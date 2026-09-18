@@ -20,11 +20,11 @@ PROJECT_ROOT := justfile_directory()
 import 'python.just'
 
 GEN := "gen-defs.py"
-AGENTS_DIR := "agents"
-COMMANDS_DIR := "commands"
 
 default:
-    @just --list
+    @just --list | grep -v '\[dev\]'
+    @echo "===="
+    @just --list | grep '\[dev\]'
 
 # The one deployment shape: copies both deployed
 # surfaces into <target>/.claude/ via gen-defs.py install, minus test suites
@@ -38,7 +38,7 @@ default:
 # recipe's own target-composition, not gen-defs.py: read only when it is the
 # *first* flag, stripped before the rest forwards. Absent, subdir defaults
 # to `.claude`; `--subdir=` (empty value) installs directly into <target>.
-[doc("install both surfaces into <target>/<subdir>/ (<target> is the first non-flag argument, in any position; subdir defaults to .claude; pass --subdir= as the first flag to install into <target> directly) — every other --* flag forwards verbatim to gen-defs.py (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
+[doc("install into <project>/<subdir>/; <project> is the first non-flag argument; [--subdir=<subdir>] defaults to .claude/")]
 install target *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -73,7 +73,7 @@ install target *args:
     mkdir -p "${root}"
     # ${arr[@]+...} guard: expanding an empty array trips `set -u` on the
     # bash 3.2 that macOS ships at /bin/bash.
-    python3 "{{justfile_directory() / GEN}}" install "${root}" ${args[@]+"${args[@]}"}
+    python3 "{{PROJECT_ROOT / GEN}}" install "${root}" ${args[@]+"${args[@]}"}
 
 # The live ~/.claude/CLAUDE.md is a real file, deliberately not a symlink:
 # updates flow only by explicit act, never silently. This recipe is the repo ->
@@ -84,9 +84,9 @@ install target *args:
 # reverse flow (home -> repo) stays a manual diff-and-adopt; this recipe never
 # reads live changes back. A live file no published revision merges cleanly
 # against leaves the recipe nonzero with ~/.claude/CLAUDE.md untouched.
-[doc("merge user-config/INSTALLED_CLAUDE.md into ~/.claude/CLAUDE.md (classified and reported before it writes; nonzero and untouched when no clean merge exists)")]
+[doc("safe-merge user-config/INSTALLED_CLAUDE.md into ~/.claude/CLAUDE.md")]
 install-claude-md:
-    python3 "{{justfile_directory() / GEN}}" install-claude-md "${HOME}/.claude/CLAUDE.md"
+    python3 "{{PROJECT_ROOT / GEN}}" install-claude-md "${HOME}/.claude/CLAUDE.md"
 
 
 ##
@@ -99,56 +99,83 @@ install-claude-md:
 ##                                                          #
 ##                                                          "
 
-# This repository's own render tree: gitignored, never committed, and the
-# conventional place to put the product for inspection or a PR diff. It names
-# a build product rather than a project root.
-RENDERED := "rendered"
+# The root the repository's own render slots sit under: gitignored, never
+# committed, and the conventional place to inspect the product or diff it in
+# a PR. No slot is ever read back as input to another render (see `render`
+# and `render-diff` below), so this names a location under which slots live,
+# not a privileged tree.
+RENDERED_DIR := "rendered"
 
 # The project's scratch space, gitignored: throwaway trees nobody inspects
-# twice. The tuning rungs render there rather than into RENDERED, which holds
-# the default-triple product an operator reads and diffs — a rung landing there
-# would leave it tuned to something else until the next `just check`.
+# twice. The tuning rungs render there rather than under rendered/, which
+# holds the slots `render` and `render-diff` work with — a rung landing there
+# would leave a slot tuned to something else until the next render.
 SCRATCH := ".claude-temp"
 
 
-# The full install shape, not a bare render: rendered/ holds what a consuming
-# project would receive, which is what makes it inspectable and PR-diffable.
-# `--subdir=` is fixed here, ahead of any caller-supplied args, so the render
-# always lands directly under rendered/ with no .claude nest — `install`'s
-# leading-flag rule means a caller-supplied --subdir would only apply if it
-# came first, and this recipe does not expose that seam.
-[doc("render the full install product into rendered/ (no .claude nest) — every --* flag forwards verbatim to gen-defs.py via install (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
-generate *args:
-    @mkdir -p "{{RENDERED}}"
-    "{{just_executable()}}" --justfile "{{justfile()}}" install "{{RENDERED}}" --subdir= {{args}}
-
-# The eventual shape — `check` also asserting the
-# Guest-Extraction Contract over the render — is not landed here.
+# render / render-diff: a slot is rebuilt on demand and never read back as
+# input to itself, so no slot is ever mistaken for a baseline. The working
+# sequence is `just render reference` to capture a known-good state, do the
+# work, `just render`, then `just render-diff`.
 #
-# check does NOT render its own subject. It diffs rendered/ — a baseline
-# `just generate` produced earlier — against what the templates render right
-# now, and prints exactly what differs and where. That diff is the point: the
-# working sequence is generate a baseline, edit a template or a
-# shared-chunks.toml chunk, run check, and read which definitions changed and
-# how — a chunk edit that reaches forty definitions when you meant four is the
-# failure this is for. Folding `generate` into this recipe would overwrite the
-# baseline before the diff ever ran, so the report would always read clean —
-# which is why that line was removed rather than kept ahead of the check pass.
-# `--no-diff` suppresses the very report this recipe exists to produce; reach
-# for it only when the exit code alone is wanted.
+# `render` mirrors `install`'s own leading-flag scan: the first argument that
+# is not a `--` flag, wherever it sits, is the slug (default `latest`) rather
+# than a fixed positional parameter, so `just render --family=gemma-4` tunes
+# the `latest` slot instead of mistaking the flag for a slug. `--subdir=` is
+# fixed ahead of the forwarded flags, so the render always lands directly
+# under the slot with no .claude nest.
 #
-# Every flag forwards verbatim to the check pass: a tree rendered under a
-# given family/tier-map/pin-map must be checked under the identical set — the
-# banner claims it, and a mismatch reports MISTUNED.
-[doc("diff rendered/ (a baseline from `just generate`) against what the templates render now, naming exactly what changed and where — every --* flag forwards verbatim to gen-defs.py (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
-check *args:
+# The flags that produced a slot are recorded in it as RENDER-FLAGS.txt — the
+# record RULED 3 of ROADMAP_PLANS/RENDER_VERIFICATION_PLAN.md requires, so a
+# `render-diff` between two slots rendered under different tunings shows why
+# they differ instead of reading as unexplained drift.
+[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) — every other --* flag forwards verbatim to gen-defs.py via install (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
+render *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [[ ! -d "{{RENDERED}}" ]]; then
-        printf '%s\n' "error: {{RENDERED}}/ does not exist — run 'just generate' first, then 'just check'" >&2
+    slug="latest"
+    args=()
+    have_slug=""
+    for arg in "$@"; do
+        if [[ -z "${have_slug}" && "${arg}" != --* ]]; then
+            slug="${arg}"
+            have_slug=1
+        else
+            args+=("${arg}")
+        fi
+    done
+    out="{{PROJECT_ROOT / RENDERED_DIR}}/${slug}"
+    mkdir -p "${out}"
+    if [[ "${#args[@]}" -gt 0 ]]; then
+        printf '%s\n' "${args[@]}" > "${out}/RENDER-FLAGS.txt"
+    else
+        : > "${out}/RENDER-FLAGS.txt"
+    fi
+    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${args[@]+"${args[@]}"}
+
+# Reports and never gates: a difference between two slots is the expected
+# outcome of doing work, so `diff -rq`'s exit 1 is swallowed. Only a
+# comparison that could not be MADE is fatal — a missing slot, or `diff(1)`
+# itself in trouble (status 2).
+[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
+render-diff a="reference" b="latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    a_dir="{{PROJECT_ROOT / RENDERED_DIR}}/{{a}}"
+    b_dir="{{PROJECT_ROOT / RENDERED_DIR}}/{{b}}"
+    if [[ ! -d "${a_dir}" ]]; then
+        printf 'error: %s does not exist — run '"'"'just render {{a}}'"'"' first\n' "${a_dir}" >&2
         exit 1
     fi
-    python3 "{{justfile_directory() / GEN}}" check "{{RENDERED}}" {{args}}
+    if [[ ! -d "${b_dir}" ]]; then
+        printf 'error: %s does not exist — run '"'"'just render {{b}}'"'"' first\n' "${b_dir}" >&2
+        exit 1
+    fi
+    diff_status=0
+    diff -rq "${a_dir}" "${b_dir}" || diff_status="$?"
+    if [[ "${diff_status}" -eq 2 ]]; then
+        exit 1
+    fi
 
 # The two tuning rungs share one shape, and each is a pair of recipes rather
 # than a command line so neither rung is ever run from correctly-recalled
@@ -165,33 +192,33 @@ check *args:
 _render-rung name *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    out="{{justfile_directory() / SCRATCH / name}}"
+    out="{{PROJECT_ROOT / SCRATCH / name}}"
     mkdir -p "${out}"
     "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= {{args}}
 
 _check-rung name render_recipe *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    out="{{justfile_directory() / SCRATCH / name}}"
+    out="{{PROJECT_ROOT / SCRATCH / name}}"
     if [[ ! -d "${out}" ]]; then
         printf '%s\n' "error: ${out}/ does not exist — run 'just {{render_recipe}}' first, then 'just {{name}}'" >&2
         exit 1
     fi
-    python3 "{{justfile_directory() / GEN}}" check "${out}" {{args}}
+    python3 "{{PROJECT_ROOT / GEN}}" check "${out}" {{args}}
 
 # The floor: every tier mapped onto the smallest model, tuning and pin alike.
 # What it exercises is the `all=` merge reaching every tier a real definition
 # sits at — not the `lowest` tier, which no pin site carries.
-[doc("install the floor rung (both maps all=haiku) into .claude-temp/check-floor")]
+[doc("[dev] install the floor rung (both maps all=haiku) into .claude-temp/check-floor")]
 generate-floor: (_render-rung "check-floor" "--model-tier-map=all=haiku" "--model-pin-map=all=haiku")
-[doc("diff the floor rung against what the templates render now — run `just generate-floor` first")]
+[doc("[dev] diff the floor rung against what the templates render now — run `just generate-floor` first")]
 check-floor: (_check-rung "check-floor" "generate-floor" "--model-tier-map=all=haiku" "--model-pin-map=all=haiku")
 
 # The stock rung: a family whose five tiers name real members that the family
 # declares no overlay overrides for, so every tier renders stock and says so.
-[doc("install the stock rung (family gemma-4) into .claude-temp/check-stock")]
+[doc("[dev] install the stock rung (family gemma-4) into .claude-temp/check-stock")]
 generate-stock: (_render-rung "check-stock" "--family=gemma-4")
-[doc("diff the stock rung against what the templates render now — run `just generate-stock` first")]
+[doc("[dev] diff the stock rung against what the templates render now — run `just generate-stock` first")]
 check-stock: (_check-rung "check-stock" "generate-stock" "--family=gemma-4")
 
 # The shipped packages are imported as top-level packages (`kb_tools`,
@@ -203,9 +230,9 @@ check-stock: (_check-rung "check-stock" "generate-stock" "--family=gemma-4")
 # above), so the pytest arguments that follow it start at $2 — `"${@:2}"`
 # forwards them to pytest as the separate words `just` received them as,
 # not as a re-split string, so `-k "a and b"` survives as one argument.
-[doc("run tooling python tests: no argument runs all three (kb_tools + liaison_tools + gen-defs); a surface argument (kb_tools, liaison_tools, gen-defs) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
-test surface="" *pytest_args: venv
-    PYTHONPATH="{{justfile_directory()}}" PYTHONDONTWRITEBYTECODE=1 "{{VENV_PYTHON}}" -m pytest {{ \
+[doc("[dev] run tooling python tests: no argument runs all three (kb_tools + liaison_tools + gen-defs); a surface argument (kb_tools, liaison_tools, gen-defs) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
+test surface="" *pytest_args: _venv
+    PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -m pytest {{ \
       if surface == "" { "kb_tools/tests liaison_tools/tests tests" } \
       else if surface == "kb_tools" { "kb_tools/tests" } \
       else if surface == "liaison_tools" { "liaison_tools/tests" } \
@@ -221,8 +248,8 @@ FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E7
 # argument order exactly — the order flake8 was already called with differs
 # from black/isort's, and that difference is preserved rather than
 # normalized away.
-[doc("black-format, isort, flake8 the shipped python packages and the generator, or the given path(s) in place of all four")]
-format-python *paths: venv
+[doc("[dev] black-format, isort, flake8 the shipped python packages and the generator, or the given path(s) in place of all four")]
+format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
@@ -249,36 +276,10 @@ format-python *paths: venv
 # Stdlib only under the system python3, like every other tool here, with
 # PYTHONPATH pointed at this tree because the sweep is imported as a top-level
 # module. `--rev` sweeps a past tree, which is how the known-answer run is made.
-[doc("list duplicated-prose candidates across templates/ — chunk bodies and template inline prose; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
+[doc("[dev] list duplicated-prose candidates across templates/ — chunk bodies and template inline prose; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-prose *args:
-    PYTHONPATH="{{justfile_directory()}}" PYTHONDONTWRITEBYTECODE=1 python3 -m dupe_sweep prose "$@"
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m dupe_sweep prose "$@"
 
-[doc("list one-idea-two-places candidates across kb_tools/ — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
+[doc("[dev] list one-idea-two-places candidates across kb_tools/ — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-python *args:
-    PYTHONPATH="{{justfile_directory()}}" PYTHONDONTWRITEBYTECODE=1 python3 -m dupe_sweep python "$@"
-
-
-# The claim-graph sheet for one built KB. A recipe rather than a command line:
-# the op takes no root override — it resolves the repository from the working
-# directory, the way every tool in this toolchain does — so naming the KB means
-# standing in it, and a naked invocation is a cd plus a PYTHONPATH recalled
-# correctly every time.
-#
-# Stdlib only, under the system python3 the way a consumer runs it, but with
-# PYTHONPATH pointed at THIS tree rather than the consumer's installed
-# .claude/agents: the renderer under test is the working copy.
-#
-# `"${@:2}"` and not `"$@"`: with positional-arguments set, $1 is `repo` itself,
-# so passing the whole list would hand the op its own target as a flag.
-[doc("render one built KB's claim graph to <repo>/kb-root/claim-graph.svg (repo is a consuming repository root); trailing args forward verbatim to the op (--out, --domain)")]
-render-claim-graph repo *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ ! -d "{{repo}}" ]]; then
-        printf 'error: %s is not a directory — name a consuming repository root, the one holding kb-root/\n' "{{repo}}" >&2
-        exit 1
-    fi
-    root="$(cd "{{repo}}" && pwd)"
-    cd "${root}"
-    PYTHONPATH="{{justfile_directory()}}" PYTHONDONTWRITEBYTECODE=1 \
-        python3 -m kb_tools.kb_util render-claim-graph "${@:2}"
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m dupe_sweep python "$@"

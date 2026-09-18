@@ -14,13 +14,13 @@ the graph. Point 14 guarantees a fresh tree carries none of the artifacts it
 writes, so the presence of any one of them means the input is not a fresh tree,
 and :func:`gate` refuses.
 
-**The discovered pass's guard is a different one, and it is per document.** That
-pass extends the tree additively — SPEC declares nodes additively in leaf
-frontmatter — so a whole-tree refusal on "any frontmatter at all" would forbid
-it entirely. What it must not do is re-mint, so the question moves from the tree
-to the document: :func:`determination` says whether one document has already had
-its claim declaration settled, and :func:`pass_two_gate` partitions the tree by
-that answer.
+**The discovered pass's entry condition is a different one, and it is per
+document.** That pass extends the tree additively — SPEC declares nodes
+additively in leaf frontmatter — so a whole-tree refusal on "any frontmatter at
+all" would forbid it entirely. What it must not do is re-mint, so the question
+moves from the tree to the document: :func:`determination` says whether one
+document has already had its claim declaration settled, and
+:func:`pass_two_gate` partitions the tree by that answer.
 
 **The forbidden artifacts are read off the module that composes them**
 (:data:`tree.METADATA_OPENERS`, itself read off :mod:`kb_tools.kb_write.render`)
@@ -47,7 +47,7 @@ from .. import kb_index_lib, kb_util, verify_md_links
 from .assemble import UNSCANNED_REASON
 from .identify import UNANCHORED_REASON
 from .report import ClaimGraphError
-from .tree import ANCHOR_RE, DECLARING_KINDS, METADATA_OPENERS, Tree, resolve, unquote
+from .tree import ANCHOR_RE, DECLARING_KINDS, METADATA_OPENERS, Tree, document_kind, resolve, strip_markers, unquote
 
 #: The authored artifacts point 14 forbids: exactly the line-shaped metadata the
 #: write API inserts, which :data:`tree.METADATA_OPENERS` already spells off the
@@ -152,9 +152,21 @@ def _anchors(tree: Tree) -> None:
     is not a failure — point 7 admits a label that cannot be resolved rendering
     as its own text, and a fragment with no path in front of it is what that
     looks like.
+
+    **Read over the marker-stripped text, because :func:`pass_two_gate` runs
+    this after a minting pass has written to the tree.** An anchor may be
+    hard-wrapped between its attributes (SPEC.md, the cross-reference join) and
+    ``ops._insert_marker`` appends to the end of the located line, so a marker
+    landing on such an anchor's first line sits between two attributes
+    :data:`tree.ANCHOR_RE` requires to be adjacent. The pattern would then match
+    nothing there and the anchor would go *unchecked* rather than reported —
+    the one failure this check cannot survive, since its whole subject is the
+    links no other gate can see. On :func:`gate`'s run the strip changes
+    nothing: a tree carrying a marker at all is one :func:`_cleanliness`
+    refuses.
     """
     for path, document in sorted(tree.documents.items()):
-        for match in ANCHOR_RE.finditer(unquote(document.text)):
+        for match in ANCHOR_RE.finditer(unquote(strip_markers(document.text))):
             target, _, _ = match.group(1).partition("#")
             if target and resolve(path, target) not in tree.documents:
                 raise _refuse(7, f"{path}: cross-reference anchor {match.group(1)!r} lands on no document")
@@ -229,8 +241,13 @@ class Determination(StrEnum):
     #: price, and what the state is for is being reported loudly enough that a
     #: person looks.
     UNANCHORED = "unanchored"
-    #: Declares neither, and is a kind that must. The tier-1 coverage check
-    #: refuses this too; it is named here so the refusal arrives before a write.
+    #: Declares neither, and is a kind that must — including one carrying no
+    #: frontmatter block at all, which declares nothing by declaring nothing.
+    #: Nobody has settled it, so :func:`pass_two_gate` reads it as awaiting: the
+    #: reading it has not had is what a minting pass is. The refusal, where the
+    #: state is a defect rather than a document nobody got to, is the runner's —
+    #: ``verify_kb_metadata``'s frontmatter-presence and tier-1 coverage checks,
+    #: over what the pass leaves behind rather than ahead of what it reads.
     UNDECLARED = "undeclared"
 
 
@@ -280,10 +297,27 @@ class PassTwoState:
 def pass_two_gate(tree: Tree) -> PassTwoState:
     """The discovered pass's entry condition: the structural checks, then the partition.
 
-    Refuses a tree the declared pass has not run over — no frontmatter is not an
-    additive starting point, it is a tree with no claims to attach anything to —
-    and refuses a document of a declaring kind that carries neither declaration,
-    which is a half-written pass 1 rather than an input.
+    **Which documents are asked is read off the tree rather than off what an
+    earlier pass recorded about it.** A ``kind:`` field is
+    :func:`tree.document_kind`'s answer written down — :mod:`assemble` stamps it
+    from exactly this call, and :mod:`identify` scopes itself by the function
+    rather than the field for the same reason. Asking the function is what makes
+    the partition total over the tree: a document whose frontmatter is missing
+    has no ``kind:`` either, and reading the field would drop it through the gap
+    where an absent value and a non-declaring one look alike.
+
+    **A leaf nobody has settled reads as awaiting, and that is not a refusal.**
+    Neither of the two states this once refused — a document carrying no
+    frontmatter, and a leaf declaring neither claims nor a reason — is one the
+    driver can produce: ``--pass`` is the argv ``kb_pipeline``'s stage table
+    composes for a subprocess and not a command line anybody types
+    (ARCHITECTURE.md, The Claim Graph), so the declared pass runs and this one
+    runs over its output. Where such a document does arrive — a hand edit, a
+    stopped pass 1, a leaf authored since — it is one nobody has read for
+    claims, and reading those is what this pass is for. The refusal is the
+    runner's: :func:`gate.run` ends either driver on ``verify_kb_metadata``'s
+    frontmatter-presence and tier-1 coverage checks, which report both states
+    over the tree the pass leaves behind.
     """
     for check in _STRUCTURE:
         check(tree)
@@ -292,30 +326,16 @@ def pass_two_gate(tree: Tree) -> PassTwoState:
     hosting: list[str] = []
     determined: list[str] = []
     for path in sorted(tree.documents):
-        fields = kb_index_lib.parse_frontmatter(tree.documents[path].text)
-        if not fields:
-            raise ConformanceError(
-                "frontmatter-absent",
-                f"{path} carries no frontmatter block, so the declared pass has not run over this tree. "
-                f"The discovered pass extends an authored graph additively and has nothing to extend here; "
-                f"run the block-hosted build first",
-            )
-        if fields.get("kind") not in DECLARING_KINDS:
+        if document_kind(path, has_children=bool(tree.children[path])) not in DECLARING_KINDS:
             continue
-        verdict = determination(fields)
-        if verdict is Determination.UNDECLARED:
-            raise ConformanceError(
-                "determination",
-                f"{path} is a {fields.get('kind')} declaring neither claims nor a no-claim reason. The "
-                f"declared pass writes exactly one of the two onto every document of that kind, so this "
-                f"tree is not its complete output",
-            )
+        fields = kb_index_lib.parse_frontmatter(tree.documents[path].text) or {}
         {
             Determination.AWAITING: awaiting,
             Determination.HOSTS_CLAIMS: hosting,
             Determination.AUTHORED_NO_CLAIM: determined,
             Determination.UNANCHORED: determined,
-        }[verdict].append(path)
+            Determination.UNDECLARED: awaiting,
+        }[determination(fields)].append(path)
 
     return PassTwoState(awaiting=tuple(awaiting), hosting=tuple(hosting), determined=tuple(determined))
 

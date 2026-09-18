@@ -60,7 +60,7 @@ from .. import inference
 
 _LOGGER_NAME = "kb_driver"
 
-# Console lines carry a word in their brackets, per the [kb-build] / [card] /
+# Console lines carry a word in their brackets, per the [kb-build] /
 # [preflight] convention, so the checklist block stays the only thing a parser
 # can confuse with them.
 _CONSOLE_FORMAT = "[kb-driver] %(levelname)s %(message)s"
@@ -183,16 +183,6 @@ class RunPaths:
         return self.run_dir / "calls"
 
     @property
-    def values(self) -> Path:
-        """Where the driver's own write-op values files land — evidence, beside the briefs.
-
-        Not the build scratch: a values file is the exact input to one tool
-        call, so it belongs with the other records of what this run asked for,
-        and it outlives the restage that wipes scratch.
-        """
-        return self.run_dir / "values"
-
-    @property
     def barriers(self) -> Path:
         return self.run_dir / "barriers"
 
@@ -211,8 +201,7 @@ CALL_STREAM_SUFFIX = ".stream.jsonl"
 
 #: ``<seq>-<step-id>[-reask]-a<attempt>``. The step id contains hyphens
 #: (``pre.kb-root``) and so does the re-ask marker, so the only reading
-#: that cannot confuse the two is one anchored at both ends — exactly the
-#: reasoning ``prompt_templates.step_of`` carries for the brief grammar.
+#: that cannot confuse the two is one anchored at both ends.
 _CAPTURE_NAME = re.compile(r"^(?P<seq>\d+)-(?P<step>.+?)(?P<reask>-reask)?-a(?P<attempt>\d+)$")
 
 
@@ -331,9 +320,9 @@ def write_exit_json(
 ) -> Path:
     """Record the terminal code, the barrier record path, and unconsumed decisions.
 
-    This is what a session reads after watch mode reports the driver gone: the
-    terminal code and, for a barrier, the path to the record it must paste. The
-    record's own object belongs to the record, not here.
+    This is what a caller reads once the driver has exited: the terminal code
+    and, for a barrier, the path to the record it must paste. The record's own
+    object belongs to the record, not here.
     """
     payload = {
         "exit_code": exit_code,

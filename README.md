@@ -2,7 +2,11 @@
 
 This repository generates agents rather than collecting them — a single-sourced generation system paired with the multi-capability agent and command set it renders. Definitions are produced to order: tuned per model family, installed into consuming projects as hash-verified artifacts, regenerated rather than copied and hand-maintained. The generator owns the guarantees — one source for every shared span of text, additive-only model tuning, drift caught by content hash; the rendered set does the work — coder and platform specialists, multi-agent debate processes, knowledge-base construction and tooling, guest-model liaisons.
 
-## Install
+## Usage
+
+This section is for installing the product into your own project and using what it delivers. For working on this repository itself, see Development, below.
+
+### Install
 
 Clone this repo anywhere, then install both deployed surfaces into the consuming project — from **this** repo's root:
 
@@ -10,7 +14,7 @@ Clone this repo anywhere, then install both deployed surfaces into the consuming
 just install ~/projects/foo
 ```
 
-That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` in full: every definition, the MAD design-topic set, `kb_tools/`, `liaison_tools/`, and the slash commands. The definitions are rendered by that invocation — this repo keeps no checked-in copy of them — and the tool packages are copied. Test suites and caches stay behind. Every `--*` flag after the target forwards verbatim to `gen-defs.py`, so tuning the render is one more flag, not a different command — `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family (see "Variants and platform compatibility" below).
+That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` in full: every definition, the MAD design-topic set, `kb_tools/`, `liaison_tools/`, and the slash commands. The definitions are rendered by that invocation — this repo keeps no checked-in copy of them — and the tool packages are copied. Test suites and caches stay behind. Every `--*` flag after the target forwards verbatim to `gen-defs.py`, so tuning the render is one more flag, not a different command — `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family (see "Model Tuning" below).
 
 The installed tree is an **artifact**: this repo is the source of truth, and re-running the install overwrites it. Don't edit files under a consuming project's `.claude/agents/` — change the template here, then re-install. Every installed file says as much in a banner of its own, which also records the hash of the content below it; an edit that breaks that hash is not lost when the re-install replaces the file, but set aside beside it as a numbered `.bak` (yours to delete). Re-installing an untouched tree changes nothing and backs up nothing.
 
@@ -22,35 +26,19 @@ ln -s <path-to-this-repo>  .claude/adjagent-repo
 
 Upgrading from the old symlink setup: remove the `.claude/agents` and `.claude/commands` symlinks and run `just install` against the project instead — that is now the only supported shape.
 
-## Layout
-
-```
-templates/      template sources (not session-visible), rendered by gen-defs.py at the repo root — see ARCHITECTURE.md
-rendered/       gitignored build product — `just generate` puts a full render here to inspect or PR-diff
-user-config/    published operator baseline — see user-config/README.md
-ROADMAP_PLANS/  tracked home for work that has some planning done but isn't ready to execute — usually, not necessarily, behind a ROADMAP.md item
-```
-
-`agents/` and `commands/` are not directories in this repository. They are the two deployed surfaces of the *product*, produced into `<project>/.claude/` by an install (or into `rendered/` by `just generate`), and the catalog below names entries by where they land there: every entry lives under `agents/` unless noted as a command.
+### Operator Baseline
 
 The agent definitions assume a set of operator-level working rules; `user-config/` publishes that recommended baseline (`~/.claude/CLAUDE.md`) so it travels with the repo — install with `just install-claude-md`, which **merges rather than overwrites**: it recovers the published revision your live file was last integrated from out of this repo's git history, reports section by section what it found before writing a byte, keeps your own sections and edits, and keeps one rolling backup beside your file of whatever it replaces whenever it changes a byte — yours to delete. A file it cannot merge cleanly is left untouched and the baseline lands beside it as `incoming.CLAUDE.md`, for you to integrate by hand. See [user-config/README.md](user-config/README.md) for every case and for publishing changes the other way.
 
-Contract docs, precedence in this order (code is the defect when it disagrees with a higher one): [SPEC.md](SPEC.md) — observable contract, [ARCHITECTURE.md](ARCHITECTURE.md) — how the mechanism works, [CONVENTIONS.md](CONVENTIONS.md) — house rules. [ROADMAP.md](ROADMAP.md) tracks open follow-on work, outside the precedence chain.
+`agents/` and `commands/` are the two deployed surfaces install produces inside `<project>/.claude/`; the catalogs below name entries by where they land there — every entry lives under `agents/` unless noted as a command.
 
-Working in this repo itself: `just generate` renders the full install product into the gitignored `rendered/`, where you inspect or PR-diff a change; `just check` re-renders from the templates and **diffs against what is in `rendered/`**, so it reports which definitions a template or chunk edit actually changed — run `just generate` first to lay down the baseline it compares against; `just test` runs the full tooling test suite (`kb_tools` + `liaison_tools` + `gen-defs.py`, auto-provisioning a `.venv`).
+### Model Tuning
 
-## Variants and platform compatibility
+Model-specific defensive text is delivered through **overlay anchors and model-family files**. A template or shared chunk may expose an `@!fam.<key>!@` anchor at a spot where an observed failure mode needs a targeted note; the namespace ahead of the key names the registered source that fills it (`fam`, the family file, is the only one registered today), and with no such source loaded, or no entry for the key, the anchor renders as nothing, so the base definitions are byte-identical to an anchor-free render. A family file — `templates/family/<family>.toml`, one per model family, schema and the two-map system in [templates/family/README.md](templates/family/README.md) — fills anchors: family-wide `text`, with per-model overrides inside the same file. Resolution, not accumulation: at most one overlay renders per anchor, model scope winning over family scope, and the filled text renders verbatim in place with no lead-in or wrapper — an author who wants one writes it into their own text. A family file can never replace, suppress, or modify base text — it only fills anchors. Tuned sets are rendered to order, typically out of repo: `gen-defs.py generate <root> --family NAME`, where `NAME` selects `templates/family/<NAME>.toml` — a bare model name is not a family name. Two independent flags carry the tuning further: `--model-tier-map` overrides which family member each tier is tuned against, `--model-pin-map` overrides that tier's rendered `model:` value; narrowed to a subset of definitions by `--agent-glob`/`--command-glob` when the whole set is not wanted. `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-map=SPEC]` applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to `gen-defs.py`.
 
-Model-specific defensive text is delivered through **overlay anchors and model-family files**. A template or shared chunk may expose an `@!fam.<key>!@` anchor at a spot where an observed failure mode needs a targeted note; the namespace ahead of the key names the registered source that fills it (`fam`, the family file, is the only one registered today), and with no such source loaded, or no entry for the key, the anchor renders as nothing, so the base definitions are byte-identical to an anchor-free render. A family file — `templates/family/<family>.toml`, one per model family, schema and the two-map system in [templates/family/README.md](templates/family/README.md) — fills anchors: family-wide `text`, with per-model overrides inside the same file. Resolution, not accumulation: at most one overlay renders per anchor, model scope winning over family scope, and the filled text renders verbatim in place with no lead-in or wrapper — an author who wants one writes it into their own text. A family file can never replace, suppress, or modify base text — it only fills anchors. Tuned sets are rendered to order, typically out of repo: `gen-defs.py --generate --output-dir <root> --family NAME`, where `NAME` selects `templates/family/<NAME>.toml` — a bare model name is not a family name. Two independent flags carry the tuning further: `--model-tier-map` overrides which family member each tier is tuned against, `--model-pin-map` overrides that tier's rendered `model:` value; narrowed to a subset of definitions by `--agent-glob`/`--command-glob` when the whole set is not wanted. `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-map=SPEC]` applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to `gen-defs.py`. (The earlier delivery vehicle — a parallel per-model definition file, e.g. `applied-mathematician-strict.md`, a gap-aversion variant built for running the math agent on Gemma 4 — was retired 2026-08-21; the anchor mechanism replaces whole-definition forks.)
+Authoring a new family file, or extending an existing one, is repository work — see Development → Authoring Family Files.
 
-The mechanism is a response to a real phenomenon: agent definitions tend to accumulate defensive language that's keyed to the *specific* model they were tested against. Defensive clauses that *protect* one model can *smother* another — same clause, opposite effect, no error event. (Example: probe data from 2026-04-29 showed Gemma 4 31B-it silently filling axiom gaps with textbook conventions, while Gemini 3.1 Pro spontaneously surfaced the same gaps. A "do not fill gaps" clause helps the first model and slows the second.)
-
-The operating rule when porting an agent definition to a new model:
-**strip first, observe, patch.** Run the base definitions with the new model on a known-shape probe set. Watch for failure modes; only then author an anchor and a family-file entry targeted at the failure modes you actually observed. Anchors are never pre-sprinkled speculatively. Heavy scaffolding hides the model's true tendencies; you can't engineer for failure modes you never see.
-
-When adding defensive clauses, record *what tendency the clause was added to correct, against which model*. Without that record, future maintainers can't distinguish "still load-bearing" from "residue from a model we don't use anymore." Comment family-file entries like code: not what the overlay says, but why and against which observed behavior it was added.
-
-## Coding Agent Set
+### Coding Agent Set
 
 * architect.md - architecture review and design
 * security-reviewer.md - security-specific reviewer
@@ -70,11 +58,9 @@ When adding defensive clauses, record *what tendency the clause was added to cor
   * web-app-expert.md
   * windows-app-expert.md
 
-Every definition in this catalog is **generated** — the coder and platform files, the MAD agent set, all three kb definitions, the specialists, the liaisons, and every slash command. There are no hand-maintained definitions and nothing to edit directly. Each is rendered from `templates/agents/<name>.md.tmpl` plus the shared text in `templates/shared-chunks.toml`, which is the single home of the sections they hold in common (command templates live in `templates/commands/` and render into the product's `commands/`). A template in a subdirectory renders to the mirrored path — `templates/agents/mad/participant-contract.md.tmpl` → `agents/mad/participant-contract.md`. Edit the template (agent-specific text) or the shared chunks (common text), then run `just generate`.
+Every definition in this catalog is **generated** — the coder and platform files, the MAD agent set, all three kb definitions, the specialists, the liaisons, and every slash command. There are no hand-maintained definitions and nothing to edit directly; see Development → Generated Definitions for how a definition maps to its source template.
 
-**`just check` is the refactor instrument, and the order matters.** It re-renders from the templates and diffs against what `rendered/` already holds, so the sequence is: `just generate` to lay down a baseline, make the edit, then `just check` to read **which definitions changed and how**. Lifting a duplicated span into a shared chunk should leave every other definition byte-identical; a refactor meant to touch two that quietly reflows a third is what this catches, by name. Regenerating immediately before checking would overwrite the baseline and make the diff empty, which is why `check` no longer does it for you. A definition is generated only if a template declares it, and a file lacking the `# !GENERATED!` banner is never overwritten. One template can declare several definitions — `templates/agents/mad-participant.md.tmpl` renders the four model-pinned participants from one body, so they cannot drift apart. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full mechanism.
-
-## Specialists
+### Specialists
 Single-purpose agents invoked directly for non-coding work.
 * prose-architect.md - rhythm and structural review of long-form prose
 * marketing-comms-expert.md - messaging, positioning, copywriting, competitive framing
@@ -85,26 +71,21 @@ Single-purpose agents invoked directly for non-coding work.
 * theoretical-economist.md - stress-tests production/growth, market-structure, and mechanism-design claims; the economics lens in an adversarial panel
 * prompt-engineer.md - authors and revises model-facing text: agent definitions, commands, skills, template/chunk bodies, model-tuning overlay entries, agent-facing docs.
 
-## Multi-Agent Debate Agent Set
+### Multi-Agent Debate Agent Set
 Uses Multi-Agent Debate Process.
 Two modes share the same participants but use different referees; only design mode carries a topic library:
 * **Review mode** — adversarial assessment of an *existing* artifact (architecture, code, math, agent definitions).
 * **Design mode** — constructive proposal for an *open problem* (derivations, software designs, hardware designs, other problem-solving).
 
-### Shared Agents
+Both modes' liaison plumbing (`liaison_tools/`, shared with Guest Liaison below) is documented under Development → Liaison Tooling.
+
+#### Shared Agents
 * mad/participant-contract.md - the model-neutral participant contract (reviewer in review mode, proposer in design mode); the body a guest model receives as its system prompt
 * mad-participant-fable.md, mad-participant-opus.md, mad-participant-sonnet.md, mad-participant-haiku.md - the same contract as dispatchable agents, one per model pin; a run draws its participants from different pins so their blind spots differ
 * mad-guest-liaison.md - a liaison that can loop in an external model via API base url, key, and model name
 * mad-alignment-assessor.md - only assesses alignment/disagreement among participants
 
-### Liaison Tooling
-`liaison_tools/` contains the helpers used by both `mad-guest-liaison.md` (MAD process) and `guest-liaison.md` (general guest-model sessions); an install delivers it to `.claude/agents/liaison_tools/`, which is the path the definitions name. The liaison agents are the primary callers; MAD referees set `TMPDIR` for liaison invocations to keep `mktemp` output contained in the review/design directory.
-* `post-openai.py` - posts a message history to an OpenAI-compatible API and prints the assistant reply. Reads the API key from a file so it never enters argv or env.
-* `msg-util.py` - the only sanctioned path for creating or mutating the messages JSON (init / append / validate). Use this rather than ad-hoc jq or sed.
-* `relay-driver.py` - the corpus-relay eval instrument: runs budgeted, fresh-history Q&A sessions against a guest model over a read-only corpus, appending its own READ/LIST/GREP relay protocol block to the caller's system prompt (callers supply navigation doctrine only) and servicing exactly what it appended. Per-question sessions, answers, and a `stats.csv` with real token totals (via `post-openai.py`'s `USAGE_STATS_FILE` side channel) land under `--output-dir`. Sketch: `relay-driver.py --corpus-root kb-root --system-prompt scout.md --questions-file questions.md --output-dir eval-out --env-file guest.env` (single questions via `--question` or `--question-number N`).
-* `tests/` - fixtures for the above scripts.
-
-### Review Mode
+#### Review Mode
 
 * mad-review-referee.md - runs multi-agent debate review process
 * commands
@@ -121,11 +102,11 @@ Two modes share the same participants but use different referees; only design mo
     * audit trail of debate process and outcomes
     * all artifacts, temporary or otherwise, are produced under the review work directory
   * round cap: 5
-  * examples 
+  * examples
     * ```/mad-review src-review SEATS=opus,sonnet,guest ENV_FILE=~/.config/guest.env CONSTRAINTS=CONVENTIONS.md TARGET=src/ **IGNORE
     `src/third_party`**```
 
-### Design Mode
+#### Design Mode
 
 * mad-design-referee.md - runs multi-agent debate design process
 * commands
@@ -153,9 +134,9 @@ Two modes share the same participants but use different referees; only design mo
   * examples
     * ```/mad-design math-derivation SEATS=fable,opus,sonnet CONSTRAINTS=SPEC.md TARGET=mad-design/my-derivation/```
 
-## Guest Liaison
+### Guest Liaison
 
-`guest-liaison.md` relays a multi-turn conversation between you and an external "guest" model accessed via an OpenAI-compatible API. Distinct from `mad-guest-liaison.md`, which is the MAD-process-only variant invoked by referees inside review/design debates. Both share `liaison_tools/`.
+`guest-liaison.md` relays a multi-turn conversation between you and an external "guest" model accessed via an OpenAI-compatible API. Distinct from `mad-guest-liaison.md`, which is the MAD-process-only variant invoked by referees inside review/design debates. Both share `liaison_tools/` (Development → Liaison Tooling).
 
 Properties of the relay:
 * **Verbatim relay** of the system prompt and each user message — no summarizing, paraphrasing, or topic-tailoring. Verified post-write by `diff` against the source; the liaison aborts before sending if the diff is non-empty.
@@ -163,13 +144,13 @@ Properties of the relay:
 * **Audit-permanent session log** — every turn (system, user, agent) is appended to `guest-session/<topic>/messages.json` and never deleted.
 * **File and tool-call services** — when the guest model asks for a file's contents or emits a tool call, the liaison reads the file (using a fixed `Here is the content of <path>:` frame) or returns a "not available in this environment" stub, then re-invokes the model.
 
-### Slash commands
+#### Slash commands
 
 * `/guest-start <topic>` — initiate (or resume) a session: onboarding, persist session state, send the first user message, return the guest's reply.
 * `/guest <message>` — append `<message>` as the next user turn in the active session and return the guest's reply.
 * `/guest-end` — clear the active-topic pointer (`guest-session/active-topic.txt`). The session directory itself is preserved as audit history.
 
-### `/guest-start` arguments
+#### `/guest-start` arguments
 
 `/guest-start` takes one argument: the **topic slug**, which names the session directory under `guest-session/`. It must contain no path separators, leading dots, or whitespace.
 
@@ -181,13 +162,13 @@ Everything else is collected interactively after the command starts:
 
 The collected connection parameters are persisted to `guest-session/<topic>/params.env` so `/guest` can reuse them on later turns.
 
-### API key file format (the file at `API_KEY_FILE`)
+#### API key file format (the file at `API_KEY_FILE`)
 
 The file contains only the API key. Its entire content, with leading and trailing whitespace trimmed, is the key; the key must contain no internal whitespace.
 
 The liaison never reads this file. `post-openai.py` reads the key directly — the key does not appear in argv, env, transcripts, or any tool output the liaison sees.
 
-### Session directory layout
+#### Session directory layout
 
 ```
 guest-session/
@@ -200,11 +181,11 @@ guest-session/
 
 `guest-session/` is in `.gitignore` so audit logs and `params.env` (which references local API key file paths) do not leak into commits.
 
-### Resuming and switching topics
+#### Resuming and switching topics
 
 Re-running `/guest-start` with an existing topic slug offers to resume — the prior `messages.json` is preserved and new turns continue from it. To switch active sessions without deleting either, run `/guest-end` then `/guest-start` with the new topic; both session directories survive.
 
-### Example
+#### Example
 
 ```
 /guest-start solar-system
@@ -213,7 +194,7 @@ Re-running `/guest-start` with an existing topic slug offers to resume — the p
 /guest-end
 ```
 
-## Knowledge Base Agent Set
+### Knowledge Base Agent Set
 
 Agents and portable tooling for building, navigating, and maintaining a knowledge base — a navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph metadata spine. All three kb-* definitions are project-portable: per-project facts live in the consuming project's `kb-root/CLAUDE.md`, not in the definitions. All three are **generated** from their templates.
 
@@ -235,13 +216,56 @@ the work; continue an interrupted one and you do not.
   * kb-claim-scorer.md - grades written derivations; returns judgments and writes nothing
   * kb-maintainer.md - the write side: leaf edits, claim-graph wiring, refresh→verify loop
 
-### KB toolchain
+#### KB toolchain
 
 `kb_tools/` is the stdlib-only, zero-config Python toolchain the kb agents drive — see [kb_tools/CONVENTIONS.md](kb_tools/CONVENTIONS.md) for the full picture. An install delivers it to `.claude/agents/kb_tools/`, which is the path the definitions and the runner snippets name. A consuming project:
 
 1. Installs `.claude/agents` as in [Install](#install) and keeps its KB in `kb-root/` at the repo root — the tools self-anchor by walking up from the cwd to `.git` and requiring `kb-root/` beside it.
 2. Installs the runner targets once, from the project root: `PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util install-targets` — this adds a single non-fatal include line to the project's justfile or Makefile.
 3. Uses `just`/`make` `kb-verify`, `kb-refresh`, and `kb-stats` from then on.
+
+## Development
+
+This section is for working on this repository itself — the generator, its templates, and the shipped tool packages. If you are installing the product into a project, see Usage, above.
+
+### Repository Layout
+
+```
+templates/      template sources (not session-visible), rendered by gen-defs.py at the repo root — see ARCHITECTURE.md
+rendered/       gitignored build product — `just render [slug]` puts a render here per slot to inspect or PR-diff; see "Working In This Repo" below
+user-config/    published operator baseline — see user-config/README.md
+ROADMAP_PLANS/  tracked home for work that has some planning done but isn't ready to execute — usually, not necessarily, behind a ROADMAP.md item
+```
+
+`agents/` and `commands/` are not directories in this repository. They are the two deployed surfaces of the *product*, produced into `<project>/.claude/` by an install (or into `rendered/` by `just render`), and the catalogs in Usage name entries by where they land there: every entry lives under `agents/` unless noted as a command.
+
+Project docs: [THESIS.md](THESIS.md) — purpose and intent, [SPEC.md](SPEC.md) — observable contract, [ARCHITECTURE.md](ARCHITECTURE.md) — how the mechanism works, [CONVENTIONS.md](CONVENTIONS.md) — house rules. [ROADMAP.md](ROADMAP.md) tracks open follow-on work, outside this set.
+
+### Working In This Repo
+
+`just render [slug]` renders the full install product into `rendered/<slug>/` (slug defaults to `latest`). `just render reference` writes the known-good baseline to `rendered/reference/`, which nothing else writes. `just render-diff [a] [b]` compares two rendered slots — defaulting reference against latest — and reports differences without failing on them. The working sequence for a change: `just render reference` to capture the known-good state, make the edit, `just render`, then `just render-diff` to see which definitions actually changed. `just test` runs the full tooling test suite (`kb_tools` + `liaison_tools` + `gen-defs.py`, auto-provisioning a `.venv`).
+
+### Authoring Family Files
+
+The mechanism is a response to a real phenomenon: agent definitions tend to accumulate defensive language that's keyed to the *specific* model they were tested against. Defensive clauses that *protect* one model can *smother* another — same clause, opposite effect, no error event. (Example: probe data from 2026-04-29 showed Gemma 4 31B-it silently filling axiom gaps with textbook conventions, while Gemini 3.1 Pro spontaneously surfaced the same gaps. A "do not fill gaps" clause helps the first model and slows the second.)
+
+The operating rule when porting an agent definition to a new model:
+**strip first, observe, patch.** Run the base definitions with the new model on a known-shape probe set. Watch for failure modes; only then author an anchor and a family-file entry targeted at the failure modes you actually observed. Anchors are never pre-sprinkled speculatively. Heavy scaffolding hides the model's true tendencies; you can't engineer for failure modes you never see.
+
+When adding defensive clauses, record *what tendency the clause was added to correct, against which model*. Without that record, future maintainers can't distinguish "still load-bearing" from "residue from a model we don't use anymore." Comment family-file entries like code: not what the overlay says, but why and against which observed behavior it was added.
+
+(The earlier delivery vehicle — a parallel per-model definition file, e.g. `applied-mathematician-strict.md`, a gap-aversion variant built for running the math agent on Gemma 4 — was retired 2026-08-21; the anchor mechanism replaces whole-definition forks.)
+
+### Generated Definitions
+
+Every definition in the Usage catalogs — the coder and platform files, the MAD agent set, all three kb definitions, the specialists, the liaisons, and every slash command — is **generated**. There are no hand-maintained definitions and nothing to edit directly; see [CONVENTIONS.md](CONVENTIONS.md#adding-templates-and-promoting-definitions) for how a template maps to its rendered output, and how to add or change one.
+
+### Liaison Tooling
+`liaison_tools/` contains the helpers used by both `mad-guest-liaison.md` (MAD process) and `guest-liaison.md` (general guest-model sessions); an install delivers it to `.claude/agents/liaison_tools/`, which is the path the definitions name. The liaison agents are the primary callers; MAD referees set `TMPDIR` for liaison invocations to keep `mktemp` output contained in the review/design directory.
+* `post-openai.py` - posts a message history to an OpenAI-compatible API and prints the assistant reply. Reads the API key from a file so it never enters argv or env.
+* `msg-util.py` - the only sanctioned path for creating or mutating the messages JSON (init / append / validate). Use this rather than ad-hoc jq or sed.
+* `relay-driver.py` - the corpus-relay eval instrument: runs budgeted, fresh-history Q&A sessions against a guest model over a read-only corpus, appending its own READ/LIST/GREP relay protocol block to the caller's system prompt (callers supply navigation doctrine only) and servicing exactly what it appended. Per-question sessions, answers, and a `stats.csv` with real token totals (via `post-openai.py`'s `USAGE_STATS_FILE` side channel) land under `--output-dir`. Sketch: `relay-driver.py --corpus-root kb-root --system-prompt scout.md --questions-file questions.md --output-dir eval-out --env-file guest.env` (single questions via `--question` or `--question-number N`).
+* `tests/` - fixtures for the above scripts.
 
 ## Third Party Acknowledgements
 

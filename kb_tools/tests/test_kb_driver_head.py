@@ -105,7 +105,6 @@ def _walk_head(
     return run.execute(
         config=config.load(None, run_overrides=dict(overrides), admissible=barriers.ADMISSIBLE),
         paths=paths,
-        decisions=[config.parse_decision("start.proceed=yes", admissible=barriers.ADMISSIBLE)],
         repo_root=consumer,
         stages=stages,
     )

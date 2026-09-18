@@ -9,8 +9,7 @@ VENV_PYTHON := VENV / PYBIN / "python" + EXE
 
 # Lazy: if the venv's python already exists this is a no-op; a half-built
 # venv is repaired by deleting .venv and re-running.
-[doc("create .venv with pytest/isort/black if its python is missing")]
-venv:
+_venv:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! -x "{{VENV_PYTHON}}" ]]; then

@@ -40,21 +40,18 @@ build is either a launch or a resume, and a resume is not configured — it is
 what a ledger with recorded stages already says, re-derived from the ledger on
 every invocation. A setting whose vocabulary has one member is a question with
 one answer, so ``[run] build_mode``, its vocabulary and its default are deleted
-outright rather than kept as a single-valued vestige. Deleted is not the same as
-unknown: an unknown key is ignored here, which is right for one nobody ever
-honoured and wrong for one whose author is relying on it — this key decided
-which rows a build walked, so ignoring it would silently walk a different build
-than the file asks for. Every such key is named in :data:`RETIRED_RUN_KEYS` and
-refused at load with what to do instead.
+outright rather than kept as a single-valued vestige. It needs no key of its
+own to be refused by, because **every key in ``[run]`` that :func:`load` does
+not read is refused, naming the section and the key** — an unknown key here is
+never inert: a file that still carries one means something by it, and silently
+ignoring it would walk a different build than the file asks for.
 
-**Two fields say what a run is made of; one bounds how far it goes.**
+**One field says what a run is made of; one bounds how far it goes.**
 ``no_inference`` drops every row that would cost a model call, row by row, and
-the walk carries on past them to a finished build. ``dry_run`` replays the calls
-this driver dispatches instead of spawning them — a narrower claim, since the
-claim-graph stages spawn theirs inside the tool the driver invokes. ``through``
-names the last stage to walk, by stage id or by the stage's own display name,
-resolved here to an id so nothing downstream deals in two spellings. The first
-two are rendered back into the resume line and the third is not.
+the walk carries on past them to a finished build. ``through`` names the last
+stage to walk, by stage id or by the stage's own display name, resolved here to
+an id so nothing downstream deals in two spellings. The first is rendered back
+into the resume line and the second is not.
 
 A stage id containing a dot must be quoted in TOML — e.g. ``[barriers."phase-1.5".some-kind]``
 — because TOML reads an unquoted dot as another level of table nesting. No
@@ -69,7 +66,6 @@ import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 
 from .. import kb_pipeline, kb_util
 
@@ -87,20 +83,14 @@ CONFIG_FLAG = "--config"
 SOURCE_FLAG = "--source"
 PERMISSION_MODE_FLAG = "--permission-mode"
 
-# The two mode flags. Both specify what the run is made of rather than how far
-# it goes, so both are rendered back into the resume line (:func:`invocation`).
+# The mode flag. It specifies what the run is made of rather than how far it
+# goes, so it is rendered back into the resume line (:func:`invocation`).
 #
 # `--no-inference` spends no model call: every row that would cost one is
 # dropped and the walk continues past it, so the build closes out without them.
 # Spelled once in `kb_util`, because the driver passes the same flag through to
 # `advance-step`, where the stage table decides what it excuses.
-#
-# `--dry-run` replaces every model **this driver dispatches** with `replay.py`.
-# It is not the same claim: a row whose model is spawned inside a tool the
-# driver invokes (`steps.Step.spends_own_inference`) is not replaced by it, so a
-# fresh build under `--dry-run` alone still reaches those rows for real.
 NO_INFERENCE_FLAG = kb_util.NO_INFERENCE_FLAG
-DRY_RUN_FLAG = "--dry-run"
 
 # The one flag that bounds an invocation rather than specifying the build, and
 # so the one this module does not render back: see :func:`invocation`.
@@ -110,10 +100,9 @@ THROUGH_FLAG = "--through"
 # names a `[log]` key rather than a `[run]` one. This module resolves it against
 # the file and renders it back into the resume line — a card that dropped it
 # would hand back an invocation whose evidence lands somewhere else
-# (:func:`invocation`). Spelled in `kb_util` for `NO_INFERENCE_FLAG`'s reason
-# read one step further: `baton` prints it in the watch command it offers and
-# may import no driver module, so the one spelling has to sit where both can
-# reach it.
+# (:func:`invocation`). Spelled in `kb_util` for `NO_INFERENCE_FLAG`'s reason:
+# the flag is published beside the invocation a consuming repo reaches these
+# modules through, so one spelling serves whatever renders a command line.
 RUN_DIR_FLAG = kb_util.RUN_DIR_FLAG
 
 # The installed CLI's permission modes, probed at 2.1.220 (`--permission-mode`
@@ -122,7 +111,6 @@ RUN_DIR_FLAG = kb_util.RUN_DIR_FLAG
 # first call.
 PERMISSION_MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
 
-BRIEF_TRANSPORTS = ("stdin", "file")  # never argv
 RUNNERS = ("just", "make")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -130,9 +118,7 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 DEFAULT_PERMISSION_MODE = "bypassPermissions"
 DEFAULT_CLAUDE_COMMAND = ("claude",)
-DEFAULT_BRIEF_TRANSPORT = "stdin"
 DEFAULT_SINGLE_SECONDS = 1800
-DEFAULT_WAVE_SECONDS = 7200
 DEFAULT_SILENCE_SECONDS = 600
 DEFAULT_TRANSPORT_ATTEMPTS = 3
 DEFAULT_BACKOFF_SECONDS = (5, 30)
@@ -141,18 +127,6 @@ DEFAULT_LOG_LEVEL = "INFO"
 # beneath it. The run lock does NOT — it is anchored at the repo root, so that
 # changing this value cannot buy a second concurrent run.
 DEFAULT_RUN_DIR = ".claude-temp/kb-driver"
-
-#: ``[run]`` keys that once meant something and no longer do, each with the
-#: sentence its refusal carries. Keyed rather than listed so the refusal says
-#: what to do instead of only that the key is gone.
-RETIRED_RUN_KEYS: Mapping[str, str] = MappingProxyType(
-    {
-        "build_mode": (
-            "a build is either a launch or a resume, and a resume is not configured — it is what "
-            "the ledger's recorded stages already say. Remove the key"
-        ),
-    }
-)
 
 
 class ConfigError(ValueError):
@@ -205,11 +179,6 @@ class RunSection:
     #: (``steps.applies``) and the walk continues past it, so this specifies
     #: what the build is made of rather than bounding how far it goes.
     no_inference: bool = False
-    #: Replay every call the driver dispatches instead of spawning one. A
-    #: smoke test of the state machine, and **not** a claim that no model runs:
-    #: the two claim-graph stages spawn theirs inside the tool the driver
-    #: invokes, which no invoker of this driver replaces.
-    dry_run: bool = False
     #: The last stage this invocation walks, as a **resolved stage id** — the
     #: display name a caller may have written is resolved at load, so nothing
     #: downstream deals in anything but ids. Empty is the whole build.
@@ -220,13 +189,11 @@ class RunSection:
 class ClaudeSection:
     command: tuple[str, ...]
     env: Mapping[str, str]
-    brief_transport: str
 
 
 @dataclass(frozen=True)
 class TimeoutSection:
     single_seconds: int
-    wave_seconds: int
     silence_seconds: int
     #: Per-step total bounds, keyed by step id. The keys are checked against the
     #: step table at load and the values against the same positivity rule the
@@ -270,6 +237,25 @@ def _table(parent: Mapping[str, object], key: str, *, section: str) -> dict:
     if not isinstance(value, dict):
         raise ConfigError(f"[{section}] must be a table, got {type(value).__name__}")
     return value
+
+
+class _TrackedTable(dict):
+    """A table that remembers every key read through :meth:`get`.
+
+    ``[run]`` has no enumerated key vocabulary to check an unknown key
+    against — the recognized set is derived from the reads themselves, so it
+    cannot drift from what :func:`load` actually consults. Every field helper
+    below reads through ``.get``, so wrapping the table is enough to capture
+    the whole set with no change to the helpers.
+    """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.read_keys: set[str] = set()
+
+    def get(self, key: str, default: object = None) -> object:
+        self.read_keys.add(key)
+        return super().get(key, default)
 
 
 def _required(section: str, key: str, flag: str) -> str:
@@ -503,13 +489,11 @@ def _read(path: Path) -> dict:
 def run_dir_parent(parent: Path | str | None) -> str:
     """The run-directory parent a card must name, or empty where it need not.
 
-    One predicate, two lines: the resume line rendered below, and the watch line
-    the baton composes from :attr:`baton.BatonContext.run_dir_parent`, which is
-    set wherever a context is built. The default is what a bare invocation
-    already finds, so naming it would put a flag on every card to say nothing;
-    anything else is a directory the next invocation would otherwise not look
-    in — and a ``watch`` that looked in the default one would read a stale
-    ``LATEST``, find a dead ``run.pid``, and report a live run as terminated.
+    Read by the resume line rendered below. The default is what a bare
+    invocation already finds, so naming it would put a flag on every card to
+    say nothing; anything else is a directory the next invocation would
+    otherwise not look in, and a resume that dropped it would file the resumed
+    run's evidence under the default parent and strand the first run's.
     """
     if parent is None or str(parent) == DEFAULT_RUN_DIR:
         return ""
@@ -529,7 +513,7 @@ def invocation(
     resume line is not the place for a mapping that could be wrong.
 
     **The run directory is rendered wherever it is not the default one**
-    (:func:`run_dir_parent`, which the watch line reads too). ``run_dir`` is the
+    (:func:`run_dir_parent`). ``run_dir`` is the
     *effective* parent — the flag where one was given, the file's ``[log]
     run_dir`` otherwise — so a card built from this line hands back the
     directory this run's evidence is actually in. A resume line that dropped it
@@ -543,11 +527,9 @@ def invocation(
     hand the operator an invocation that stops in the same place forever.
     Resuming past a bound is the point of resuming.
 
-    **Both mode flags are rendered, for the mirror-image reason.** Each says
-    what this build is made of, so a resume that dropped one would change the
-    build half way through: without ``--no-inference`` it would run the very
-    rows the build was told to do without, and without ``--dry-run`` it would
-    spend real model calls a smoke test never meant to spend.
+    **The mode flag is rendered, for the mirror-image reason.** It says what
+    this build is made of, so a resume that dropped it would change the build
+    half way through, running the very rows the build was told to do without.
     """
     overrides = run_overrides or {}
     parts: list[str] = []
@@ -561,9 +543,8 @@ def invocation(
     named_parent = run_dir_parent(run_dir)
     if named_parent:
         parts += [RUN_DIR_FLAG, named_parent]
-    for flag, key in ((NO_INFERENCE_FLAG, "no_inference"), (DRY_RUN_FLAG, "dry_run")):
-        if overrides.get(key):
-            parts.append(flag)
+    if overrides.get("no_inference"):
+        parts.append(NO_INFERENCE_FLAG)
     return shlex.join(parts)
 
 
@@ -593,10 +574,7 @@ def load(
     overrides = dict(run_overrides or {})
     raw = _read(path) if path is not None else {}
 
-    run_raw = {**_table(raw, "run", section="run"), **overrides}
-    for retired, reason in RETIRED_RUN_KEYS.items():
-        if retired in run_raw:
-            raise ConfigError(f"[run] {retired} is retired: {reason}")
+    run_raw = _TrackedTable({**_table(raw, "run", section="run"), **overrides})
     runner = run_raw.get("runner")
     run = RunSection(
         sources=_str_list_field(run_raw, "sources", section="run", flag=SOURCE_FLAG),
@@ -607,28 +585,23 @@ def load(
         charter_file=Path(_str_field(run_raw, "charter_file", section="run", default=kb_pipeline.CHARTER_RELPATH)),
         runner=None if runner is None else _str_field(run_raw, "runner", section="run", choices=RUNNERS),
         no_inference=_bool_field(run_raw, "no_inference", section="run", default=False),
-        dry_run=_bool_field(run_raw, "dry_run", section="run", default=False),
         through=_stage_field(run_raw, "through", section="run", flag=THROUGH_FLAG),
     )
+    unknown = sorted(set(run_raw) - run_raw.read_keys)
+    if unknown:
+        plural = "s" if len(unknown) > 1 else ""
+        raise ConfigError(f"[run] unknown key{plural}: {', '.join(unknown)}")
 
     claude_raw = _table(raw, "claude", section="claude")
     _reject_model_keys(claude_raw)
     claude = ClaudeSection(
         command=_str_list_field(claude_raw, "command", section="claude", default=DEFAULT_CLAUDE_COMMAND),
         env=_str_map(claude_raw, "env", section="claude"),
-        brief_transport=_str_field(
-            claude_raw,
-            "brief_transport",
-            section="claude",
-            default=DEFAULT_BRIEF_TRANSPORT,
-            choices=BRIEF_TRANSPORTS,
-        ),
     )
 
     timeouts_raw = _table(raw, "timeouts", section="timeouts")
     timeouts = TimeoutSection(
         single_seconds=_int_field(timeouts_raw, "single_seconds", section="timeouts", default=DEFAULT_SINGLE_SECONDS),
-        wave_seconds=_int_field(timeouts_raw, "wave_seconds", section="timeouts", default=DEFAULT_WAVE_SECONDS),
         silence_seconds=_int_field(
             timeouts_raw, "silence_seconds", section="timeouts", default=DEFAULT_SILENCE_SECONDS
         ),

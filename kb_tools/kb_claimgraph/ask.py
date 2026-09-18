@@ -175,8 +175,8 @@ DEPENDS_CYCLE_TEMPLATE = "depends-cycle-reask.tmpl"
 IDENTIFY_TEMPLATE = "identify.tmpl"
 IDENTIFY_REASK_TEMPLATE = "identify-claim-reask.tmpl"
 
-#: This package's composer constants — the analogue of ``steps.CONSTANT_SLOTS``
-#: for the two asks, drawn on only where a template names one. Every value here
+#: This package's composer constants — the pool the two asks hand
+#: ``prompt_templates.render``, drawn on only where a template names one. Every value here
 #: is a marker literal :func:`parse_answer` or :func:`parse_identify_answer`
 #: matches an answer against, so it reaches a prompt as a slot rather than as
 #: template text: a template spelling one would be a second definition of a

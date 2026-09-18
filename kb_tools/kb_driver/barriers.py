@@ -10,17 +10,16 @@ invocation, through one of two doors with one vocabulary — the
 What lives here:
 
 * **The registry** — one :class:`BarrierSpec` per ``(stage, kind)``, carrying
-  the admissible answers, which of them are themselves stops, the exit code
-  that holds when the barrier is not resolved, and the question text the record
-  renders verbatim. Raise sites reference registry members, never string
+  the admissible answers, the exit code that holds when the barrier is not
+  resolved, and the question text the record renders verbatim. Every admissible
+  answer continues the run; a barrier stops it by going unanswered, which is the
+  only way it stops. Raise sites reference registry members, never string
   literals; :data:`REGISTRY` is the authority. **No wildcards** — a wildcard
   reintroduces the prose topic-matching the typed registry exists to kill.
 * **Resolution** — :class:`Resolver`, which applies ``--decide``'s precedence
   over config, consumes each answer at most once per run (a second raise of the
-  same pair is an automatic stop even if config answers it), counts
-  ``authorize-one-more`` grants for ``effective_cap = cap +
-  grants_this_process``, and reports the ``--decide`` values whose pair was
-  never raised.
+  same pair is an automatic stop even if config answers it), and reports the
+  ``--decide`` values whose pair was never raised.
 * **The record's construction** — :func:`record` builds the
   :class:`baton.BarrierRecord`. ``baton.py`` renders it; the split is
   deliberate, and it is the same one ``BatonContext`` already has.
@@ -55,101 +54,49 @@ _log = runlog.logger("barriers")
 # form (lowercase, hyphens); these fix the words, so a raise site comparing
 # against one cannot drift from the set the config validator admits.
 
-ANSWER_YES = "yes"
-ANSWER_NO = "no"
 ANSWER_JUST = "just"
 ANSWER_MAKE = "make"
-ANSWER_STOP = "stop"
-ANSWER_AUTHORIZE_ONE_MORE = "authorize-one-more"
 
 # --- the pairs, named -------------------------------------------------------
 
-START_PROCEED = "start.proceed"
 #: Raised where the spine seed needs a runner file and this repository carries
 #: neither. It is the seeding stage's, not `start`'s: a pair names the stage
 #: that raises it, and the seed moved out of `start` when the document graph it
 #: runs over became a stage of the build.
 SPINE_SEED_RUNNER_CHOICE = "spine-seed.runner-choice"
 
-# The kind the capped loops escalate to. A cap's pair is read off the step
-# table's ``LoopSeries.cap_barrier`` — the loop's own statement of where it
-# escalates — never rebuilt from a stage id at a raise site.
-CAP_EXHAUSTED = "cap-exhausted"
-
-# The stages whose loops have a real cap. A tuple with one member rather than a
-# constant: what makes a stage capped is that it carries a `LoopSeries`, and the
-# registry is built by walking this, so a second capped stage arrives as an entry
-# here instead of as a second spelling of the escalation.
-CAPPED_STAGES: tuple[str, ...] = ("phase-5",)
-
 
 @dataclass(frozen=True, kw_only=True)
 class BarrierSpec:
-    """One barrier: what may be answered, what stops, and what the record asks.
+    """One barrier: what may be answered, and what the record asks.
 
-    ``stopping`` is the subset of ``answers`` that ends the run — ``no`` at
-    the proceed confirmation, ``stop`` everywhere it appears. An unanswered
-    barrier stops for the same reason and through the same path: absent table
-    ⇒ stop.
-
-    ``payload`` names the free-text fields an answer may carry after its colon
-    (``--decide <stage>.<kind>=<answer>:<free text>``). No registered pair uses
-    one today; it documents what the run loop would read off ``Decision.note``
-    for a pair that did.
+    Every admissible answer continues the run. A barrier ends it by going
+    unanswered — no answer supplied, or one already spent in this process —
+    which is the one path out and the one the record describes.
     """
 
     stage: str
     kind: str
     answers: tuple[str, ...]
-    stopping: frozenset[str]
     exit_code: int
     question: str
-    payload: tuple[str, ...] = ()
 
     @property
     def pair(self) -> str:
         return f"{self.stage}.{self.kind}"
 
 
-_CAP_ANSWERS = (ANSWER_STOP, ANSWER_AUTHORIZE_ONE_MORE)
-
-
-def _cap_spec(stage: str) -> BarrierSpec:
-    """A capped loop's escalation. The cap's *value* is never restated here."""
-    return BarrierSpec(
-        stage=stage,
-        kind=CAP_EXHAUSTED,
-        answers=_CAP_ANSWERS,
-        stopping=frozenset({ANSWER_STOP}),
-        # A driver loop that hit its limit is exit 11, not 10 — the same code a
-        # mechanical gate red reports, and it carries the same
-        # answer-substituting baton.
-        exit_code=baton.EXIT_GATE_RED,
-        question=f"{stage} reached its round cap and findings are still open. Stop here, or authorize one more round?",
-    )
-
-
 _SPECS: tuple[BarrierSpec, ...] = (
-    BarrierSpec(
-        stage="start",
-        kind="proceed",
-        answers=(ANSWER_YES, ANSWER_NO),
-        stopping=frozenset({ANSWER_NO}),
-        exit_code=baton.EXIT_BARRIER,
-        question="Proceed with the build as specified?",
-    ),
     BarrierSpec(
         stage="spine-seed",
         kind="runner-choice",
         answers=(ANSWER_JUST, ANSWER_MAKE),
-        stopping=frozenset(),
         exit_code=baton.EXIT_BARRIER,
         question=(
             "This repository has neither a justfile nor a Makefile, so the KB maintenance targets "
             "cannot be installed without being told which runner to write. Which runner?"
         ),
     ),
-    *(_cap_spec(stage) for stage in CAPPED_STAGES),
 )
 
 #: The registered pairs, keyed ``"<stage>.<kind>"``.
@@ -178,11 +125,6 @@ class Resolver:
     per process and per pair: a second raise of the same pair returns no
     answer even when one is configured, which is what turns a static ``revise``
     on the design gate from an infinite loop into a stop.
-
-    ``authorize-one-more`` grants are counted here because they are
-    deliberately **not durable**: a round count belongs to the process that ran
-    the rounds, so a grant that outlived its process would be re-consumed by
-    every later resume.
     """
 
     def __init__(self, *, config_decisions: Mapping[str, Decision], cli_decisions: Sequence[Decision] = ()) -> None:
@@ -196,7 +138,6 @@ class Resolver:
                 )
             self._cli[decision.pair] = decision
         self._raised: set[str] = set()
-        self._grants: dict[str, int] = {}
 
     @property
     def raised(self) -> frozenset[str]:
@@ -249,24 +190,6 @@ class Resolver:
         )
         return decision
 
-    def grants(self, pair: str) -> int:
-        """How many ``authorize-one-more`` grants this process has recorded for ``pair``."""
-        return self._grants.get(pair, 0)
-
-    def grant(self, pair: str) -> int:
-        """Record one grant: ``effective_cap = cap + grants_this_process``.
-
-        An INFO record per grant, so the cadence/deviation audit can count what
-        the operator authorized separately from what the loop did on its own.
-        """
-        total = self.grants(pair) + 1
-        self._grants[pair] = total
-        _log.info(
-            "one more round authorized for this cap",
-            extra={"context": {"pair": pair, "grants_this_process": total}},
-        )
-        return total
-
 
 # --- the record ---------------------------------------------------------------
 
@@ -277,13 +200,11 @@ def record(
     render: str,
     artifacts: Iterable[str] = (),
     run_dir: str,
-    answered: str = "",
     unconsumed: Sequence[str] = (),
 ) -> baton.BarrierRecord:
     """Build the barrier record. ``baton.render_record`` emits it; nothing here formats.
 
-    ``render`` is the complete ``show-status`` stdout, passed through
-    untouched. ``answered`` is set only when the supplied answer was itself a stop.
+    ``render`` is the complete ``show-status`` stdout, passed through untouched.
     """
     runlog.require(bool(render.strip()), "a barrier record leads with the display, and none was captured")
     return baton.BarrierRecord(
@@ -295,6 +216,5 @@ def record(
         run_dir=run_dir,
         exit_code=registered.exit_code,
         render=render,
-        answered=answered,
         unconsumed_decisions=tuple(unconsumed),
     )

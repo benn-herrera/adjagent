@@ -372,10 +372,18 @@ def test_a_document_carrying_an_authored_reason_is_not_reopened(declared: Path):
 
 
 def test_a_run_over_a_tree_the_declared_pass_has_not_touched_stops_before_the_ask(consumer: Path):
+    """The stop is a comparison over the tree rather than a refusal of its own.
+
+    The entry condition no longer spells "no frontmatter": every leaf reads as
+    one nobody has read for claims, so the whole tree enters this run's scope.
+    What catches it is the assertion C2 makes over that scope — the documents
+    the author marked blocks in are in it, and this stage and the declared pass
+    would each mint a claim for the same site.
+    """
     inference = FakeInference()
     report = _discover(consumer, inference)
     assert report.failed
-    assert any("frontmatter-absent" in line for line in report.lines())
+    assert any("block-in-scope" in line for line in report.lines()), report.lines()
     assert inference.prompts == []
 
 
@@ -397,6 +405,54 @@ def test_a_document_both_awaiting_and_hosting_a_block_stops_the_stage():
     with pytest.raises(discover.DiscoveryError) as refusal:
         discover._no_block_in_scope(sites, ("vol/alpha.md",))
     assert refusal.value.check == "block-in-scope"
+
+
+def test_a_leaf_that_declares_nothing_is_in_the_scope_and_the_exit_condition_reads_it(declared: Path):
+    """The exit condition is over the scope, so it answers for every state that scope admits.
+
+    A leaf declaring neither claims nor a reason is ``UNDECLARED``, and the
+    partition puts it in ``awaiting`` — nobody has read it, and reading it is
+    what this pass is for. It reads ``UNDECLARED`` again where the write did not
+    land, which is a state an exit condition keyed on ``AWAITING`` alone sees in
+    neither direction: it would report the run finished over a document nobody
+    read.
+    """
+    kb_root = declared / "kb-root"
+    leaf = kb_root / "vol" / "zeta.md"
+    body = leaf.read_text(encoding="utf-8").split(render.FRONTMATTER_CLOSER, 1)[1]
+    leaf.write_text(
+        f"{_UPLINK}\n\n{render.FRONTMATTER_OPENER}\nkind: leaf\n{render.FRONTMATTER_CLOSER}{body}",
+        encoding="utf-8",
+    )
+
+    fields = kb_index_lib.parse_frontmatter(leaf.read_text(encoding="utf-8"))
+    assert conform.determination(fields) is conform.Determination.UNDECLARED
+    assert "vol/zeta.md" in conform.pass_two_gate(tree.read(kb_root)).awaiting
+    assert discover._still_awaiting(kb_root, ("vol/zeta.md",)) == ("vol/zeta.md",)
+
+
+def test_a_leaf_carrying_no_frontmatter_is_written_with_the_kind_the_tree_gives_it(consumer: Path):
+    """The ``kind:`` vocabulary is closed, and a field nobody wrote is not in it.
+
+    Every leaf of an unstamped tree enters this run's scope, so the kind read
+    off a document's own frontmatter can be absent — which reaches the write API
+    as the string ``"None"`` and is refused at ``set-frontmatter``, one pass
+    after the register entries for that same document have been minted. The
+    tree answers what the field cannot, and the only refusal left is the
+    runner's.
+    """
+    (consumer / "kb-root" / "vol" / "alpha.md").write_text(
+        f"{_UPLINK}\n\n# Alpha\n\nAlpha is argued directly.\n", encoding="utf-8"
+    )
+    answers = dict(_ANSWERS, **{"vol/alpha.md": ((), "The section argues a result stated elsewhere.")})
+    report = _discover(consumer, FakeInference(answers))
+
+    written = _texts(consumer / "kb-root")
+    assert all("kind: leaf" in written[path] for path in answers), written
+    assert [finding.check for finding in report.findings if finding.status == kb_util.FAIL] in (
+        [kb_util.refresh_cmd(consumer)],
+        [kb_util.verify_cmd(consumer)],
+    ), report.lines()
 
 
 # ---------------------------------------------------------------------------
@@ -701,7 +757,7 @@ def test_every_key_of_every_site_is_classified_by_exactly_one_transport():
     partition — at import, so a level added without a classification cannot be
     shipped rather than merely being noticed later.
     """
-    for level in (*envelope.LEVELS, *ask.LEVELS):
+    for level in ask.LEVELS:
         declared = [*level.json, *level.prose, *level.fields]
         assert set(declared) == set(level.keys), level.label
         assert len(declared) == len(set(declared)), level.label
@@ -733,22 +789,6 @@ def test_each_site_takes_an_answer_whose_every_composed_value_carries_an_unescap
 
     stated = ask.parse_identify_answer(ask.identify_answer_block(no_claim=_MATHEMATICAL_PROSE), document="d.md")
     assert stated.no_claim == _MATHEMATICAL_PROSE
-
-    parsed = envelope.parse_envelope(
-        envelope.envelope_block(
-            envelope.Envelope(
-                step="p0.survey",
-                members=(envelope.Member(name="A.tex", status=_MATHEMATICAL_PROSE),),
-                gaps=(_MATHEMATICAL_PROSE,),
-                deviations=(
-                    envelope.Deviation(
-                        kind="triage", member="A.tex", what=_MATHEMATICAL_PROSE, why=_MATHEMATICAL_PROSE
-                    ),
-                ),
-            )
-        )
-    )
-    assert parsed.members[0].status == parsed.gaps[0] == parsed.deviations[0].what == _MATHEMATICAL_PROSE
 
     with pytest.raises(AnswerFormatError, match="named by no key"):
         ask.parse_answer(

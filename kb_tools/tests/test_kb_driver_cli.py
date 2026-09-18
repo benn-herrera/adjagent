@@ -5,10 +5,10 @@ the paths that never reach the sequencer, which are exactly the ones where
 the driver is least able to explain itself.
 
 Its second half, once a run directory exists: no run terminates without its
-report either. ``exit.json`` and ``cadence.jsonl`` are what a backgrounded
-session reads after watch says the driver is gone, and the endings that most
-need them — a kill, a boundary check, an exception nobody named — are the ones
-that used to leave the directory with a pid file and nothing else.
+report either. ``exit.json`` and ``cadence.jsonl`` are the run directory's own
+record of how the run ended, and the endings that most need them — a kill, a
+boundary check, an exception nobody named — are the ones that used to leave the
+directory with a pid file and nothing else.
 """
 
 import json
@@ -20,7 +20,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -257,7 +256,7 @@ def test_an_unhandled_exception_inside_the_run_leaves_its_traceback_in_the_run_l
     monkeypatch.chdir(repo)
 
     def _boom(**kwargs: object) -> object:
-        raise KeyError("REVIEW_CYCLES")
+        raise KeyError("_HANDLERS")
 
     monkeypatch.setattr(cli.run, "execute", _boom)
 
@@ -269,7 +268,7 @@ def test_an_unhandled_exception_inside_the_run_leaves_its_traceback_in_the_run_l
     records = [json.loads(line) for line in (run_dir / "run.log").read_text(encoding="utf-8").splitlines()]
     tracebacks = [record["exception"] for record in records if "exception" in record]
     assert len(tracebacks) == 1
-    assert "KeyError: 'REVIEW_CYCLES'" in tracebacks[0]
+    assert "KeyError: '_HANDLERS'" in tracebacks[0]
     # The lock is released even on this path, so the next run is not wedged.
     assert not runlog.repo_lock_path(repo).exists()
 
@@ -288,11 +287,10 @@ def consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A repository a run really starts in, with a KB under it.
 
     ``fixtures/mini-kb`` is the tree, so these cases drive a run over a KB
-    somebody wrote rather than over an empty directory, and every one of them
-    passes ``--dry-run``: whatever the walk reaches, no call this driver
-    dispatches can be spawned. What it reaches is ``pre.preflight``, the first
-    row that leaves the driver's own process — which is where each case below
-    substitutes the ending it means to test.
+    somebody wrote rather than over an empty directory. No case reaches a
+    dispatch: the walk stops at ``pre.preflight``, the first row that leaves the
+    driver's own process, which is where each case below substitutes the ending
+    it means to test.
     """
     repo = tmp_path / "consumer"
     repo.mkdir()
@@ -311,13 +309,13 @@ def consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _drive(consumer: Path) -> tuple[int, Path]:
-    """One ``--dry-run`` invocation through ``main``; its exit code and its run parent.
+    """One invocation through ``main``; its exit code and its run parent.
 
     The parent is outside the repository, which is where a run's evidence
     belongs and which is also what makes the resume line below carry a flag.
     """
     runs = consumer.parent / "runs"
-    code = cli.main(["run", "--source", "AcmeWidgets.tex", config.DRY_RUN_FLAG, config.RUN_DIR_FLAG, str(runs)])
+    code = cli.main(["run", "--source", "AcmeWidgets.tex", config.RUN_DIR_FLAG, str(runs)])
     return code, runs
 
 
@@ -391,63 +389,29 @@ def test_a_boundary_error_mid_run_still_leaves_its_report(
     assert "rc outside its own vocabulary" in out
 
 
-def test_a_card_from_a_real_run_hands_back_the_run_directory_it_was_launched_with(
-    consumer: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The resume line an operator actually reads, off a run that actually ran.
-
-    ``start.proceed`` is the first barrier a launch raises, and its card is a
-    resume line with an answer substituted into it. Run that line without
-    ``--run-dir`` and the resumed run files its evidence under the default
-    parent while the first run's stays where it was.
-    """
-    monkeypatch.setattr(ledger, "preflight", lambda repo_root: ledger.Outcome(baton.EXIT_OK))
-
-    code, runs = _drive(consumer)
-    out = capsys.readouterr().out
-
-    assert code == baton.EXIT_BARRIER
-    resume = [line for line in out.splitlines() if f"{kb_util.DRIVER_INVOCATION} run " in line]
-    assert resume, "the barrier card offered no resume line"
-    for line in resume:
-        assert f"{config.RUN_DIR_FLAG} {runs}" in line
-
-
 def test_every_command_a_card_offers_names_the_run_directory(tmp_path: Path) -> None:
-    """Closed over both ladders, so no exit code can offer a command that looks elsewhere.
+    """Closed over the ladder, so no exit code can offer a command that looks elsewhere.
 
-    Resume lines and watch lines alike: a resume carries the directory in the
-    invocation it hands back, and a watch — which takes no ``--config`` and no
-    ``--source`` — carries it in the only flag it has. Each mode is rendered
-    over its own ladder, because a code means one thing in each. The guard above
-    the loop is what keeps the claim from passing by matching nothing.
+    A resume carries the directory in the invocation it hands back, which is
+    the only channel a card has for it. The guard above the loop is what keeps
+    the claim from passing by matching nothing.
     """
     runs = tmp_path / "outside" / "runs"
     cfg = config.load(None, run_overrides={"sources": ("a.tex",)}, run_dir=runs)
     context = baton.BatonContext(
         invocation=cfg.invocation,
-        pair="start.proceed",
-        question="proceed?",
+        pair="spine-seed.runner-choice",
+        question="which runner?",
         run_dir=str(runs / "20260101T000000-1"),
-        run_dir_parent=config.run_dir_parent(runs),
     )
 
     offered = [
-        (mode, code, line)
-        for mode, codes in (
-            (baton.MODE_RUN, baton.RUN_MODE_EXIT_CODES),
-            (baton.MODE_WATCH, baton.WATCH_MODE_EXIT_CODES),
-        )
-        for code in codes
-        for line in baton.render(code, replace(context, mode=mode)).splitlines()
+        (code, line)
+        for code in baton.RUN_MODE_EXIT_CODES
+        for line in baton.render(code, context).splitlines()
         if kb_util.DRIVER_INVOCATION in line
     ]
 
-    assert offered, "no card in either ladder offered a command"
-    assert {mode for mode, _, _ in offered} == {baton.MODE_RUN, baton.MODE_WATCH}, "one mode offered none"
-    for mode, code, line in offered:
-        assert f"{config.RUN_DIR_FLAG} {runs}" in line, f"{mode} exit {code}: {line}"
-
-
-# ``watch`` is the second registered mode; its dispatch, exits, and batons are
-# exercised through this same entry point in test_kb_driver_watch.py.
+    assert offered, "no card in the ladder offered a command"
+    for code, line in offered:
+        assert f"{config.RUN_DIR_FLAG} {runs}" in line, f"exit {code}: {line}"

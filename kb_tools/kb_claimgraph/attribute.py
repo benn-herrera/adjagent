@@ -6,14 +6,20 @@ a claim where a rule settles it, and left open where none does:
 
 * the **source** end. A reference sitting inside a claim-bearing block belongs
   to that block's claim; a reference inside a *proof* belongs to the claim that
-  proof establishes (:func:`_proofs`); a reference in the prose of a document
-  hosting exactly one claim belongs to that claim, there being no other.
-* the **target** end. A reference whose fragment names a block's own source
-  label lands on that block's claim; an ``eqref`` naming an equation that sits
-  inside a claim-bearing block lands on that block's claim, because an equation
-  labelled inside a theorem body *is* that theorem's assertion; a reference into
-  a document hosting exactly one claim lands on that claim, there being no
-  other.
+  proof establishes (:func:`_proofs`); a reference anywhere else in a document's
+  prose offers every claim that document hosts, there being no narrower rule to
+  try. That last one is a fallback rather than a rule: it settles nothing about
+  direction and nothing about which claim, and where the document happens to
+  host one it narrows to that claim by arithmetic rather than by reading
+  anything.
+* the **target** end, in this order. A reference whose fragment names a block's
+  own source label lands on that block's claim; a reference whose fragment names
+  a block :data:`inventory.NOT_A_CLAIM_TARGET` classifies contributes no pair at
+  all, the author having pointed at a site somebody judged to state no result; a
+  reference whose label names a maths fence lands on the claim holding that
+  equation — the block's, where a claim-bearing block holds it, and otherwise the
+  node the equation was minted as; a reference into a document hosting exactly
+  one claim lands on that claim, there being no other.
 * where an end stays open the enumeration offers every claim it could be, and
   the selection below is what attributes. Where **both** ends are settled *and
   the source end was settled by proof containment*, the edge is authored
@@ -43,8 +49,8 @@ This needs no model. The ruling it overturns is that an author's cross-reference
 "carries no direction: a theorem citing a lemma is usually a dependency, a lemma
 citing the theorem it motivates is not, and the markup is identical" — true of a
 bare reference in prose, and false here, because the containment is part of the
-markup too. Measured across 27 maths papers of the staged corpus, 39% of
-cross-references in claim-bearing papers sit inside a proof (``math.AP`` 0.65,
+markup too. Measured over the cross-references carried by the staged corpus's 27
+claim-bearing maths papers, 39% of them sit inside a proof (``math.AP`` 0.65,
 ``math.DG`` 0.57, ``math.AG`` 0.54, ``math.PR`` 0.28, ``math.NT`` 0.26,
 ``math.ST`` 0.24), so this is the bulk of the material and not an edge case.
 
@@ -78,19 +84,39 @@ nothing is lost that was not already the ask's.
 ruling this replaces is that "an ``eqref`` anchor contributes nothing — it
 targets an equation, and an equation is not a node", which is true of the
 equation and does not follow for the reference: 232 of 791 claim-reaching
-references in an earlier survey were of exactly this shape. An equation is still
-not a node; the reference resolves *through* it to the block it sits in.
+references in an earlier survey were of exactly this shape. The reference
+resolves *through* the equation to the block it sits in.
 :func:`_equation_claim` is the join, and it reads the label off the anchor's
 third attribute because point 9 leaves an equation's ``\\label`` inside the maths
-fence rather than as an addressable id — so an ``eqref`` lands on its document
-with an empty fragment, and the label is the whole of what says which equation.
-An ``eqref`` whose equation sits in no claim-bearing block still contributes
-nothing: there is a claim to resolve to only where the equation is inside one.
+fence rather than as an addressable id — so an equation reference lands on its
+document with an empty fragment, and the label is the whole of what says which
+equation.
 
-**A reference into a document hosting exactly one claim lands on that claim.**
-This is the mirror of the source-end rule directly above it — "there being no
-other" reads the same at either end — and it is what admits the section
-references the third narrowing used to drop. The ruling it replaces held that
+**An equation no block and no proof holds is a node of its own**, which is the
+second half of that ruling reversed. What the old form said next — that a
+reference whose equation sits in no claim-bearing block "still contributes
+nothing" — described 2378 anchors across 43 of the corpus's 50 papers, and what
+they contributed nothing *to* was a graph in which their target did not exist.
+:mod:`equation` mints one per referenced equation nothing else holds, bounded by
+the author's own cross-references, and :func:`_equation_claim` is where the
+reference reaches it. **It is reachable there and nowhere else**: it is not in
+:meth:`graph.AuthoredGraph.hosted_by`, so neither the prose source end nor the
+sole-claim target end can offer one, and it carries no ``identifier``, so
+:func:`_fragment_claim` cannot name one. The restriction is measured rather than
+preferred — counting equation nodes as ordinary hosted claims cost 205 existing
+sole-claim edges and manufactured 132 section references onto equations no
+author pointed at. **And it is terminal**: the only reference that could run
+*from* an equation is one sealed inside a maths fence, which reaches the tree as
+no anchor at all, so nothing new can close a cycle.
+
+**A reference into a document hosting exactly one claim lands on that claim**,
+and it is what admits the section references the third narrowing used to drop.
+**It has no source-end counterpart**, though the two agree on their output
+wherever a document hosts one claim: the source end's prose fallback offers
+every claim the document hosts and settles nothing, so a single-claim document
+narrows it to one claim by arithmetic. Reading that coincidence as one rule read
+at either end would be claiming a route settles the source end off code that
+offers everything there. The ruling it replaces held that
 "a reference to a document is not a reference to what the document establishes",
 since the referent is the section and resolving it would *manufacture a claim
 out of containment*; that objection stands wherever the target hosts several
@@ -103,6 +129,63 @@ references, and dropping them took stage D from 15 sources / 29 pairs to 10 /
 discovery multiplies m — is unanswered and is paid: a section reference into a
 multi-claim document offers every claim that document hosts.
 
+**An anchor naming a block somebody classified as stating no result contributes
+no pair.** A ``\\ref{def:thick}`` resolves to a *definition* and a
+``\\ref{rmk:numevid}`` to a *remark* — the first a node kind SPEC.md rules out,
+the second a block stage B classified as stating no result, and neither of them
+something a claim node exists for. So :func:`_fragment_claim` finds nothing and
+every route behind it answers with a claim the author did not point at — the
+document's sole claim where it hosts one, and every claim it hosts where it
+hosts several.
+:data:`inventory.NOT_A_CLAIM_TARGET` is read at the target end and ends the
+reference there. Two rules beside it already take that refusal on that ground: an
+``\\eqref`` whose equation resolves to no claim returns ``()`` rather than falling
+to the sole-claim route, and a proof whose opening run names a subject that is no
+node binds to nothing rather than falling back to the block above it. In all
+three the author said what they meant and what they meant is not in the graph.
+
+**This is not one of the three reversed narrowings in a new place, and the
+asymmetry is what decides it.** Those withheld *the relationship the corpus
+states* because some fraction of them would be wrong, and left the graph
+asserting the claims unrelated — a wrong answer arrived at silently. The
+relationship this corpus states is claim → the block the author named, and there
+is no node to record it against; what the refusal withholds is a *different*
+relationship, one the author did not write, so no true statement is traded for
+silence. A pair recorded here would also misstate the ``references`` class's own
+contract, whose target is the claim the reference resolves to — and this
+reference resolves to no claim.
+
+**The refusal reaches every classified name but ``proof``, and what it removes
+is candidates — never an edge.** Measured over the 53 built kb-roots, each name
+against the same baseline of a run refusing nothing: the whole set removes 166
+``references`` records and the 166 candidates they put to the model
+(``assumption`` 84, ``definition`` 39, ``remark`` 23, and ``example``,
+``notation``, ``problem`` none), **and leaves the 1000 settled edges untouched,
+name for name and in combination**. ``proof`` stands outside on a different
+ground from its zero: an anchor naming a proof block has a *better* answer
+available than a refusal in the claims that proof establishes
+(:class:`inventory.Proof` already binds them), so refusing it would spend a
+route nobody has written yet.
+
+**A per-anchor pair count is not an edge count, and reading one as the other is
+what made ``remark`` look like the worse case.** :func:`narrow` collapses the
+settled pairs into a dict keyed by ``(source, target)``, so an anchor naming a
+non-claim-bearing block takes an edge away only where **no other anchor**
+settles the same pair. Counted per anchor, ``remark`` contributes to 3 settled
+pairs; those are 2 distinct edges, and each is settled independently by another
+anchor — one through the identifier route off a claim-bearing block, one through
+a plain section reference into the same single-claim document. Corpus-wide, not
+one settled pair has its sole provenance in an anchor naming a block this
+refusal reaches, so no ``depends`` edge moves and the route breakdown
+:attr:`Attribution.routes` reports is unchanged.
+
+**A name nobody has classified is outside this by construction** — 36 anchors
+over the same corpus spell ``Hypothesis``, ``Setup``, ``PAR``, and the near
+misses ``rremark``, ``defi`` and ``exa`` — and falls through exactly as it
+always did: the refusal spends a judgement somebody made and never stands in for
+one nobody made. Those anchors contribute to 2 settled pairs, and both of those
+are co-settled too.
+
 The refusal these three replaced is unchanged in one place: **shared containment
 in a directory contributes no candidate on its own**, filing being a placement
 decision and not a dependency relation. Nothing above derives a candidate from
@@ -113,6 +196,34 @@ wrote.
 forced: most of the tree's ``ref`` anchors sit in prose rather than inside a
 block, and a rule confining candidates to block interiors would leave most
 claims with nothing to select from.
+
+**Where the prose's own document hosts no claim the end stays empty, and that
+is an answer rather than a gap.** 360 of the 1789 anchors naming a claim-bearing
+block sit in the prose of a document that states none — 293 of them before the
+cleveref family was read at all, and the equation nodes moved the figure by
+zero, :meth:`graph.AuthoredGraph.hosted_by` excluding them being precisely what
+keeps a numbered formula from standing in for what a section says. What a
+widening could attribute *from* was then measured document by document, and the
+answer is mostly nothing: 212 of the 360 sit in a document holding no claim, no
+proof and no equation; 63 hold an equation node, which the restriction above
+refuses on its own measured grounds; 13 hold a proof bound to a claim; and
+everything outside the document is containment in a directory, which the refusal
+above already covers. The last 72 sit under a heading that names a claim —
+``\\section{Proof of Theorem \\ref{thm:2}}`` reaches the tree as an anchor on the
+H1 line — and 43 of those name only the claim the heading already names, which
+is no pair, leaving 29 references and 28 pairs across 4 of 50 papers.
+
+**That last case is a proof this stage cannot see, and it is not fixed here.** A
+document whose heading says it proves a theorem *is* a proof; reading it as one
+belongs beside :class:`inventory.Proof`'s two arms, where it would reach all 165
+references the 28 such documents carry — and direct them, as proof containment
+already directs — rather than the slice a prose fallback sees. Widening the
+prose fallback to reach the same 29 would take the weaker half of that reading
+and make the stronger one harder to add. **And the rest is the host
+environment's base rate, visible in the text**: of the 324 outside that last
+case, 85 sit in an ``overview.md`` and 31 more in a section organising the paper
+— *Theorem 2 is proved in Section 6* — which names a result and asserts no
+relationship between claims for the graph to carry.
 
 **A pair containment cannot direct is recorded as a ``references`` edge, never
 discarded.** The author wrote one claim's own identifier inside another claim's
@@ -221,17 +332,22 @@ stage's rulings above exist to refuse.
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from .. import kb_index_lib
 from .graph import AuthoredGraph, ClaimNode
-from .inventory import PROOF_ENVIRONMENT, Anchor, Block, Inventory, MathFence
+from .inventory import (
+    NOT_A_CLAIM_TARGET,
+    PROOF_ENVIRONMENT,
+    Anchor,
+    Block,
+    Inventory,
+    MathFence,
+    by_document,
+    hosting_block,
+)
 from .report import AnswerFormatError, ClaimGraphError
-from .tree import Tree, unquote
-
-#: The anchor type naming an equation rather than a block. It reaches a claim
-#: only through :func:`_equation_claim`, an equation being no node itself.
-EQUATION_REFERENCE_TYPE = "eqref"
+from .tree import Tree, strip_markers, unquote
 
 #: How the three target-end rules are named in the build's own report, so a
 #: reader of the log can tell how an edge arose without a marker on the edge.
@@ -300,27 +416,6 @@ class Selector(Protocol):
 # --- the mechanical narrowing ------------------------------------------------
 
 
-class _InDocument(Protocol):
-    """Every reading stage B produces carries the document it was found in."""
-
-    document: str
-
-
-_Found = TypeVar("_Found", bound=_InDocument)
-
-
-def _by_document(items: Sequence[_Found]) -> Mapping[str, tuple[_Found, ...]]:
-    """One stage-B reading grouped by document, each group in the scan's own order."""
-    grouped: dict[str, list[_Found]] = {}
-    for item in items:
-        grouped.setdefault(item.document, []).append(item)
-    return {path: tuple(found) for path, found in grouped.items()}
-
-
-def _hosting_block(line: int, blocks: Sequence[Block]) -> Block | None:
-    return next((block for block in blocks if block.start <= line < block.end), None)
-
-
 def _claim_of(block: Block | None, hosted: Sequence[ClaimNode]) -> ClaimNode | None:
     """The claim a block carries, joined the way :func:`graph.read` bound it: by locator."""
     if block is None:
@@ -344,23 +439,17 @@ def _fragment_claim(anchor: Anchor, hosted: Sequence[ClaimNode]) -> ClaimNode | 
     return next((node for node in hosted if node.identifier == anchor.fragment), None)
 
 
-def _equation_claim(
-    anchor: Anchor,
-    fences: Sequence[MathFence],
-    blocks: Sequence[Block],
-    hosted: Sequence[ClaimNode],
-) -> ClaimNode | None:
-    """The claim whose body holds the equation an ``eqref`` names, where one does.
+def _fragment_block(anchor: Anchor, blocks: Sequence[Block]) -> Block | None:
+    """The block the anchor's fragment names, whether or not that block carries a claim.
 
-    The label is the anchor's own third attribute rather than its fragment,
-    which point 9 leaves empty for an equation (:data:`tree.ANCHOR_RE`). An
-    equation labelled outside every claim-bearing block resolves to no claim:
-    the reference reaches a result only where the equation *is* one.
+    :func:`_fragment_claim`'s question asked of the page instead of the graph. A
+    block stating no result is invisible to that join — it minted no node for a
+    fragment to match — and it is exactly what the target end has to be able to
+    see before it falls past the identifier route.
     """
-    fence = next((found for found in fences if anchor.label in found.labels), None)
-    if fence is None:
+    if not anchor.fragment:
         return None
-    return _claim_of(_hosting_block(fence.start, blocks), hosted)
+    return next((block for block in blocks if block.identifier == anchor.fragment), None)
 
 
 @dataclass(frozen=True)
@@ -401,6 +490,64 @@ def _proofs(graph: AuthoredGraph, inventory: Inventory) -> Mapping[str, Mapping[
     return found
 
 
+def _equation_claims(
+    anchor: Anchor,
+    fences: Sequence[MathFence],
+    blocks: Sequence[Block],
+    hosted: Sequence[ClaimNode],
+    proofs: Mapping[int, _Proof],
+    minted: ClaimNode | None,
+) -> tuple[ClaimNode, ...] | None:
+    """The claims an equation reference resolves through, or ``None`` for no equation reference.
+
+    **The two empty answers are different and the caller acts on the
+    difference.** ``None`` says the label names no fence in the document the
+    anchor resolved to, so this is not an equation reference and the routes
+    after it still apply. ``()`` says it *is* one and this cannot say which
+    claim the equation belongs to — a proof binding to no subject, a
+    claim-bearing block no register entry carries — and there the honest result
+    is no pair at all. Collapsing the two would let an author's ``\\eqref`` land
+    on whatever claim the target document happens to state alone, a claim they
+    did not point at.
+
+    **The residue is small and that is the point.** Measured over the staged
+    corpus, 3 anchors take this refusal, because almost every equation the join
+    meets now has a node or a proof behind it. Run the same ordering against a
+    corpus with no equation nodes in it and the figure is 676 — which is what
+    the refusal bounds, and what a build over a tree this row has not minted
+    into would otherwise manufacture.
+
+    The label is the anchor's own third attribute rather than its fragment,
+    which point 9 leaves empty for an equation (:data:`tree.ANCHOR_RE`). **Where
+    the equation is labelled is what decides**, and there are three cases:
+
+    * inside a **claim-bearing block** — that block's claim holds it, an
+      equation labelled inside a theorem body being that theorem's assertion;
+    * inside a **proof** — the claims that proof establishes hold it, the
+      equation being a step of their argument. The binding is
+      :class:`inventory.Proof`'s, read here rather than derived a second time,
+      and it is why such an equation needs no node of its own. A proof may
+      establish several claims, and then the reference names several;
+    * anywhere else — nothing holds it, and ``minted`` is the node the equation
+      was given for exactly that reason (:mod:`equation`). It is reached here
+      and nowhere else in this module.
+
+    """
+    fence = next((found for found in fences if anchor.label in found.labels), None)
+    if fence is None:
+        return None
+    block = hosting_block(fence.start, blocks)
+    if block is None:
+        return (minted,) if minted is not None else ()
+    if block.claim_bearing:
+        held = _claim_of(block, hosted)
+        return (held,) if held is not None else ()
+    if block.environment.casefold() == PROOF_ENVIRONMENT:
+        proof = proofs.get(block.start)
+        return proof.subjects if proof is not None else ()
+    return (minted,) if minted is not None else ()
+
+
 def _source_end(
     anchor: Anchor, blocks: Sequence[Block], hosted: Sequence[ClaimNode], proofs: Mapping[int, _Proof]
 ) -> tuple[tuple[ClaimNode, ...], bool]:
@@ -408,37 +555,88 @@ def _source_end(
 
     Settled means a *direction* was established, which only a proof does: the
     claim the proof establishes rests on what the proof draws on. A reference
-    inside a claim-bearing block, or in the prose of a single-claim document,
-    narrows the end to one claim and says nothing about which way the edge runs.
+    inside a claim-bearing block narrows the end to one claim and says nothing
+    about which way the edge runs; a reference anywhere else falls back to every
+    claim the document hosts, which narrows nothing and settles nothing — one
+    claim out of that fallback is a document hosting one, not a rule that read
+    anything.
     """
     if (anchor.hosting_environment or "").casefold() == PROOF_ENVIRONMENT:
-        block = _hosting_block(anchor.line, blocks)
+        block = hosting_block(anchor.line, blocks)
         proof = proofs.get(block.start) if block is not None else None
         if proof is None or proof.names(anchor):
             return (), False
         return (proof.subjects, True) if proof.subjects else (tuple(hosted), False)
-    inside = _claim_of(_hosting_block(anchor.line, [found for found in blocks if found.claim_bearing]), hosted)
+    inside = _claim_of(hosting_block(anchor.line, [found for found in blocks if found.claim_bearing]), hosted)
     return ((inside,), False) if inside is not None else (tuple(hosted), False)
 
 
 def _target_end(
-    anchor: Anchor, targets: Sequence[ClaimNode], fences: Sequence[MathFence], blocks: Sequence[Block]
+    anchor: Anchor,
+    targets: Sequence[ClaimNode],
+    fences: Sequence[MathFence],
+    blocks: Sequence[Block],
+    proofs: Mapping[int, _Proof],
+    minted: ClaimNode | None,
 ) -> tuple[tuple[ClaimNode, ...], str | None]:
-    """The claims the reference may name, and the rule that settled it where one did."""
-    if anchor.reference_type == EQUATION_REFERENCE_TYPE:
-        claim = _equation_claim(anchor, fences, [block for block in blocks if block.claim_bearing], targets)
-        return ((claim,), BY_EQUATION) if claim is not None else ((), None)
+    """The claims the reference may name, and the rule that settled it where one did.
+
+    **Ordering decides which route a reference takes, not its type.** This used
+    to branch on ``reference_type == "eqref"``, which asked the referencing
+    *macro* a question only the referenced *target* can answer: an author's own
+    ``\\ref{eq:8}`` names an equation and was sent down the identifier route to
+    reach nothing, and the cleveref family — whose type says nothing about what
+    it names — could be sent down neither route without being wrong about most
+    of the corpus. Trying the identifier route first and falling back to the
+    label-to-fence join costs nothing and preserves that reading exactly: a
+    ``\\cref`` to a theorem has a fragment, wins on the identifier route, and
+    never reaches the equation join at all. Measured anchor by anchor over the
+    staged corpus, 1789 take the identifier route before the reorder and the
+    same 1789 take it after; no anchor left it.
+
+    **The equation join comes before the sole-claim fallback, and it ends the
+    reference either way.** Where the label names a fence this returns what that
+    join found and stops — an empty answer included — because a reference that
+    names an equation is not a reference to the document's sole claim, and
+    passing it on would be manufacturing one. An equation node never reaches the
+    fallback for a second reason as well: ``targets`` is
+    :meth:`graph.AuthoredGraph.hosted_by`, which does not carry one, so
+    ``len(targets) == 1`` can only be a claim the document states.
+
+    **A fragment naming a block somebody classified as stating no result ends the
+    reference, and ends it ahead of the equation join.** The fragment is the
+    strongest evidence an anchor carries — point 7 lands it on the node that held
+    the label — so where it names a block :data:`inventory.NOT_A_CLAIM_TARGET`
+    classifies, what the author pointed at is known and is not a claim. Both
+    routes behind it would answer with one the author did not point at, which is
+    manufacturing a target rather than resolving a reference.
+    """
     named = _fragment_claim(anchor, targets)
     if named is not None:
         return (named,), BY_IDENTIFIER
+    stated = _fragment_block(anchor, blocks)
+    if stated is not None and stated.environment.casefold() in NOT_A_CLAIM_TARGET:
+        return (), None
+    through = _equation_claims(anchor, fences, blocks, targets, proofs, minted)
+    if through is not None:
+        return (through, BY_EQUATION) if through else ((), None)
     if len(targets) == 1:
         return tuple(targets), BY_SOLE_CLAIM
     return tuple(targets), None
 
 
 def _reference_line(tree: Tree, anchor: Anchor) -> str:
-    """The source line the anchor sits on, unquoted and collapsed to one line."""
-    lines = unquote(tree.documents[anchor.document].text).splitlines()
+    """The source line the anchor sits on, in the author's own words, collapsed to one line.
+
+    Marker-stripped as well as unquoted, because this value is not read by this
+    package: it becomes :attr:`Question.evidence` and renders verbatim into the
+    ask's reference-lines slot. A Tier-2 marker is appended to the end of the
+    line its claim is located by, and this stage always runs over a tree two
+    earlier passes have minted into — so an author who states a result by
+    reference puts the anchor and the marker on one line, and the seat choosing
+    a dependency direction would be reading the metadata alongside the prose.
+    """
+    lines = unquote(strip_markers(tree.documents[anchor.document].text)).splitlines()
     line = lines[anchor.line] if anchor.line < len(lines) else ""
     return re.sub(r"\s+", " ", line).strip()
 
@@ -510,8 +708,8 @@ def narrow(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Attributio
     a ring's demoted edges included — what the ring refuses is the set, and
     containment's reading of each member stands as the reference it becomes.
     """
-    blocks = _by_document(inventory.blocks)
-    fences = _by_document(inventory.fences)
+    blocks = by_document(inventory.blocks)
+    fences = by_document(inventory.fences)
     proofs = _proofs(graph, inventory)
 
     settled: dict[tuple[str, str], str] = {}
@@ -521,10 +719,21 @@ def narrow(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Attributio
         if anchor.target is None:
             continue
         targets = graph.hosted_by(anchor.target)
-        if not targets:
+        # An equation node is not in `targets` and is the only thing 144 of this
+        # corpus's documents hold, so a bail on the hosted set alone would drop
+        # every reference into one of them before the join that resolves it ran.
+        minted = graph.equation_node(anchor.target, anchor.label)
+        if not targets and minted is None:
             continue
 
-        to_ends, route = _target_end(anchor, targets, fences.get(anchor.target, ()), blocks.get(anchor.target, ()))
+        to_ends, route = _target_end(
+            anchor,
+            targets,
+            fences.get(anchor.target, ()),
+            blocks.get(anchor.target, ()),
+            proofs.get(anchor.target, {}),
+            minted,
+        )
         if not to_ends:
             continue
         from_ends, directed = _source_end(

@@ -24,7 +24,21 @@ from pathlib import Path
 
 import pytest
 
+from kb_tools import kb_util
 from kb_tools.kb_driver import prompt_templates, runlog, steps
+
+#: A caller's constant pool, stood in for the way the bodies below are. The
+#: pool is the caller's mapping — ``kb_claimgraph.ask`` passes its marker
+#: literals through it — so a fixture pool exercises the composer's half of the
+#: contract without tying these cases to whatever a caller happens to publish.
+#: ``values-flag`` is the one entry taken from a constant rather than invented:
+#: the lint case at the bottom pins the same one, and two spellings of it here
+#: would be the duplication the routing exists to prevent.
+CONSTANTS = {
+    "layout-paths": "scratch/kb-build/review/<stage>-<author>.md",
+    "values-flag": kb_util.VALUES_FLAG,
+    "pending-rule": "An unscored value is written as the literal `*pending*`, and only as that.",
+}
 
 # --- the fixture template set -----------------------------------------------
 #
@@ -32,20 +46,13 @@ from kb_tools.kb_driver import prompt_templates, runlog, steps
 # set looks like, and the lint test below asserts exactly that.
 
 FRAGMENT_FIXTURES = {
-    "dispatch-discipline.tmpl": (
-        "Dispatch every member call with run_in_background: false. Hold the turn\n" "until all members return.\n"
+    "verdict-contract.tmpl": (
+        "End with: VERDICT: critical=<n> warning=<n> note=<n>\n\n"
+        "Return the counts as JSON where a tool asks for them:\n\n"
+        '{"critical": 0, "warning": 0, "note": 0}\n'
     ),
-    "envelope-contract.tmpl": (
-        "Close with one envelope block:\n\n"
-        "<<<KB-DRIVER-ENVELOPE\n"
-        '{"step": "...", "members": [], "gaps": [], "deviations": []}\n'
-        "KB-DRIVER-ENVELOPE\n"
-    ),
-    "deviation-contract.tmpl": "A deviation is one of: @!deviation-kinds!@. Reporting one is not a fault.\n",
-    "verdict-contract.tmpl": "End with: VERDICT: critical=<n> warning=<n> note=<n>\n",
     "return-contract.tmpl": "Return the artifact as your final message body and nothing else.\n",
-    "scratch-layout.tmpl": "Scratch paths:\n\n@!layout-paths!@\n",
-    "persist-members.tmpl": "Write each member's return to the path named for it, verbatim.\n",
+    "write-op-contract.tmpl": "Call the op as @!values-flag!@ <your file>.\n",
     # The caller-selected alternatives, stood in for under their registered
     # names: which file an alternative slot resolves to is the registry's, so a
     # fixture that renamed them would be exercising a route nothing takes.
@@ -54,20 +61,20 @@ FRAGMENT_FIXTURES = {
     "identify-no-display-maths.tmpl": "The document carries no display-maths block.",
 }
 
-WAVE_FIXTURE = "fixture-survey.wave.tmpl"
-SINGLE_FIXTURE = "fixture-design.single.tmpl"
+SPLICING_FIXTURE = "fixture-review.single.tmpl"
+CONSTANTS_FIXTURE = "fixture-design.single.tmpl"
 ALTERNATIVE_FIXTURE = "fixture-ask.single.tmpl"
 
 STEP_FIXTURES = {
     ALTERNATIVE_FIXTURE: "Read @!dyn.document!@.\n\n@!display-maths!@\n\nAnswer.@!correction!@",
-    WAVE_FIXTURE: (
-        "Survey each source named below.\n\n"
-        "Charter: @!dyn.charter!@\n\nMembers:\n@!dyn.members!@\n\n"
-        "@!dispatch-discipline!@\n@!envelope-contract!@\n@!deviation-contract!@\n@!scratch-layout!@\n"
+    SPLICING_FIXTURE: (
+        "Review the documents named below.\n\n"
+        "Charter: @!dyn.charter!@\n\nDocuments:\n@!dyn.documents!@\n\n"
+        "@!verdict-contract!@\n@!return-contract!@\n@!write-op-contract!@\n"
     ),
-    SINGLE_FIXTURE: (
+    CONSTANTS_FIXTURE: (
         "Design the taxonomy from the charter at @!dyn.charter!@.\n\n"
-        "@!scope-line-contract!@\n\n@!pending-rule!@\n\n@!return-contract!@\n"
+        "@!layout-paths!@\n\n@!pending-rule!@\n\n@!return-contract!@\n"
     ),
 }
 
@@ -100,20 +107,18 @@ def test_render_fills_step_slots_fragments_and_constants(tmp_path: Path) -> None
     directory = _templates(tmp_path)
 
     brief = prompt_templates.render(
-        WAVE_FIXTURE,
-        slots={"charter": "scratch/build-charter.md", "members": "- AcmeWidgets.tex"},
-        constants=steps.CONSTANT_SLOTS,
-        wave=True,
+        SPLICING_FIXTURE,
+        slots={"charter": "scratch/build-charter.md", "documents": "- AcmeWidgets.md"},
+        constants=CONSTANTS,
         directory=directory,
     )
 
     assert "scratch/build-charter.md" in brief
-    assert "- AcmeWidgets.tex" in brief
-    # The fragment arrived, and its own slot was filled from the driver's
-    # single definition rather than restated in the template.
-    assert "run_in_background: false" in brief
-    assert "adaptive-retry" in brief
-    assert steps.SCRATCH_ROOT in brief
+    assert "- AcmeWidgets.md" in brief
+    # The fragment arrived, and its own slot was filled from the caller's pool
+    # rather than restated in the template.
+    assert "VERDICT: critical=<n>" in brief
+    assert CONSTANTS["values-flag"] in brief
     assert "@!dyn.charter!@" not in brief
 
 
@@ -121,44 +126,36 @@ def test_a_fragment_example_survives_as_a_literal(tmp_path: Path) -> None:
     directory = _templates(tmp_path)
 
     brief = prompt_templates.render(
-        WAVE_FIXTURE,
-        slots={"charter": "c.md", "members": "- one"},
-        constants=steps.CONSTANT_SLOTS,
-        wave=True,
+        SPLICING_FIXTURE,
+        slots={"charter": "c.md", "documents": "- one"},
+        constants=CONSTANTS,
         directory=directory,
     )
 
-    assert '{"step": "...", "members": [], "gaps": [], "deviations": []}' in brief
+    assert '{"critical": 0, "warning": 0, "note": 0}' in brief
 
 
 def test_constants_are_drawn_on_only_where_a_slot_names_them(tmp_path: Path) -> None:
+    """One pool serves every template, and a template gets the entries it names and no others."""
     directory = _templates(tmp_path)
 
     brief = prompt_templates.render(
-        SINGLE_FIXTURE,
+        CONSTANTS_FIXTURE,
         slots={"charter": "c.md"},
-        constants=steps.CONSTANT_SLOTS,
+        constants=CONSTANTS,
         directory=directory,
     )
 
-    assert prompt_templates.RESERVED_WAVE_SLOTS[0] not in brief
-    assert "SCOPE: within-charter" in brief
-
-
-def test_a_wave_template_missing_a_reserved_slot_fails_composition(tmp_path: Path) -> None:
-    body = "Survey @!dyn.members!@.\n@!dispatch-discipline!@\n@!envelope-contract!@\n"
-    directory = _templates(tmp_path, extra={"gap.wave.tmpl": body})
-
-    with pytest.raises(runlog.BoundaryError, match="reserved slot"):
-        prompt_templates.render("gap.wave.tmpl", slots={"members": "- one"}, wave=True, directory=directory)
+    assert CONSTANTS["pending-rule"] in brief
+    assert CONSTANTS["values-flag"] not in brief
 
 
 def test_an_unfilled_composer_slot_fails_composition(tmp_path: Path) -> None:
     """A bare slot no pool answers for. The caller is not asked about it and cannot fix it."""
     directory = _templates(tmp_path)
 
-    with pytest.raises(runlog.BoundaryError, match="unfilled slot\\(s\\): pending-rule, scope-line-contract"):
-        prompt_templates.render(SINGLE_FIXTURE, slots={"charter": "c.md"}, directory=directory)
+    with pytest.raises(runlog.BoundaryError, match="unfilled slot\\(s\\): layout-paths, pending-rule"):
+        prompt_templates.render(CONSTANTS_FIXTURE, slots={"charter": "c.md"}, directory=directory)
 
 
 def test_an_unsupplied_dynamic_slot_names_the_caller_s_omission(tmp_path: Path) -> None:
@@ -166,7 +163,7 @@ def test_an_unsupplied_dynamic_slot_names_the_caller_s_omission(tmp_path: Path) 
     directory = _templates(tmp_path)
 
     with pytest.raises(runlog.BoundaryError, match=r"supplied no value for @!dyn\.…!@ slot\(s\): charter"):
-        prompt_templates.render(SINGLE_FIXTURE, slots={}, constants=steps.CONSTANT_SLOTS, directory=directory)
+        prompt_templates.render(CONSTANTS_FIXTURE, slots={}, constants=CONSTANTS, directory=directory)
 
 
 def test_a_caller_supplying_a_composer_slot_is_told_which_half_it_belongs_to(tmp_path: Path) -> None:
@@ -177,11 +174,11 @@ def test_a_caller_supplying_a_composer_slot_is_told_which_half_it_belongs_to(tmp
     """
     directory = _templates(tmp_path)
 
-    with pytest.raises(runlog.BoundaryError, match="the composer fills: scope-line-contract"):
+    with pytest.raises(runlog.BoundaryError, match="the composer fills: pending-rule"):
         prompt_templates.render(
-            SINGLE_FIXTURE,
-            slots={"charter": "c.md", "scope-line-contract": "whatever I like"},
-            constants=steps.CONSTANT_SLOTS,
+            CONSTANTS_FIXTURE,
+            slots={"charter": "c.md", "pending-rule": "whatever I like"},
+            constants=CONSTANTS,
             directory=directory,
         )
 
@@ -204,9 +201,9 @@ def test_an_unused_supplied_slot_fails_composition(tmp_path: Path) -> None:
 
     with pytest.raises(runlog.BoundaryError, match="never uses"):
         prompt_templates.render(
-            SINGLE_FIXTURE,
+            CONSTANTS_FIXTURE,
             slots={"charter": "c.md", "volume-list": "- one"},
-            constants=steps.CONSTANT_SLOTS,
+            constants=CONSTANTS,
             directory=directory,
         )
 
@@ -220,21 +217,22 @@ def test_an_unused_supplied_slot_fails_composition(tmp_path: Path) -> None:
 # stop holding the first time someone added a slot to a fragment.
 
 
-@pytest.mark.parametrize("inner", ["dispatch-discipline", "correction"])
+@pytest.mark.parametrize("inner", ["return-contract", "correction"])
 def test_a_fragment_whose_body_names_an_expandable_slot_is_refused(tmp_path: Path, inner: str) -> None:
-    directory = _templates(tmp_path, fragments_extra={"scratch-layout.tmpl": f"Scratch paths:\n\n@!{inner}!@\n"})
+    directory = _templates(tmp_path, fragments_extra={"write-op-contract.tmpl": f"Call the op.\n\n@!{inner}!@\n"})
 
-    with pytest.raises(runlog.BoundaryError, match=rf"@!scratch-layout!@ resolves to .*whose body names @!{inner}!@"):
+    complaint = rf"@!write-op-contract!@ resolves to .*whose body names @!{inner}!@"
+
+    with pytest.raises(runlog.BoundaryError, match=complaint):
         prompt_templates.render(
-            WAVE_FIXTURE,
-            slots={"charter": "c.md", "members": "- one"},
-            constants=steps.CONSTANT_SLOTS,
-            wave=True,
+            SPLICING_FIXTURE,
+            slots={"charter": "c.md", "documents": "- one"},
+            constants=CONSTANTS,
             directory=directory,
         )
 
 
-@pytest.mark.parametrize("inner", ["persist-members", "display-maths"])
+@pytest.mark.parametrize("inner", ["write-op-contract", "display-maths"])
 def test_an_alternative_whose_body_names_an_expandable_slot_is_refused(tmp_path: Path, inner: str) -> None:
     directory = _templates(tmp_path, fragments_extra={"ask-correction.tmpl": f"\n\nCorrection:\n\n@!{inner}!@"})
 
@@ -441,9 +439,9 @@ def test_the_write_op_contract_fragment_states_the_exit_eight_rule() -> None:
 
 
 #: No shipped template names a write op today: the mint-bearing rows that used
-#: to call one from inside a wave session are gone, and the fix and review
-#: waves this table still has rows for are generic content work, never a
-#: metadata write. ``test_the_write_op_contract_fragment_states_the_exit_eight_rule``
+#: to call one are gone, and the rows this table still holds are generic content
+#: work, never a metadata write.
+#: ``test_the_write_op_contract_fragment_states_the_exit_eight_rule``
 #: keeps the fragment itself honest; there is currently no composed brief to
 #: hold to it.
 
@@ -456,12 +454,11 @@ def test_the_write_op_contract_fragment_states_the_exit_eight_rule() -> None:
         ("Run advance-step when you are done.\n", "advance-step"),
         ("Then start-build opens the ledger.\n", "start-build"),
         ("Record PHASE-5 before moving on.\n", "phase-5"),
-        # The flag is `@!values-flag!@`'s to render. A template that
-        # spells it has hand-written the third token of an invocation whose
-        # first two it was given, and a rename would leave it stale. The
-        # fixture is built from the constant for that same reason — a literal
-        # here would be one more site a rename leaves behind.
-        (f"Call the op with {steps.VALUES_FLAG_SLOT} <your file>.\n", steps.VALUES_FLAG_SLOT),
+        # A template that spells the write ops' flag has hand-written a token
+        # `kb_util` publishes, and a rename would leave it stale. The fixture is
+        # built from that constant for the same reason — a literal here would be
+        # one more site a rename leaves behind.
+        (f"Call the op with {kb_util.VALUES_FLAG} <your file>.\n", kb_util.VALUES_FLAG),
     ],
 )
 def test_a_template_naming_the_drivers_own_business_is_flagged(tmp_path: Path, body: str, named: str) -> None:
@@ -480,34 +477,9 @@ def test_start_reads_as_prose_but_not_as_a_stage_argument(tmp_path: Path) -> Non
     assert prompt_templates.lint(prompt_templates.template_paths(naming), prohibited=steps.TEMPLATE_PROHIBITIONS)
 
 
-def test_a_driver_supplied_layout_path_is_not_read_as_prose(tmp_path: Path) -> None:
-    """The layout paths a brief carries are filled from the driver's constants, not authored."""
-    findings = prompt_templates.lint(
-        prompt_templates.template_paths(_templates(tmp_path)),
-        prohibited=steps.TEMPLATE_PROHIBITIONS,
-    )
-
-    assert findings == []
-    assert steps.SCRATCH_ROOT in steps.CONSTANT_SLOTS["layout-paths"]
-
-
-def test_the_lint_flags_a_wave_template_missing_its_reserved_slots(tmp_path: Path) -> None:
-    directory = _templates(tmp_path, extra={"gap.wave.tmpl": "Survey @!dyn.members!@.\n@!dispatch-discipline!@\n"})
-
-    findings = prompt_templates.lint(prompt_templates.template_paths(directory), prohibited=steps.TEMPLATE_PROHIBITIONS)
-
-    flagged = {
-        slot
-        for slot in prompt_templates.RESERVED_WAVE_SLOTS
-        for finding in findings
-        if finding.startswith("gap.wave.tmpl") and slot in finding
-    }
-    assert flagged == {"envelope-contract", "deviation-contract"}
-
-
 def test_the_lint_reports_a_stray_delimiter_rather_than_raising(tmp_path: Path) -> None:
     """A template defect the lint has to survive: it reports every file, not the first bad one."""
-    directory = _templates(tmp_path, extra={"stray.wave.tmpl": "Survey @!members and stop.\n"})
+    directory = _templates(tmp_path, extra={"stray.single.tmpl": "Review @!documents and stop.\n"})
 
     findings = prompt_templates.lint(prompt_templates.template_paths(directory), prohibited=steps.TEMPLATE_PROHIBITIONS)
 
@@ -519,55 +491,8 @@ def test_template_paths_tolerates_an_absent_directory(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The seat slot
+# Seats
 # ---------------------------------------------------------------------------
-
-#: A wave template naming ``@!seat!@`` directly. No shipped template names it —
-#: the one-member-collapse fragment that did went with the last ``wave*`` row —
-#: so both halves of the mechanism are exercised against a fixture: the seat a
-#: row states reaches the brief, and a row with none is refused rather than
-#: rendered.
-SEAT_FIXTURES = {
-    "seated.wave.tmpl": (
-        "Members:\n@!dyn.members!@\n\nDispatch each member as `subagent_type: @!seat!@`.\n\n"
-        "@!dispatch-discipline!@\n@!envelope-contract!@\n@!deviation-contract!@\n"
-    ),
-}
-
-
-def test_the_seat_slot_is_filled_from_the_row(tmp_path: Path) -> None:
-    directory = _templates(tmp_path, extra=SEAT_FIXTURES)
-
-    brief = prompt_templates.render(
-        "seated.wave.tmpl",
-        slots={"members": "- one"},
-        constants=steps.CONSTANT_SLOTS,
-        row=prompt_templates.RowSlots(step_id="p5.docs", seat="tech-writer"),
-        wave=True,
-        directory=directory,
-    )
-
-    assert "`subagent_type: tech-writer`" in brief
-
-
-def test_a_seatless_row_reaching_the_seat_slot_is_refused_naming_the_step(tmp_path: Path) -> None:
-    """The refusal is the composer's, not the dispatched prompt's.
-
-    A seatless row is legitimate — a WAVE fans out to the seats its member
-    table names rather than through ``--agent`` — so the defect is not the row
-    but its meeting this slot, and the message has to say which row it was.
-    """
-    directory = _templates(tmp_path, extra=SEAT_FIXTURES)
-
-    with pytest.raises(runlog.BoundaryError, match="p5.review carries no seat"):
-        prompt_templates.render(
-            "seated.wave.tmpl",
-            slots={"members": "- one"},
-            constants=steps.CONSTANT_SLOTS,
-            row=prompt_templates.RowSlots(step_id="p5.review", seat=None),
-            wave=True,
-            directory=directory,
-        )
 
 
 def test_no_shipped_template_spells_a_seat_the_step_table_holds() -> None:

@@ -29,6 +29,7 @@ from kb_tools.kb_claimgraph import ask, attribute, conform, depends, graph, inve
 from kb_tools.kb_claimgraph.assemble import UNSCANNED_REASON
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import AnswerFormatError
+from kb_tools.kb_write import render
 
 _PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
 
@@ -46,7 +47,12 @@ pytestmark = pytest.mark.skipif(
 # exercised — a proof bound to its claim by adjacency and another by the result
 # its opening run names, an eqref into an equation inside a claim body, a
 # section reference into a single-claim document and another into a two-claim
-# one, and a reference inside a proof that resolves to no claim at all.
+# one, a reference inside a proof that resolves to no claim at all, an anchor
+# naming a definition block in each of a single-claim and a two-claim document,
+# and one naming a remark block from inside a proof — the shapes that used to
+# fall past the identifier route onto a claim nobody pointed at, the last of
+# them with both ends settled, which is what makes it an edge rather than a
+# candidate.
 #
 # Every anchor carries all three of the attributes SPEC.md's cross-reference
 # join states, in that order, because that is what a rewritten reference is.
@@ -75,8 +81,18 @@ _ALPHA = f"""{_UPLINK}
 > \\end{{equation}}
 > ```
 
+> <span id="def:alpha">**definition**</span>
+>
+> **Definition 1** (Admissible state). *A state is admissible when it is bounded.*
+
+> <span id="rem:alpha">**remark**</span>
+>
+> **Remark 1** (Numerical evidence). *The bound is sharp in simulation.*
+
 Alpha is argued from
-<a href="beta.md#thm:beta" data-reference-type="ref" data-reference="thm:beta">Lemma 2</a>.
+<a href="beta.md#thm:beta" data-reference-type="ref" data-reference="thm:beta">Lemma 2</a>,
+and it reads a term settled in
+<a href="gamma.md#def:gamma" data-reference-type="ref" data-reference="def:gamma">Definition 2</a>.
 """
 
 _BETA = f"""{_UPLINK}
@@ -92,10 +108,13 @@ _BETA = f"""{_UPLINK}
 > *Proof.* Beta rests on
 > <a href="gamma.md#thm:g2" data-reference-type="ref" data-reference="thm:g2">Lemma 1</a> and on
 > <a href="epsilon.md#epsilon" data-reference-type="ref" data-reference="sec:epsilon">Section 5</a>,
-> which states no result of its own. ◻
+> which states no result of its own. The evidence is collected in
+> <a href="alpha.md#rem:alpha" data-reference-type="ref" data-reference="rem:alpha">Remark 1</a>. ◻
 
 Beta is read beside
-<a href="gamma.md#thm:g1" data-reference-type="ref" data-reference="thm:g1">Theorem 1</a>.
+<a href="gamma.md#thm:g1" data-reference-type="ref" data-reference="thm:g1">Theorem 1</a>,
+over the states of
+<a href="alpha.md#def:alpha" data-reference-type="ref" data-reference="def:alpha">Definition 1</a>.
 """
 
 _GAMMA = f"""{_UPLINK}
@@ -116,6 +135,10 @@ _GAMMA = f"""{_UPLINK}
 > <a href="gamma.md#thm:g1" data-reference-type="ref" data-reference="thm:g1">Theorem 1</a>.*
 > It follows from equation
 > <a href="alpha.md" data-reference-type="eqref" data-reference="eq:one">1</a>. ◻
+
+> <span id="def:gamma">**definition**</span>
+>
+> **Definition 2** (Interior). *The interior is the set of non-boundary states.*
 
 Both are read beside
 <a href="alpha.md#thm:alpha" data-reference-type="ref" data-reference="thm:alpha">Theorem 1</a>.
@@ -404,10 +427,49 @@ def test_the_determination_predicate_is_the_unscanned_reason_by_identity(fields,
     assert conform.determination(fields) is verdict
 
 
-def test_the_entry_condition_refuses_a_tree_the_declared_pass_has_not_run_over(consumer: Path):
+def test_a_tree_the_declared_pass_has_not_run_over_reads_as_leaves_nobody_has_read(consumer: Path):
+    """No frontmatter is not a refusal here: it is five documents nobody has read for claims.
+
+    Which five is the tree's own answer rather than the missing frontmatter's —
+    the entry point and the volume index are excluded by their path shape, the
+    way their ``kind:`` would have excluded them had the declared pass stamped
+    one. A document in none of the three partitions is invisible to both
+    drivers' census lines, and keying the partition on a field that may be
+    absent is how one gets there.
+    """
+    state = conform.pass_two_gate(tree.read(consumer / "kb-root"))
+
+    assert state.awaiting == ("vol/alpha.md", "vol/beta.md", "vol/delta.md", "vol/epsilon.md", "vol/gamma.md")
+    assert state.hosting == ()
+    assert state.determined == ()
+
+
+def test_a_marker_on_a_wrapped_anchor_s_first_line_leaves_the_anchor_checked(declared: Path):
+    """Pass 2 is the one reader that meets marker bytes, and the anchor check must survive them.
+
+    SPEC.md's cross-reference join admits an anchor hard-wrapped between its
+    attributes, and ``kb_write.ops._insert_marker`` appends to the end of the
+    located line — so a marker on such an anchor's first line sits between two
+    attributes :data:`tree.ANCHOR_RE` requires adjacent. Read raw, the pattern
+    matches nothing there and the anchor goes *unchecked* rather than reported,
+    which is the one way this check can fail: no other gate in the toolchain
+    sees this link form, ``verify_md_links`` reading ``[text](target)`` alone.
+    """
+    leaf = declared / "kb-root" / "vol" / "alpha.md"
+    text = leaf.read_text(encoding="utf-8")
+    marker = render.render_tier2_marker(kb_index_lib.parse_frontmatter(text)["claims"][0])
+    planted = (
+        f'Alpha is also read beside\n<a href="nowhere.md#thm:nowhere" data-reference-type="ref" {marker}\n'
+        'data-reference="thm:nowhere">Theorem 9</a>.\n'
+    )
+    assert not tree.ANCHOR_RE.search(planted), "the marker must land between two attributes or this passes vacuously"
+    leaf.write_text(text + planted, encoding="utf-8")
+
     with pytest.raises(conform.ConformanceError) as refusal:
-        conform.pass_two_gate(tree.read(consumer / "kb-root"))
-    assert refusal.value.check == "frontmatter-absent"
+        conform.pass_two_gate(tree.read(declared / "kb-root"))
+
+    assert refusal.value.check == "point-7"
+    assert "nowhere.md#thm:nowhere" in refusal.value.detail
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +535,7 @@ def test_an_eqref_into_an_equation_inside_a_claim_body_names_that_claim(declared
     """
     documents, sites, authored = _read(declared)
     ids = _titles(authored)
-    equation = [anchor for anchor in sites.anchors if anchor.reference_type == attribute.EQUATION_REFERENCE_TYPE]
+    equation = [anchor for anchor in sites.anchors if anchor.label.startswith("eq:")]
     assert [(anchor.fragment, anchor.label, anchor.target) for anchor in equation] == [("", "eq:one", "vol/alpha.md")]
 
     narrowed = attribute.narrow(documents, authored, sites)
@@ -505,6 +567,75 @@ def test_the_anchor_naming_what_a_proof_proves_is_not_read_as_a_dependency(decla
     assert (ids["Gamma two"], ids["Gamma one"]) not in reached
 
 
+def test_an_anchor_naming_a_definition_block_contributes_no_pair(declared: Path):
+    """The author pointed at a block somebody classified as stating no result.
+
+    Both shapes the corpus carries, on two documents so a failure names which:
+    Beta names Alpha's definition and Alpha hosts one claim, so the sole-claim
+    route would have answered with that claim; Alpha names Gamma's and Gamma
+    hosts two, so the multi-claim enumeration would have offered both. Neither
+    is what the reference resolves to, and the exact candidate set asserted
+    above is the other half of this — a regression puts these pairs back there.
+    """
+    documents, sites, authored = _read(declared)
+    ids = _titles(authored)
+
+    naming = {
+        (anchor.document, anchor.target, anchor.fragment)
+        for anchor in sites.anchors
+        if anchor.fragment.startswith("def:")
+    }
+    assert naming == {
+        ("vol/beta.md", "vol/alpha.md", "def:alpha"),
+        ("vol/alpha.md", "vol/gamma.md", "def:gamma"),
+    }, "the fixture stopped carrying the references this is about"
+    named = [block for block in sites.blocks if block.identifier in {"def:alpha", "def:gamma"}]
+    assert len(named) == 2 and not any(block.claim_bearing for block in named)
+    # The refusal may only spend a judgement somebody made, so these blocks have
+    # to carry a name stage B classified rather than one nobody has looked at.
+    assert {block.environment.casefold() for block in named} <= inventory.NOT_A_CLAIM_TARGET
+
+    narrowed = attribute.narrow(documents, authored, sites)
+    reached = set(narrowed.edges) | set(narrowed.references) | _pairs(narrowed)
+    assert (ids["Beta lemma"], ids["Alpha result"]) not in reached
+    assert (ids["Alpha result"], ids["Gamma one"]) not in reached
+    assert (ids["Alpha result"], ids["Gamma two"]) not in reached
+
+
+def test_an_anchor_naming_a_remark_block_from_a_proof_authors_no_edge(declared: Path, monkeypatch: pytest.MonkeyPatch):
+    """The refusal's other shape: both ends settled, so the pair is an *edge*.
+
+    The definition case above manufactures candidates — every one of its anchors
+    has an undirected source end, so a model still decides. This one does not.
+    Beta's proof names a remark in alpha.md: containment directs the source end
+    onto the claim that proof establishes, and alpha hosts exactly one claim, so
+    the sole-claim route settles the target and the graph records Beta's lemma
+    as resting on a result nobody referenced — mechanically, with no question
+    asked.
+
+    The monkeypatch is the non-vacuity guard. Asserting only that the edge is
+    absent would pass just as well on a fixture whose anchor never reached the
+    route at all; taking ``remark`` back out of the refusal has to put the edge
+    back, or this test is asserting nothing.
+    """
+    documents, sites, authored = _read(declared)
+    ids = _titles(authored)
+
+    naming = [anchor for anchor in sites.anchors if anchor.fragment == "rem:alpha"]
+    assert [(anchor.document, anchor.target, anchor.hosting_environment) for anchor in naming] == [
+        ("vol/beta.md", "vol/alpha.md", "proof")
+    ], "the fixture stopped carrying the reference this is about"
+    remark = next(block for block in sites.blocks if block.identifier == "rem:alpha")
+    assert not remark.claim_bearing and remark.environment.casefold() in inventory.NOT_A_CLAIM_TARGET
+
+    manufactured = (ids["Beta lemma"], ids["Alpha result"])
+    narrowed = attribute.narrow(documents, authored, sites)
+    assert manufactured not in set(narrowed.edges) | set(narrowed.references) | _pairs(narrowed)
+
+    monkeypatch.setattr(attribute, "NOT_A_CLAIM_TARGET", inventory.NOT_A_CLAIM_TARGET - {"remark"})
+    assert manufactured in set(attribute.narrow(documents, authored, sites).edges)
+
+
 def test_a_fragment_naming_a_block_resolves_the_target_to_that_block_s_claim(declared: Path):
     """gamma.md hosts two claims; beta's prose reference names one of them by its source label."""
     ids, narrowed = _narrowed(declared)
@@ -529,6 +660,46 @@ def test_edges_containment_settles_are_never_also_asked_about(declared: Path):
     assert (ids["Gamma one"], ids["Alpha result"]) in narrowed.edges
     assert (ids["Gamma one"], ids["Alpha result"]) not in _pairs(narrowed)
     assert ids["Gamma one"] not in {question.source.id for question in narrowed.questions}
+
+
+def test_a_marker_on_a_reference_line_is_not_shown_to_the_seat_that_picks_a_direction(declared: Path):
+    """``Question.evidence`` is authored prose, and a marker is not prose.
+
+    The line renders verbatim into the ask's reference-lines slot, and this
+    stage always runs over a tree two earlier passes have minted into — so
+    unlike the anchor check above, nothing has to go wrong for the two to meet.
+    A Tier-2 marker is appended to the end of the line its claim is located by,
+    which is the claim's own statement line, so an author who states a result by
+    reference puts the anchor and the marker on one line. That is the shape
+    planted here.
+
+    Over the 51 built KBs of the staged corpus the shape does not yet occur — 0
+    of 6738 anchor lines and 0 of 1675 evidence lines carry a marker, against
+    468 markers standing in those trees — so this is a hardening, and the test
+    is what keeps it from rotting. Reverting the ``strip_markers`` call in
+    :func:`attribute._reference_line` fails the last assertion with the marker
+    itself in the message.
+    """
+    leaf = declared / "kb-root" / "vol" / "gamma.md"
+    text = leaf.read_text(encoding="utf-8")
+    marker = render.render_tier2_marker(kb_index_lib.parse_frontmatter(text)["claims"][0])
+    located = next((line for line in text.splitlines() if line.endswith(marker)), None)
+    assert located is not None, "the declared pass stopped marking this leaf, so there is no line to plant on"
+    reference = '<a href="beta.md#thm:beta" data-reference-type="ref" data-reference="thm:beta">Lemma 2</a>'
+    leaf.write_text(text.replace(located, located.replace(marker, f"{reference} {marker}")), encoding="utf-8")
+    assert f"{reference} {marker}" in leaf.read_text(encoding="utf-8"), "the marker must end the reference's own line"
+
+    documents, sites, authored = _read(declared)
+    narrowed = attribute.narrow(documents, authored, sites)
+
+    shown = [
+        line
+        for question in narrowed.questions
+        for line in question.evidence
+        if "beta.md#thm:beta" in line and "Gamma one" in line
+    ]
+    assert len(shown) == 1, f"the planted reference reached no question, so this would pass vacuously: {shown}"
+    assert marker not in shown[0], shown[0]
 
 
 # ---------------------------------------------------------------------------
@@ -857,17 +1028,26 @@ def test_the_discovered_pass_runs_end_to_end_against_a_fake_inference(declared: 
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
 
 
-def test_a_run_stopping_at_the_entry_condition_writes_no_edge(consumer: Path):
-    """The sequencer reports the stop and never reaches the ask or the write."""
+def test_a_run_over_a_tree_the_declared_pass_never_wrote_asks_nobody_and_authors_no_edge(consumer: Path):
+    """Nothing to attribute over, and the run is refused at the gate rather than at its own door.
+
+    The entry condition no longer stops here: a tree with no frontmatter is one
+    nobody has read for claims, and that state has no spelling of its own in
+    this package any more. What refuses it is the runner's verify target over
+    the tree the run leaves behind — the same frontmatter-presence check any
+    other reader of this KB would fail. Nothing is asked and no values file is
+    composed on the way there, because a tree with no claims offers no pair.
+    """
     inference = FakeInference({})
-    report = depends.build(
+    outcome = depends.build(
         kb_root=consumer / "kb-root",
         repo_root=consumer,
         scratch=_scratch(consumer),
         selector=_selector(inference),
     )
-    assert report.failed
-    assert any("frontmatter-absent" in line for line in report.lines())
+    assert outcome.failed, outcome.lines()
+    refusal = next(line for line in outcome.lines() if kb_util.verify_cmd(consumer) in line)
+    assert report.FAIL in refusal and "missing frontmatter" in refusal, outcome.lines()
     assert inference.prompts == []
     assert not (_scratch(consumer) / "3-add-depends-on.toml").exists()
 

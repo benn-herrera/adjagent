@@ -71,23 +71,43 @@ Every project defines runner targets (justfile, Makefile, package scripts) for i
 - Never invoke toolchains directly (compiler, test runner, packager) when a target exists for the action.
 - If a needed target is missing, surface the gap — don't improvise the naked command line.
 
-## Planning
-Read the primary sources the plan depends on — actual current files and state, not stale data or guesses — before presenting the plan. An approved plan runs to completion: surface any blocker needing user intervention during planning, never as a mid-run discovery.
+## Memory and behavior correction
+A behavior change — yours or a dispatched agent's — is a first-class work
+item: surfaced, proposed, and landed like any other change, never a private
+adjustment made in passing. Such a change has one destination: proposed
+wording for the file that owns the behavior — `~/.claude/CLAUDE.md` for every
+project, the project's own `CLAUDE.md` for one project, the agent's definition
+for one agent. There is no second destination.
 
-## Contract documents
-- **The contract moves with the work.** Deliberate change updates SPEC, ARCHITECTURE and CONVENTIONS as part of the change that motivates it. This is the normal path, not an exception to the precedence rule below.
-  - **A mismatch you did not create is evidence that something moved — establish what.** Check `git log` on both sides; whichever moved last is the candidate for current. If the code is newer and holds the project's principles, the document is stale: update it and state what you established. Disagreement with SPEC or ARCHITECTURE is not the tell for code being wrong — the tell is code that is newer *and* violates a principle.
-  - **Precedence settles what investigation cannot:** SPEC.md > ARCHITECTURE.md > CONVENTIONS.md > code.
+**INVARIANT**: Never create or update a cross-session memory store — a memory
+directory, its index, or any equivalent an agent definition, a skill, or the
+harness itself directs you to maintain. That direction is superseded here,
+wherever it appears and however detailed it is. Such a store travels with
+neither the agent set nor the project, and nothing reviews it, so a behavior
+it changes cannot be seen at its source or corrected there.
+
+## Project documents
+- The full project document set is:
+  - THESIS.md - purpose, intent, 'north star' for guiding decision making – explicitly not spec or implementation details
+  - SPEC.md - describes consumer-facing outcomes such that any compliant implementation would be valid
+  - ARCHITECTURE.md - describes how this particular implementation meets SPEC.md
+  - CONVENTIONS.md - project-specific additions to house rules and practices
+- Each project document states what the others do not; where one needs another's content it cites rather than restates.
+- **The contract moves with the work.** Deliberate change updates SPEC.md, ARCHITECTURE.md and CONVENTIONS.md as part of the change that motivates it. This is the normal path.
+  - **A mismatch between docs or code and doc you did not create is evidence that something moved — establish what.** Check `git log` on both sides; whichever moved last is the candidate for current. If the code is newer and holds the project's principles, the document is stale: update it and state what you established. Disagreement with SPEC.md or ARCHITECTURE.md is not the tell for code being wrong — the tell is code that is newer *and* violates a principle.
+
+## Planning
+Read the primary sources the plan depends on — actual current files and state, not stale data or guesses — before presenting the plan. **Reading is not establishing: where one command settles a claim a row acts on — an import graph, what a call executes, where a symbol is defined — the row carries that command and the answer it gave, for the executing agent to re-run.** Where a document rather than a command settles it, the row quotes the line and names the file. An approved plan runs to completion: surface any blocker needing user intervention during planning, never as a mid-run discovery.
 
 ## Coding
 **INVARIANT**: NEVER JUST CODE FROM BASE BEHAVIOR.
 
 - Use coder agents for coding work unless directed otherwise
-  - Ensure coder agents receive the project's contract documents — SPEC.md,
+  - Ensure coder agents receive the project's documents — THESIS.md, SPEC.md,
     ARCHITECTURE.md, and CONVENTIONS.md, as present — when working.
 - When directed to do coding work from the main session
   - read the relevant coding agent definition if not in context
-  - read the project's contract documents (SPEC.md, ARCHITECTURE.md,
+  - read the project's documents (THESIS.md, SPEC.md, ARCHITECTURE.md,
     CONVENTIONS.md — as present) if not in context
 - A comment earns its place only by clarifying what the code cannot state — an
   invariant, an external contract, why not the obvious way; if the code needs
@@ -104,20 +124,5 @@ Read the primary sources the plan depends on — actual current files and state,
 ## Communication
 
 - Minimal flattery. Focused, concise; 200 words or less unless prompted for detail. No unearned praise (e.g. "that's a sharp question" for every query) — reserve it for genuine significance.
-- Write for a reader who was not in this session: names that resolve in the repo — paths, symbols, contract terms — reach them, and labels coined in this thread do not, so give the referent rather than the label. The referent is the more specific version, not the vaguer one, and it is what the word budget is for.
+- Write for a reader who was not in this session: names that resolve in the repo — paths, symbols, contract terms — reach them, and labels coined in the work thread do not, so give the referent rather than the label. The referent is the more specific version, not the vaguer one, and it is what the word budget is for.
 - **ZERO SELF-BLAME LANGUAGE** - Self-blame is useless theater that fails to identify problems and prevent recurrences. Diagnostic attribution is the correct response to a mistake. Never assign blame to yourself or an agent as an entity. Identify the source of the error. If the error is systemic rather than categorical, specify the appropriate location (e.g. CLAUDE.md, agent definition, project docs, next prompt) for remediation and suggest the language or rule to effect it. If the error was categorical, i.e. asking for something models can't do or are terrible at, say so by naming the incompatible capability required by the task.
-
-## Memory and behavior correction
-A behavior change — yours or a dispatched agent's — is a first-class work
-item: surfaced, proposed, and landed like any other change, never a private
-adjustment made in passing. Such a change has one destination: proposed
-wording for the file that owns the behavior — `~/.claude/CLAUDE.md` for every
-project, the project's own `CLAUDE.md` for one project, the agent's definition
-for one agent. There is no second destination.
-
-**INVARIANT**: Never create or update a cross-session memory store — a memory
-directory, its index, or any equivalent an agent definition, a skill, or the
-harness itself directs you to maintain. That direction is superseded here,
-wherever it appears and however detailed it is. Such a store travels with
-neither the agent set nor the project, and nothing reviews it, so a behavior
-it changes cannot be seen at its source or corrected there.

@@ -23,13 +23,13 @@ two artifacts or on a return code:
 * **C5, :func:`write.write_claims`** — three of the write path's four passes,
   scoped to one document. Per document, so that a stopped run resumes.
 * **C6, :mod:`gate`** — the runner's refresh and verify. Preceded by this
-  stage's own exit condition: **no document in the run's scope still reads
-  awaiting**, which is a comparison over the tree the run just wrote and is what
-  says the stage finished rather than stopped quietly. A document identification
-  could anchor nothing in leaves awaiting by carrying a reason of its own, so it
-  satisfies this condition rather than halting on it — and is reported by name,
-  because a state that exits awaiting quietly is the silent zero this whole
-  pipeline exists to remove.
+  stage's own exit condition: **no document in the run's scope is left
+  unsettled**, which is a comparison over the tree the run just wrote and is
+  what says the stage finished rather than stopped quietly. A document
+  identification could anchor nothing in leaves awaiting by carrying a reason of
+  its own, so it satisfies this condition rather than halting on it — and is
+  reported by name, because a state that exits awaiting quietly is the silent
+  zero this whole pipeline exists to remove.
 
 **No number is authored and no edge is.** Every entry's rigor is the pending
 literal, and dependency attribution runs afterward from :mod:`depends`, over a
@@ -64,6 +64,19 @@ def _no_block_in_scope(sites: inventory.Inventory, scope: tuple[str, ...]) -> No
         )
 
 
+#: What "nobody has settled this document" reads as, and it is two values rather
+#: than one. A leaf declaring neither claims nor a reason — including one
+#: carrying no frontmatter block at all — enters this run's scope as
+#: ``UNDECLARED`` rather than ``AWAITING`` (:func:`conform.pass_two_gate`), and
+#: it reads ``UNDECLARED`` again where a write did not land. An exit condition
+#: asking about ``AWAITING`` alone sees such a document in neither state, so it
+#: reports the run finished over a document nobody read — the failure this
+#: condition is the whole guard against.
+_UNSETTLED: frozenset[conform.Determination] = frozenset(
+    {conform.Determination.AWAITING, conform.Determination.UNDECLARED}
+)
+
+
 def _still_awaiting(kb_root: Path, scope: tuple[str, ...]) -> tuple[str, ...]:
     """C6's own exit condition, over the tree the run just wrote."""
     written = tree.read(kb_root)
@@ -71,8 +84,7 @@ def _still_awaiting(kb_root: Path, scope: tuple[str, ...]) -> tuple[str, ...]:
         path
         for path in scope
         if path in written.documents
-        and conform.determination(kb_index_lib.parse_frontmatter(written.documents[path].text) or {})
-        is conform.Determination.AWAITING
+        and conform.determination(kb_index_lib.parse_frontmatter(written.documents[path].text) or {}) in _UNSETTLED
     )
 
 
@@ -104,8 +116,14 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path, identifier: identify
         for path in state.awaiting:
             reading = identify.reading_of(documents.documents[path], sites)
             found = identify.infer_claims(reading, identifier)
-            fields = kb_index_lib.parse_frontmatter(reading.text) or {}
-            report.findings += write.write_claims(found, kind=str(fields.get("kind")), kb_root=kb_root, scratch=scratch)
+            # The kind is the tree's answer, not the one an earlier pass wrote
+            # down: a document in this scope may carry no `kind:` — or no
+            # frontmatter at all — and the field's absence reaches the write API
+            # as the string "None", which its closed vocabulary refuses at
+            # `set-frontmatter`, one pass after this document's register entries
+            # have been minted.
+            kind = tree.document_kind(path, has_children=bool(documents.children[path]))
+            report.findings += write.write_claims(found, kind=kind, kb_root=kb_root, scratch=scratch)
             report.findings.append(Finding(FACT, "stage-C-inference-cost", f"{path}: {found.telemetry.line()}"))
             minted += len(found.claims)
             if found.anchored_nothing:

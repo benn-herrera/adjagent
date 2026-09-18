@@ -21,10 +21,9 @@ fixture that was a document rather than a manifest would test the wrong module.
 
 Post-build is the other half: the planted classes (g) a file on disk absent
 from the skeleton's list and (h) a listed file absent from disk, each nonzero and
-naming the planted identity; a planted ``mf:`` token in an authored leaf failing the
-guard; and the on-disk reachability the link primitives read. Those fixtures *are*
-trees, built per-test under ``tmp_path`` — nothing here reads or writes a real
-``kb-root/``.
+naming the planted identity; and the on-disk reachability the link primitives
+read. Those fixtures *are* trees, built per-test under ``tmp_path`` — nothing
+here reads or writes a real ``kb-root/``.
 """
 
 import inspect
@@ -343,7 +342,7 @@ def test_findings_come_back_in_check_order_and_sorted_within_a_check() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Post-build: the tree diff, on-disk reachability, the `mf:` guard
+# Post-build: the tree diff and on-disk reachability
 #
 # The fixture is a five-document KB written under `tmp_path`: a root, two domain
 # indexes, two leaves, every non-root document up-linked and every one linked to
@@ -393,7 +392,6 @@ def test_a_built_tree_matching_its_skeleton_passes_every_post_build_check(tmp_pa
     assert {finding.check for finding in findings if finding.status == validate.PASS} == {
         validate.CHECK_TREE_DIFF,
         validate.CHECK_REACHABILITY,
-        validate.CHECK_ID_GUARD,
     }
 
 
@@ -429,31 +427,6 @@ def test_the_diff_reports_both_directions_in_one_run(tmp_path: Path) -> None:
     assert len(diff) == 2
     assert [line for line in diff if "gamma/leaf.md" in line and "listed" in line]
     assert [line for line in diff if "gamma/stowaway.md" in line and "unlisted" in line]
-
-
-def test_a_planted_manifest_id_token_in_an_authored_leaf_fails_the_guard(tmp_path: Path) -> None:
-    documents = _built_tree()
-    documents["gamma/leaf.md"] = _doc("Leaf", up="index.md", body="Distilled from mf:2-gamma of the source.")
-    planted = next(
-        number for number, text in enumerate(documents["gamma/leaf.md"].splitlines(), start=1) if mf.ID_PREFIX in text
-    )
-
-    findings = _build_run(tmp_path, documents)
-
-    assert validate.exit_code(findings) == validate.EXIT_VIOLATION
-    (line,) = [line for line in _failures(findings) if validate.CHECK_ID_GUARD in line]
-    assert f"gamma/leaf.md:{planted}" in line and mf.ID_PREFIX in line
-
-
-def test_the_guard_reads_the_document_as_written_so_a_fenced_token_still_fails(tmp_path: Path) -> None:
-    """A per-run id in a code fence is in the built tree just the same."""
-    documents = _built_tree()
-    documents["alpha/beta.md"] = _doc("Beta", up="index.md", body="```\nsection: mf:1-alpha\n```")
-
-    findings = _build_run(tmp_path, documents)
-
-    assert validate.exit_code(findings) == validate.EXIT_VIOLATION
-    assert [line for line in _failures(findings) if "alpha/beta.md" in line and validate.CHECK_ID_GUARD in line]
 
 
 def test_a_document_no_down_link_chain_reaches_is_reported_unreachable(tmp_path: Path) -> None:

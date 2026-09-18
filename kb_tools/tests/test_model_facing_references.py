@@ -1,22 +1,18 @@
 """Every reference the toolchain's model-facing text makes has to resolve.
 
-**Population.** The two bodies this toolchain composes and puts in front of a
-model: the rendered stage cards of every ``kb_pipeline.STAGES`` entry, and the
-composed brief of every shipped ``kb_driver/prompt-templates/`` template a step-table row
-names. Both are rendered here the way a run renders them — cards through
-``card_lines``, briefs through ``prompt_templates.render`` with the row's slots filled by
-named placeholders — because what a seat reads is the filled body, and a raw
-read of either source would judge text nobody receives. ``kb_pipeline``'s
-refusals compose their paths, ops and commands from the same constants the
-cards do and then render the stage's card beneath, so they carry no reference
-of their own.
+**Population.** The one body this toolchain composes and puts in front of a
+model: the composed brief of every shipped ``kb_driver/prompt-templates/``
+template a step-table row names. It is rendered here the way a run renders it —
+``prompt_templates.render`` with the row's slots filled by named placeholders —
+because what a seat reads is the filled body, and a raw read of the template
+would judge text nobody receives. ``kb_pipeline``'s refusals compose their paths
+from the same constants the checks do, so they carry no reference of their own.
 
 **Extraction is per-kind and anchored.** Each check below looks only where the
 text marks a reference as that kind — the scratch root in front of a path, the
-sanctioned invocation in front of an op, a backticked runner call, the word
-``cap`` in front of an integer, the ``kb-`` namespace. A permissive extractor
-that fired on prose merely resembling a path would be suppressed, and then it
-would protect nothing.
+sanctioned invocation in front of an op, a backticked runner call, the ``kb-``
+namespace. A permissive extractor that fired on prose merely resembling a path
+would be suppressed, and then it would protect nothing.
 
 **What it deliberately does not see.** A path carrying neither the scratch root
 in front of it nor ``.md`` on the end (``review/`` alone). A runner target named
@@ -60,9 +56,7 @@ _RUNNER_FRAGMENT = Path(kb_util.__file__).resolve().parent / "runner-snippets" /
 
 def _population() -> dict[str, str]:
     """Every model-facing body the toolchain composes, keyed by where it comes from."""
-    texts = {
-        f"card:{stage.id}": "\n".join(kb_pipeline.card_lines(stage, _AGENTS_SURFACE)) for stage in kb_pipeline.STAGES
-    }
+    texts: dict[str, str] = {}
     shipped = {path.name for path in prompt_templates.template_paths()}
     for step in steps.STEPS:
         if step.template is None or step.template not in shipped:
@@ -70,9 +64,6 @@ def _population() -> dict[str, str]:
         texts[f"brief:{step.id}"] = prompt_templates.render(
             step.template,
             slots={slot: f"<{slot}>" for slot in step.slots},
-            constants=steps.CONSTANT_SLOTS,
-            row=prompt_templates.RowSlots(step_id=step.id, seat=step.seat),
-            wave=step.unit is steps.Unit.WAVE,
         )
     return texts
 
@@ -140,13 +131,6 @@ def _consumer_targets() -> frozenset[str]:
     return frozenset(re.findall(r"^([a-z][a-z0-9-]*):", _RUNNER_FRAGMENT.read_text(encoding="utf-8"), re.MULTILINE))
 
 
-def _published_caps() -> frozenset[int]:
-    """Every loop cap the pipeline states, the same constants the cards render from."""
-    return frozenset(
-        value for name, value in vars(kb_pipeline).items() if name.endswith("_CAP") and isinstance(value, int)
-    )
-
-
 # ---------------------------------------------------------------------------
 # The extractors
 # ---------------------------------------------------------------------------
@@ -156,7 +140,7 @@ _TRAILING_PUNCTUATION = re.compile(r"[.,;:)\]}`\"']+$")
 _PLACEHOLDER = re.compile(r"<[^<>]*>")
 _DOCUMENT = re.compile(r"(?<![\w.<-])([A-Za-z0-9][\w.-]*\.md)(?![\w-])")
 _RUNNER_CALL = re.compile(r"`(?:just|make)\s+([^`\s]+)")
-_CAP = re.compile(r"\bcap\s+(\d+)\b")
+_CAP = re.compile(r"\bcap\s+(\d+)\b")  # the template half alone; no constant states one
 _NAMESPACED = re.compile(r"(?<![\w<-])(kb-[a-z0-9-]*[a-z0-9])")
 
 
@@ -186,7 +170,12 @@ def _layout_pattern(entry: str) -> re.Pattern[str]:
     return re.compile("[^/]+".join(re.escape(part) for part in _PLACEHOLDER.split(entry)))
 
 
-LAYOUT_PATTERNS = tuple(_layout_pattern(entry) for entry in steps.SCRATCH_LAYOUT)
+#: The layout, read off the rows that declare it: a row's ``outputs`` are the
+#: scratch-relative patterns it writes, so the set of them is what a reference
+#: to a build artifact has to land inside.
+LAYOUT_PATTERNS = tuple(
+    _layout_pattern(entry) for entry in sorted({output for step in steps.STEPS for output in step.outputs})
+)
 
 
 def _in_layout(path: str) -> bool:
@@ -213,7 +202,7 @@ def test_every_scratch_path_named_resolves_in_the_layout(source: str) -> None:
     """A build artifact goes where the driver looks for it, or the reference is dead."""
     unresolved = [path for path in _scratch_paths(POPULATION[source]) if not _in_layout(path)]
 
-    assert not unresolved, f"{source}: no SCRATCH_LAYOUT entry covers {unresolved}"
+    assert not unresolved, f"{source}: no row's declared outputs cover {unresolved}"
 
 
 @pytest.mark.parametrize("source", POPULATION_IDS)
@@ -242,14 +231,6 @@ def test_every_runner_target_named_is_one_the_fragment_defines(source: str) -> N
 
 
 @pytest.mark.parametrize("source", POPULATION_IDS)
-def test_every_cap_stated_is_a_published_cap(source: str) -> None:
-    caps = _published_caps()
-    unresolved = [value for value in _CAP.findall(POPULATION[source]) if int(value) not in caps]
-
-    assert not unresolved, f"{source}: no cap constant holds {unresolved}"
-
-
-@pytest.mark.parametrize("source", POPULATION_IDS)
 def test_every_namespaced_word_resolves_to_a_constant_or_a_seat(source: str) -> None:
     """The ``kb-`` namespace is where this toolchain's seats and tokens live.
 
@@ -265,8 +246,8 @@ def test_every_namespaced_word_resolves_to_a_constant_or_a_seat(source: str) -> 
 def test_every_seat_the_step_table_holds_is_a_shipped_definition() -> None:
     """The seat a brief dispatches comes from the row; this is what makes the row true.
 
-    Templates spell no seat and cards name only the ``kb-`` ones, so a seat that
-    stopped existing would otherwise reach a wave as an agent type nothing
+    Templates spell no seat at all, so a seat that stopped existing would
+    otherwise reach a dispatch as an agent type nothing
     defines. The names come from the generator's own reader, since a template may
     declare several outputs and none of them has to be its stem.
     """
@@ -283,21 +264,14 @@ def test_every_seat_the_step_table_holds_is_a_shipped_definition() -> None:
     assert not missing, f"the step table seats {missing}, which no template renders"
 
 
-@pytest.mark.parametrize("stage", kb_pipeline.STAGES, ids=[stage.id for stage in kb_pipeline.STAGES])
-def test_no_plain_card_obligation_spells_a_cap(stage: kb_pipeline.Stage) -> None:
-    """The check above says a stated cap is *a* cap; this says nobody typed one.
-
-    A cap is right on the day it is written, so a hand-spelled one goes stale in
-    silence. ``CappedLine`` is what a card obligation naming a cap must be.
-    """
-    spelled = [item for item in stage.card if isinstance(item, str) and _CAP.search(item)]
-
-    assert not spelled, f"{stage.id}: render the cap from its constant instead of spelling it — {spelled}"
-
-
 @pytest.mark.parametrize("template", prompt_templates.template_paths(), ids=lambda path: path.name)
 def test_no_brief_template_spells_a_cap(template: Path) -> None:
-    """The brief's half of the same rule: a row's cap reaches it through a slot."""
+    """A cap is right on the day it is written, so a hand-spelled one goes stale.
+
+    Read off the raw template rather than the rendered brief, because a cap that
+    reached one through a slot is a cap the row supplied and this is the check
+    that nobody typed one instead.
+    """
     body = template.read_text(encoding="utf-8")
 
     spelled = _CAP.findall(body)
@@ -305,22 +279,17 @@ def test_no_brief_template_spells_a_cap(template: Path) -> None:
     assert not spelled, f"{template.name}: take the cap from the row's slot — cap {spelled}"
 
 
-def test_no_extractor_is_vacuous() -> None:
-    """A refactor that changed the text's shape could empty every check silently.
+def test_the_population_is_not_empty() -> None:
+    """A refactor that emptied the population would pass every check above silently.
 
-    A floor, not a census: what matters is that each extractor still sees the
-    population, not how many references the population happens to hold.
+    **This is deliberately not a per-kind floor.** A brief reaches every path,
+    document and command it names through a slot the row fills, and a slot
+    renders here as an angle-bracketed placeholder the extractors are written not
+    to see — so a population of briefs alone legitimately yields nothing for any
+    extractor to resolve, and a floor per kind would assert a shape the briefs
+    are written the other way round. What is still a defect is no population at
+    all: a row that stopped naming its template, or a template that stopped
+    shipping, takes the text these checks guard out of reach with it.
     """
-    whole = "\n".join(POPULATION.values())
-    seen = {
-        "scratch path": _scratch_paths(whole),
-        "document": _documents(whole),
-        "op": _ops(whole),
-        "runner target": _RUNNER_CALL.findall(whole),
-        "cap": _CAP.findall(whole),
-        "namespaced word": _NAMESPACED.findall(whole),
-    }
-
-    blind = [kind for kind, found in seen.items() if not found]
-
-    assert not blind, f"{blind}: the extractor no longer sees the population it guards"
+    assert POPULATION
+    assert all(body.strip() for body in POPULATION.values())

@@ -1,8 +1,8 @@
 """Run-directory layout, the run lock, exit.json, and the log tee.
 
-``exit.json`` is what a session reads after watch mode reports the driver
-gone, so its field set is a contract: the terminal code, the barrier record
-path, and the ``--decide`` values that were never raised.
+``exit.json`` is the run directory's own record of how the run ended, so its
+field set is a contract: the terminal code, the barrier record path, and the
+``--decide`` values that were never raised.
 """
 
 import json
@@ -77,20 +77,20 @@ def test_run_id_is_sortable_and_unique_per_process() -> None:
 
 def test_exit_json_carries_exactly_the_named_fields(tmp_path: Path) -> None:
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    record = paths.barriers / "phase-1b-design-gate.md"
+    record = paths.barriers / "spine-seed-runner-choice.md"
 
     written = runlog.write_exit_json(
         paths,
         exit_code=10,
         barrier_record=record,
-        unconsumed_decisions=["phase-4.cap-exhausted=authorize-one-more"],
+        unconsumed_decisions=["spine-seed.runner-choice=just"],
     )
     payload = json.loads(written.read_text(encoding="utf-8"))
 
     assert set(payload) == EXIT_JSON_FIELDS
     assert payload["exit_code"] == 10
     assert payload["barrier_record"] == str(record)
-    assert payload["unconsumed_decisions"] == ["phase-4.cap-exhausted=authorize-one-more"]
+    assert payload["unconsumed_decisions"] == ["spine-seed.runner-choice=just"]
 
 
 def test_exit_json_records_no_barrier_for_a_plain_exit(tmp_path: Path) -> None:
@@ -152,8 +152,8 @@ def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -
 def test_a_re_ask_and_a_hyphenated_step_id_are_told_apart(tmp_path: Path) -> None:
     """``p2.6.apply-scores`` and ``-reask`` both contain the separator.
 
-    A reader splitting on the first or last hyphen gets one of them wrong, which
-    is the reasoning ``prompt_templates.step_of`` already carries for the brief grammar.
+    A reader splitting on the first or last hyphen gets one of them wrong, so
+    the capture-name pattern is anchored at both ends instead.
     """
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
     _capture(paths, seq=11, label="p2.6.apply-scores-reask", attempt=2, lines=[_result(duration_ms=5, cost=0.0)])

@@ -1,4 +1,4 @@
-"""Relay batons — one per exit code, the mode's own where a code means two things, and the unlisted-code fallback.
+"""Relay batons — one per exit code, plus the unlisted-code fallback.
 
 Every terminating invocation of the driver ends by printing a baton: the card
 that tells the relaying session what to place in its message body, what to ask
@@ -40,13 +40,11 @@ EXIT_CONFIG = 13
 EXIT_ENVIRONMENT = 14
 EXIT_INTERNAL = 15
 EXIT_LOCKED = 16
-#: A dispatched call did not answer its brief. Two routes reach it: a return
-#: that could not produce the declared output shape, twice (``call.Caller``),
-#: and a return whose shape was fine and whose content the run could see was no
-#: answer — a ``phase-5`` fix round composing the document that already stands
-#: (``run._assemble_overview``). A brief and a seat are what it is a mismatch
-#: between, and neither exists on a row that invokes a tool and reads an exit
-#: code — such a row's missing output is :data:`EXIT_COVERAGE`.
+#: A dispatched call did not answer its brief: a return that could not produce
+#: the declared output shape, twice (``call.Caller``). A brief and a seat are
+#: what it is a mismatch between, and neither exists on a row that invokes a
+#: tool and reads an exit code — such a row's missing output is
+#: :data:`EXIT_COVERAGE`.
 EXIT_CONTRACT = 17
 #: The run stopped where it was told to — ``--through``, or the point past
 #: which ``--no-inference`` cannot go. Not a failure and not a completion: the
@@ -61,16 +59,12 @@ EXIT_BOUNDED = 18
 #: whose remedy is a brief or a seat that these rows do not have.
 EXIT_COVERAGE = 19
 
-# Watch mode's own set. 0 is shared and means "the recorded-stage set grew".
-EXIT_WATCH_TIMEOUT = 21
-EXIT_WATCH_DRIVER_GONE = 22
-
-#: The two mode-scoped ladders, enumerated. A mode's set is a contract with
-#: whoever reads its exit — "the registry may add codes; it may not remove
-#: these" — so it is named here rather than reconstructed wherever something
-#: means to be exhaustive over one. A suite asserting that every code is
-#: reachable is asking a question about a set, and a set it derived itself
-#: would only ever agree with itself.
+#: The ladder, enumerated. It is a contract with whoever reads a driver exit —
+#: "the registry may add codes; it may not remove these" — so it is named here
+#: rather than reconstructed wherever something means to be exhaustive over it.
+#: A suite asserting that every code is reachable is asking a question about a
+#: set, and a set it derived itself would only ever agree with itself, which is
+#: why this is spelled out rather than read off :data:`_BATONS`.
 RUN_MODE_EXIT_CODES: tuple[int, ...] = (
     EXIT_OK,
     EXIT_BARRIER,
@@ -85,16 +79,7 @@ RUN_MODE_EXIT_CODES: tuple[int, ...] = (
     EXIT_COVERAGE,
 )
 
-WATCH_MODE_EXIT_CODES: tuple[int, ...] = (EXIT_OK, EXIT_WATCH_TIMEOUT, EXIT_WATCH_DRIVER_GONE)
-
-#: The two modes, as the mode-scoped card table below is keyed. A context
-#: carries one because the exit code alone cannot say which ladder it was read
-#: on: ``0`` is the code both modes reach, and it does not mean the same thing
-#: in each.
-MODE_RUN = "run"
-MODE_WATCH = "watch"
-
-# The line prefix follows the existing [kb-build] / [card] / [preflight]
+# The line prefix follows the existing [kb-build] / [preflight]
 # convention: the checklist block stays the only thing matching `^\[[x* ]\] `,
 # so a parser lifts a relayed render without knowing about the baton.
 PREFIX = "[relay]"
@@ -119,19 +104,8 @@ class BatonContext:
     question: str = ""  # the registry's question text, verbatim
     admissible: tuple[str, ...] = ()
     run_dir: str = ""
-    #: The run directory's **parent** — what ``watch --run-dir`` names, as
-    #: against :attr:`run_dir`, which is this run's own directory inside it. A
-    #: watch command is offered with no ``--config`` and no ``--source``, so
-    #: this is the only way one can say where to look; empty means the default
-    #: parent, which a bare ``watch`` already reads (``config.run_dir_parent``).
-    run_dir_parent: str = ""
     detail: tuple[str, ...] = ()  # extra ASK lines: findings paths, the named key, …
     unconsumed_decisions: tuple[str, ...] = ()
-    #: Which mode's ladder this exit was read on — :data:`MODE_RUN` or
-    #: :data:`MODE_WATCH`. Set by the mode that ends the invocation; an
-    #: exception escaping one renders under the default, which is sound because
-    #: every card those codes reach is mode-neutral.
-    mode: str = MODE_RUN
 
 
 @dataclass(frozen=True)
@@ -143,12 +117,11 @@ class BatonSpec:
     substitutes_answer: bool = False
 
 
+# The resume names the directory this run's evidence is in, through the
+# invocation it was launched with (`config.invocation` renders `--run-dir`
+# wherever it is not the default).
 _RESUME = f"{kb_util.DRIVER_INVOCATION} run {{invocation}}"
 _DECIDE = (f"{_RESUME} \\", "    --decide {pair}=<answer>")
-# Both commands a card offers name the directory this run's evidence is in —
-# the resume through the invocation it was launched with, the watch through a
-# field of its own, since a watch invocation carries none of the rest of it.
-_WATCH_AGAIN = f"{kb_util.DRIVER_INVOCATION} watch{{watch_run_dir}}"
 
 _BATONS: dict[int, BatonSpec] = {
     EXIT_OK: BatonSpec(
@@ -183,7 +156,7 @@ _BATONS: dict[int, BatonSpec] = {
     ),
     EXIT_LOCKED: BatonSpec(
         ask="none — report the live pid",
-        then_run=(_WATCH_AGAIN, "    (or stop the other run first)"),
+        then_run=("nothing while that run holds the lock — wait for it to end, or stop it first",),
     ),
     EXIT_CONTRACT: BatonSpec(
         ask="none — report the step and the validator's complaint",
@@ -209,30 +182,6 @@ _BATONS: dict[int, BatonSpec] = {
             f"    {_RESUME}",
         ),
     ),
-    EXIT_WATCH_TIMEOUT: BatonSpec(
-        ask="none",
-        then_run=(_WATCH_AGAIN,),
-    ),
-    EXIT_WATCH_DRIVER_GONE: BatonSpec(
-        ask="none yet — read {run_dir}/exit.json first",
-        then_run=("the baton in that record",),
-    ),
-}
-
-#: The cards a mode renders in place of the shared table's. One code is in here
-#: because one code means two things: a run's ``0`` is a finished build, and a
-#: watch's ``0`` is a **live** one whose recorded set just grew — which is the
-#: only condition watch returns it on. Rendering "report completion" for the
-#: second told a relay that a build still hours from its last stage was done.
-#: A mode with no table here, and a code with no entry in its table, reads the
-#: shared one.
-_MODE_BATONS: dict[str, dict[int, BatonSpec]] = {
-    MODE_WATCH: {
-        EXIT_OK: BatonSpec(
-            ask="none — report which stages were recorded since the last watch, and that the build is still running",
-            then_run=(_WATCH_AGAIN, "    (poll again; a finished build is what exit.json says, never a poll)"),
-        ),
-    },
 }
 
 _FALLBACK = BatonSpec(
@@ -242,18 +191,23 @@ _FALLBACK = BatonSpec(
 
 # The card for a code that *can* carry a registry barrier but did not.
 #
-# Both answer-substituting codes are reachable two ways. One is a raised
-# barrier: a registered pair, a question, admissible answers, and a record on
-# disk. The other is a stage that failed mechanically — a build front end or a
-# runner gate whose rc came back nonzero, or a row whose own check went red —
-# which has none of those and no answer an operator could give (``ledger.py``:
-# a red front end is a defect in the tool or its input; ``run._p3a_gate``: no
-# repair round exists here).
+# An answer-substituting code arrives one of two ways. One is a raised barrier:
+# a registered pair, a question, admissible answers, and a record on disk. The
+# other is a stage that failed mechanically — a build front end or a runner gate
+# whose rc came back nonzero, or a row whose own check went red — which has none
+# of those and no answer an operator could give (``ledger.py``: a red front end
+# is a defect in the tool or its input).
+#
+# Which way a given code arrives is not fixed and is not asserted here: it
+# follows from which ``barriers.BarrierSpec`` carries that code, and today no
+# registered spec carries :data:`EXIT_GATE_RED`, so every red gate is the second
+# kind. ``BatonContext.pair`` is what tells them apart at render time, because
+# only a raised barrier ever sets it — a registry that gains a red-gate spec
+# gets its question card back with no edit here.
 #
 # Rendering the barrier card for the second kind is what put a blank ask and a
 # `--decide <stage>.<kind>=<answer>` resume in front of every operator whose
-# build stopped on a failing stage. ``BatonContext.pair`` is what tells them
-# apart, because only a raised barrier ever sets it.
+# build stopped on a failing stage.
 _NO_BARRIER = BatonSpec(
     ask="none — report the failing stage and the lines under this one, verbatim",
     then_run=("nothing; a stage failed a mechanical check, which takes no answer — fix what it reports",),
@@ -266,14 +220,11 @@ CODES: tuple[int, ...] = tuple(sorted(_BATONS))
 def render(exit_code: int, context: BatonContext | None = None) -> str:
     """Render the relay baton for ``exit_code``; unlisted codes get the fallback.
 
-    The context's mode is read first, because a code both modes reach need not
-    mean the same thing in each (:data:`_MODE_BATONS`). An answer-substituting
-    code reached without a barrier pair then gets :data:`_NO_BARRIER` instead of
-    its own row — see that constant.
+    An answer-substituting code reached without a barrier pair gets
+    :data:`_NO_BARRIER` instead of its own row — see that constant.
     """
     ctx = context if context is not None else BatonContext()
-    mode_spec = _MODE_BATONS.get(ctx.mode, {}).get(exit_code)
-    spec = mode_spec if mode_spec is not None else _BATONS.get(exit_code, _FALLBACK)
+    spec = _BATONS.get(exit_code, _FALLBACK)
     if spec.substitutes_answer and not ctx.pair:
         spec = _NO_BARRIER
     fields = {
@@ -281,10 +232,6 @@ def render(exit_code: int, context: BatonContext | None = None) -> str:
         "pair": ctx.pair or "<stage>.<kind>",
         "question": ctx.question,
         "run_dir": ctx.run_dir or "<run-dir>",
-        # A flag and its value, or nothing at all — the empty case is a run
-        # whose evidence is where a bare watch already looks, and a placeholder
-        # there would be an operator pasting a command with a hole in it.
-        "watch_run_dir": f" {kb_util.RUN_DIR_FLAG} {ctx.run_dir_parent}" if ctx.run_dir_parent else "",
     }
 
     lines = [
@@ -316,12 +263,10 @@ def render(exit_code: int, context: BatonContext | None = None) -> str:
 class BarrierRecord:
     """One raised barrier, as ``barriers.py`` constructs it for this module to render.
 
-    ``render`` is the **complete** verbatim stdout of ``show-status`` —
-    status line, checklist, action card, any advisory, and the closing contract
-    line. Trimming it to the checklist re-creates the paraphrase failure the
-    render exists to prevent, so nothing here trims it. ``answered`` names a
-    supplied answer that was itself a stop (``cancel``, ``no``, ``stop``); it is
-    empty when the barrier went unanswered.
+    ``render`` is the **complete** verbatim stdout of ``show-status`` — the
+    status line, any advisory, and the checklist block. Trimming it re-creates
+    the paraphrase failure the render exists to prevent, so nothing here trims
+    it.
     """
 
     stage: str
@@ -332,18 +277,11 @@ class BarrierRecord:
     run_dir: str = ""
     exit_code: int = EXIT_BARRIER
     render: str = ""
-    answered: str = ""
     unconsumed_decisions: tuple[str, ...] = ()
 
     @property
     def pair(self) -> str:
         return f"{self.stage}.{self.kind}"
-
-
-# The record names an artifact by path and never quotes it: kb-build.md's
-# verbatim-transport rule is that the session pastes what the driver printed,
-# and a file's content is not something the driver printed.
-_ARTIFACT_NOTE = "(the path only — never its content; kb-build.md Verbatim transport)"
 
 
 def render_record(record: BarrierRecord) -> str:
@@ -365,11 +303,9 @@ def render_record(record: BarrierRecord) -> str:
         f"**Admissible answers**: {' | '.join(record.answers)}",
         "",
     ]
-    if record.answered:
-        lines += [f"**Answered**: {record.answered}", ""]
     if record.artifacts:
         lines += [f"**Artifact**: {artifact}" for artifact in record.artifacts]
-        lines += [_ARTIFACT_NOTE, ""]
+        lines.append("")
 
     payload = {
         "stage": record.stage,

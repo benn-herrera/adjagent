@@ -22,8 +22,8 @@ opening. A brace is only a brace here: a JSON example, a shell ``${VAR}`` or a
 
 **A namespace routes the slot; the name never does.** ``@!dyn.<name>!@`` is
 filled from the caller's per-call data and from nowhere else, and ``@!<name>!@``
-from the composer's own sources — constants, fragments, alternatives, the
-calling row — and from nowhere else. :data:`DYNAMIC_PREFIX` sits outside the name
+from the composer's own sources — constants, fragments, alternatives — and from
+nowhere else. :data:`DYNAMIC_PREFIX` sits outside the name
 class, so a namespace can never be mistaken for a name and a name can never claim
 one. What that buys is a hole that declares what it is in the artifact: these
 templates are read and edited by agents holding no repository context, and the
@@ -45,41 +45,30 @@ is a defect, never a pipeline outcome.
 code single-sourced:
 
 * *constants* — the pool a template draws on only where a slot names it, so one
-  pool serves every template: driver constants (``@!deviation-kinds!@``,
-  ``@!layout-paths!@``, the DOMAINS/SCOPE contracts) wired once in
-  ``steps.CONSTANT_SLOTS``, and, for the claim-graph asks,
-  ``kb_claimgraph.ask.MARKER_SLOTS`` — the marker literals whose parse matches
-  against the same constants;
+  pool serves every template that names an entry of it. The caller supplies the
+  pool: today that is ``kb_claimgraph.ask.MARKER_SLOTS``, the marker literals
+  whose parse matches against the same constants;
 * *fragments* — the shared fragments, resolved here from :data:`FRAGMENTS` by
-  loading the file under ``fragments/`` and rendering it first, so wave
-  discipline is one chunk injected by the composer rather than a restatement per
-  template;
+  loading the file under ``fragments/`` and rendering it first, so a contract
+  several templates carry is one chunk injected by the composer rather than a
+  restatement per template;
 * *alternatives* — the same directory's caller-selected pieces, registered per
   slot in :data:`ALTERNATIVE_SLOTS`. The caller passes a **choice** — one
   registered name, or ``None`` where the slot admits an empty fill — and the
   composer resolves it exactly as it resolves a fragment. A caller holding the
   chosen body's prose would be prose reaching a model from application code, so
-  the name is what travels;
-* *the row* — what the calling row rather than the driver decides, passed in
-  ``row``. Today that is one value, :data:`SEAT_SLOT`, and it is here rather
-  than in the constants because it differs per step.
+  the name is what travels.
 
 A fragment and an alternative each resolve **one level deep**: the slots the
 resolved body declares join the required set and are filled from these same
 sources, and a resolved body naming a fragment or an alternative slot of its own
 is refused.
 
-The reserved-slot rule is enforced twice on purpose: :func:`render` refuses a WAVE call whose
-template omits a reserved slot (the composition that is about to happen), and
-:func:`lint` refuses any ``*.wave.tmpl`` that omits one (every template that
-exists, whether or not this run reaches it).
-
 Stdlib only.
 """
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
@@ -124,16 +113,6 @@ SLOT = re.compile(rf"@!((?:{re.escape(DYNAMIC_PREFIX)})?{SLOT_NAME})!@")
 #: a marker whose name is not a slot name.
 _DELIMITER = re.compile(r"@!|!@")
 
-# The naming convention: `<name>.wave.tmpl` / `<name>.single.tmpl`. It is a
-# convention the lint reads, never a resolution rule — the step table names
-# every template it uses, so there are no magic filenames.
-WAVE_INFIX = ".wave."
-
-# Every WAVE template carries all three, and composition fails without them:
-# the most-observed failure class is structurally impossible to omit, not
-# merely available to include.
-RESERVED_WAVE_SLOTS: tuple[str, ...] = ("dispatch-discipline", "envelope-contract", "deviation-contract")
-
 # The shared fragments, by slot name. A template names the slot; the composer
 # loads the file and supplies the rendered body.
 #
@@ -153,13 +132,8 @@ RESERVED_WAVE_SLOTS: tuple[str, ...] = ("dispatch-discipline", "envelope-contrac
 # thing naming both. Editing that fragment out of one of those facts fails
 # there.
 FRAGMENT_SLOTS: tuple[str, ...] = (
-    "dispatch-discipline",
-    "envelope-contract",
-    "deviation-contract",
     "verdict-contract",
     "return-contract",
-    "scratch-layout",
-    "persist-members",
     "write-op-contract",
 )
 
@@ -210,40 +184,14 @@ FRAGMENTS: Mapping[str, str] = MappingProxyType({slot: _fragment_file(slot) for 
 #: a caller that spelled one would be a second place a move has to reach.
 ALTERNATIVES: Mapping[str, str] = MappingProxyType({name: _fragment_file(name) for name in ALTERNATIVE_NAMES})
 
-#: The one slot a template fills from the calling row rather than from the
-#: driver's constants. Named here because the composer is what refuses a row
-#: that cannot fill it; :class:`RowSlots` carries the value. No shipped
-#: template names it today — the one-member-collapse fragment that did went
-#: with the last ``wave*`` row — and it stays because the seat a row dispatches
-#: is the row's to state and a template's never to spell.
-SEAT_SLOT = "seat"
-
 # The re-ask's brief and captures carry this suffix, so the two asks are
 # distinguishable on disk and neither overwrites the other's evidence. It lives
 # here rather than beside the re-ask policy because it is part of the brief
-# *filename* grammar, which `persist` writes and `step_of` reads back — one
-# module owning both directions of one format.
+# *filename* grammar, which `persist` writes.
 REASK_SUFFIX = "-reask"
 
 _NO_VALUES: Mapping[str, str] = MappingProxyType({})
 _NO_CHOICES: Mapping[str, str | None] = MappingProxyType({})
-
-
-@dataclass(frozen=True, kw_only=True)
-class RowSlots:
-    """What the calling row contributes to the composer's pool, and the id a refusal names.
-
-    ``seat`` is the seat that row dispatches. A row that dispatches none carries
-    ``None`` — the review waves fan out to the seats their member table names —
-    and a template naming ``@!seat!@`` is then refused rather than rendered,
-    because ``None`` in a dispatched prompt reads as a seat name.
-    """
-
-    step_id: str = ""
-    seat: str | None = None
-
-
-_NO_ROW = RowSlots()
 
 
 # --- loading and slot discovery ---------------------------------------------
@@ -352,8 +300,6 @@ def render(
     slots: Mapping[str, str],
     constants: Mapping[str, str] = _NO_VALUES,
     alternatives: Mapping[str, str | None] = _NO_CHOICES,
-    row: RowSlots = _NO_ROW,
-    wave: bool = False,
     directory: Path = PROMPT_TEMPLATES_DIR,
 ) -> str:
     """Compose one brief. Every declared slot filled, every supplied value used.
@@ -362,21 +308,9 @@ def render(
     bare name: the namespace is the composer's to spell, never a caller's.
     ``alternatives`` names one registered choice per alternative slot the
     template declares.
-
-    ``wave`` says the call unit is a WAVE, which is the step table's knowledge,
-    not the filename's: a one-member ``wave*`` step collapses to a SINGLE,
-    and a SINGLE composed from a wave template still needs its discipline.
     """
     text = load(name, directory=directory)
     fields = slots_of(text, source=name)
-
-    if wave:
-        missing_reserved = [slot for slot in RESERVED_WAVE_SLOTS if slot not in fields]
-        runlog.require(
-            not missing_reserved,
-            f"{name}: WAVE template omits reserved slot(s): {', '.join(missing_reserved)}",
-            template=name,
-        )
 
     # Resolve the spliced bodies first: their own slots join the required set. A
     # fragment's file is fixed by the slot's name, an alternative's is the
@@ -420,15 +354,6 @@ def render(
     static = {field for field in required if not field.startswith(DYNAMIC_PREFIX)}
 
     pool: dict[str, str] = {key: constants[key] for key in static if key in constants}
-    if SEAT_SLOT in static:
-        seat = row.seat
-        runlog.require(
-            bool(seat),
-            f"{name}: step {row.step_id} carries no seat, so @!{SEAT_SLOT}!@ has nothing to name",
-            template=name,
-            step=row.step_id,
-        )
-        pool[SEAT_SLOT] = seat
 
     unsupplied = sorted(dynamic - slots.keys())
     runlog.require(
@@ -465,8 +390,8 @@ def persist(briefs_dir: Path, *, seq: int, step_id: str, text: str) -> Path:
 
     Every brief is on disk before anything is spawned: evidence,
     reproducibility, and the file-reference transport fallback in one act. A
-    brief never travels as an argv value — a wave-scale brief carrying a full
-    member table fails as a mystery ``E2BIG`` otherwise.
+    brief never travels as an argv value — a brief carrying a document body
+    fails as a mystery ``E2BIG`` otherwise.
     """
     runlog.require(briefs_dir.is_dir(), "brief directory does not exist", directory=str(briefs_dir))
     path = briefs_dir / f"{seq:03d}-{step_id}.md"
@@ -475,31 +400,16 @@ def persist(briefs_dir: Path, *, seq: int, step_id: str, text: str) -> Path:
     return path
 
 
-def step_of(brief_path: Path) -> str:
-    """The step id a persisted brief's filename names — :func:`persist`'s grammar, read back.
-
-    The inverse, and the reason it is a function rather than a caller's split:
-    a step id contains hyphens (``pre.revision-entry``) and so does the re-ask
-    marker, so the only reading that cannot confuse the two is one that knows
-    both halves of the grammar. A caller matching a step id as a substring of
-    the stem would match one row's id inside another's.
-    """
-    _, separator, body = brief_path.stem.partition("-")
-    runlog.require(bool(separator), "not a persisted brief filename", brief=brief_path.name)
-    return body[: -len(REASK_SUFFIX)] if body.endswith(REASK_SUFFIX) else body
-
-
 # --- the template lint -------------------------------------------------------
 
 
 def lint(paths: Iterable[Path], *, prohibited: Mapping[str, re.Pattern[str]]) -> list[str]:
     """Static check over template files. An empty list is a pass.
 
-    Three findings, in file order: a template spelling something ``prohibited``
+    Two findings, in file order: a template spelling something ``prohibited``
     names — the driver's own business (a stage id, the record verb, the
-    ledger's op flag) or a metadata marker the write API alone composes;
-    a template carrying a delimiter that does not parse as a slot; and a
-    ``*.wave.tmpl`` missing one of the reserved wave slots.
+    ledger's op flag) or a metadata marker the write API alone composes; and a
+    template carrying a delimiter that does not parse as a slot.
 
     ``prohibited`` is injected rather than imported, and the finding reports
     the label rather than a reason: both vocabularies are the caller's, and
@@ -515,14 +425,7 @@ def lint(paths: Iterable[Path], *, prohibited: Mapping[str, re.Pattern[str]]) ->
                 if pattern.search(line)
             ]
         try:
-            fields = slots_of(text, source=path.name)
+            slots_of(text, source=path.name)
         except runlog.BoundaryError as exc:
             findings.append(f"{path.name}: {exc}")
-            continue
-        if WAVE_INFIX in path.name:
-            findings += [
-                f"{path.name}: WAVE template omits reserved slot {slot!r}"
-                for slot in RESERVED_WAVE_SLOTS
-                if slot not in fields
-            ]
     return findings

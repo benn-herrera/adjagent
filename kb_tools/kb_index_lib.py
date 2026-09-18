@@ -90,10 +90,10 @@ WORKS_REGISTER = "claim-quality.md"
 # module is the lowest common import of everything that reads or writes it: a
 # directory's node is its `index.md`, the tree's root is `entry-point.md`, and a
 # non-root document's link back to its parent carries the up-arrow marker.
-# Spelling these independently at their four consumers — the survey validator's
-# design-time reachability, the driver's step and replay constants, and this
-# package's verifier — lets a convention change miss one and leave design-time
-# and post-build reachability disagreeing about the same tree.
+# Spelling these independently at their consumers — the survey validator's
+# design-time reachability, the query side's directory-to-node resolution, and
+# this package's verifier — lets a convention change miss one and leave
+# design-time and post-build reachability disagreeing about the same tree.
 ENTRY_POINT_FILENAME = "entry-point.md"
 INDEX_FILENAME = "index.md"
 UPLINK_MARKER = "↑"

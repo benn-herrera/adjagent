@@ -8,20 +8,16 @@ stdout reaches the driver's stdout byte-for-byte, never trimmed and never
 re-rendered.
 """
 
-import json
-import logging
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from kb_tools import inference, kb_pipeline, kb_util
+from kb_tools import kb_pipeline, kb_util
 from kb_tools.kb_driver import baton, ledger, runlog
-from kb_tools.kb_write import ops as write_ops
 
 _THIS_DIR = Path(__file__).resolve().parent
 _PKG_PARENT = _THIS_DIR.parent.parent
@@ -176,7 +172,6 @@ def test_graph_init_with_no_document_tree_is_exit_14(tmp_path: Path) -> None:
     outcome = ledger.graph_init(repo)
 
     assert outcome.exit_code == baton.EXIT_ENVIRONMENT
-    assert not outcome.barrier
     assert not outcome.ok
 
 
@@ -321,14 +316,14 @@ def test_relayed_stdout_is_byte_identical_to_the_tools_own(tmp_path: Path, capsy
 
 
 def test_a_failing_op_still_relays_its_whole_render(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """The refusal render is display too: it carries the card, which is the fix."""
+    """The refusal render is display too: it carries the checklist and the units."""
     repo = _seeded_repo(tmp_path / "consumer")
 
     outcome = ledger.record_stage(repo, stage="phase-5")
 
     assert capsys.readouterr().out == outcome.stdout
     assert outcome.stdout.endswith("\n")
-    assert "[card] next action" in outcome.stdout
+    assert "[kb-build] status:" in outcome.stdout
 
 
 def test_relay_can_be_suppressed_for_a_read_that_is_not_a_transition(
@@ -503,181 +498,3 @@ def test_run_target_refuses_a_name_that_is_not_a_maintenance_target(tmp_path: Pa
 
     with pytest.raises(runlog.BoundaryError):
         ledger.run_target(repo, target="kb-publish")
-
-
-# ---------------------------------------------------------------------------
-# The write ops: exit 8 enrolled, and retried unchanged
-# ---------------------------------------------------------------------------
-#
-# The rc is injected rather than raced for: a real exit 8 needs a second writer
-# moving the file inside the op's own contention window, which is
-# `test_kb_write_*`'s forced interleaving and proves nothing about the
-# adapter. What is under test here is the adapter's answer to the rc — that
-# the identical argv is re-run, a bounded number of times, with no dispatch
-# anywhere in the loop.
-
-# A stand-in for `python3 -m kb_tools.kb_util <op>`: it appends its own argv to
-# a log and exits the next code in a scripted sequence, so a case states the rc
-# series it means to test and reads back exactly what was invoked. Written as a
-# joined list because the formatter collapses an implicitly concatenated
-# multi-line literal onto one line.
-_SCRIPTED_OP = "\n".join(
-    [
-        "import sys",
-        "from pathlib import Path",
-        "here = Path(__file__).resolve().parent",
-        "log = here / 'invocations.log'",
-        "codes = (here / 'codes.txt').read_text(encoding='utf-8').split()",
-        "seen = len(log.read_text(encoding='utf-8').splitlines()) if log.exists() else 0",
-        "with log.open('a', encoding='utf-8') as handle:",
-        "    handle.write(' '.join(sys.argv[1:]) + '\\n')",
-        "sys.exit(int(codes[seen if seen < len(codes) else -1]))",
-    ]
-)
-
-# Every write op takes one `--values FILE` and nothing else — the values are
-# TOML — so an op name and a values path is the whole shape of a
-# driver-invoked call.
-# The file is never opened here: the scripted op reads its rc, not its input.
-_WRITE_ARGS = ("--values", ".claude-temp/kb-build/set-rigor.toml")
-
-
-def _no_dispatch(*args: object, **kwargs: object) -> None:
-    raise AssertionError("the write-op path dispatched inference")
-
-
-def _scripted_write_op(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *codes: int) -> Path:
-    """Point the adapter's ``kb_util`` invocation at :data:`_SCRIPTED_OP`; return its log.
-
-    ``_KB_UTIL`` is the seam the adapter itself uses to name the tool, so
-    replacing it exercises the real ``_outcome`` path — the real subprocess,
-    the real rc mapping, the real retry loop.
-    """
-    home = tmp_path / "scripted-op"
-    home.mkdir()
-    (home / "codes.txt").write_text(" ".join(str(code) for code in codes), encoding="utf-8")
-    script = home / "op.py"
-    script.write_text(_SCRIPTED_OP, encoding="utf-8")
-    monkeypatch.setattr(ledger, "_KB_UTIL", (sys.executable, str(script)))
-    return home / "invocations.log"
-
-
-def _invocations(log: Path) -> list[str]:
-    return log.read_text(encoding="utf-8").splitlines()
-
-
-@pytest.fixture
-def run_log(tmp_path: Path) -> Iterator[Path]:
-    """The driver's own evidence channel, attached for one test and detached after.
-
-    A retry is *reported* where the driver reports everything — the run log's
-    JSONL — so the count is read back from there rather than through
-    ``caplog``, whose handler lands on the driver logger as well as the root
-    when a suite has already turned that logger's propagation off, and then
-    sees every record twice.
-    """
-    paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    runlog.configure(run_log=paths.run_log, level="INFO")
-    yield paths.run_log
-    driver_log = logging.getLogger("kb_driver")
-    for handler in list(driver_log.handlers):
-        driver_log.removeHandler(handler)
-        handler.close()
-
-
-def _reported_retries(run_log: Path) -> list[dict]:
-    records = [json.loads(line) for line in run_log.read_text(encoding="utf-8").splitlines()]
-    return [record for record in records if "re-ran the identical invocation" in record["message"]]
-
-
-def test_a_contended_write_op_is_re_run_unchanged_until_it_lands(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_log: Path
-) -> None:
-    """rc 8 twice then 0: three invocations of one argv, one reported retry, exit 0."""
-    repo = _seeded_repo(tmp_path / "consumer")
-    log = _scripted_write_op(tmp_path, monkeypatch, 8, 8, 0)
-    # Nothing in this path may reach the model. The dispatch entry point is
-    # `inference.invoke`; if the adapter ever routed a retry through inference,
-    # this is where it would show.
-    monkeypatch.setattr(inference, "invoke", _no_dispatch)
-
-    outcome = ledger.write_op(repo, op=kb_util.OP_SET_RIGOR, args=_WRITE_ARGS)
-
-    assert outcome.ok
-    invocations = _invocations(log)
-    assert len(invocations) == 3
-    assert set(invocations) == {" ".join((kb_util.OP_SET_RIGOR, *_WRITE_ARGS))}
-    retries = _reported_retries(run_log)
-    assert len(retries) == 1
-    # The run log's context values are strings by the formatter's contract.
-    assert retries[0]["context"] == {
-        "argv": " ".join((sys.executable, str(tmp_path / "scripted-op" / "op.py"), kb_util.OP_SET_RIGOR, *_WRITE_ARGS)),
-        "invocations": "3",
-        "returncode": "0",
-    }
-
-
-def test_a_write_op_that_stays_contended_is_bounded_and_names_its_restore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """rc 8 forever: the original call plus the bound, then an environment fault."""
-    repo = _seeded_repo(tmp_path / "consumer")
-    log = _scripted_write_op(tmp_path, monkeypatch, 8)
-    monkeypatch.setattr(inference, "invoke", _no_dispatch)
-
-    outcome = ledger.write_op(repo, op=kb_util.OP_SET_RIGOR, args=_WRITE_ARGS)
-
-    assert outcome.exit_code == baton.EXIT_ENVIRONMENT
-    assert len(_invocations(log)) == ledger.WRITE_OP_RETRY_LIMIT + 1
-    assert any("restore:" in line for line in outcome.detail)
-
-
-def test_a_write_op_that_lands_first_time_is_neither_retried_nor_reported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_log: Path
-) -> None:
-    repo = _seeded_repo(tmp_path / "consumer")
-    log = _scripted_write_op(tmp_path, monkeypatch, 0)
-
-    outcome = ledger.write_op(repo, op=kb_util.OP_SET_RIGOR, args=_WRITE_ARGS)
-
-    assert outcome.ok
-    assert len(_invocations(log)) == 1
-    assert _reported_retries(run_log) == []
-
-
-@pytest.mark.parametrize(
-    ("code", "expected"),
-    [
-        (write_ops.ExitCode.ENVIRONMENT, baton.EXIT_ENVIRONMENT),
-        (write_ops.ExitCode.REFUSED, baton.EXIT_INTERNAL),
-    ],
-    ids=["environment", "refused"],
-)
-def test_the_other_write_op_codes_map_without_a_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, expected: int
-) -> None:
-    repo = _seeded_repo(tmp_path / "consumer")
-    log = _scripted_write_op(tmp_path, monkeypatch, code)
-
-    outcome = ledger.write_op(repo, op=kb_util.OP_SET_RIGOR, args=_WRITE_ARGS)
-
-    assert outcome.exit_code == expected
-    assert len(_invocations(log)) == 1
-
-
-def test_an_rc_outside_the_write_vocabulary_is_still_a_contract_violation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The reason 8 had to be enrolled: an unmapped rc reads as a broken tool (exit 15)."""
-    repo = _seeded_repo(tmp_path / "consumer")
-    _scripted_write_op(tmp_path, monkeypatch, 9)
-
-    with pytest.raises(runlog.BoundaryError):
-        ledger.write_op(repo, op=kb_util.OP_SET_RIGOR, args=_WRITE_ARGS)
-
-
-def test_write_op_refuses_a_name_that_is_not_a_write_op(tmp_path: Path) -> None:
-    repo = _seeded_repo(tmp_path / "consumer")
-
-    with pytest.raises(runlog.BoundaryError):
-        ledger.write_op(repo, op=kb_util.OP_SHOW_STATUS)

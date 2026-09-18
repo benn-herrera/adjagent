@@ -124,7 +124,6 @@ def _walk_head(
             None, run_overrides={"sources": tuple(sources), **overrides}, admissible=barriers.ADMISSIBLE
         ),
         paths=paths,
-        decisions=[config.parse_decision("start.proceed=yes", admissible=barriers.ADMISSIBLE)],
         repo_root=consumer,
         stages=stages,
     )
@@ -234,10 +233,9 @@ def walked_without_inference(
     walk runs the whole pipeline and every other test in this file reads a
     ledger that stops at the cut.
 
-    No ``--dry-run``: with every inference-spending row dropped there is nothing
-    left for a replay to answer, so the walk runs against the real transport and
-    never reaches it. That the run completes is itself the evidence that no row
-    tried to spawn a model.
+    The walk runs against the real transport throughout: with every
+    inference-spending row dropped, nothing reaches a dispatch, so that the run
+    completes at all is itself the evidence that no row tried to spawn a model.
     """
     root = tmp_path_factory.mktemp("no-inference")
     consumer = _make_fresh_consumer(root / "consumer", corpus=staged_corpus, files=(*sources, bibliography))

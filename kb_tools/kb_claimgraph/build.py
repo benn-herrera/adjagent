@@ -102,12 +102,23 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path) -> Report:
         )
 
         plan = assemble.assemble(documents, sites, claims)
+        equations = tuple(entry for entry in plan.entries if entry.equation is not None)
         report.findings.append(
             Finding(
                 PASS,
                 "stage-E-assemble",
                 f"{len(plan.entries)} register entries across {len(plan.registers())} registers, "
                 f"{len(plan.documents)} frontmatter records, {len(plan.markers)} markers",
+            )
+        )
+        report.findings.append(
+            Finding(
+                FACT,
+                "stage-E-equations",
+                f"{len(equations)} of those entries are referenced equations no claim-bearing block and no "
+                f"proof holds, across {len({entry.document for entry in equations})} documents — minted so "
+                f"that the corpus's own cross-references to them resolve, and bounded by those references: "
+                f"a labelled equation nobody cites is not among them",
             )
         )
         report.findings.append(

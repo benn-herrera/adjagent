@@ -1470,8 +1470,7 @@ def test_the_walk_records_every_stage_and_ends_complete(
         - _commit_count(ladder[_predecessor_of("phase-5")].tree),
         "the world-state named at completion": "complete" in final.status.stdout,
         "checklist markers at completion": sorted({marker for marker, _ in _checklist(final.status.stdout)}),
-        "cards rendered by a complete process": _cards(final.status.stdout),
-        "the line closing the card-less render": final.status.stdout.splitlines()[-1],
+        "the line closing the render": final.status.stdout.splitlines()[-1],
         "re-recording the final stage exits": rerecorded.returncode,
         "re-recording says the process is already complete": "process already complete" in rerecorded.stdout,
         "commits re-recording added": _commit_count(settled) - before,
@@ -1486,8 +1485,7 @@ def test_the_walk_records_every_stage_and_ends_complete(
         "commits the phase-5 boundary added": 1,
         "the world-state named at completion": True,
         "checklist markers at completion": ["x"],
-        "cards rendered by a complete process": [],
-        "the line closing the card-less render": f"[kb-build] {kb_pipeline.CONTRACT_LINE}",
+        "the line closing the render": kb_pipeline.checklist_lines(set(kb_pipeline.STAGE_IDS))[-1],
         "re-recording the final stage exits": 0,
         "re-recording says the process is already complete": True,
         "commits re-recording added": 0,
@@ -1600,96 +1598,13 @@ def test_show_status_omits_the_unseeded_note_once_the_spine_exists(tmp_path: Pat
     assert "not seeded yet" not in result.stdout
 
 
-# ---------------------------------------------------------------------------
-# Action cards, the contract line, and baton lines
-# ---------------------------------------------------------------------------
-
-
-def _cards(stdout: str) -> list[str]:
-    return [line for line in stdout.splitlines() if line.startswith(kb_pipeline.CARD_PREFIX)]
-
-
-def test_every_stage_carries_a_card_with_exactly_one_record_step_and_stage_status_step(tmp_path: Path) -> None:
-    """The card is single-sourced beside the stage id; none may be missing.
-
-    Each must carry exactly one generated ``RecordStep``: the record verb
-    appears nowhere else an agent reads, so a card without one is a dead end
-    and a card with two is ambiguous. Each must likewise carry exactly one
-    generated ``StageStatusStep``, for the same reason: it is the one place a
-    card hands back what a stage still has to cover.
-    """
-    for stage in kb_pipeline.STAGES:
-        assert stage.card, f"{stage.id} has no action card"
-        assert all(not isinstance(item, str) or item.strip() for item in stage.card), stage.id
-        assert sum(isinstance(item, kb_pipeline.RecordStep) for item in stage.card) == 1, stage.id
-        assert sum(isinstance(item, kb_pipeline.StageStatusStep) for item in stage.card) == 1, stage.id
-
-
-def test_pre_start_renders_the_start_card(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-
-    result = _op(repo, "show-status")
-
-    cards = _cards(result.stdout)
-    assert cards[0] == f"{kb_pipeline.CARD_PREFIX} next action — start (build started):"
-    assert any(kb_pipeline.CHARTER_RELPATH in line for line in cards)
-    # What follows the opening boundary is the driver's own next stage. The card
-    # used to direct a dispatch here, and the build has no such route: a card is
-    # an operator's next action, so one naming a seat that does not exist is a
-    # defect rather than a stale phrasing.
-    assert any("nothing is dispatched here" in line for line in cards)
-    assert not any("coordinator" in line for line in cards)
-
-
-def test_advance_step_card_is_its_baton(tmp_path: Path) -> None:
-    """Recording a stage renders the next stage's card, not the recorded one's."""
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, _predecessor_of("phase-3a"))
-
-    result = _op(repo, "advance-step", "--stage", "phase-3a")
-
-    assert _cards(result.stdout)[0].startswith(f"{kb_pipeline.CARD_PREFIX} next action — overview-drafted ")
-
-
-def test_refusals_still_render_the_current_card(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, _predecessor_of("phase-3a"))
-
-    result = _op(repo, "advance-step", "--stage", "phase-5")
-
-    assert result.returncode == kb_pipeline.EXIT_OUT_OF_ORDER
-    # Refused the wrong stage, still told where the build actually is.
-    assert _cards(result.stdout)[0].startswith(f"{kb_pipeline.CARD_PREFIX} next action — phase-3a ")
-
-
-@pytest.mark.parametrize(
-    "make_call",
-    [
-        pytest.param(lambda repo: _op(repo, "show-status"), id="show-status"),
-        pytest.param(lambda repo: _op(repo, "start-build", "--charter", "c.md"), id="start-build"),
-        pytest.param(lambda repo: _op(repo, "advance-step", "--stage", "start"), id="advance-step"),
-    ],
-)
-def test_every_pipeline_render_ends_with_the_contract_line(tmp_path: Path, make_call) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-
-    result = make_call(repo)
-
-    assert result.stdout.splitlines()[-1] == f"[kb-build] {kb_pipeline.CONTRACT_LINE}"
-
-
-def test_contract_line_closes_a_refusal_render_too(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, "start")
-
-    result = _op(repo, "advance-step", "--stage", "phase-5")
-
-    assert result.returncode == kb_pipeline.EXIT_OUT_OF_ORDER
-    assert result.stdout.splitlines()[-1] == f"[kb-build] {kb_pipeline.CONTRACT_LINE}"
-
-
 def test_checklist_block_stays_contiguous_and_uniquely_parseable(tmp_path: Path) -> None:
-    """Card, note, status and contract lines must not leak into a checklist parse."""
+    """Status, note and refusal lines must not leak into a checklist parse.
+
+    ``kb_driver.checklist`` lifts the block out of the render with this regex
+    and nothing else, so a second line matching it is a stage the driver reads
+    that the ledger never recorded.
+    """
     repo = _pipeline_repo(tmp_path / "consumer")
     _advance_through(repo, "start")
 
@@ -1697,25 +1612,16 @@ def test_checklist_block_stays_contiguous_and_uniquely_parseable(tmp_path: Path)
 
     matched = [i for i, line in enumerate(lines) if _CHECKLIST_RE.match(line)]
     assert len(matched) == len(kb_pipeline.STAGES)
-    # One unbroken run: no card or prose line falls inside the block.
+    # One unbroken run: no status or note line falls inside the block.
     assert matched == list(range(matched[0], matched[0] + len(kb_pipeline.STAGES)))
     # And nothing outside it parses as a checklist entry.
-    assert not _CHECKLIST_RE.match(f"[kb-build] {kb_pipeline.CONTRACT_LINE}")
-    assert not _CHECKLIST_RE.match(f"{kb_pipeline.CARD_PREFIX} · record")
+    assert [line for line in lines if not _CHECKLIST_RE.match(line)]
+    assert not _CHECKLIST_RE.match(kb_pipeline.status_line({"start"}))
 
 
-def test_start_build_directs_no_coordinator(tmp_path: Path) -> None:
-    """R-D: the build is driver-controlled end to end, so no card names a coordinator seat."""
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _lay_down_artifacts(repo, only={"docs/charter.md"})
-
-    result = _op(repo, "start-build", "--charter", "docs/charter.md")
-
-    assert result.returncode == 0, result.stderr
-    assert "coordinator" not in result.stdout
-    # The render still hands the reader its next action: the card for the
-    # stage the checklist now points at.
-    assert kb_pipeline.CARD_PREFIX in result.stdout
+# ---------------------------------------------------------------------------
+# Baton lines
+# ---------------------------------------------------------------------------
 
 
 def test_preflight_baton_on_success_only(tmp_path: Path) -> None:
@@ -1739,197 +1645,6 @@ def test_graph_init_baton_on_success(tmp_path: Path) -> None:
     assert f"{kb_util.GRAPH_INIT_TAG} next: start-build [--charter <path>]" in result.stdout
     # graph-init runs the preflight suite; its standalone baton must not appear.
     assert "then run graph-init" not in result.stdout
-
-
-# --- generated card obligations -------------------------------------------
-
-_OP_PREFIX = "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util "
-
-
-@pytest.mark.parametrize("stage", kb_pipeline.STAGES, ids=[s.id for s in kb_pipeline.STAGES])
-def test_record_line_carries_the_full_invocation_for_its_own_stage(tmp_path: Path, stage: kb_pipeline.Stage) -> None:
-    """The record command is generated from the stage, never hand-written.
-
-    A hand-maintained stage id inside a card string is exactly the drift this
-    guards: every stage's record line must name its own id and no other.
-    """
-    repo = _pipeline_repo(tmp_path / "consumer")
-
-    lines = kb_pipeline.card_lines(stage, repo)
-    record = [line for line in lines if " · record: " in line]
-    assert len(record) == 1, lines
-
-    if stage.id == kb_pipeline.FIRST_STAGE_ID:
-        assert f"{_OP_PREFIX}start-build [--charter {kb_pipeline.CHARTER_RELPATH}]" in record[0]
-        assert "advance-step" not in record[0]
-    else:
-        assert f"{_OP_PREFIX}advance-step --stage {stage.id}" in record[0]
-        assert "start-build" not in record[0]
-        # No other stage's id may appear in this stage's record line.
-        others = [other for other in kb_pipeline.STAGE_IDS if other != stage.id]
-        tail = record[0].split(f"--stage {stage.id}", 1)[1]
-        assert not any(f"--stage {other}" in tail for other in others)
-
-
-def test_record_line_renders_note_and_aside_where_the_spec_asks(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    by_id = {stage.id: stage for stage in kb_pipeline.STAGES}
-
-    phase_3a = " ".join(kb_pipeline.card_lines(by_id["phase-3a"], repo))
-    assert "--stage phase-3a" in phase_3a
-    assert "(the tool refuses to record this stage red)" in phase_3a
-
-    # A stage whose spec record line says nothing extra gets a bare command.
-    phase_5 = [line for line in kb_pipeline.card_lines(by_id["phase-5"], repo) if " · record: " in line][0]
-    assert "--note" not in phase_5
-
-
-_RUNNERS = [("justfile", "just"), ("Makefile", "make")]
-
-
-def _repo_with_runner(tmp_path: Path, runner_file: str) -> Path:
-    """A pipeline repo carrying exactly one runner file, so detection has one answer."""
-    repo = _pipeline_repo(tmp_path / runner_file)
-    for name in ("justfile", "Makefile"):
-        (repo / name).unlink(missing_ok=True)
-    (repo / runner_file).write_text("hello:\n", encoding="utf-8")
-    return repo
-
-
-@pytest.mark.parametrize(("runner_file", "expected"), _RUNNERS)
-def test_validation_gate_card_names_the_repos_own_runner(tmp_path: Path, runner_file: str, expected: str) -> None:
-    """A justfile consumer must not be told to run make."""
-    repo = _repo_with_runner(tmp_path, runner_file)
-    gate = {stage.id: stage for stage in kb_pipeline.STAGES}["phase-3a"]
-
-    line = [line for line in kb_pipeline.card_lines(gate, repo) if " · run " in line][0]
-
-    assert line.endswith(f"run `{expected} kb-refresh` then `{expected} kb-verify`")
-
-
-def test_the_full_verify_gate_belongs_to_phase_3a_alone(tmp_path: Path) -> None:
-    """One pre-completion verify gate, at the first stage where it can pass.
-
-    Stated over the table rather than one card, so a later stage cannot
-    quietly acquire a second gate.
-    """
-    gated = {
-        stage.id for stage in kb_pipeline.STAGES if any(isinstance(item, kb_pipeline.GateStep) for item in stage.card)
-    }
-    assert gated == {"phase-3a"}
-
-
-# --- loop caps, rendered from their one definition ------------------------
-
-# (stage whose card carries the line, the cap constant it renders, the line as
-# an agent must read it).
-_CAPPED_CARD_LINES = [
-    (
-        "phase-5",
-        "PHASE_5_FIX_CAP",
-        "tech-writer-reviewer reviews the documents the stage before this one wrote, tech-writer "
-        "answers each round's findings; fix-cycle cap {cap}; findings persisting -> escalate",
-    ),
-]
-_CAPPED_IDS = [stage_id for stage_id, _, _ in _CAPPED_CARD_LINES]
-
-# A cap number written into a plain card string, in any of the shapes the
-# cards used before the constants existed.
-_HAND_WRITTEN_CAP_RE = re.compile(r"\bcap \d|\bmax \d|\b\d+ (?:cycles?|iterations?)\b")
-
-
-def _card_line(template: str, cap: int) -> str:
-    return f"{kb_pipeline.CARD_PREFIX} · " + template.format(cap=cap)
-
-
-@pytest.mark.parametrize(("stage_id", "constant", "template"), _CAPPED_CARD_LINES, ids=_CAPPED_IDS)
-def test_card_renders_its_cap_from_the_constant(tmp_path: Path, stage_id: str, constant: str, template: str) -> None:
-    """The card an agent reads carries the number the driver will enforce."""
-    repo = _pipeline_repo(tmp_path / "consumer")
-    stage = {s.id: s for s in kb_pipeline.STAGES}[stage_id]
-
-    lines = kb_pipeline.card_lines(stage, repo)
-
-    assert _card_line(template, getattr(kb_pipeline, constant)) in lines
-
-
-@pytest.mark.parametrize(("stage_id", "constant", "template"), _CAPPED_CARD_LINES, ids=_CAPPED_IDS)
-def test_retuning_a_cap_retunes_the_card_that_names_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage_id: str, constant: str, template: str
-) -> None:
-    """One definition: the constant moves and the card follows, with nothing to sync."""
-    repo = _pipeline_repo(tmp_path / "consumer")
-    stage = {s.id: s for s in kb_pipeline.STAGES}[stage_id]
-    before = _card_line(template, getattr(kb_pipeline, constant))
-
-    monkeypatch.setattr(kb_pipeline, constant, 9)
-    lines = kb_pipeline.card_lines(stage, repo)
-
-    assert _card_line(template, 9) in lines
-    assert before not in lines
-
-
-@pytest.mark.parametrize(
-    "removed",
-    [
-        "Criticals -> architect revises (max 2 cycles, one final review)",
-        "failures -> distiller fixes, cap 2, then escalate",
-        "max 3 iterations then escalate",
-    ],
-)
-def test_the_hand_written_cap_guard_catches_the_shapes_it_replaced(removed: str) -> None:
-    """The guard below is only worth running if it matches what it is guarding against."""
-    assert _HAND_WRITTEN_CAP_RE.search(removed)
-
-
-def test_no_card_hand_writes_a_cap_number() -> None:
-    """A cap living in a plain string is exactly the drift the constants remove."""
-    offenders = [
-        (stage.id, item)
-        for stage in kb_pipeline.STAGES
-        for item in stage.card
-        if isinstance(item, str) and _HAND_WRITTEN_CAP_RE.search(item)
-    ]
-
-    assert offenders == []
-
-
-# --- the cards a walking agent actually reads ------------------------------
-#
-# Everything above is asserted against the stage table; these four are asserted
-# against what `show-status` actually puts on an agent's screen, at the
-# boundaries whose rendered card says something distinct. Each reads the render
-# the ladder walk already captured, so all four are free and stay separate —
-# a card naming the wrong runner and a card hand-writing a cap number are
-# different diagnoses and deserve different reports.
-
-
-def test_in_progress_renders_the_starred_stages_card(ladder: dict[str, Rung]) -> None:
-    """The card and the [*] marker are one decision, so they cannot disagree."""
-    rendered = ladder[_predecessor_of("phase-3a")].status.stdout
-
-    starred = [stage_id for marker, stage_id in _checklist(rendered) if marker == "*"]
-    assert starred == ["phase-3a"]
-    cards = _cards(rendered)
-    assert cards[0].startswith(f"{kb_pipeline.CARD_PREFIX} next action — phase-3a ")
-    assert any("run `just kb-refresh` then `just kb-verify`" in line for line in cards)
-
-
-def test_cap_lines_are_rendered_through_the_running_tool(ladder: dict[str, Rung]) -> None:
-    """End-to-end: the number an agent actually reads comes from the constant."""
-    cards = _cards(ladder[_predecessor_of("phase-5")].status.stdout)
-
-    assert any(f"fix-cycle cap {kb_pipeline.PHASE_5_FIX_CAP};" in line for line in cards)
-    # The pre-constant phrasing, which said the same number twice.
-    assert not any("max 1 iteration" in line for line in cards)
-
-
-def test_validation_gate_card_is_rendered_through_the_running_tool(ladder: dict[str, Rung]) -> None:
-    """End-to-end: the card an agent actually reads names the detected runner."""
-    cards = _cards(ladder[_predecessor_of("phase-3a")].status.stdout)
-
-    assert any("run `just kb-refresh` then `just kb-verify`" in line for line in cards)
-    assert not any("make kb-refresh" in line for line in cards)
 
 
 # --- artifact-existence postconditions ------------------------------------
@@ -1970,8 +1685,8 @@ def test_stage_refuses_when_its_artifact_is_missing(
     assert result.returncode == kb_pipeline.EXIT_POSTCONDITION_FAILED
     assert f"cannot record '{stage_id}'" in result.stderr
     assert _commit_count(repo) == before
-    # The corrective feedback is the card itself.
-    assert _cards(result.stdout)[0].startswith(f"{kb_pipeline.CARD_PREFIX} next action — {stage_id} ")
+    # The corrective feedback is the checklist: where the build actually stands.
+    assert [marker for marker, named in _checklist(result.stdout) if named == stage_id] == ["*"]
 
 
 def test_start_refuses_when_the_charter_was_never_written(tmp_path: Path) -> None:
@@ -2232,13 +1947,11 @@ def test_the_read_reports_phase_5s_one_unit_covered_and_then_missing(branch_at: 
     ]
 
 
-def test_the_read_renders_no_checklist_and_no_card(branch_at: Callable[[str], Path]) -> None:
+def test_the_read_renders_no_checklist(branch_at: Callable[[str], Path]) -> None:
     """Not ``show-status``: this render is a list as long as the corpus.
 
-    ``show-status``' render is quoted verbatim into every user message, which is
-    what the contract line demands of it; a unit list inside that payload has no
-    bound. So the coverage read carries neither the checklist nor the card, and
-    the checklist block keeps its one producer.
+    ``show-status``' render is the fixed-length one, and the checklist block
+    keeps its one producer — so nothing this read prints parses as one.
     """
     repo = branch_at("phase-3a")
 
@@ -2247,12 +1960,12 @@ def test_the_read_renders_no_checklist_and_no_card(branch_at: Callable[[str], Pa
 
         assert result.returncode == 0, result.stderr
         assert _checklist(result.stdout) == [], stage_id
-        assert _cards(result.stdout) == [], stage_id
-        assert kb_pipeline.CONTRACT_LINE not in result.stdout, stage_id
+        assert _stage_status_lines(result.stdout), stage_id
+        assert "[kb-build] status:" not in result.stdout, stage_id
 
 
 def test_the_zero_argument_read_is_the_stage_the_checklist_stars(branch_at: Callable[[str], Path]) -> None:
-    """One ``current_stage`` decision behind the marker, the card and this read."""
+    """One ``current_stage`` decision behind the marker and this read."""
     repo = branch_at(_predecessor_of("phase-5"))
     starred = [stage_id for marker, stage_id in _checklist(_op(repo, "show-status").stdout) if marker == "*"]
 
@@ -2501,11 +2214,10 @@ def test_the_read_op_constant_keys_the_sibling_registry_and_joins_no_write_set()
     """The read-only op is a sibling of the write surface, not a tenth member.
 
     The consequence is what this pins. ``WRITE_OPS`` is what the driver's
-    ledger admits as a spawnable write, what carries the write ops' four-code
-    exit vocabulary, and what ``steps.WRITE_OP_SLOTS`` renders a brief slot
-    for; an op that writes nothing and that no brief invokes belongs to none of
-    those. The two registries are disjoint and together are exactly the closed
-    values vocabulary.
+    ledger admits as a spawnable write and what carries the write ops'
+    four-code exit vocabulary; an op that writes nothing and that no brief
+    invokes belongs to neither. The two registries are disjoint and together
+    are exactly the closed values vocabulary.
     """
     from kb_tools.kb_write import ops as write_ops
     from kb_tools.kb_write import values as write_values
@@ -2877,229 +2589,25 @@ def test_a_non_matching_excerpt_refuses_with_nothing_on_stdout(tmp_path: Path) -
     assert _tree_snapshot(repo) == before
 
 
-def test_the_published_invocation_constants_are_what_the_cards_render(tmp_path: Path) -> None:
+def test_the_published_invocation_constants_are_what_the_renderers_render() -> None:
     """Both published invocations, pinned against the renderers that consume them.
 
-    ``kb_pipeline`` builds every card command and ``kb_driver.steps`` fills every
-    brief slot from ``INVOCATION``; ``kb_driver.baton`` builds every ``THEN RUN:``
-    line and ``kb_driver.watch`` its restore hint from ``DRIVER_INVOCATION``.
-    Pinning each against the text an agent actually reads is what keeps one
-    invocation from becoming several spellings of itself — and the literal here
-    is what keeps a spelling that drops the ``PYTHONPATH`` prefix, and so does
+    ``verify_kb_metadata`` builds its remediation hint from ``INVOCATION``;
+    ``kb_driver.baton`` builds every ``THEN RUN:``
+    line from ``DRIVER_INVOCATION``.
+    Pinning each against the text a reader actually gets is what keeps one
+    invocation from becoming several spellings of itself — and the literals here
+    are what keep a spelling that drops the ``PYTHONPATH`` prefix, and so does
     not resolve where the relaying session stands, from passing.
     """
-    repo = _pipeline_repo(tmp_path / "consumer")
-    stage = {s.id: s for s in kb_pipeline.STAGES}["phase-3a"]
+    from kb_tools import verify_kb_metadata
 
-    record = [line for line in kb_pipeline.card_lines(stage, repo) if " · record: " in line][0]
-
-    assert f"record: {kb_util.INVOCATION} " in record
-    assert _OP_PREFIX == f"{kb_util.INVOCATION} "
+    assert kb_util.INVOCATION == "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util"
+    assert verify_kb_metadata.SET_FRONTMATTER_CMD.startswith(f"{kb_util.INVOCATION} ")
 
     assert kb_util.DRIVER_INVOCATION == "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_driver"
     resume = baton.render(baton.EXIT_TRANSPORT, baton.BatonContext(invocation="--config cfg.toml"))
     assert f"{kb_util.DRIVER_INVOCATION} run --config cfg.toml" in resume
-
-
-# ---------------------------------------------------------------------------
-# The build's opening gate (show-confirmation)
-#
-# One read in front of the gate; what the answer releases is `start-build`,
-# tested above. What is asserted below is what the read leaves behind — the
-# render's content, and that it writes nothing outside the scratch directory
-# preflight creates — never the wording of a line.
-# ---------------------------------------------------------------------------
-
-
-def _bare_repo(root: Path, *, sources: bool = True) -> Path:
-    """A committed consumer repo with no runner file and no KB.
-
-    What ``show-confirmation`` reads its tri-state off: the confirmation renders
-    before anything has been built, and ``kb-root/`` not existing yet is one of
-    the things it reports.
-    """
-    files = {"sources/book.tex": "\\documentclass{article}\n"} if sources else {}
-    return _git_repo(root, files=files)
-
-
-def _charter_values(repo: Path, charter: str, name: str = "charter.toml") -> Path:
-    """A charter values file in the repo's scratch tree, where an input belongs.
-
-    Written under ``.claude-temp/`` deliberately: it is the call's input rather
-    than a build artifact, and an uncommitted file anywhere else would fail the
-    clean-worktree check the seed that follows this read runs.
-    """
-    path = repo / kb_util.SCRATCH_DIRNAME / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = charter.replace("'''", "")
-    path.write_text(f"[[entry]]\ncharter = '''\n{body}'''\n", encoding="utf-8")
-    return path
-
-
-# --- show-confirmation: the render is the message --------------------------
-
-
-def test_confirmation_carries_the_parse_the_checklist_and_the_environment(tmp_path: Path) -> None:
-    """One call renders everything the confirmation turns on.
-
-    The sequence this replaced ran two ops and composed the rest, which is where
-    the ordering defect lived. Every fact the answer depends on comes back from
-    one call, so there is nothing left to assemble and nothing to assemble it in
-    the wrong order.
-    """
-    repo = _bare_repo(tmp_path / "consumer")
-    values = _charter_values(repo, "Build the KB from sources/book.tex.\n")
-
-    result = _run_installer(repo, "show-confirmation", "--source", "sources/book.tex", "--charter-values", str(values))
-
-    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert str(repo.resolve()) in result.stdout
-    assert str((repo / "sources" / "book.tex").resolve()) in result.stdout
-    assert str(kb_util.kb_root(repo)) in result.stdout
-    # The determination, the run map, the unsettled facts, and the environment.
-    assert "does not exist yet" in result.stdout
-    assert [stage_id for _, stage_id in _checklist(result.stdout)] == list(kb_pipeline.STAGE_IDS)
-    assert "Default" in result.stdout
-    assert "[preflight] PASS" in result.stdout
-    # The charter is quoted back for the user to check what will be carried.
-    assert "[charter] Build the KB from sources/book.tex." in result.stdout
-
-
-def test_confirmation_names_every_stage_the_table_gates_on_the_user(tmp_path: Path) -> None:
-    """Where the user is expected reaches the render, and comes from the table.
-
-    Compared as the pair rather than the bare id, so an id that happens to be a
-    substring of another stage's cannot read a gate as standing where it does
-    not.
-    """
-    repo = _bare_repo(tmp_path / "consumer")
-
-    result = _run_installer(repo, "show-confirmation", "--source", "sources")
-
-    assert result.returncode == 0, result.stderr
-    named = {stage.id for stage in kb_pipeline.STAGES if f"{stage.id} ({stage.display})" in result.stdout}
-    assert named == {stage.id for stage in kb_pipeline.STAGES if stage.user_gate}
-
-
-def test_confirmation_writes_nothing_but_the_scratch_directory(tmp_path: Path) -> None:
-    """A read before a gate: no KB, no charter, no ledger, no runner file."""
-    repo = _bare_repo(tmp_path / "consumer")
-    (repo / kb_util.SCRATCH_DIRNAME).mkdir()
-    before = _tree_snapshot(repo)
-
-    result = _run_installer(repo, "show-confirmation", "--source", "sources")
-
-    assert result.returncode == 0, result.stderr
-    assert _tree_snapshot(repo) == before
-    assert not (repo / "kb-root").exists()
-    assert not (repo / kb_pipeline.CHARTER_RELPATH).exists()
-    assert not _subjects(repo)
-
-
-def test_confirmation_names_the_runner_default_only_where_it_is_unsettled(tmp_path: Path) -> None:
-    """A fact the repository already answers is not a question to put to the user.
-
-    The runner is the only entry the section carries, so a repository that
-    answers it leaves nothing unsettled: the heading goes with the entries
-    rather than standing over an empty section. What the rest of the answer
-    becomes is not conditional on that, and is still said.
-    """
-    bare = _run_installer(_bare_repo(tmp_path / "bare"), "show-confirmation", "--source", "sources")
-    with_runner = _run_installer(
-        _git_repo(tmp_path / "runner", files={"justfile": _JUSTFILE_BODY, "sources/b.tex": "x\n"}),
-        "show-confirmation",
-        "--source",
-        "sources",
-    )
-
-    assert bare.returncode == 0 and with_runner.returncode == 0
-    # The repo with no runner file is asked, and told what it gets by default.
-    assert "Task runner" in _unsettled_block(bare.stdout)
-    assert kb_util.runner_filename(kb_util.DEFAULT_RUNNER) in _unsettled_block(bare.stdout)
-    # The repo carrying a justfile is not asked at all, and the section it
-    # would have been the only entry of does not print.
-    assert "Task runner" not in with_runner.stdout
-    assert "Unsettled" not in with_runner.stdout
-    assert "you say is charter text" in with_runner.stdout
-
-
-def _unsettled_block(stdout: str) -> str:
-    """The confirmation's unsettled-facts lines, as one blob."""
-    lines = stdout.splitlines()
-    opening = [i for i, line in enumerate(lines) if line.startswith(f"{kb_pipeline.CONFIRMATION_TAG} Unsettled")]
-    assert len(opening) == 1, stdout
-    tail = lines[opening[0] :]
-    return "\n".join(
-        line for line in tail if line.startswith(kb_pipeline.CONFIRMATION_TAG) and "environment checks" not in line
-    )
-
-
-def test_confirmation_reports_kb_root_state_with_what_it_means_for_opening_a_build(tmp_path: Path) -> None:
-    """The tri-state, and the one consequence a reader can still act on.
-
-    A populated kb-root/ is what the driver's launch guard refuses over, so the
-    confirmation says so where there is still a choice to make — and says
-    nothing of the kind where the tree is absent, there being no refusal to
-    warn about. It states and never gates: whether this invocation is opening a
-    build or continuing one is the ledger's answer, and the checklist printed
-    below carries it.
-    """
-    empty = _run_installer(_bare_repo(tmp_path / "empty"), "show-confirmation", "--source", "sources")
-    populated = _git_repo(tmp_path / "populated", files={"kb-root/entry-point.md": "# KB\n", "sources/b.tex": "x\n"})
-
-    with_tree = _run_installer(populated, "show-confirmation", "--source", "sources")
-
-    assert "does not exist yet" in empty.stdout
-    assert "refused" not in empty.stdout
-    assert "holds a document tree" in with_tree.stdout
-    assert "a build opened over it is refused" in with_tree.stdout
-    assert with_tree.returncode == 0, with_tree.stderr
-
-
-def test_confirmation_blocks_on_a_source_that_is_not_there(tmp_path: Path) -> None:
-    """The one input from outside the repository, checked where it can still be fixed."""
-    repo = _bare_repo(tmp_path / "consumer")
-
-    result = _run_installer(repo, "show-confirmation", "--source", "sources/book.tex", "--source", "sources/gone.tex")
-
-    assert result.returncode == 1
-    assert "gone.tex" in result.stdout
-    assert "does not exist" in result.stdout
-
-
-def test_confirmation_blocks_on_a_preflight_failure(tmp_path: Path) -> None:
-    repo = _git_repo(tmp_path / "consumer", docent=False, files={"sources/b.tex": "x\n"})
-
-    result = _run_installer(repo, "show-confirmation", "--source", "sources")
-
-    assert result.returncode == 1
-    assert "FAIL" in result.stdout and "docent-commands" in result.stdout
-
-
-@pytest.mark.parametrize(
-    ("body", "reason"),
-    [
-        ("op = 'show-confirmation'\n[[entry]]\ncharter = '''x'''\n", "op"),
-        ("[[entry]]\ncharter = '''a'''\n[[entry]]\ncharter = '''b'''\n", "one build has one charter"),
-        ("[[entry]]\ncharter_text = '''x'''\n", "charter_text"),
-        ("[[entry]]\ncharter = '''   '''\n", "charter"),
-        ("[[entry\n", "readable"),
-    ],
-)
-def test_a_refused_charter_values_file_writes_nothing_and_names_the_key(tmp_path: Path, body: str, reason: str) -> None:
-    """The values grammar refuses before the op reaches the repository."""
-    repo = _bare_repo(tmp_path / "consumer")
-    values = repo / kb_util.SCRATCH_DIRNAME / "bad.toml"
-    values.parent.mkdir(parents=True, exist_ok=True)
-    values.write_text(body, encoding="utf-8")
-    before = _tree_snapshot(repo)
-
-    result = _run_installer(repo, "show-confirmation", "--source", "sources", "--charter-values", str(values))
-
-    assert result.returncode == 2
-    assert reason in result.stderr
-    assert _tree_snapshot(repo) == before
-    assert not _subjects(repo)
 
 
 def test_the_charter_lands_outside_the_scratch_tree_and_outside_the_kb(tmp_path: Path) -> None:

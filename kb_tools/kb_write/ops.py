@@ -3038,8 +3038,8 @@ class Op:
 
 #: The write surface: the nine ops that touch a file. Membership here is
 #: what makes an op a write op everywhere else — ``kb_util.WRITE_OPS`` is
-#: asserted equal to these keys, the driver's ledger refuses to spawn anything
-#: outside them, and ``steps.WRITE_OP_SLOTS`` renders one brief slot per member.
+#: asserted equal to these keys, and the driver's ledger refuses to spawn
+#: anything outside them.
 OPS: Mapping[str, Op] = {
     op.name: op
     for op in (
@@ -3066,8 +3066,7 @@ OPS: Mapping[str, Op] = {
 #: about writing: ``ledger._WRITE_OP_EXITS`` says what a driver does with a 7
 #: (a driver defect, because the driver composed the values) and with an 8 (a
 #: contended file, re-run unchanged) — and a read op has no 8 to earn, having
-#: nothing to contend over. ``steps.WRITE_OP_SLOTS`` renders a brief slot per
-#: write op, and no brief invokes this one. The mint partition walks
+#: nothing to contend over. The mint partition walks
 #: ``OPS`` asking which ops mint; a read op mints nothing and would answer
 #: vacuously in every clause.
 #:

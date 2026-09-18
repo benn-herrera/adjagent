@@ -24,6 +24,16 @@ scratch and every later stage would know the claim by path alone. The block join
 runs first, because where a block carries the title the block's own display line
 is the locator by construction.
 
+**An equation node has neither, and its title is the route back.** A node minted
+for a referenced equation (:mod:`equation`) sits in no block and takes no marker
+— its ``\\label`` is inside a maths fence, which is a place no block-level
+metadata may go — so both arms above answer ``None`` and the claim would come
+back locatable only by path. The title is what carries the label
+(:func:`kb_schema.equation_label`), so it is the third arm, and it runs
+**first**: the title's shape is decisive, where the other two are lookups that
+can miss for reasons of their own. The honest locator is the label itself, which
+is the whole of what says *where in this document* an equation sits.
+
 **Nothing here re-derives an id, a title or a host.** Every value is read off
 the authored bytes; the only thing computed is the join.
 """
@@ -32,7 +42,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import kb_index_lib
+from .. import kb_index_lib, kb_schema
 from ..kb_write import render
 from .assemble import REGISTER_FILENAME
 from .inventory import Inventory
@@ -59,6 +69,13 @@ class ClaimNode:
     #: a cross-reference fragment names, and the only mechanical route from an
     #: anchor to a *particular* claim in a document hosting several.
     identifier: str | None
+    #: The equation's own ``\\label`` where this node stands for a referenced
+    #: equation (:mod:`equation`), and ``None`` for every other claim. It is the
+    #: node's **only** route in: :func:`attribute._equation_claim` matches it
+    #: against an anchor's ``data-reference``, and nothing else reaches it —
+    #: which is why it is a field of its own rather than a second spelling of
+    #: ``identifier``, a field :func:`attribute._fragment_claim` reads.
+    equation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,7 +85,35 @@ class AuthoredGraph:
     nodes: Mapping[str, ClaimNode]
 
     def hosted_by(self, document: str) -> tuple[ClaimNode, ...]:
-        return tuple(node for node in self.nodes.values() if node.document == document)
+        """The claims ``document`` hosts — **an equation node deliberately not among them.**
+
+        This is the set two of stage D's fallbacks stand on: ``_source_end``
+        offers every claim a document hosts when a prose reference belongs to no
+        block, and ``_target_end`` lands a reference on a document's claim when
+        it hosts exactly one. An equation node counted here would join both, and
+        both readings are false of it — "the claim this prose belongs to" and
+        "the one thing this document could be about" are statements about what a
+        document *states*, and an equation node stands for a numbered formula
+        that nothing claims.
+
+        Measured over the 50-paper arXiv corpus, counting them cost **205
+        existing sole-claim edges** (90 documents stopped hosting exactly one),
+        **manufactured 132 section references** onto an equation no author
+        pointed at (66 documents newly sole), and took the prose source end's
+        k×m from 3434 to 7487. So the restriction is here, at the one accessor
+        both fallbacks read, rather than as a condition each remembers.
+        """
+        return tuple(node for node in self.nodes.values() if node.document == document and node.equation is None)
+
+    def equation_node(self, document: str, label: str) -> ClaimNode | None:
+        """The node standing for the equation ``label`` names in ``document``, or ``None``.
+
+        The whole of an equation node's reachability. Everything else asks
+        :meth:`hosted_by`, which does not carry it.
+        """
+        return next(
+            (node for node in self.nodes.values() if node.document == document and node.equation == label), None
+        )
 
     def documents(self) -> frozenset[str]:
         return frozenset(node.document for node in self.nodes.values())
@@ -123,6 +168,12 @@ def read(tree: Tree, inventory: Inventory) -> AuthoredGraph:
                     f"the register disagree about what exists, and an edge authored over that disagreement "
                     f"would name a node with no entry",
                 )
+            label = kb_schema.equation_label(title)
+            if label is not None:
+                nodes[claim_id] = ClaimNode(
+                    id=claim_id, document=path, title=title, locator=label, identifier=None, equation=label
+                )
+                continue
             locator, identifier = blocks_by_document.get(path, {}).get(title, (None, None))
             if locator is None:
                 locator = marker_locator(tree.documents[path].text, claim_id)

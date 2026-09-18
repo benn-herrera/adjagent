@@ -366,12 +366,37 @@ def check_tier1_coverage(files: list[tuple[Path, dict | None]]):
     return failures
 
 
-def check_tier2_coverage(files: list[tuple[Path, dict | None]]):
+def equation_node_ids(state) -> set[str]:
+    """Every claim id whose register title says it stands for a referenced equation.
+
+    The title is where that fact lives, because the node is an ordinary ``clm-``
+    entry in every other respect — same prefix, same register, same fields — and
+    :func:`kb_schema.equation_label` is the one reading of it, shared with the
+    builder that composed it so the two cannot drift apart.
+    """
+    return {entry.id for entry in state.claim_entries if kb_schema.equation_label(entry.title) is not None}
+
+
+def check_tier2_coverage(files: list[tuple[Path, dict | None]], equation_ids: set[str]):
+    """Marker coverage, over the claims a marker can actually be placed on.
+
+    **An equation node is outside this check at both ends**, and the exemption
+    has the same shape as the external work's in :func:`check_uncited_entries`:
+    the marker exists to make a claim's position in its document recoverable,
+    and an equation's position is its ``\\label`` — which is already in the
+    node's title and inside a maths fence in the document, a place no
+    block-level metadata may be written without altering the mathematics the
+    fence is a guarantee of. So such a node neither needs a marker nor may push
+    the document it lands in over the threshold that demands one of every claim
+    beside it; a leaf hosting one block claim and four equations is a leaf with
+    one claim as far as this rule is concerned, exactly as it was before the
+    equations were minted.
+    """
     failures = []
     for p, fm in files:
         if fm is None:
             continue
-        ids = fm.get("claims", [])
+        ids = [i for i in fm.get("claims", []) if i not in equation_ids]
         if len(ids) < 2:
             continue
         text = p.read_text(encoding="utf-8")
@@ -1430,7 +1455,7 @@ def main(argv: list[str] | None = None) -> int:
     quality_block_failures = check_quality_block_integrity()
     confidence_failures = check_confidence_values()
     t1_failures = check_tier1_coverage(files)
-    t2_failures = check_tier2_coverage(files)
+    t2_failures = check_tier2_coverage(files, equation_node_ids(kb_state))
     id_dupes = check_id_uniqueness(canonical)
     orphans = check_orphan_refs(files, canonical_set)
     subtree_failures = check_subtree_consistency(kb_state)

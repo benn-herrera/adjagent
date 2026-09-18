@@ -1,26 +1,21 @@
-"""Call policy: retry, the one re-ask, and the three persistence routes.
+"""Call policy: retry, the one re-ask, and the persistence route.
 
 Every case drives the real ``call.Caller`` through the same
-``inference.invoke`` a live call goes through, against ``replay``'s synthetic
+``inference.invoke`` a live call goes through, against ``_fake_model``'s synthetic
 stream-json — save one, which substitutes the real ``SubprocessInvoker``
 because the fault it is about is ``Popen``'s own and no synthetic invoker
 raises it where it happens.
 Two things are asserted about writes throughout, not only in the route tests:
-that each route wrote exactly where its step row declares, and that nothing the
-driver process wrote landed under ``kb-root/``.
+that the route wrote exactly where its step row declares, and that nothing else
+under the repository changed.
 
 The step rows are the real ones from ``steps.py`` — what the run loop will pass
 — while the templates are local stand-ins named for the real ones, because the
 shipped templates are the prompt engineer's and their prose is not what this
-suite is about. **Two rows are local**, and for one reason: no shipped row is a
-wave any more. The call machinery's wave route outlives the stages that used it
-— the envelope parse, the one re-ask, the premature-dispatch check, the
-one-member collapse, the two writer routes a wave takes — so the rows those
-cases run through are built in this file rather than borrowed from a table that
-no longer holds one.
+suite is about. No row is local: every calling row in the table is a SINGLE
+whose returned text the driver persists, so every case here runs through one.
 """
 
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -28,33 +23,21 @@ from pathlib import Path
 import pytest
 
 from kb_tools import inference, kb_pipeline
-from kb_tools.kb_driver import baton, call, config, envelope, prompt_templates, replay, runlog, steps
+from kb_tools.kb_driver import baton, call, config, envelope, prompt_templates, runlog, steps
+from kb_tools.tests import _fake_model as fake_model
 
 # --- the templates a call composes against ----------------------------------
 
 TEMPLATES: Mapping[str, str] = {
     "phase-5-overview-passage.single.tmpl": ("KB: @!dyn.kb-root!@\nFindings: @!dyn.remediation-source-path!@\n"),
-    "docs.single.tmpl": ("README: @!dyn.readme-path!@\n"),
     "phase-5-review.single.tmpl": (
         "README: @!dyn.readme-path!@\nCONVENTIONS: @!dyn.conventions-path!@\n\n@!verdict-contract!@\n@!return-contract!@\n"
-    ),
-    "fix.wave.tmpl": (
-        "Kind: @!dyn.remediation-kind!@\nAttempt @!dyn.attempt!@.\n"
-        "Echo @!dyn.step-id!@.\n\n@!dyn.members!@\n\n@!dispatch-discipline!@\n@!envelope-contract!@\n@!deviation-contract!@\n"
-    ),
-    "review.wave.tmpl": (
-        "Members:\n@!dyn.members!@\n\n@!persist-members!@\n"
-        "@!dispatch-discipline!@\n@!envelope-contract!@\n@!deviation-contract!@\n"
     ),
 }
 
 # Keyed by bare name and placed under the fragments directory by the fixture, so
 # the layout is stated once, where the composer states it.
 FRAGMENTS: Mapping[str, str] = {
-    "dispatch-discipline.tmpl": "Every member call sets run_in_background to false, and the turn is held.\n",
-    "envelope-contract.tmpl": "Close with exactly one envelope block for @!dyn.step-id!@ and nothing after it.\n",
-    "deviation-contract.tmpl": "Report deviations, one of: @!deviation-kinds!@\n",
-    "persist-members.tmpl": "Write each member's return to that member's named path, verbatim.\n",
     "return-contract.tmpl": "Return the artifact as the final message body.\n",
     "verdict-contract.tmpl": "End with VERDICT: critical=<n> warning=<n> note=<n>\n",
 }
@@ -62,8 +45,6 @@ FRAGMENTS: Mapping[str, str] = {
 # --- the returns a scenario can make ----------------------------------------
 
 VERDICT_TEXT = "Findings: the tree is navigable.\n\nVERDICT: critical=0 warning=2 note=1"
-
-DOCS_TEXT = "# README\n"
 
 # A path slot's value is checked before the call is made — absolute, and there
 # on disk — so these are functions of the repo under test rather than literals.
@@ -80,25 +61,6 @@ def docs_slots(repo: Path) -> dict[str, str]:
 
 PASSAGE_TEXT = "This corpus argues one thing, and the place to start is its introduction.\n"
 
-# The write-to-disk route at SINGLE, which the step table no longer holds a row
-# for: `phase-5` assembles its document from a template and the index now, and
-# the seat it calls returns prose the driver persists. The route itself is live
-# machinery with a live wave* producer (`FIX_STEP` below), so the SINGLE half
-# keeps a row here rather than losing its coverage with the row that used it.
-DOCS_STEP = steps.Step(
-    id="single.docs",
-    stage="phase-5",
-    unit=steps.Unit.SINGLE,
-    writer=steps.Writer.WORKER,
-    seat="tech-writer",
-    template="docs.single.tmpl",
-    slots=("readme-path",),
-)
-
-
-def docs_step_slots(repo: Path) -> dict[str, str]:
-    return {"readme-path": str(repo / "kb-root" / kb_pipeline.OVERVIEW_DOC)}
-
 
 #: The pair a review brief states, each named for itself. A zip over a document
 #: set would drop `conventions-path` the moment that set stopped holding two
@@ -114,59 +76,6 @@ def review_slots(repo: Path) -> dict[str, str]:
     return {slot: str(repo / "kb-root" / name) for slot, name in REVIEW_DOCS.items()}
 
 
-# The two local rows, and the values one call of the first carries. `wave.fix`
-# is the worker-writes route at `wave*`: members write their own artifacts under
-# `kb-root/` and the driver validates them, which is what makes the "the driver
-# process writes nothing under kb-root" assertions worth making. It names a real
-# seat, because `--agent` carries the name on the one-member collapse and a seat
-# nothing defines would be a call no consumer could make.
-FIX_STEP = steps.Step(
-    id="wave.fix",
-    stage="phase-5",
-    unit=steps.Unit.WAVE_STAR,
-    writer=steps.Writer.WORKER,
-    seat="tech-writer",
-    template="fix.wave.tmpl",
-    slots=("remediation-kind", "members", "attempt", "step-id"),
-    parses=(steps.Parse.ENVELOPE,),
-)
-
-FIX_SLOTS = {
-    "remediation-kind": "verify-gate failure",
-    "members": "- foundations: red paths under foundations/",
-    "attempt": "1",
-    "step-id": FIX_STEP.id,
-}
-
-FIX_MEMBERS = ("foundations", "dynamics")
-
-# The wave-session route: never-writer members return text and the seatless
-# session writes each return to the driver-named path.
-WAVE_SESSION_STEP = steps.Step(
-    id="wave.review",
-    stage="phase-5",
-    unit=steps.Unit.WAVE,
-    writer=steps.Writer.WAVE_SESSION,
-    template="review.wave.tmpl",
-    slots=("members", "step-id"),
-    parses=(steps.Parse.ENVELOPE,),
-)
-
-
-def _envelope_text(step_id: str, *, members: tuple[str, ...], invented: Mapping[str, object] | None = None) -> str:
-    """The envelope a wave returns; ``invented`` adds keys the contract does not name."""
-    payload: dict[str, object] = {
-        "step": step_id,
-        "members": [{"name": name, "status": "ok"} for name in members],
-        "gaps": [],
-        "deviations": [],
-        **(invented or {}),
-    }
-    return "\n".join(
-        ["The wave is complete.", "", envelope.ENVELOPE_OPEN, json.dumps(payload), envelope.ENVELOPE_CLOSE]
-    )
-
-
 # --- harness ----------------------------------------------------------------
 
 
@@ -175,9 +84,9 @@ class Harness:
     """One caller, plus the evidence a test needs to look at afterwards."""
 
     caller: call.Caller
-    invoker: replay.ReplayInvoker
+    invoker: fake_model.FakeInvoker
     sleeps: list[float]
-    seen: list[replay.ReplayContext]
+    seen: list[fake_model.Context]
     paths: runlog.RunPaths
     root: Path
 
@@ -198,8 +107,8 @@ def _config(*, attempts: int = 3, silence: int = 30) -> config.DriverConfig:
             charter_file=Path(kb_pipeline.CHARTER_RELPATH),
             runner=None,
         ),
-        claude=config.ClaudeSection(command=("claude",), env={}, brief_transport="stdin"),
-        timeouts=config.TimeoutSection(single_seconds=60, wave_seconds=120, silence_seconds=silence, by_step={}),
+        claude=config.ClaudeSection(command=("claude",), env={}),
+        timeouts=config.TimeoutSection(single_seconds=60, silence_seconds=silence, by_step={}),
         retry=config.RetrySection(transport_attempts=attempts, backoff_seconds=(5, 30)),
         log=config.LogSection(level="INFO", run_dir=Path(".claude-temp/kb-driver")),
         decisions={},
@@ -236,15 +145,15 @@ def build(tmp_path: Path, repo: Path) -> Callable[..., Harness]:
         (fragments / name).write_text(text, encoding="utf-8")
     paths = runlog.prepare(tmp_path / "kb-driver", "run-0001")
 
-    def _build(scenario: replay.Scenario, **overrides: int) -> Harness:
+    def _build(scenario: fake_model.Scenario, **overrides: int) -> Harness:
         sleeps: list[float] = []
-        seen: list[replay.ReplayContext] = []
+        seen: list[fake_model.Context] = []
 
-        def watched(context: replay.ReplayContext) -> replay.Response:
+        def watched(context: fake_model.Context) -> fake_model.Response:
             seen.append(context)
             return scenario(context)
 
-        invoker = replay.ReplayInvoker(watched)
+        invoker = fake_model.FakeInvoker(watched)
         caller = call.Caller(
             invoker=invoker,
             config=_config(**overrides),
@@ -258,18 +167,6 @@ def build(tmp_path: Path, repo: Path) -> Callable[..., Harness]:
     return _build
 
 
-def _writes(artifacts: Mapping[Path, str], scenario: replay.Scenario) -> replay.Scenario:
-    """A scenario whose call writes its own artifacts — the worker and wave-session routes."""
-
-    def wrapped(context: replay.ReplayContext) -> replay.Response:
-        for path, text in artifacts.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-        return scenario(context)
-
-    return wrapped
-
-
 def _snapshot(root: Path) -> dict[Path, str]:
     return {path: path.read_text(encoding="utf-8") for path in root.rglob("*") if path.is_file()}
 
@@ -278,29 +175,21 @@ def _changed(before: Mapping[Path, str], after: Mapping[Path, str]) -> set[Path]
     return {path for path, text in after.items() if before.get(path) != text}
 
 
-def _fix_outputs(repo: Path, *domains: str) -> tuple[Path, ...]:
-    return tuple(repo / "kb-root" / domain / f"{domain}.md" for domain in domains)
-
-
 def _passage(repo: Path) -> Path:
     """``ov.docs``' one declared artifact: the prose answer, under the scratch layout."""
     return repo / steps.SCRATCH_ROOT / steps.overview_prose(stage=steps.STEPS_BY_ID["ov.docs"].stage)
 
 
 # ---------------------------------------------------------------------------
-# The three persistence routes, and the guarantee nothing lands under kb-root/
+# The persistence route, and the guarantee nothing else under the repo changes
 # ---------------------------------------------------------------------------
 
 
 def test_the_driver_persists_a_never_writers_return_and_writes_nowhere_else(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
-    harness = build(replay.clean(VERDICT_TEXT))
-    findings = (
-        repo
-        / steps.SCRATCH_ROOT
-        / steps.findings(stage="phase-5", series=steps.SERIES_INITIAL, round_number=1, author="tech-writer-reviewer")
-    )
+    harness = build(fake_model.clean(VERDICT_TEXT))
+    findings = repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author="tech-writer-reviewer")
     before = _snapshot(harness.root)
 
     outcome = harness.caller.execute(
@@ -313,107 +202,15 @@ def test_the_driver_persists_a_never_writers_return_and_writes_nowhere_else(
     # Parsed, never judged: the reviewer judges and the driver counts.
     assert outcome.verdict == envelope.Verdict(critical=0, warning=2, note=1)
     # The artifact, the composed brief, the capture — and nothing else, anywhere.
+    # **This is where "the driver process never writes under kb-root/" is
+    # asserted**: the changed set is stated exhaustively rather than as a
+    # negative about one directory, so a write anywhere it does not name fails
+    # here. The boundary that refuses such a target is the test below it.
     assert _changed(before, _snapshot(harness.root)) == {
         findings,
         harness.brief(3, "p5.review"),
         harness.stream(3, "p5.review", 1),
     }
-
-
-def test_the_write_to_disk_route_validates_the_document_and_writes_none_of_it(
-    repo: Path, build: Callable[..., Harness]
-) -> None:
-    """The write-to-disk route: the seat writes the document, the driver only validates it."""
-    readme = repo / "kb-root" / "README.md"
-    harness = build(_writes({readme: DOCS_TEXT}, replay.clean("Wrote README.md.")))
-
-    outcome = harness.caller.execute(
-        call.CallRequest(step=DOCS_STEP, seq=3, slots=docs_step_slots(repo), outputs=(readme,))
-    )
-
-    assert outcome.ok
-    assert outcome.written == (), "the seat wrote the document; the driver validated it"
-
-
-def test_the_worker_writes_route_validates_the_artifacts_and_writes_none_of_them(
-    repo: Path, build: Callable[..., Harness]
-) -> None:
-    outputs = _fix_outputs(repo, *FIX_MEMBERS)
-    harness = build(
-        _writes(
-            {path: f"# {path.stem}\n" for path in outputs},
-            replay.clean(_envelope_text(FIX_STEP.id, members=FIX_MEMBERS)),
-        )
-    )
-    before = _snapshot(harness.root)
-
-    outcome = harness.caller.execute(
-        call.CallRequest(step=FIX_STEP, seq=1, slots=FIX_SLOTS, outputs=outputs, members=2)
-    )
-
-    assert outcome.ok
-    assert outcome.written == ()  # the members wrote their own artifacts; the driver validated them
-    assert outcome.envelope is not None
-    assert [member.name for member in outcome.envelope.members] == list(FIX_MEMBERS)
-    assert _changed(before, _snapshot(harness.root)) == {
-        *outputs,
-        harness.brief(1, FIX_STEP.id),
-        harness.stream(1, FIX_STEP.id, 1),
-    }
-    # A WAVE_STAR of more than one member is seatless: a named seat would be a
-    # re-created coordinator.
-    assert harness.seen[0].agent is None
-
-
-def test_the_wave_session_persists_route_leaves_every_write_to_the_session(
-    repo: Path, build: Callable[..., Harness]
-) -> None:
-    reviewers = ("first-lens", "second-lens")
-    outputs = tuple(repo / steps.SCRATCH_ROOT / "review" / f"phase-5-r1-{reviewer}.md" for reviewer in reviewers)
-    harness = build(
-        _writes(
-            {path: f"# {path.stem}\n\nVERDICT: critical=0 warning=0 note=0\n" for path in outputs},
-            replay.clean(_envelope_text(WAVE_SESSION_STEP.id, members=reviewers)),
-        )
-    )
-    before = _snapshot(harness.root)
-
-    outcome = harness.caller.execute(
-        call.CallRequest(
-            step=WAVE_SESSION_STEP,
-            seq=12,
-            slots={"members": "- first-lens\n- second-lens", "step-id": WAVE_SESSION_STEP.id},
-            outputs=outputs,
-            members=2,
-        )
-    )
-
-    assert outcome.ok
-    assert outcome.written == ()
-    assert _changed(before, _snapshot(harness.root)) == {
-        *outputs,
-        harness.brief(12, WAVE_SESSION_STEP.id),
-        harness.stream(12, WAVE_SESSION_STEP.id, 1),
-    }
-
-
-def test_the_driver_process_writes_nothing_under_kb_root(repo: Path, build: Callable[..., Harness]) -> None:
-    # The artifact is under kb-root and the worker writes it: this module
-    # validates existence and never touches the path. What assembles a document
-    # under `kb-root/` is the run loop, from a template and the index, and it
-    # reaches no persistence route here.
-    step = DOCS_STEP
-    target = repo / "kb-root" / "README.md"
-    harness = build(_writes({target: DOCS_TEXT}, replay.clean("Wrote README.md.")))
-    before = _snapshot(harness.root)
-
-    outcome = harness.caller.execute(call.CallRequest(step=step, seq=2, slots=docs_step_slots(repo), outputs=(target,)))
-
-    assert outcome.ok
-    assert outcome.written == ()
-    driver_wrote = _changed(before, _snapshot(harness.root)) - {target}
-    assert driver_wrote == {harness.brief(2, step.id), harness.stream(2, step.id, 1)}
-    assert not [path for path in driver_wrote if repo / "kb-root" in path.parents]
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +235,7 @@ def _persist_request(repo: Path, target: Path) -> call.CallRequest:
 def test_a_dying_persist_leaves_no_partial_artifact_under_the_final_name(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
-    harness = build(replay.clean(PASSAGE_TEXT))
+    harness = build(fake_model.clean(PASSAGE_TEXT))
     target = _passage(repo)
 
     with pytest.raises(UnicodeEncodeError):
@@ -449,7 +246,7 @@ def test_a_dying_persist_leaves_no_partial_artifact_under_the_final_name(
 
 def test_a_dying_persist_leaves_the_artifact_already_there_untouched(repo: Path, build: Callable[..., Harness]) -> None:
     """The target is the previous file or the whole new one, and there is no third state."""
-    harness = build(replay.clean(PASSAGE_TEXT))
+    harness = build(fake_model.clean(PASSAGE_TEXT))
     target = _passage(repo)
     harness.caller._persist(_persist_request(repo, target), text=PASSAGE_TEXT)
 
@@ -462,7 +259,7 @@ def test_a_dying_persist_leaves_the_artifact_already_there_untouched(repo: Path,
 def test_a_driver_persist_target_outside_the_scratch_root_is_a_boundary_error(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
-    harness = build(replay.clean(VERDICT_TEXT))
+    harness = build(fake_model.clean(VERDICT_TEXT))
     stray = repo / "kb-root" / "phase-5-r1-review.md"
 
     with pytest.raises(runlog.BoundaryError, match="scratch layout root"):
@@ -480,7 +277,7 @@ def test_a_path_a_seat_could_not_act_on_is_refused_before_the_call(repo: Path, b
     and returned three critical findings about it. All three fail the same way
     at the seat — it goes looking — so all three are refused before it is asked.
     """
-    harness = build(replay.clean(VERDICT_TEXT))
+    harness = build(fake_model.clean(VERDICT_TEXT))
     findings = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
     sound = review_slots(repo)
     broken = {
@@ -500,7 +297,7 @@ def test_a_path_a_seat_could_not_act_on_is_refused_before_the_call(repo: Path, b
 def test_an_optional_path_slot_may_carry_the_named_absence(repo: Path, build: Callable[..., Harness]) -> None:
     """A first round has no findings to answer, which is an absence with a name."""
     passage = _passage(repo)
-    harness = build(replay.clean(PASSAGE_TEXT))
+    harness = build(fake_model.clean(PASSAGE_TEXT))
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["ov.docs"], seq=3, slots=docs_slots(repo), outputs=(passage,))
@@ -511,7 +308,7 @@ def test_an_optional_path_slot_may_carry_the_named_absence(repo: Path, build: Ca
 
 
 def test_an_empty_return_never_becomes_an_artifact(repo: Path, build: Callable[..., Harness]) -> None:
-    harness = build(replay.clean("   \n"))
+    harness = build(fake_model.clean("   \n"))
     target = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
 
     outcome = harness.caller.execute(
@@ -523,32 +320,24 @@ def test_an_empty_return_never_becomes_an_artifact(repo: Path, build: Callable[.
 
 
 # ---------------------------------------------------------------------------
-# Composition: the call unit, the seat, and the driver constants
+# Composition: the seat, and the driver constants
 # ---------------------------------------------------------------------------
 
 
-def test_a_one_member_wave_star_is_a_single_that_names_its_seat(repo: Path, build: Callable[..., Harness]) -> None:
-    # A step's call unit is a property of its member count, which is what makes
-    # the one-domain mini-run exercise both paths without a second one.
-    (output,) = _fix_outputs(repo, "foundations")
-    harness = build(_writes({output: "# fixed\n"}, replay.clean(_envelope_text(FIX_STEP.id, members=("foundations",)))))
+def test_a_call_carries_its_rows_seat_on_agent(repo: Path, build: Callable[..., Harness]) -> None:
+    """``--agent`` is how the seat's own definition — and its model pin — is selected."""
+    step = steps.STEPS_BY_ID["p5.review"]
+    harness = build(fake_model.clean(VERDICT_TEXT))
+    findings = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
 
-    outcome = harness.caller.execute(
-        call.CallRequest(step=FIX_STEP, seq=1, slots=FIX_SLOTS, outputs=(output,), members=1)
-    )
+    outcome = harness.caller.execute(call.CallRequest(step=step, seq=1, slots=review_slots(repo), outputs=(findings,)))
 
     assert outcome.ok
-    assert harness.seen[0].agent == FIX_STEP.seat
-    # The vocabulary the driver accepts and the prose the wave sees are one
-    # definition, wired through steps.CONSTANT_SLOTS; the dispatch discipline is
-    # injected by the composer, not restated per template.
-    brief = harness.brief(1, FIX_STEP.id).read_text(encoding="utf-8")
-    assert steps.CONSTANT_SLOTS["deviation-kinds"] in brief
-    assert "run_in_background" in brief
+    assert harness.seen[0].agent == step.seat
 
 
 def test_a_step_that_makes_no_call_is_a_boundary_error(build: Callable[..., Harness]) -> None:
-    harness = build(replay.clean("ok"))
+    harness = build(fake_model.clean("ok"))
 
     with pytest.raises(runlog.BoundaryError, match="makes no call"):
         harness.caller.execute(call.CallRequest(step=steps.STEPS_BY_ID["p3a.record"], seq=4))
@@ -564,7 +353,7 @@ def test_a_command_prefix_carrying_model_is_refused_in_either_spelling(
     which argparse accepts identically — so the pin was overridable with no log
     line, no exit-code change, and nothing on the card to read.
     """
-    harness = build(replay.clean(PASSAGE_TEXT))
+    harness = build(fake_model.clean(PASSAGE_TEXT))
     caller = replace(
         harness.caller,
         config=replace(
@@ -587,7 +376,7 @@ def test_an_empty_composed_brief_is_a_boundary_error_rather_than_a_call(
     repo: Path, build: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The spawn boundary: nothing is worth spawning on a brief with nothing in it."""
-    harness = build(replay.clean(PASSAGE_TEXT))
+    harness = build(fake_model.clean(PASSAGE_TEXT))
 
     def persist_nothing(briefs_dir: Path, *, seq: int, step_id: str, text: str) -> Path:
         del text
@@ -610,7 +399,7 @@ def test_an_empty_composed_brief_is_a_boundary_error_rather_than_a_call(
 def test_a_call_spawned_while_another_is_live_is_a_boundary_error(repo: Path, build: Callable[..., Harness]) -> None:
     """Exactly one ``claude`` subprocess at a time — a policy of this driver's, held here.
 
-    The re-entry is made from inside a replayed call, which is where a second
+    The re-entry is made from inside a scripted call, which is where a second
     spawn would happen for real: a scenario stands in for the process that is
     still live while the next one is started.
     """
@@ -619,12 +408,12 @@ def test_a_call_spawned_while_another_is_live_is_a_boundary_error(repo: Path, bu
         step=steps.STEPS_BY_ID["ov.docs"], seq=3, slots=docs_slots(repo), outputs=(_passage(repo),)
     )
 
-    def reentrant(context: replay.ReplayContext) -> replay.Response:
+    def reentrant(context: fake_model.Context) -> fake_model.Response:
         try:
             harness.caller.execute(replace(request, seq=4))
         except runlog.BoundaryError as exc:
             nested.append(exc)
-        return replay.clean(PASSAGE_TEXT)(context)
+        return fake_model.clean(PASSAGE_TEXT)(context)
 
     harness = build(reentrant)
 
@@ -641,8 +430,8 @@ def test_a_call_spawned_while_another_is_live_is_a_boundary_error(repo: Path, bu
 
 def test_a_transport_death_is_retried_until_a_call_stands(repo: Path, build: Callable[..., Harness]) -> None:
     passage = _passage(repo)
-    stands = replay.clean(PASSAGE_TEXT)
-    harness = build(replay.sequence(replay.transport_die(), replay.transport_die(), stands))
+    stands = fake_model.clean(PASSAGE_TEXT)
+    harness = build(fake_model.sequence(fake_model.transport_die(), fake_model.transport_die(), stands))
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["ov.docs"], seq=3, slots=docs_slots(repo), outputs=(passage,))
@@ -657,7 +446,7 @@ def test_a_transport_death_is_retried_until_a_call_stands(repo: Path, build: Cal
 
 
 def test_exhausted_transport_retries_exit_12(repo: Path, build: Callable[..., Harness]) -> None:
-    harness = build(replay.transport_die(stderr="connection reset\n"))
+    harness = build(fake_model.transport_die(stderr="connection reset\n"))
     passage = _passage(repo)
 
     outcome = harness.caller.execute(
@@ -675,7 +464,7 @@ def test_exhausted_transport_retries_exit_12(repo: Path, build: Callable[..., Ha
 
 def test_a_cli_rejection_is_never_retried_and_exits_13(repo: Path, build: Callable[..., Harness]) -> None:
     stderr = "error: unknown option '--frobnicate-widget'\n"
-    harness = build(replay.cli_rejection(stderr))
+    harness = build(fake_model.cli_rejection(stderr))
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["ov.docs"], seq=3, slots=docs_slots(repo), outputs=(_passage(repo),))
@@ -700,7 +489,7 @@ def test_a_command_that_cannot_be_spawned_exits_14_and_carries_a_restore_line(
     card names the run directory as a bug report against the driver.
     """
     absent = tmp_path / "no-such-claude"
-    harness = build(replay.clean(PASSAGE_TEXT))
+    harness = build(fake_model.clean(PASSAGE_TEXT))
     caller = replace(
         harness.caller,
         invoker=inference.SubprocessInvoker(),
@@ -724,7 +513,7 @@ def test_a_command_that_cannot_be_spawned_exits_14_and_carries_a_restore_line(
 
 
 def test_a_silence_wedge_is_a_transport_failure_and_exhausts_to_12(repo: Path, build: Callable[..., Harness]) -> None:
-    harness = build(replay.stall(), attempts=1, silence=1)
+    harness = build(fake_model.stall(), attempts=1, silence=1)
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["ov.docs"], seq=3, slots=docs_slots(repo), outputs=(_passage(repo),))
@@ -742,12 +531,10 @@ def test_a_silence_wedge_is_a_transport_failure_and_exhausts_to_12(repo: Path, b
 def test_a_contract_failure_re_asks_the_same_step_once_with_the_complaint(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
-    harness = build(replay.sequence(replay.clean("no verdict anywhere in this text"), replay.clean(VERDICT_TEXT)))
-    findings = (
-        repo
-        / steps.SCRATCH_ROOT
-        / steps.findings(stage="phase-5", series=steps.SERIES_INITIAL, round_number=1, author="tech-writer-reviewer")
+    harness = build(
+        fake_model.sequence(fake_model.clean("no verdict anywhere in this text"), fake_model.clean(VERDICT_TEXT))
     )
+    findings = repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author="tech-writer-reviewer")
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=5, slots=review_slots(repo), outputs=(findings,))
@@ -765,46 +552,11 @@ def test_a_contract_failure_re_asks_the_same_step_once_with_the_complaint(
     assert "VERDICT" in re_ask.removeprefix(first.rstrip("\n"))  # … with the validator's complaint attached
 
 
-def test_an_envelope_carrying_an_invented_key_is_re_asked_and_the_step_recovers(
-    repo: Path, build: Callable[..., Harness]
-) -> None:
-    """A strict envelope parse costs one re-ask, not the run.
-
-    The refusal is the ``ParseError`` every contract failure raises, so it takes
-    the same path: the wave that drops its invention on the second ask has its
-    artifacts accepted and the build goes on. Only a second failure ends the
-    invocation.
-    """
-    outputs = _fix_outputs(repo, *FIX_MEMBERS)
-    harness = build(
-        _writes(
-            {path: f"# {path.stem}\n" for path in outputs},
-            replay.sequence(
-                replay.clean(_envelope_text(FIX_STEP.id, members=FIX_MEMBERS, invented={"elapsed_s": 41})),
-                replay.clean(_envelope_text(FIX_STEP.id, members=FIX_MEMBERS)),
-            ),
-        )
-    )
-
-    outcome = harness.caller.execute(
-        call.CallRequest(step=FIX_STEP, seq=1, slots=FIX_SLOTS, outputs=outputs, members=2)
-    )
-
-    assert outcome.ok
-    assert harness.invoker.calls == 2
-    re_ask = harness.brief(1, f"{FIX_STEP.id}{call.REASK_SUFFIX}").read_text(encoding="utf-8")
-    assert "elapsed_s" in re_ask  # the complaint names the offending key
-
-
 def test_a_second_contract_failure_exits_17_naming_the_step_and_the_complaint(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
-    harness = build(replay.clean("VERDICT: critical=none"))
-    findings = (
-        repo
-        / steps.SCRATCH_ROOT
-        / steps.findings(stage="phase-5", series=steps.SERIES_INITIAL, round_number=1, author="tech-writer-reviewer")
-    )
+    harness = build(fake_model.clean("VERDICT: critical=none"))
+    findings = repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author="tech-writer-reviewer")
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=5, slots=review_slots(repo), outputs=(findings,))
@@ -817,60 +569,22 @@ def test_a_second_contract_failure_exits_17_naming_the_step_and_the_complaint(
     assert not findings.exists()
 
 
-def test_a_premature_dispatch_fails_the_contract_check_rather_than_passing_as_a_wave(
+def test_a_premature_dispatch_fails_the_contract_check_rather_than_passing_as_a_finished_call(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
-    # The async-dispatch shape: a first `result` announcing success before any
-    # member ran. Accepting it records a completed wave with zero member
-    # artifacts — the false green this architecture exists to eliminate.
-    outputs = _fix_outputs(repo, *FIX_MEMBERS)
-    body = _envelope_text(FIX_STEP.id, members=FIX_MEMBERS)
-    harness = build(
-        _writes(
-            {path: f"# {path.stem}\n" for path in outputs},
-            replay.sequence(replay.premature_dispatch(body), replay.clean(body)),
-        )
-    )
+    # The async-dispatch shape: a first `result` announcing success before the
+    # work the call started had run. Accepting it records a finished step whose
+    # work never happened — the false green this architecture exists to
+    # eliminate.
+    harness = build(fake_model.sequence(fake_model.premature_dispatch(VERDICT_TEXT), fake_model.clean(VERDICT_TEXT)))
+    findings = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
 
     outcome = harness.caller.execute(
-        call.CallRequest(step=FIX_STEP, seq=1, slots=FIX_SLOTS, outputs=outputs, members=2)
+        call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=1, slots=review_slots(repo), outputs=(findings,))
     )
 
     assert outcome.ok  # the re-ask stood
     assert harness.invoker.calls == 2
-    re_ask = harness.brief(1, f"{FIX_STEP.id}{call.REASK_SUFFIX}").read_text(encoding="utf-8")
+    re_ask = harness.brief(1, f"p5.review{call.REASK_SUFFIX}").read_text(encoding="utf-8")
     assert "init events in one call" in re_ask
     assert "run_in_background" in re_ask
-
-
-def test_a_missing_declared_artifact_is_a_contract_failure_that_names_it(
-    repo: Path, build: Callable[..., Harness]
-) -> None:
-    outputs = _fix_outputs(repo, *FIX_MEMBERS)
-    harness = build(
-        _writes(
-            {outputs[0]: "# only the first member wrote\n"},
-            replay.clean(_envelope_text(FIX_STEP.id, members=FIX_MEMBERS)),
-        )
-    )
-
-    outcome = harness.caller.execute(
-        call.CallRequest(step=FIX_STEP, seq=1, slots=FIX_SLOTS, outputs=outputs, members=2)
-    )
-
-    assert outcome.exit_code == baton.EXIT_CONTRACT
-    complaint = " ".join(outcome.detail)
-    assert str(outputs[1]) in complaint
-    assert str(outputs[0]) not in complaint
-
-
-def test_an_envelope_declaring_another_step_is_a_contract_failure(repo: Path, build: Callable[..., Harness]) -> None:
-    (output,) = _fix_outputs(repo, "foundations")
-    harness = build(_writes({output: "# fixed\n"}, replay.clean(_envelope_text("p4.fix", members=("foundations",)))))
-
-    outcome = harness.caller.execute(
-        call.CallRequest(step=FIX_STEP, seq=1, slots=FIX_SLOTS, outputs=(output,), members=1)
-    )
-
-    assert outcome.exit_code == baton.EXIT_CONTRACT
-    assert any("p4.fix" in line for line in outcome.detail)

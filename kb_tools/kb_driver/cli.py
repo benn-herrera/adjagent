@@ -23,20 +23,12 @@ than the log record's context, because the console tee prints messages alone: a
 run whose mode nobody chose still says what it is dispatching under and which
 flag changes it.
 
-**Two flags change what a run is made of, and they are different claims.**
-``--dry-run`` swaps the ``Invoker`` and nothing else: the ledger ops still run
-against the real ``kb_util`` in the consuming repo, the run directory and its
-briefs and captures are still written, barriers still stop the run, and
-persistence still happens — it replaces the model, not the pipeline. What it
-does **not** replace is a model spawned inside a tool this driver invokes, which
-is the two claim-graph stages, so it is a smoke test of the state machine rather
-than a promise that nothing spends inference.
-
-``--no-inference`` is that promise, and it is the sequencer's rather than this
-layer's: every row that would cost a model call is dropped and the walk carries
-on past it, so a build under it closes out real and inference-free. Which rows
-those are is the step table's (``steps.Step.spends_inference``); this layer
-holds no stage knowledge and does not acquire any to announce the flag.
+**One flag changes what a run is made of.** ``--no-inference`` promises that no
+model call is spent, and it is the sequencer's rather than this layer's: every
+row that would cost one is dropped and the walk carries on past it, so a build
+under it closes out real and inference-free. Which rows those are is the step
+table's (``steps.Step.spends_inference``); this layer holds no stage knowledge
+and does not acquire any to announce the flag.
 
 Both barrier doors are validated here, against the registry ``barriers.py``
 holds: ``config.load`` and ``config.parse_decision`` each take the admissible
@@ -49,8 +41,8 @@ exists, every way out of the sequencer writes ``cadence.jsonl`` and
 ``exit.json`` (``run.write_report``) — a boundary check that failed, a
 terminating signal, an exception no handler names, alongside the endings the
 walk chose. Those are the endings that most need one: their own card calls the
-run directory the bug report, and ``exit.json`` is the one channel a
-backgrounded session has for learning how a run ended. The exception-to-exit
+run directory the bug report, and an ending nobody planned is the one least
+likely to have said anything legible on the way out. The exception-to-exit
 mapping is :func:`_terminal`, read by that path and by :func:`main`'s
 last-resort handler alike, so a failure raised inside the run and the same
 failure raised a frame higher cannot report different codes.
@@ -65,7 +57,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .. import __version__, kb_util
-from . import barriers, baton, config, replay, run, runlog, watch
+from . import barriers, baton, config, run, runlog
 
 _log = runlog.logger("cli")
 
@@ -126,17 +118,9 @@ def _build_parser() -> argparse.ArgumentParser:
         config.NO_INFERENCE_FLAG,
         action="store_true",
         help="Spend no model call: every row that would cost one is dropped and the walk continues past "
-        "it, so the build closes out without them. Not a bound and not a replay — the stages around a "
-        "dropped row run for real, each stage still records, and the boundary of a stage whose work was "
+        "it, so the build closes out without them. Not a bound and not a substitution — the stages around "
+        "a dropped row run for real, each stage still records, and the boundary of a stage whose work was "
         "dropped says so.",
-    )
-    p_run.add_argument(
-        config.DRY_RUN_FLAG,
-        action="store_true",
-        help="Replay every call this driver dispatches instead of spawning one — a smoke test of the "
-        "state machine. Everything else runs for real. It is not a promise that no model runs: the two "
-        "claim-graph stages spawn theirs inside the tool this driver invokes, so a fresh build wanting "
-        "to spend nothing wants --no-inference as well.",
     )
     p_run.add_argument(
         config.THROUGH_FLAG,
@@ -144,36 +128,6 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="<stage>",
         help="Walk no further than this stage, inclusive, named by its id or by its display name. "
         "Absent, the run walks the whole build.",
-    )
-
-    p_watch = sub.add_parser(
-        "watch",
-        help="Poll a backgrounded run until it advances, ends, or the timeout expires.",
-        allow_abbrev=False,
-    )
-    p_watch.add_argument(
-        "--timeout",
-        type=int,
-        default=watch.DEFAULT_TIMEOUT_SECONDS,
-        metavar="<seconds>",
-        help=f"Give up waiting for the ledger to grow after this long (default: {watch.DEFAULT_TIMEOUT_SECONDS}).",
-    )
-    p_watch.add_argument(
-        "--poll",
-        type=int,
-        default=watch.DEFAULT_POLL_SECONDS,
-        metavar="<seconds>",
-        help=f"Seconds between ledger reads (default: {watch.DEFAULT_POLL_SECONDS}).",
-    )
-    # Watch has no --config: the relay's watch invocation carries none, and the
-    # only config value it would read is [log] run_dir, which this names
-    # directly. Required in the kb-testing recipes, whose run directory sits
-    # outside the tree the restage wipes.
-    p_watch.add_argument(
-        config.RUN_DIR_FLAG,
-        type=Path,
-        default=Path(config.DEFAULT_RUN_DIR),
-        help="The parent holding LATEST and one directory per run (default: %(default)s).",
     )
 
     return parser
@@ -188,21 +142,17 @@ def _run_overrides(args: argparse.Namespace) -> dict[str, object]:
     file is ignored".
     """
     overrides: dict[str, object] = {}
-    sources = getattr(args, "source", None)  # watch mode declares neither flag
-    if sources:
-        overrides["sources"] = tuple(sources)
-    mode = getattr(args, "permission_mode", None)
-    if mode is not None:
-        overrides["permission_mode"] = mode
+    if args.source:
+        overrides["sources"] = tuple(args.source)
+    if args.permission_mode is not None:
+        overrides["permission_mode"] = args.permission_mode
     # A store_true reads False when it was never given, and False is a value
     # that would overwrite a config's own `true`. Only the flag actually
     # passed carries anything, which is this function's rule throughout.
-    for attribute, key in (("no_inference", "no_inference"), ("dry_run", "dry_run")):
-        if getattr(args, attribute, False):
-            overrides[key] = True
-    through = getattr(args, "through", None)
-    if through is not None:
-        overrides["through"] = through
+    if args.no_inference:
+        overrides["no_inference"] = True
+    if args.through is not None:
+        overrides["through"] = args.through
     return overrides
 
 
@@ -272,19 +222,6 @@ def _mode_run(args: argparse.Namespace, ctx: baton.BatonContext) -> tuple[int, b
             extra={"context": {"run_id": run_id, "permission_mode": cfg.run.permission_mode}},
         )
 
-        if cfg.run.dry_run:
-            # WARNING, not INFO: every artifact a replayed run leaves behind is
-            # synthetic, and the one place that fact is recorded for whoever
-            # reads the run log afterwards is here. Said once, on the way in,
-            # beside the permission mode.
-            _log.warning(
-                "dry run: every call this driver dispatches is replayed, so nothing below it was produced "
-                "by a model. `%s` does not reach a model spawned inside a tool this driver invokes; a run "
-                "that must spend nothing at all passes `%s` too",
-                config.DRY_RUN_FLAG,
-                config.NO_INFERENCE_FLAG,
-                extra={"context": {"run_id": run_id}},
-            )
         if cfg.run.no_inference:
             # Not synthetic and not a bound: the rows are gone, the rest of the
             # build is real, and what it produced is a real KB built without
@@ -303,7 +240,6 @@ def _mode_run(args: argparse.Namespace, ctx: baton.BatonContext) -> tuple[int, b
                     config=cfg,
                     paths=paths,
                     decisions=decisions,
-                    invoker=replay.dry_run_invoker() if cfg.run.dry_run else None,
                     repo_root=repo_root,
                 )
         except BaseException as exc:  # noqa: BLE001 — see below
@@ -318,13 +254,12 @@ def _mode_run(args: argparse.Namespace, ctx: baton.BatonContext) -> tuple[int, b
             return exit_code, baton.BatonContext(
                 invocation=cfg.invocation,
                 run_dir=str(paths.run_dir),
-                run_dir_parent=config.run_dir_parent(paths.parent),
                 detail=detail,
             )
 
-        # This is what a session reads after watch reports the driver gone —
-        # the terminal code, the barrier record to paste, and the decisions
-        # that answered nothing.
+        # The run directory's own record of how this run ended — the terminal
+        # code, the barrier record to paste, and the decisions that answered
+        # nothing.
         run.write_report(
             paths,
             exit_code=result.exit_code,
@@ -334,9 +269,11 @@ def _mode_run(args: argparse.Namespace, ctx: baton.BatonContext) -> tuple[int, b
         return result.exit_code, result.context
 
 
-# Mode dispatch. Each further mode (watch, and whatever the registry adds)
-# registers here and nowhere else.
-_MODES = {"run": _mode_run, "watch": watch.mode}
+# Mode dispatch: the subparser's own name picks the handler. A mode is two
+# registrations and not one — the subparser above and this row — so a name
+# added to either alone is a `--help` entry with no handler, or a handler
+# nothing can reach.
+_MODES = {"run": _mode_run}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -357,10 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     # the file has not been loaded, and on the paths that get here it never
     # will be.
     ctx = baton.BatonContext(
-        invocation=config.invocation(
-            getattr(args, "config", None), _run_overrides(args), run_dir=getattr(args, "run_dir", None)
-        ),
-        run_dir_parent=config.run_dir_parent(getattr(args, "run_dir", None)),
+        invocation=config.invocation(args.config, _run_overrides(args), run_dir=args.run_dir),
     )
     try:
         exit_code, ctx = _MODES[args.mode](args, ctx)

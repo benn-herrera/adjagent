@@ -78,10 +78,69 @@ BLOCKQUOTE_PREFIX = re.compile(r"^(?:[ \t]{0,3}>[ \t]?)+")
 #: an empty fragment. Measured over the staged corpus: 717 of 717 ``eqref``
 #: anchors carry no fragment, and 1945 of 1945 anchors carry this attribute.
 #:
+#: **The type is read as whatever the attribute holds, and a narrower class was
+#: the defect.** ``([a-z]+)`` matched ``ref`` and ``eqref`` and refused both
+#: spellings pandoc gives the cleveref family — ``ref+label`` for ``\cref`` and
+#: ``\autoref``, ``ref+Label`` for ``\Cref`` — so references the trees carried
+#: were read as none. SPEC.md's cross-reference join says only that the type is
+#: the referencing macro's own kind and enumerates no vocabulary, so a class
+#: that enumerates one is a second contract, and the next spelling defeats it
+#: the same way this one was defeated.
+#:
+#: **A cleveref anchor is handed downstream under its own type**, and nothing
+#: downstream reads the type to pick a route any more. A cleveref command names
+#: whatever its label names and says which nowhere, so calling one an ``eqref``
+#: would have asserted about every ``\cref`` to a theorem a thing that is true
+#: of few of them, and flattening it to ``ref`` would erase the one fact
+#: separating a cleveref equation reference from an author's own ``\ref{eq:8}``
+#: — two populations a later pass has to count apart. What the pass-through once
+#: cost was that a cleveref naming an equation took the identifier route and
+#: reached nothing; :func:`attribute._target_end` now tries the identifier route
+#: and falls back to the label-to-fence join for every type alike, so ordering
+#: decides what typing used to, and the cost is paid off.
+#:
 #: Matched over the blockquote-stripped text because the reader wraps a long tag
 #: across lines and the continuation line carries the quote prefix, which would
 #: break a match that read the raw bytes.
-ANCHOR_RE = re.compile(r'<a\s+href="([^"]*)"\s+data-reference-type="([a-z]+)"\s+data-reference="([^"]*)"', re.DOTALL)
+ANCHOR_RE = re.compile(r'<a\s+href="([^"]*)"\s+data-reference-type="([^"]+)"\s+data-reference="([^"]*)"', re.DOTALL)
+
+#: A rewritten cross-reference whole, with the text it shows a reader inside it.
+#: :data:`ANCHOR_RE` reads the *attributes* and stops at the third, which is all
+#: a reading of what an anchor names needs; this is the other question — what the
+#: page says where the anchor sits — and it is asked wherever an anchor's span
+#: has to become a value a person reads.
+ANCHOR_RENDERING_RE = re.compile(r"<a\s[^>]*>(?P<rendering>.*?)</a>", re.DOTALL)
+
+#: The two type spellings whose ``data-reference`` is a *list* of labels.
+#: Cleveref splits its own argument on the comma, so a label reaching one of
+#: these can never contain one — while a ``\ref`` takes exactly one label that
+#: may, and this corpus carries four of them (``\ref{cor: decay, hyper, unif}``).
+#: That is why the split below is keyed on the type and not on the comma: a rule
+#: reading the comma alone turns those four resolving anchors into dead
+#: fragments.
+CLEVEREF_REFERENCE_TYPES: frozenset[str] = frozenset({"ref+label", "ref+Label"})
+
+_LABEL_SEPARATOR = ","
+
+
+def anchor_labels(reference_type: str, label: str) -> tuple[str, ...]:
+    """The labels one anchor names — several only where a cleveref named several.
+
+    ``\\cref{a,b}`` names two targets and states two relationships, and pandoc
+    emits it as one anchor. Every reading that asks what an anchor names has to
+    split it the same way or the two disagree about the corpus, which is why
+    this is a function here rather than a comprehension at each call site.
+
+    **The split is a reading, not yet a resolution.** Point 7 rewrites an href
+    against :attr:`kb_docgraph.outline.VolumeTree.label_paths`, which is keyed on
+    single labels — so a multi-label anchor matches no key, keeps its href as the
+    bare fragment ``#a,b``, and resolves to no document. The labels this yields
+    therefore reach the narrowing carrying no target until that rewrite handles a
+    list.
+    """
+    if reference_type not in CLEVEREF_REFERENCE_TYPES:
+        return (label,)
+    return tuple(found for part in label.split(_LABEL_SEPARATOR) if (found := part.strip())) or (label,)
 
 
 def unquote(text: str) -> str:
@@ -120,6 +179,28 @@ class Document:
     @property
     def lines(self) -> list[str]:
         return self.text.splitlines()
+
+    @property
+    def heading(self) -> str | None:
+        """The document's own H1 **as the words the page shows**, or ``None``.
+
+        The **first** such line rather than the best one: the partition writes a
+        document one heading, so a reader preferring a later match would be
+        preferring something the author's own prose happened to spell.
+
+        A heading is *rendered* LaTeX, so a section the author titled with a
+        ``\\ref`` is titled with the anchor point 7 rewrote — attribute, href and
+        all. :data:`ANCHOR_RENDERING_RE` takes that back to what a reader of the
+        line sees, for :func:`inventory._readable`'s reason and with its
+        consequence: a value carried into a register heading may not carry the
+        markup that produced it, not least because the href inside it is
+        relative to this document and the heading is read somewhere else.
+        """
+        for line in self.text.splitlines():
+            if line.startswith("# "):
+                shown = ANCHOR_RENDERING_RE.sub(r"\g<rendering>", strip_markers(line[2:]))
+                return shown.strip() or None
+        return None
 
 
 @dataclass(frozen=True)

@@ -24,7 +24,7 @@ that says nothing about this claim.
 *Rendering*: definitions are rendered in memory from ``templates/``, not read out
 of ``rendered/``, which is a gitignored build product that may be absent or stale.
 The templates are the source the render is a function of, so the sweep sees what
-the next ``just generate`` would write.
+the next render would write.
 
 The sweep's first run found one resolution-object site — the taxonomy
 architect's Review Mode navigability item — and held it in an ``OPEN_FINDINGS``

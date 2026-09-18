@@ -10,7 +10,10 @@ than on a shape observed once in one corpus:
   prose and never quoted as a claim, and the ``\\label`` tokens inside them;
 * **rewritten cross-references** (point 7) — with the document each resolves to,
   its type, the author's own label off its third attribute, and which labelled
-  block it sits inside where it sits inside one;
+  block it sits inside where it sits inside one. **One record per label, not per
+  anchor**: a cleveref command takes a list, so ``\\cref{a,b}`` reaches the
+  reader as one element naming two targets and stating two relationships, and it
+  is read as two (:func:`tree.anchor_labels`);
 * **rendered citations** (point 10) — see the caveat below;
 * **which claim each proof establishes** (:class:`Proof`) — the one reading that
   spans documents, and the one that is a *relation between* blocks rather than a
@@ -44,9 +47,15 @@ claim-bearing. What the refusal conflated was *do not lose claims quietly* with
 *stop*, and only the first is load-bearing. A recorded, named, counted omission
 is not silent — it is the census line a reader greps — while a halted build
 reports one bit and no distribution at all. That distinction is why
-:data:`NOT_CLAIM_BEARING` still exists with no branch reading it: it is what
-separates a name somebody classified as not stating a result from a name nobody
-has classified, and the census reports only the second.
+:data:`NOT_CLAIM_BEARING` exists at all, independently of anything branching on
+it: it is what separates a name somebody classified as not stating a result from
+a name nobody has classified, and the census reports only the second. One
+consumer now spends that judgement rather than only subtracting it — stage D
+contributes no pair for a reference whose fragment names a block any of these
+names classifies, ``proof`` excepted (:data:`NOT_A_CLAIM_TARGET`) — and it
+reaches classified names alone for the same reason the census reports the
+others: a refusal standing on a judgement nobody made is the default column this
+module has no column for.
 
 **This is what makes the stage usable outside the corpus it was calibrated on.**
 Even over display names the table is a table: the survey's residue is some
@@ -166,23 +175,65 @@ puts a ``\\cite``. The marker therefore lands *inside* the citation span's
 opening tag, between ``class="citation"`` and ``data-cites``,
 :data:`CITATION_SPAN_RE` stops matching, and the citation leaves the inventory
 with nothing downstream able to tell: there is no second count for it to
-disagree with. Measured over the built arXiv corpus, four citations of 1387
-vanish this way on a re-scan and **all four are citations inside a claim
-block** — half of that population, because markers and those citations sit on
-the same line by construction. So this reading strips markers the way
-:func:`_display` already does, and the line numbering survives it: a marker
-carries no newline, so :attr:`Citation.line` still addresses the written
-document. The tree's other three readings were measured against the same corpus
-and none of them moves.
+disagree with. Measured over the built arXiv corpus, fourteen citations of 2988
+vanish this way on a re-scan and **every one of them is a citation inside a
+claim block** — fourteen of the twenty-nine there are, because markers and those
+citations sit on the same line by construction. So this reading strips markers
+the way :func:`_display` already does, and the line numbering survives it: a
+marker carries no newline, so :attr:`Citation.line` still addresses the written
+document.
+
+**Every reading whose construct can share a line with a marker now strips, and
+which those are is decided by what can place one — never by what a corpus
+happens to contain.** Two producers put a Tier-2 marker in a tree: a claim
+block's own locator, which is :attr:`Block.display`, read off the line two below
+the label line; and a prose claim's start line, which
+:func:`~kb_tools.kb_claimgraph.identify._opens_a_claim` has already filtered. So
+the question each reading answers is whether its construct can occur on a claim
+block's display line or on a sentence that predicate admits.
+
+:func:`_anchors`, :func:`_proofs` and :func:`_works` can, and strip. A theorem
+environment's optional argument renders its cross-reference on the display
+line; a ``proof`` is outside :data:`CLAIM_BEARING` and so outside the
+claim-block set that predicate's caller excludes a start inside; and
+``references.md`` is a leaf, which puts it inside
+:data:`tree.DECLARING_KINDS` like any other. Each function states its own cost
+above.
+
+:func:`_fences` and the label-line match opening :func:`_blocks` cannot, and
+read raw text deliberately. ``_opens_a_claim`` refuses a start on every line of
+``[fence.start, fence.end)`` — ``MathFence.end`` being the closing delimiter's
+line plus one, that is the whole of what :func:`_fences` scans — and refuses a
+label line under :data:`~kb_tools.kb_claimgraph.identify.MIN_OPENING_WORDS`, a
+structural label folding to one or two words. Neither can be reached by a
+block's locator either, which sits two lines below the label and, where a
+block's content opens with a fence, is never composed at all: the display line
+yields no printed-name span, so :attr:`Block.claim_bearing` is false and the
+block mints nothing. A strip in either would be a second expression of rules
+:mod:`identify` already states.
+
+**The measurement is the confirmation, not the argument, and it is a snapshot.**
+Over the arXiv corpus as built — 53 KBs, 2015 documents, 507 marker-carrying
+lines, 468 of them on quoted display lines — all five readings return exactly
+what they return with markers stripped, and none of the 507 sits on a fence
+line, a label line, an anchor, a proof head or a reference entry. What the three
+strips are worth is measured by planting one marker where
+``kb_write.ops._insert_marker`` puts one, on each construct's own first line:
+6449 of 6738 anchors, 61 of 110 proof heads, and marker markup in the rendered
+title of 9 of 834 external works. The same plant over the two that do not strip
+costs every fence and every block in the corpus, silently — which is what those
+two exclusions in :mod:`identify` are holding, and why a change to either is a
+change to this module.
 """
 
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Protocol, TypeVar
 
 from .report import ClaimGraphError
-from .tree import ANCHOR_RE, Document, Tree, resolve, strip_markers, unquote
+from .tree import ANCHOR_RE, Document, Tree, anchor_labels, resolve, strip_markers, unquote
 
 #: Display names whose blocks state a result, case-folded. Every member is a
 #: display name a surveyed corpus declares.
@@ -195,15 +246,63 @@ CLAIM_BEARING: frozenset[str] = frozenset(
 #: ``assumption`` are the material a result is stated over; ``problem`` states a
 #: question; ``definition`` is a node kind SPEC.md places out of scope.
 #:
-#: **Nothing branches on this set, and it is not obviated.** An unclassified name
-#: is already not-claim-bearing by :attr:`Block.claim_bearing` reading
-#: :data:`CLAIM_BEARING` alone. What this set carries is the *judgement* — these
-#: names were looked at and found not to state results — and the census
+#: **This set is branched on, all but one member of it, and it is not obviated
+#: by that.** An
+#: unclassified name is already not-claim-bearing by :attr:`Block.claim_bearing`
+#: reading :data:`CLAIM_BEARING` alone. What this set carries is the *judgement*
+#: — these names were looked at and found not to state results — and the census
 #: subtracts it to report the names nobody has looked at, which is the whole
-#: datum a sweep over an unfamiliar corpus is collecting.
+#: datum a sweep over an unfamiliar corpus is collecting. Stage D spends that
+#: judgement at the target end for every member but one
+#: (:data:`NOT_A_CLAIM_TARGET`), so a name added here is refused there in the
+#: same act rather than in a second one somebody has to remember.
 NOT_CLAIM_BEARING: frozenset[str] = frozenset(
     {"proof", "remark", "definition", "example", "assumption", "notation", "problem"}
 )
+
+#: Point 12's label line for a proof, case-folded. ``amsthm`` declares the
+#: environment and its display name is the handle, so this is the one word the
+#: label line carries whatever the author called the environment internally.
+#:
+#: Declared here rather than beside :class:`Proof` because
+#: :data:`NOT_A_CLAIM_TARGET` subtracts it: the one place the word is spelled is
+#: the one place a reader has to find to know which member stands outside that
+#: refusal.
+PROOF_ENVIRONMENT = "proof"
+
+#: The names a cross-reference's fragment may land on and get **no claim target
+#: at all** for: stage D contributes no pair where an anchor's fragment names one
+#: of these blocks (:func:`~kb_tools.kb_claimgraph.attribute._target_end`),
+#: rather than falling past the identifier route onto whatever claim the target
+#: document happens to host.
+#:
+#: **What this withholds is a target, not a relationship.** The author named a
+#: block, and somebody classified that block as stating no result, so every route
+#: behind the identifier route answers with a claim the author did not point at.
+#: The relationship the corpus states runs to the block itself, and there is no
+#: node to record it against — so nothing true is given up, which is what
+#: separates this from declining to record what an author did write.
+#:
+#: **Derived from :data:`NOT_CLAIM_BEARING` rather than listed, and the
+#: subtraction is the whole ruling.** Membership requires a judgement somebody
+#: made: a name outside that set is one nobody has classified, and a refusal
+#: standing on a judgement nobody made would be the default column this module
+#: refuses everywhere else. Every name in it earns the refusal on one argument —
+#: the author pointed at a block that states no result, so nothing behind the
+#: identifier route can answer with what they pointed at — so a listed subset
+#: would be a second copy of that set, drifting against it the moment a name is
+#: classified and refused nowhere.
+#:
+#: **``proof`` is the one subtraction, and it is subtracted for having a better
+#: answer than a refusal rather than for costing more.** An anchor naming a
+#: proof block can resolve to the claims that proof establishes
+#: (:class:`Proof` already binds them), and refusing it here would spend a route
+#: nobody has written yet. The corpus carries no such anchor either way, so
+#: nothing turns on it today; what the subtraction protects is the option.
+#:
+#: What each name costs is measured and argued in
+#: :mod:`~kb_tools.kb_claimgraph.attribute`'s own docstring.
+NOT_A_CLAIM_TARGET: frozenset[str] = NOT_CLAIM_BEARING - {PROOF_ENVIRONMENT}
 
 #: Every name this package has classified, either way. The census reports what
 #: falls outside it.
@@ -346,16 +445,14 @@ class Anchor:
     #: every anchor whether or not the fragment does, which is what names the
     #: equation an ``eqref`` points at — that anchor's fragment is empty, point 9
     #: leaving an equation's label inside the maths fence rather than as an id.
+    #: **One label, where the attribute may hold a list**: a cleveref naming
+    #: several yields one record per label (:func:`tree.anchor_labels`), so the
+    #: other fields — ``href``, ``fragment``, ``line`` — are shared across them.
     label: str
     #: The environment of the labelled block it sits inside, or ``None`` for one
     #: in surrounding prose.
     hosting_environment: str | None
 
-
-#: Point 12's label line for a proof, case-folded. ``amsthm`` declares the
-#: environment and its display name is the handle, so this is the one word the
-#: label line carries whatever the author called the environment internally.
-PROOF_ENVIRONMENT = "proof"
 
 #: A proof's opening emphasis run — ``*Proof.*``, or ``*Proof of Theorem <a
 #: …>1</a>.*`` where the author gave ``\begin{proof}`` an optional argument.
@@ -444,6 +541,28 @@ class Work:
     document: str
     key: str
     text: str
+
+
+class InDocument(Protocol):
+    """Every reading this module produces carries the document it was found in."""
+
+    document: str
+
+
+_Found = TypeVar("_Found", bound=InDocument)
+
+
+def by_document(items: Sequence[_Found]) -> Mapping[str, tuple[_Found, ...]]:
+    """One reading grouped by document, each group in the scan's own order."""
+    grouped: dict[str, list[_Found]] = {}
+    for item in items:
+        grouped.setdefault(item.document, []).append(item)
+    return {path: tuple(found) for path, found in grouped.items()}
+
+
+def hosting_block(line: int, blocks: Sequence[Block]) -> Block | None:
+    """The labelled block ``line`` sits inside, of one document's blocks, or ``None``."""
+    return next((block for block in blocks if block.start <= line < block.end), None)
 
 
 @dataclass(frozen=True)
@@ -720,14 +839,34 @@ def _fences(document: Document) -> list[MathFence]:
 
 
 def _anchors(document: Document, blocks: Sequence[Block], tree: Tree) -> list[Anchor]:
-    text = unquote(document.text)
+    """Every rewritten cross-reference, one record per label it names.
+
+    A ``\\cref{a,b}`` is one anchor naming two targets and stating two
+    relationships, so it becomes two records (:func:`tree.anchor_labels`). The
+    other fields are the anchor's own and are shared across the split: what the
+    reader emitted is one element, and the only thing that is per-label is the
+    label.
+
+    **Markers come off first, for the reason the module docstring gives about
+    citations and with the same producer behind it.** A Tier-2 marker lands on
+    the end of a claim's display line, and a theorem environment's optional
+    argument puts the author's ``\\cref`` on that same line — so the marker sits
+    between two attributes :data:`tree.ANCHOR_RE` requires adjacent whenever the
+    reader hard-wrapped the tag, which it does for most of this corpus's
+    anchors. The match disappears and the anchor leaves the inventory with no
+    second count to disagree with; ``depends.build`` and :func:`_proofs` both
+    consume exactly these records. Line numbering survives the strip, a marker
+    carrying no newline, so :attr:`Anchor.line` still addresses the written
+    document.
+    """
+    text = unquote(strip_markers(document.text))
     found: list[Anchor] = []
     for match in ANCHOR_RE.finditer(text):
         number = text.count("\n", 0, match.start())
         path, _, fragment = match.group(1).partition("#")
         landed = resolve(document.path, path) if path else None
         hosting = next((block.environment for block in blocks if block.start <= number < block.end), None)
-        found.append(
+        found += [
             Anchor(
                 document=document.path,
                 line=number,
@@ -735,10 +874,11 @@ def _anchors(document: Document, blocks: Sequence[Block], tree: Tree) -> list[An
                 href=match.group(1),
                 target=landed if landed in tree.documents else None,
                 fragment=fragment,
-                label=match.group(3),
+                label=label,
                 hosting_environment=hosting,
             )
-        )
+            for label in anchor_labels(match.group(2), match.group(3))
+        ]
     return found
 
 
@@ -749,11 +889,21 @@ def _head_anchors(lines: Sequence[str], block: Block) -> frozenset[tuple[str, st
     renders ``\\begin{proof}``'s optional argument as the italic run it opens
     with. A block whose content opens with no such run yields nothing, which is
     what sends :func:`_adjacent_subject` looking.
+
+    Split per label exactly as :func:`_anchors` splits, because
+    :meth:`Proof.names` joins the two sets on ``(href, label)``: a head read
+    whole against anchors read per label would match neither half of a
+    ``\\begin{proof}[Proof of \\cref{a,b}]``, and the proof would then read its
+    own subjects as premises it rests on.
     """
     match = _PROOF_HEAD_RE.match("\n".join(lines[block.start + 2 : block.end]))
     if match is None:
         return frozenset()
-    return frozenset((found.group(1), found.group(3)) for found in ANCHOR_RE.finditer(match.group()))
+    return frozenset(
+        (found.group(1), label)
+        for found in ANCHOR_RE.finditer(match.group())
+        for label in anchor_labels(found.group(2), found.group(3))
+    )
 
 
 def _adjacent_subject(proof: Block, blocks: Sequence[Block]) -> tuple[Block, ...]:
@@ -801,10 +951,20 @@ def _proofs(tree: Tree, blocks: Mapping[str, Sequence[Block]], anchors: Mapping[
     same as having no head: the author pointed somewhere and this reading could
     not follow them, so falling back to the block above would answer a question
     they already answered differently.
+
+    **Markers come off, and here the strip is what keeps two readings of one
+    document agreeing.** :meth:`Proof.names` joins the head's ``(href, label)``
+    pairs against the :class:`Anchor` records :func:`_anchors` produced; once
+    that reading strips and this one does not, a single marker makes the two
+    disagree about the same bytes. What that costs is worse than a lost edge: an
+    emptied head is falsy, ``subjects`` falls through to
+    :func:`_adjacent_subject`, and the proof binds to whichever block sits above
+    it — a containment edge authored mechanically, pointed somewhere the author
+    did not point, with nothing downstream positioned to disagree.
     """
     found: list[Proof] = []
     for path, document_blocks in sorted(blocks.items()):
-        lines = unquote(tree.documents[path].text).splitlines()
+        lines = unquote(strip_markers(tree.documents[path].text)).splitlines()
         for block in document_blocks:
             if block.environment.casefold() != PROOF_ENVIRONMENT:
                 continue
@@ -888,10 +1048,20 @@ def _works(document: Document) -> list[Work]:
     A document carrying the volume's reference list is the only one that yields
     any. The entry's own markup is stripped and its wrapping collapsed, so the
     text is the sentence a reader sees rather than the div that carries it.
+
+    **Markers come off, and what they cost here is the work's title rather than
+    the entry.** ``references.md`` is a leaf like any other, so it is inside
+    :data:`tree.DECLARING_KINDS` and a claim may be identified in it. Where the
+    reader hard-wrapped an entry's opening ``<div>``, a marker on its first line
+    puts a ``>`` inside the attribute run, :data:`BIBLIOGRAPHY_ENTRY_RE` closes
+    the tag on the marker instead, and the rest of the real tag falls into the
+    captured text — which :func:`_collapse_entry` cannot remove, having no
+    opening ``<`` to match. The entry is still found; it is titled with markup,
+    and that title is the whole of what the ``work-`` node says about the work.
     """
     return [
         Work(document.path, match.group("key"), _collapse_entry(match.group("text")))
-        for match in BIBLIOGRAPHY_ENTRY_RE.finditer(unquote(document.text))
+        for match in BIBLIOGRAPHY_ENTRY_RE.finditer(unquote(strip_markers(document.text)))
     ]
 
 

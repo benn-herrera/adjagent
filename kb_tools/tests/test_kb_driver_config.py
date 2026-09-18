@@ -23,7 +23,6 @@ permission_mode = "acceptEdits"
 # answer-set validation is testable without importing it.
 ADMISSIBLE = {
     "phase-1b.design-gate": frozenset({"approve", "revise", "cancel"}),
-    "start.proceed": frozenset({"yes", "no"}),
 }
 
 
@@ -46,7 +45,6 @@ def test_minimal_config_applies_every_default(tmp_path: Path) -> None:
     assert cfg.run.charter_file == Path(kb_pipeline.CHARTER_RELPATH)
     assert cfg.run.runner is None
     assert cfg.claude.command == ("claude",)
-    assert cfg.claude.brief_transport == "stdin"
     assert cfg.claude.env == {}
     assert cfg.timeouts.single_seconds == config.DEFAULT_SINGLE_SECONDS
     assert cfg.timeouts.by_step == {}
@@ -67,11 +65,9 @@ runner = "make"
 [claude]
 command = ["claude", "--dangerously-skip-update"]
 env = { ANTHROPIC_LOG = "debug" }
-brief_transport = "file"
 
 [timeouts]
 single_seconds = 60
-wave_seconds = 120
 silence_seconds = 30
 [timeouts.by_step]
 "p5.review" = 14400
@@ -95,7 +91,6 @@ note = "Approve."
     assert cfg.run.runner == "make"
     assert cfg.claude.command == ("claude", "--dangerously-skip-update")
     assert cfg.claude.env == {"ANTHROPIC_LOG": "debug"}
-    assert cfg.claude.brief_transport == "file"
     assert cfg.timeouts.by_step == {"p5.review": 14400}
     assert cfg.retry.transport_attempts == 2
     assert cfg.retry.backoff_seconds == (1, 2, 3)
@@ -263,11 +258,10 @@ def test_the_run_directory_flag_wins_over_the_file_and_reaches_the_resume_line(t
         ("sources not strings", '[run]\nsources = [1]\npermission_mode = "auto"\n', "sources"),
         ("missing [run]", '[log]\nlevel = "INFO"\n', "sources"),
         ("unknown runner", MINIMAL + 'runner = "cmake"\n', "runner"),
-        ("bad brief transport", MINIMAL + '[claude]\nbrief_transport = "argv"\n', "brief_transport"),
         ("command not a list", MINIMAL + '[claude]\ncommand = "claude"\n', "command"),
         ("env value not a string", MINIMAL + "[claude]\nenv = { A = 1 }\n", "env"),
         ("timeout not an integer", MINIMAL + '[timeouts]\nsingle_seconds = "fast"\n', "single_seconds"),
-        ("timeout not positive", MINIMAL + "[timeouts]\nwave_seconds = 0\n", "wave_seconds"),
+        ("timeout not positive", MINIMAL + "[timeouts]\nsilence_seconds = 0\n", "silence_seconds"),
         ("backoff not integers", MINIMAL + '[retry]\nbackoff_seconds = ["5s"]\n', "backoff_seconds"),
         ("unknown log level", MINIMAL + '[log]\nlevel = "CHATTY"\n', "level"),
         ("barrier table has no decision", MINIMAL + '[barriers.phase-1b.design-gate]\nnote = "hi"\n', "decision"),
@@ -315,29 +309,71 @@ def test_a_non_positive_per_step_timeout_is_refused_at_load(tmp_path: Path, seco
     assert "positive" in message
 
 
-@pytest.mark.parametrize("retired", sorted(config.RETIRED_RUN_KEYS))
 @pytest.mark.parametrize("door", ["file", "flag"])
-def test_a_retired_run_key_is_refused_at_load_rather_than_ignored(tmp_path: Path, retired: str, door: str) -> None:
-    """An unknown key is ignored here; a retired one is not, and the difference is intent.
-
-    ``build_mode`` selected which rows a build walked. A file still carrying it
-    means something by it, so ignoring it would walk a different build than the
-    file asks for and say nothing — where an unknown key nobody ever honoured
-    changes nothing by being skipped. The refusal carries the key and what to do
-    instead, both doors alike, because a flag is refused in the same words its
-    config key is.
+def test_an_unknown_run_key_is_refused_naming_it(tmp_path: Path, door: str) -> None:
+    """[run] has no enumerated vocabulary to check against — a key config.load
+    never reads is refused all the same, both doors alike, because a flag is
+    refused in the same words its config key would be.
     """
-    body = MINIMAL + f'{retired} = "fresh"\n'
     with pytest.raises(config.ConfigError) as excinfo:
         if door == "file":
-            config.load(_write(tmp_path, body))
+            config.load(_write(tmp_path, MINIMAL + 'no_inferrence = "true"\n'))
         else:
-            config.load(None, run_overrides={"sources": ("a.tex",), retired: "fresh"})
+            config.load(None, run_overrides={"sources": ("a.tex",), "no_inferrence": "true"})
 
     message = str(excinfo.value)
-    assert retired in message
-    assert "retired" in message
-    assert config.RETIRED_RUN_KEYS[retired] in message, "the refusal says what to do instead"
+    assert "[run]" in message
+    assert "no_inferrence" in message
+
+
+def test_build_mode_is_refused_by_the_general_unknown_key_rule(tmp_path: Path) -> None:
+    """The retired per-key allowlist is gone; the general rule subsumes it.
+
+    ``build_mode`` once selected which rows a build walked and was refused by
+    name. It reads nothing now, so it is caught the same way any other typo
+    in ``[run]`` is: named as an unrecognized key.
+    """
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(_write(tmp_path, MINIMAL + 'build_mode = "fresh"\n'))
+
+    message = str(excinfo.value)
+    assert "[run]" in message
+    assert "build_mode" in message
+
+
+def test_multiple_unknown_run_keys_are_all_reported_in_one_refusal(tmp_path: Path) -> None:
+    body = MINIMAL + 'no_inferrence = true\nbuild_mode = "fresh"\n'
+
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(_write(tmp_path, body))
+
+    message = str(excinfo.value)
+    assert "no_inferrence" in message
+    assert "build_mode" in message
+
+
+def test_every_recognized_run_key_still_loads(tmp_path: Path) -> None:
+    """The refusal reads what config.load actually consults — every field it
+    is documented to accept must still load clean."""
+    body = """
+[run]
+sources = ["a.tex"]
+bibliography = "refs.bib"
+permission_mode = "acceptEdits"
+charter_file = "scratch/charter.md"
+runner = "make"
+no_inference = true
+through = "start"
+"""
+    cfg = config.load(_write(tmp_path, body))
+
+    assert cfg.run.sources == ("a.tex",)
+    assert cfg.run.bibliography == "refs.bib"
+    assert cfg.run.permission_mode == "acceptEdits"
+    assert cfg.run.charter_file == Path("scratch/charter.md")
+    assert cfg.run.runner == "make"
+    assert cfg.run.no_inference is True
+    assert cfg.run.through == "start"
 
 
 @pytest.mark.parametrize(
@@ -432,31 +468,30 @@ def test_decide_pair_is_checked_against_the_registry() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The two mode flags, and the one bound
+# The mode flag, and the one bound
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key", ["no_inference", "dry_run"])
+@pytest.mark.parametrize("key", ["no_inference"])
 def test_each_mode_flag_defaults_off_and_is_carried_through(tmp_path: Path, key: str) -> None:
     assert getattr(config.load(_write(tmp_path, MINIMAL)).run, key) is False
     assert getattr(config.load(_write(tmp_path, MINIMAL), run_overrides={key: True}).run, key) is True
     assert getattr(config.load(_write(tmp_path, MINIMAL + f"{key} = true\n")).run, key) is True
 
 
-def test_both_mode_flags_are_rendered_into_the_resume_line_and_the_bound_is_not() -> None:
+def test_the_mode_flag_is_rendered_into_the_resume_line_and_the_bound_is_not() -> None:
     """What a resume must keep, and what it must drop.
 
-    A resume dropping either mode flag would change the build half way through
-    — spending the calls it was told to do without, or spending real ones a
-    smoke test never meant to. A resume keeping the bound would stop in the
-    same place forever, which is what resuming is for.
+    A resume dropping the mode flag would change the build half way through,
+    spending the calls it was told to do without. A resume keeping the bound
+    would stop in the same place forever, which is what resuming is for.
     """
     line = config.invocation(
         None,
-        {"sources": ("a.tex",), "no_inference": True, "dry_run": True, "through": "start"},
+        {"sources": ("a.tex",), "no_inference": True, "through": "start"},
     )
 
-    assert line == f"--source a.tex {config.NO_INFERENCE_FLAG} {config.DRY_RUN_FLAG}"
+    assert line == f"--source a.tex {config.NO_INFERENCE_FLAG}"
     assert config.THROUGH_FLAG not in line
 
 

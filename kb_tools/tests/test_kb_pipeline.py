@@ -1,15 +1,11 @@
 """Tests for the pipeline vocabulary itself (``kb_tools/kb_pipeline.py``).
 
-``test_kb_util.py`` exercises the cards as the CLI renders them; this file
-tests the stage table directly, for obligations whose *absence* is the
-contract and which therefore have no rendered line to look for — and for the
-generated invocations, whose contract is that they are **generated**: the
-last section drives each card's underlying constant and asserts the render
-followed.
+``test_kb_util.py`` exercises the renders the CLI produces; this file tests the
+stage table directly, for obligations whose *absence* is the contract and which
+therefore have no rendered line to look for.
 """
 
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -89,145 +85,36 @@ def test_the_meta_documentation_boundary_refuses_on_the_overview_and_on_nothing_
 
 
 # ---------------------------------------------------------------------------
-# Where the build expects the user
+# What a stage is for
 # ---------------------------------------------------------------------------
 
 
-def _gate_named(stage: kb_pipeline.Stage, line: str) -> bool:
-    """Whether the sentence names this stage.
+@pytest.mark.parametrize("stage", kb_pipeline.STAGES, ids=[stage.id for stage in kb_pipeline.STAGES])
+def test_a_stopped_build_names_the_stage_and_what_that_stage_is_for(stage: kb_pipeline.Stage, tmp_path: Path) -> None:
+    """``display`` is the purpose label, and every render a stopped build leaves carries it.
 
-    Matched as the whole rendered pair, never as the bare id: one id can be a
-    substring of another, so an id test would read the gate as standing where
-    it does not.
+    A build stops at a stage boundary, and what a reader has in front of them
+    there is one of these three: the checklist, the stage-coverage read, or the
+    boundary commit of the last stage that did record. Each names the stage and
+    what it is for, from one string. The third is asserted end to end in
+    ``test_kb_util.py``'s ledger walk, against the subjects git actually holds;
+    here are the two rendered in process.
     """
-    return f"{stage.id} ({stage.display})" in line
+    assert stage.display and stage.display != stage.id
 
+    checklist = [line for line in kb_pipeline.checklist_lines({stage.id}) if line.split()[1] == stage.id][0]
+    fact = kb_pipeline.stage_status(tmp_path, stage)[0]
 
-def test_the_confirmation_sentence_names_exactly_the_stages_the_table_gates() -> None:
-    """The flag is the source; the sentence is what is read off it."""
-    line = kb_pipeline._user_gate_line()
-
-    named = {stage.id for stage in kb_pipeline.STAGES if _gate_named(stage, line)}
-    assert named == {stage.id for stage in kb_pipeline.STAGES if stage.user_gate}
-    # Not vacuous: a build with no gate at all would satisfy the equality above.
-    assert named
-
-
-@pytest.mark.parametrize("gated", ["phase-3a", "phase-5"])
-def test_moving_the_gate_moves_the_sentence(monkeypatch: pytest.MonkeyPatch, gated: str) -> None:
-    """A gate that moves without the flag disappears from the confirmation.
-
-    Driving the table is what says the sentence is derived: a hand-written one
-    naming today's gated stage passes the test above and fails this.
-    """
-    moved = tuple(replace(stage, user_gate=stage.id == gated) for stage in kb_pipeline.STAGES)
-    monkeypatch.setattr(kb_pipeline, "STAGES", moved)
-
-    line = kb_pipeline._user_gate_line()
-
-    assert {stage.id for stage in moved if _gate_named(stage, line)} == {gated}
-
-
-# ---------------------------------------------------------------------------
-# The generated invocations
-# ---------------------------------------------------------------------------
-
-
-def _card(stage_id: str, tmp_path: Path) -> str:
-    """One stage's card as one blob — the invocations are long, and this reads them whole."""
-    return "\n".join(kb_pipeline.card_lines(_stage(stage_id), tmp_path))
-
-
-# The ops whose invocation needs the render's own context — a stage id, a
-# per-consumer runner. Each has a generated item behind it, so none of them
-# may appear in a plain string. `OP_SHOW_CONFIRMATION` is not one of these: the
-# `start` card's opening line composes it once, from constants alone, at
-# STAGES-table-definition time — there is no per-render value it could go
-# stale against, unlike a stage id or a repo-relative path.
-_GENERATED_OPS = (
-    kb_util.OP_START_BUILD,
-    kb_util.OP_ADVANCE_STEP,
-    kb_util.OP_SHOW_STAGE_STATUS,
-)
-
-#: Every op token the CLI declares, taken from ``kb_util``'s own constants
-#: rather than listed here: a card may name any of them and nothing else.
-_DECLARED_OPS = frozenset(
-    value for name, value in vars(kb_util).items() if name.startswith("OP_") and isinstance(value, str)
-)
-
-#: The sanctioned prefix, and whatever token follows it. A card line either
-#: matches this with a declared op or it hand-wrote a command.
-_INVOCATION_RE = re.compile(rf"{re.escape(kb_pipeline._INVOCATION)}\s+(\S+)")
-
-
-def test_no_card_hand_writes_a_command(tmp_path: Path) -> None:
-    """A command a card composed by hand is a command that can go stale unnoticed.
-
-    Two halves, because the cards now carry two kinds of invocation.
-
-    *Render-time ops* name a stage id or the consumer's runner, so each must
-    come from a generated item and none may appear in a plain string at all —
-    that is what keeps the stage id a card prints and the stage id the ledger
-    records one value.
-
-    *The write ops* name none of those: the op token and the prefix are
-    the whole of the command, so ``_kb_util_command`` composes them where the
-    card is written and there is nothing left for a render to bind. What can
-    still go wrong there is a card advertising a subcommand the CLI does not
-    have, so every invocation any card carries — prose or generated — is held
-    against ``kb_util``'s own op constants.
-    """
-    prose = [item for stage in kb_pipeline.STAGES for item in stage.card if isinstance(item, str)]
-    rendered = [line for stage in kb_pipeline.STAGES for line in kb_pipeline.card_lines(stage, tmp_path)]
-
-    assert [line for line in prose for op in _GENERATED_OPS if op in line] == []
-    assert [op for line in rendered for op in _INVOCATION_RE.findall(line) if op not in _DECLARED_OPS] == []
-
-
-def test_no_card_carries_a_rendered_manifest_view(tmp_path: Path) -> None:
-    """No card line embeds a newline.
-
-    A card's obligations are read into a message a line at a time; anything a
-    card names has to fit that grammar, so nothing rendered here may itself be
-    multi-line text.
-    """
-    for stage in kb_pipeline.STAGES:
-        for line in kb_pipeline.card_lines(stage, tmp_path):
-            assert "\n" not in line, stage.id
-
-
-@pytest.mark.parametrize(
-    ("module", "constant", "value", "stage_ids"),
-    [
-        pytest.param(kb_util, "OP_START_BUILD", "commence-build", ("start",), id="start-build-op"),
-        pytest.param(kb_util, "OP_ADVANCE_STEP", "record-stage", ("phase-3a",), id="advance-step-op"),
-    ],
-)
-def test_moving_the_constant_moves_the_card(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    module: object,
-    constant: str,
-    value: str,
-    stage_ids: tuple[str, ...],
-) -> None:
-    """The row's real claim: these lines are rendered from the constants, not beside them."""
-    before = {stage_id: _card(stage_id, tmp_path) for stage_id in stage_ids}
-    monkeypatch.setattr(module, constant, value)
-
-    for stage_id in stage_ids:
-        card = _card(stage_id, tmp_path)
-        assert value in card, stage_id
-        assert card != before[stage_id], stage_id
+    assert checklist.endswith(f"  {stage.display}")
+    assert f"{kb_pipeline.FACT} {stage.id} ({stage.display}) — " in fact
 
 
 # ---------------------------------------------------------------------------
 # The stage-coverage read
 #
 # The op's own render, tested where the tree is constructed directly.
-# `test_kb_util.py` is where the two consumers are held to one another through
-# the running CLI; here it is the shape of one report.
+# `test_kb_util.py` is where it is driven through the running CLI; here it is
+# the shape of one report.
 # ---------------------------------------------------------------------------
 
 
@@ -264,7 +151,6 @@ def test_no_read_line_parses_as_a_checklist_entry(tmp_path: Path) -> None:
         for line in kb_pipeline.stage_status(tmp_path, stage):
             assert line.startswith(kb_pipeline.STAGE_STATUS_TAG), (stage.id, line)
             assert not checklist.match(line), (stage.id, line)
-            assert not line.startswith(kb_pipeline.CARD_PREFIX), (stage.id, line)
 
 
 # ---------------------------------------------------------------------------

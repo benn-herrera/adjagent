@@ -5,6 +5,14 @@ derived from a path. What this stage adds is arrangement: which register each
 entry belongs in, what ``kind:`` each document carries, which documents declare
 which claims, and where a Tier-2 marker goes.
 
+**Two kinds of thing are arranged into one kind of entry.** A claim the author
+marked as a block, and a referenced equation nothing in the graph holds
+(:mod:`equation`) — the second is stage B's reading arranged, exactly like the
+first, and both become ordinary ``clm-`` entries. Where they differ is the
+marker: an equation has no line of prose to anchor one to, its position being
+the ``\\label`` inside its maths fence, so it takes none and is not counted
+toward the threshold that demands one of everything else.
+
 **Ids do not exist yet**, and cannot: an insert op mints its own id and there is
 no way to spell "depends on the third entry in this file". So a document record
 and a marker record name their claims by **position in** :attr:`Plan.entries`,
@@ -20,10 +28,12 @@ pass, and solidity is computed by refresh.
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .. import kb_index_lib
-from . import endcap
+from .. import kb_index_lib, kb_schema
+from ..kb_write import render
+from . import endcap, equation
 from .identify import Claim
 from .inventory import Inventory
+from .report import ClaimGraphError
 from .tree import DECLARING_KINDS, Tree, document_kind
 
 #: Where a domain's register lives. One per volume, because the citation gate
@@ -55,13 +65,31 @@ UNSCANNED_REASON = kb_index_lib.UNSCANNED_REASON
 
 @dataclass(frozen=True)
 class Entry:
-    """One register entry to insert, in mint order."""
+    """One register entry to insert, in mint order.
+
+    Two things are assembled into one of these and the difference is
+    ``equation``: a claim the author marked as a block, and a referenced
+    equation nothing else in the graph holds (:mod:`equation`). They share every
+    other field because they become the same kind of node — an ordinary ``clm-``
+    entry, minted by the same op into the same register.
+    """
 
     register: str
     title: str
     rationale: str
-    #: The claim it was assembled from — its host and its locator ride here.
-    claim: Claim
+    #: The document hosting it.
+    document: str
+    #: Where in that document it sits: a block's own display line, or — for an
+    #: equation — its ``\\label``, which is inside the maths fence rather than on
+    #: a line of prose.
+    locator: str
+    #: The equation's ``\\label`` where this entry stands for one, ``None`` where
+    #: it stands for a claim-bearing block. **It is what says a Tier-2 marker
+    #: does not apply**: the marker exists to make a claim's position
+    #: recoverable, and an equation's position is its label — carried in the
+    #: title, and findable in the document's own fence — so there is nothing for
+    #: a marker to add and nowhere outside the maths to put one.
+    equation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,16 +152,73 @@ def _rationale(claim: Claim) -> str:
     )
 
 
-def assemble(tree: Tree, inventory: Inventory, claims: Sequence[Claim]) -> Plan:
-    """Arrange the claims and the tree into the four write passes' inputs."""
-    entries = tuple(
-        Entry(register=register_for(claim.document), title=claim.title, rationale=_rationale(claim), claim=claim)
-        for claim in claims
+def _equation_rationale(found: equation.ReferencedEquation) -> str:
+    return (
+        f"A labelled equation in {found.document} that this corpus's own cross-references name and that no "
+        f"claim-bearing block and no proof holds. The title carries the equation's own label, which is what "
+        f"a cross-reference resolves through; the equation is a node so that those references reach "
+        f"something, not because anybody read it as stating a result. Neither dependency attribution nor "
+        f"rigor assessment has run over it."
     )
+
+
+def _equation_entries(tree: Tree, inventory: Inventory) -> tuple[Entry, ...]:
+    """One entry per referenced equation nothing else in the graph holds.
+
+    The title is the hosting document's own H1 and the equation's own label —
+    both the author's words, and the pair unique across the corpus. A document
+    with no H1 is refused rather than titled from its path: the heading is the
+    half of the title a reader recognizes the node by, and a node named after a
+    file is one no reader can place.
+
+    **The heading is normalised before it is composed in**, because this is the
+    one title source whose words are an author's running prose rather than a
+    display line: a heading carrying a non-breaking space comes back off the
+    register as an ordinary one, and the mint-order proof — which compares the
+    title asked for against the title landed — reads that as the wrong entry.
+    :func:`render.collapse_prose` is the parser's own normalization applied at
+    write time, which is what makes the comparison well-posed.
+    """
+    found: list[Entry] = []
+    for referenced in equation.unheld(inventory):
+        heading = tree.documents[referenced.document].heading
+        if heading is not None:
+            heading = render.collapse_prose(heading) or None
+        if heading is None:
+            raise ClaimGraphError(
+                "equation-heading",
+                f"{referenced.document} carries no H1, so the equation labelled {referenced.label!r} in it "
+                f"has no title to be minted under. Every document of a conforming tree carries one",
+            )
+        found.append(
+            Entry(
+                register=register_for(referenced.document),
+                title=kb_schema.equation_title(label=referenced.label, heading=heading),
+                rationale=_equation_rationale(referenced),
+                document=referenced.document,
+                locator=referenced.label,
+                equation=referenced.label,
+            )
+        )
+    return tuple(found)
+
+
+def assemble(tree: Tree, inventory: Inventory, claims: Sequence[Claim]) -> Plan:
+    """Arrange the claims, the referenced equations and the tree into the write passes' inputs."""
+    entries = tuple(
+        Entry(
+            register=register_for(claim.document),
+            title=claim.title,
+            rationale=_rationale(claim),
+            document=claim.document,
+            locator=claim.locator,
+        )
+        for claim in claims
+    ) + _equation_entries(tree, inventory)
 
     hosted: dict[str, list[int]] = {}
     for position, entry in enumerate(entries):
-        hosted.setdefault(entry.claim.document, []).append(position)
+        hosted.setdefault(entry.document, []).append(position)
 
     documents = []
     for path in sorted(tree.documents):
@@ -149,15 +234,22 @@ def assemble(tree: Tree, inventory: Inventory, claims: Sequence[Claim]) -> Plan:
             )
         )
 
+    # Counted over the block-hosted entries alone, at both ends of the rule: an
+    # equation node takes no marker, so it may not push the document it lands in
+    # over the threshold that demands one of everything else either.
+    markable = {
+        path: [position for position in positions if entries[position].equation is None]
+        for path, positions in hosted.items()
+    }
     markers = tuple(
-        Marker(document=path, entry=position, locator=entries[position].claim.locator)
-        for path, positions in sorted(hosted.items())
+        Marker(document=path, entry=position, locator=entries[position].locator)
+        for path, positions in sorted(markable.items())
         if len(positions) > 1
         for position in positions
     )
 
     off_graph = endcap.scan(inventory)
-    position_of = {(entry.claim.document, entry.claim.locator): position for position, entry in enumerate(entries)}
+    position_of = {(entry.document, entry.locator): position for position, entry in enumerate(entries)}
     rests_on = tuple(
         (position_of[site], work_id)
         for site, work_ids in off_graph.pairings.items()

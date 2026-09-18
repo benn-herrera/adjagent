@@ -215,20 +215,17 @@ def test_every_printed_line_follows_the_report_convention(tmp_path: Path, capsys
 def test_a_well_formed_tree_exits_zero_with_every_check_reported(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Both checks this caller can answer pass, and the third says it cannot be asked.
+    """The one check this caller can answer passes, and the other says it cannot be asked.
 
     The set assertions are what say the report claims exactly its own coverage:
-    a run that reported only reachability would exit 0 just the same, and a
-    tree-diff ``PASS`` here would be a third confirmation nobody performed.
+    a run that reported nothing at all would exit 0 just the same, and a
+    tree-diff ``PASS`` here would be a second confirmation nobody performed.
     """
     code = _cli(*_write_build_case(tmp_path))
     out = capsys.readouterr().out
 
     assert code == validate.EXIT_OK, out
-    assert {line.split()[2] for line in _finding_lines(out, validate.PASS)} == {
-        validate.CHECK_REACHABILITY,
-        validate.CHECK_ID_GUARD,
-    }
+    assert {line.split()[2] for line in _finding_lines(out, validate.PASS)} == {validate.CHECK_REACHABILITY}
     (tree_diff,) = [line for line in _finding_lines(out, validate.FACT) if validate.CHECK_TREE_DIFF in line]
     assert "not applicable" in tree_diff
 
@@ -432,10 +429,6 @@ def test_the_enumeration_reaches_every_subcommand_the_cli_declares() -> None:
     walked = _parsers()
 
     assert {parser.prog.split()[-1] for parser in walked[1:]} == set(_subparsers_action(walked[0]).choices)
-    # Not vacuous: the eleven build ops, the claim-graph renderer, the twelve
-    # write ops and the one read-only metadata op are all there, and the
-    # top-level parser with them.
-    assert len(walked) == 26
     subcommands = {parser.prog.split()[-1] for parser in walked[1:]}
     assert set(kb_util.WRITE_OPS) < subcommands
     assert set(kb_util.READ_OPS) < subcommands

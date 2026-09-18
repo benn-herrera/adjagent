@@ -1,7 +1,6 @@
 # The single source of shared text (chunks) for the agent and command
-# templates. Editing a chunk changes every definition that uses it; run
-# `just generate`. Marker syntax, variants, and defaults: ARCHITECTURE.md,
-# "Template System".
+# templates. Editing a chunk changes every definition that uses it. Marker
+# syntax, variants, and defaults: ARCHITECTURE.md, "Template System".
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
 
@@ -102,9 +101,32 @@ text = '''**You never modify files.** If asked to fix an issue or modify any fil
 
 # ─── Testing ─────────────────────────────────────────────────────────────────
 
+# The discriminator is the load here, and it is a sentence rather than a list:
+# boundaries= is per-seat illustration (rust names FFI and channels,
+# shell-dsl-coder names argv and PATH), and a seat meeting a boundary its own
+# list does not name decides from the test. That test replaced `(any point where
+# data crosses a trust, I/O, or thread boundary)`, 2026-09: the parenthetical was
+# a second enumeration one altitude up — a seat still had to know what counts as
+# a trust boundary — where provenance and ownership are answerable at the site.
+# Both halves are load-bearing and neither subsumes the other: provenance covers
+# untrusted input and I/O, ownership covers the queue and thread handoff where
+# both sides are the seat's own code.
+# The restates-the-design sentence is the write-side of what kb_tools/AGENTS.md
+# states for a closed pipeline, narrowed to the part a seat can establish from
+# what it can see. The broad form — name every producer of a state before
+# writing a check for it — needs whole-system knowledge a seat dispatched into
+# an unknown codebase does not have, and resolves there to "I found no producer
+# in my scope", which deletes the check protecting a caller in a file the seat
+# never opened. The deletion direction needs nothing here: no-scope-creep
+# already forbids the drive-by edit to adjacent code.
+# Eleven consumers, the seats that implement: generalist-coder, the three
+# language coders, shell-dsl-coder, the six platform experts.
+# Sibling stating this rule in its own words, unreached by a chunk edit — check
+# by hand: templates/agents/architect.md.tmpl, the `Runtime boundary validation`
+# design invariant, which still carries the parenthetical this chunk dropped.
 [chunks.boundary-checks-lead]
 defaults.boundaries = '''external API calls, user input parsing, database writes, IPC, and queue boundaries'''
-text = '''*Runtime boundary checks*: at significant system boundaries — @!arg.boundaries!@ (any point where data crosses a trust, I/O, or thread boundary) — implement lightweight contract and expectation checks. Apply these only when the change directly touches or creates such a boundary; a fix internal to a module does not require new boundary checks.'''
+text = '''*Runtime boundary checks*: at significant system boundaries — @!arg.boundaries!@ — implement lightweight contract and expectation checks. What makes one a boundary is what the check reads, not where the line sits: data your own code did not compute, or state another thread or process may have changed underneath you. A check over a value your own code just computed, or over a state the code that reaches it has already refused, restates the design instead of testing it. Apply these only when the change directly touches or creates such a boundary; a fix internal to a module does not require new boundary checks.'''
 
 # The one sentence of the boundary-check paragraph that survived unchanged at
 # every seat that writes checks rather than reviewing them. Five consumers:
@@ -273,9 +295,9 @@ text = '''**Verification evidence**: any verification a reported conclusion rest
 
 # Harvested from shell-dsl-coder, which carried it inline and alone; every other
 # implementing seat ships pages of house style with no stated tiebreak against
-# the project's own. The operator CLAUDE.md's precedence chain ranks the contract
-# documents against each other and against the code, and says nothing about this
-# definition, which is the residue stated here.
+# the project's own. The operator CLAUDE.md names the contract documents and
+# routes changes through them, and says nothing about this definition, which is
+# the residue stated here.
 # The observable violation is a diff that restyles working code to the
 # preferences above it — python-coder's `Match the codebase` and
 # generalist-coder's `mirror its style` were the two paraphrases this replaced.
@@ -338,10 +360,16 @@ text = '''**Build system**: if the project has a Makefile or justfile, use its t
 [chunks.new-project-setup]
 text = '''**New project setup**: creating a project from scratch means creating its task-runner entry point WITH the first code, never retrofitting it later. A `justfile` by default; a `Makefile` only where the top-level utility commands genuinely need dependency management — file targets with staleness rules, generated content that must rebuild when its sources change, recursive sub-builds (`$(MAKE) -C`). Aliasing commands is never reason enough to choose Make over just. Standard targets: `build`/`rebuild`, `test`, an integration-test target, and `generate`/`regenerate` wherever generation is a distinct step the build does not own — CMake project generation in the C++/CMake family, `go generate` codegen in Go, code/data generation in Python (Rust and Zig typically need none: `build.rs`/`build.zig` own generation). Omit a target only where the task genuinely does not exist for the project — never because wiring it up is effort. No project may ever require the agent or the developer to execute a major project-iteration task from a naked command line with correctly-recalled values: the target is the memory. Also created at project birth: `.claude-temp/`, with a `.claude-temp/` entry in the root `.gitignore` — the project's scratch space (throwaway builds, probe harnesses, captured output), pre-made so the scratch-space rule never stalls on a missing directory. It lives beside `.claude/`, never inside it — writes under `.claude/` trip the permission system's own-settings protections.'''
 
-# Not redundant with the global CLAUDE.md: that file carries only the ambient
-# precedence rule, and the full structure travels here, to project birth.
+# The operator CLAUDE.md now names the four documents and states each one's
+# role, so the roles are no longer restated here; what travels to project birth
+# is the residue that file does not carry — the two writing rules, the lean
+# CLAUDE.md, the vanilla case, and ROADMAP.md. The precedence ranking went out
+# of the baseline 2026-09 (it was being cited in place of investigation) and out
+# of this chunk with it, along with `the code governs nothing`, which the
+# baseline's stale-document rule contradicts: code that is newer and holds the
+# project's principles is the current statement, not the defect.
 [chunks.project-docs-setup]
-text = '''**Project documents**: a project with a maintained contract carries, in precedence order: `SPEC.md` — what it must do to be the thing, implementation-independent; `ARCHITECTURE.md` — how this implementation satisfies SPEC.md, citing rather than restating it; `CONVENTIONS.md` — house rules and project-specific traps, not the contract. The code expresses ARCHITECTURE.md and governs nothing; where documents disagree, the higher wins and the lower is the defect. A project CLAUDE.md stays lean — only the project-specific rules that drift when the contract docs fall out of context. A vanilla project may have no CLAUDE.md and no SPEC.md; that is an acceptable state, not a defect. A project intended to be maintained also carries `ROADMAP.md` — next steps and future intent, even if one sentence ("spec implemented; no further work intended"). Future-thinking routes there, never inline in the contract docs; ROADMAP.md sits outside the precedence chain and is not handed to coding dispatches.'''
+text = '''**Project documents**: a project with a maintained contract carries the full document set — `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md` — with `ARCHITECTURE.md` citing `SPEC.md` rather than restating it, and `CONVENTIONS.md` carrying house rules and project-specific traps rather than contract. A project CLAUDE.md stays lean — only the project-specific rules that drift when the contract docs fall out of context. A vanilla project may have no CLAUDE.md and no SPEC.md; that is an acceptable state, not a defect. A project intended to be maintained also carries `ROADMAP.md` — next steps and future intent, even if one sentence ("spec implemented; no further work intended"). Future-thinking routes there, never inline in the contract docs, and ROADMAP.md is not handed to coding dispatches.'''
 
 [chunks.data-formats-scope]
 text = '''project-owned configuration and structured data files'''
@@ -851,8 +879,7 @@ text = '''**Assigned targets only.** You create files at the targets your assign
 
 # The up-link standard, expanded mid-sentence by the seat that emits the bytes
 # (maintainer). The parent relation is `kb_survey/validate.py`'s `parent_index`;
-# the target is spelled relative to the carrying document, as
-# `kb_driver/replay.py` spells it; the two filenames are `kb_index_lib`'s.
+# the marker and the two filenames are `kb_index_lib`'s.
 # Stated as a RELATION rather than as a literal `../index.md` because nothing
 # checks an up-link against the parent relation — `_check_build_reachability`
 # fails only a target resolving to no document, so a leaf up-linking
@@ -878,14 +905,6 @@ text = '''`[↑ Parent Name](<parent>)` at the top of the document — `↑` is 
 # Heading-less on purpose: the consumer expands it inside a section of its
 # own, and a chunk-owned `##` would break that section in half.
 #
-# The brief-side statement of the same contract is
-# kb_tools/kb_driver/prompt-templates/_write-op-contract.tmpl, which the driver composes
-# into every brief naming a write op. A5.4 W3 blessed the duplication and
-# refused the sync obligation: the two bodies address different readers and are
-# meant to stay separately worded — so reword this freely, but do not edit it
-# out of a fact. What is jointly asserted of both bodies — the values-file
-# transport, exit 7 and 8, the re-run-identical rule and its bound of three —
-# is tests/test_write_op_contract_sources.py, the only thing naming both.
 [chunks.kb-metadata-write]
 text = '''**You supply values; the op writes the bytes.** A document's frontmatter block, a register entry and every field in it, an in-body claim marker, a dependency bullet, a support-to-claim pair — each is written by one `kb_util` write op that renders the format itself, proves what it composed by reading it back, and refuses rather than writing anything it cannot prove.
 

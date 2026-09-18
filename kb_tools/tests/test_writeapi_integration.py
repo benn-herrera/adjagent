@@ -35,12 +35,11 @@ The one document whose *body* this module authors is the fresh leaf, which is
 what the boundary says: the tool owns the metadata, the agent owns the prose.
 Not one metadata byte below is typed.
 
-**Two clauses are proven elsewhere and cited rather than rebuilt.**
-``just kb-driver-dryrun`` exiting 0 is guarded by
-``test_kb_driver_dryrun.py``; the census refusal on a legacy KB is
+**One clause is proven elsewhere and cited rather than rebuilt.** The census
+refusal on a legacy KB is
 ``test_kb_write_ops.py::TestRefusalFixtures::test_a_register_whose_census_already_fails``,
-which drives the frozen 2026-09-02 corpus at a live op. Restating either here
-would be a second copy of a proof, not a second proof.
+which drives the frozen 2026-09-02 corpus at a live op. Restating it here would
+be a second copy of a proof, not a second proof.
 """
 
 import hashlib

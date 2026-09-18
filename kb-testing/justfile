@@ -107,7 +107,7 @@ prep-test-data-arxiv-candidates:
 # of anything `kb_driver.runlog` owns.
 [private]
 [doc("refuse if a live driver run holds dir's run lock, naming the holder; silent no-op on a stale or absent lock, on a dir with no toolchain installed yet, or on a toolchain too old to recognise show-run-lock")]
-guard-run-lock dir: venv
+guard-run-lock dir: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     dir="{{dir}}"
@@ -316,132 +316,6 @@ kb-headless-eval run_tag kb_dir corpus_note:
     fi
     printf 'log: %s\n' "${log_file}"
 
-# Rung 1: every stage under --dry-run and --no-inference together,
-# driven through the shipped entry point exactly as the integration test
-# (kb_tools/tests/test_kb_driver_dryrun.py) proves the shape:
-# `python3 -m kb_tools.kb_driver run --config … --dry-run`. Builds its own
-# throwaway consumer repo — never a real project — under this repo's own
-# scratch tree, wiped and rebuilt every invocation for idempotence. The
-# config/charter pair is written under the consumer's gitignored
-# .claude-temp/kb-build/, never at its root: a dirty worktree there fails
-# preflight (exit 14) before the driver does anything else. The run
-# directory is a sibling of the wiped consumer, not inside it: within one
-# invocation the run directory is the evidence a wipe
-# must not touch (across invocations, wiping both is fine, and this recipe
-# does).
-#
-# The consumer's .claude/ is populated by `install` — this repo's one
-# deployment shape, run for real against the fixture rather than approximated
-# by a symlink. That is what makes `just kb-refresh` and `just kb-verify`
-# real commands here: the include line kb_util's graph-init op writes imports
-# runner-snippets/kb.just from .claude/agents/kb_tools/, which now holds
-# installed files rather than a link back into this tree, and dry-run
-# replaces the model, not the pipeline, so the refresh and gate rows run
-# those targets for real against the synthetic corpus replay.py leaves
-# behind. The install path is exercised as a side effect: a package that
-# fails to arrive at its frozen destination fails this rung.
-#
-# The driver itself now imports from that same installed copy — PYTHONPATH
-# below resolves to the consumer's own .claude/agents, not this repository's
-# working tree. A staged run exercises the installed set; the `just install`
-# call above is what puts a change there before this recipe's driver
-# invocation can see it.
-[doc("drive kb_driver's dry-run rung across all stages against a throwaway fixture repo")]
-kb-driver-dryrun: venv
-    #!/usr/bin/env bash
-    set -euo pipefail
-    fixture_root="{{PROJECT_ROOT}}/.claude-temp/kb-driver-dryrun"
-    consumer="${fixture_root}/consumer"
-    run_parent="${fixture_root}/runs"
-    scratch_rel=".claude-temp/kb-build"
-    charter_rel="kb-build-charter.md"
-    config_name="driver-run.toml"
-
-    rm -rf "${fixture_root}"
-    mkdir -p "${consumer}"
-
-    git -C "${consumer}" init -q
-    git -C "${consumer}" config user.email "fixture@example.invalid"
-    git -C "${consumer}" config user.name "fixture"
-    git -C "${consumer}" config commit.gpgsign false
-
-    # The ROOT justfile's `install`, as `stage-arxiv-paper` reaches it:
-    # `install` is not a recipe of this justfile, and `justfile()` names
-    # this one — the path must resolve to the root justfile explicitly.
-    "{{just_executable()}}" --justfile "{{PROJECT_ROOT}}/justfile" install "${consumer}"
-
-    printf '.claude-temp/\n__pycache__/\n' > "${consumer}/.gitignore"
-    printf 'default:\n    @true\n' > "${consumer}/justfile"
-
-    # Near-empty, but not structureless: the source survey runs for real at
-    # phase-0, and a document with no sectioning yields a manifest holding
-    # nothing for a coverage assignment to claim. Two sections per volume, each
-    # spanning more than one line, is the smallest source that exercises the
-    # leaf-cut, coverage and tiling path end to end — the same shape
-    # kb_tools/tests/test_kb_driver_dryrun.py's own fixture uses, independently.
-    for source in VolumeOne.tex VolumeTwo.tex; do
-        printf '\\documentclass{article}\n\\begin{document}\n\\section{Overview}\nSynthetic body for %s.\nA second line, so the section can be cut.\n\\section{Details}\nMore synthetic body.\nA second line here too.\n\\end{document}\n' \
-            "${source}" > "${consumer}/${source}"
-    done
-
-    # The document-graph stage resolves every citation against exactly one
-    # bibliography and takes its path as a required flag; the launch line
-    # carries only sources, so the driver resolves the one sitting beside them
-    # and stops where that is none or several. These sources cite nothing, but
-    # the file still has to be there and still has to parse — hence one real
-    # entry rather than an empty file.
-    printf '@book{synthetic,\n  author = {A. Fixture},\n  title = {Nothing Cited},\n  year = {2026}\n}\n' \
-        > "${consumer}/synthetic.bib"
-
-    # The charter is tracked content at the durable path the driver resolves one
-    # at, so it goes down before this commit: the start boundary names its path
-    # permanently, and scratch is deleted wholesale by staging. An uncommitted
-    # one would also fail the clean-worktree check start's preflight makes.
-    printf '# Build charter\n\nEverything in the two volumes.\n' > "${consumer}/${charter_rel}"
-
-    git -C "${consumer}" add -A
-    git -C "${consumer}" commit -qm seed
-
-    # The run overlay is the launch's own input and stays in gitignored scratch,
-    # so writing it cannot dirty the worktree preflight is about to read.
-    mkdir -p "${consumer}/${scratch_rel}"
-    printf '[run]\nsources = ["VolumeOne.tex", "VolumeTwo.tex"]\npermission_mode = "acceptEdits"\n' \
-        > "${consumer}/${scratch_rel}/${config_name}"
-
-    # Subshell-scoped cd: the driver reads its config path and runs preflight
-    # relative to the consuming repo's root, exactly as a runner recipe (and
-    # the integration test, via subprocess cwd=) invokes it. `-e` above
-    # propagates a nonzero driver exit as this recipe's own exit; stdout and
-    # stderr pass through uncaptured, so the driver's own relay baton —
-    # including the ledger's final checklist — lands directly in this
-    # recipe's output.
-    # BOTH mode flags, and the consumer is why. `--dry-run` replaces the calls
-    # the driver dispatches; it does not reach a model spawned inside a tool the
-    # driver invokes, and the two claim-graph stages spawn theirs there. This
-    # consumer is a FRESH entry — .tex sources and no kb-root/ — so those stages
-    # apply to it, and `--dry-run` alone would have this recipe spend real
-    # inference under a name that says it does not. `--no-inference` drops those
-    # rows instead, and the walk still reaches every stage.
-    #
-    # What that costs: the rows `--no-inference` drops are rows `--dry-run`
-    # would otherwise have exercised, so the dispatch-and-capture path is
-    # covered here only for the rows that survive both. The integration test
-    # covers it whole, against a REVISION consumer where the claim-graph stages
-    # do not apply and `--dry-run` alone is therefore honest.
-    (
-        cd "${consumer}"
-        # The consumer's own installed copy, not this repository's working
-        # tree: `just install` above just froze kb_tools into the fixture's
-        # .claude/agents/, and a staged run exercises that installed set.
-        PYTHONPATH=.claude/agents \
-            "{{VENV_PYTHON}}" -m kb_tools.kb_driver run \
-            --config "${scratch_rel}/${config_name}" \
-            --dry-run \
-            --no-inference \
-            --run-dir "${run_parent}" \
-            --decide start.proceed=yes
-    )
-
 # Scratch for a backgrounded live kb_driver run: pid file, console log, and
 # run-directory bookkeeping. Read by kb-driver-harvest and kb-driver-kill.
 KB_DRIVER_LIVE_DIR := justfile_directory() / ".." / ".claude-temp" / "kb-driver-live"
@@ -472,7 +346,7 @@ KB_DRIVER_ARXIV_CANDIDATE_DIR := justfile_directory() / ".." / ".claude-temp" / 
 # recipe never stages anything itself, only reads what stage-arxiv-paper
 # already wrote.
 [doc("run a --no-inference kb_driver build over one staged arXiv paper; resolves --source from 00README.json's toplevel entry or, failing that, a lone \\documentclass file; writes a status file under KB_DRIVER_ARXIV_DIR/status/ that no-inference-kb-driver-arxiv-corpus reads to tally outcomes — exit code is advisory (0 built, 2 the source could not be resolved or the paper isn't staged, anything else the driver's own exit code)")]
-no-inference-kb-driver-arxiv-paper id: venv
+no-inference-kb-driver-arxiv-paper id: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     id_safe="$(printf '%s' "{{id}}" | tr '/' '_')"
@@ -537,11 +411,8 @@ no-inference-kb-driver-arxiv-paper id: venv
     run_dir_parent="{{KB_DRIVER_ARXIV_DIR}}/runs/${id_safe}"
     mkdir -p "${run_dir_parent}"
 
-    # start.proceed fires unconditionally on every live run (kb-driver-
-    # launch's own comment traces why, against the barrier registry); no
-    # other `--decide` is pre-answered here for the same reason it isn't
-    # there — which barrier, if any, an individual unguided paper hits is
-    # exactly what this sweep cannot know in advance.
+    # No `--decide` is pre-answered here: which barrier, if any, an individual
+    # unguided paper hits is exactly what this sweep cannot know in advance.
     set +e
     ( cd "${dir}" && \
       PYTHONPATH=.claude/agents \
@@ -549,7 +420,6 @@ no-inference-kb-driver-arxiv-paper id: venv
         --source "${source}" \
         --no-inference \
         --run-dir "${run_dir_parent}" \
-        --decide start.proceed=yes \
         > "${log_file}" 2>&1 )
     driver_exit=$?
     set -e
@@ -706,7 +576,7 @@ KB_DRIVER_ARXIV_LIVE_DIR := justfile_directory() / ".." / ".claude-temp" / "kb-d
 # rule no-inference-kb-driver-arxiv-corpus follows, for the same reason: the
 # outcomes are the product.
 [doc("run a kb_driver build with inference enabled over ARXIV_LIVE_IDS, one invocation per paper straight through to completion, over already-staged papers only — refuses (skips) an unstaged id rather than staging it; a paper that's unstaged, unresolved, or fails is logged and the sweep continues")]
-kb-driver-arxiv-corpus: venv
+kb-driver-arxiv-corpus: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! -d "{{ARXIV_STAGE}}" ]]; then
@@ -799,7 +669,6 @@ kb-driver-arxiv-corpus: venv
           "{{VENV_PYTHON}}" -m kb_tools.kb_driver run \
             --source "${source}" \
             --run-dir "${run_dir_parent}" \
-            --decide start.proceed=yes \
             > "${log_file}" 2>&1 )
         driver_exit=$?
         set -e
@@ -907,6 +776,59 @@ kb-driver-kill:
 # committed to the repo, so it is invoked deliberately rather than on every
 # unit-test pass.
 [doc("run the kb-testing integration suite (tests/): exercises this justfile's recipes against staged, not committed, test data — a clean checkout has nothing to run until prep-test-data/stage-* populate test-data/transient/ — never part of the root `just test`")]
-integration-test *pytest_args: venv
-    PYTHONPATH="{{PROJECT_ROOT}}" PYTHONDONTWRITEBYTECODE=1 "{{VENV_PYTHON}}" -m pytest tests {{pytest_args}}
+integration-test *pytest_args: _venv
+    PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -m pytest tests {{pytest_args}}
 
+# What this hands `script` is a set of kb-root paths to read, never a mandate
+# to write: staying read-only over them is the script's own obligation, and
+# this recipe does not check it. A cheap mechanical way to confirm a script
+# wrote nothing doesn't exist, and building one would be exactly the
+# defensive machinery kb_tools/AGENTS.md's "name the producer before you
+# write the refusal" bullet argues against adding on spec alone.
+[doc("run a read-only measurement script over every staged kb-root under test-data/transient/ (PYTHONPATH wired for `import kb_tools`); kb-root paths are discovered by directory structure, passed as leading positional args, followed by *args forwarded verbatim")]
+measure-kb-roots script *args: _venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -f "{{script}}" ]]; then
+        printf 'error: script %s does not exist.\n' "{{script}}" >&2
+        exit 1
+    fi
+    kb_roots=()
+    while IFS= read -r kb_root; do
+        kb_roots+=("${kb_root}")
+    done < <(find test-data/transient -type d -name kb-root | sort)
+    if [[ "${#kb_roots[@]}" -eq 0 ]]; then
+        printf 'error: no kb-root directories found under test-data/transient — stage and build a corpus first.\n' >&2
+        exit 1
+    fi
+    printf 'measure-kb-roots: %s kb-root(s) discovered under test-data/transient:\n' "${#kb_roots[@]}" >&2
+    printf '  %s\n' "${kb_roots[@]}" >&2
+    PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" "{{script}}" "${kb_roots[@]}" {{args}}
+
+
+# this is dev tooling because in normal operations a user never does this manually.
+# diagram UTD maintenance is part of the tooling contract.
+# The claim-graph sheet for one built KB. A recipe rather than a command line:
+# the op takes no root override — it resolves the repository from the working
+# directory, the way every tool in this toolchain does — so naming the KB means
+# standing in it, and a naked invocation is a cd plus a PYTHONPATH recalled
+# correctly every time.
+#
+# Stdlib only, under the system python3 the way a consumer runs it, but with
+# PYTHONPATH pointed at THIS tree rather than the consumer's installed
+# .claude/agents: the renderer under test is the working copy.
+#
+# `"${@:2}"` and not `"$@"`: with positional-arguments set, $1 is `repo` itself,
+# so passing the whole list would hand the op its own target as a flag.
+[doc("render one built KB's claim graph to <repo>/kb-root/claim-graph.svg (repo is a consuming repository root); trailing args forward verbatim to the op (--out, --domain)")]
+render-claim-graph repo *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -d "{{repo}}" ]]; then
+        printf 'error: %s is not a directory — name a consuming repository root, the one holding kb-root/\n' "{{repo}}" >&2
+        exit 1
+    fi
+    root="$(cd "{{repo}}" && pwd)"
+    cd "${root}"
+    PYTHONPATH="{{PROJECT_ROOT}}" \
+        python3 -m kb_tools.kb_util render-claim-graph "${@:2}"

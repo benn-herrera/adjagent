@@ -65,9 +65,13 @@ definition named after the template, at the template's mirrored path. Chunks,
 variants, markers, wrapping, multi-output declarations, write safety, backups,
 and the render-identity check apply identically to both template types.
 
-Usage — four verbs, one required, no default mode. `just generate`,
-`just check`, `just install` and `just install-claude-md` are the sole
-sanctioned entry points (see ARCHITECTURE.md); they wrap:
+Usage — no default mode: a verb is required. `just render`, `just install`,
+and `just install-claude-md` are the sole general-purpose sanctioned entry
+points to this script's verbs, as opposed to the fixed-flag verification
+rungs (`just generate-floor`, `just check-floor`, `just generate-stock`,
+`just check-stock`) that also reach it under a locked tuning; ARCHITECTURE.md,
+Sanctioned Invocation, has the complete list of recipes reaching this
+script. They wrap:
 
     python3 gen-defs.py check R              # check the tree under R
     python3 gen-defs.py generate R           # render templates into R
@@ -364,7 +368,7 @@ Full-product install — `install ROOT`:
         [--model-tier-map SPEC] [--model-pin-map SPEC]
 
 An install delivers the whole deployed product in two halves. The shipped
-packages (kb_tools/, liaison_tools/) are a RECURSIVE COPY
+packages (kb_tools/, liaison_tools/) are a REMOVE-AND-RECURSIVE-COPY
 into the destinations the table below names, minus one explicit exclusion list
 (INSTALL_EXCLUDED_*) — test suites and their fixtures, python/pytest caches,
 *.bak safety copies, .DS_Store, and this repository's own project
@@ -377,20 +381,17 @@ install was given is just the triple that render runs under. `install` declares
 neither `--surfaces` nor the selection globs, which would narrow the product to
 a partial install.
 
-Where a copied file LANDS is not, however, read off where its source sits. A
-file walked from a source-root surface mirrors its surface-relative subpath,
-but the shipped code packages travel by an explicit source -> destination table
+Where a copied file LANDS is not, however, read off where its source sits. The
+shipped code packages travel by an explicit source -> destination table
 (SHIPPED_PACKAGES): each row pairs a source directory in this repository with
-the ROOT-relative destination it must arrive at. The destination is a CONSUMER
-contract — runner snippets already installed in consuming projects name
-.claude/agents/kb_tools/..., and every definition body writes its paths
+the ROOT-relative destination it must arrive at, and the copy walks the row's
+source while keying every file to the row's destination. The destination is a
+CONSUMER contract — runner snippets already installed in consuming projects
+name .claude/agents/kb_tools/..., and every definition body writes its paths
 against .claude/agents/... — so the source may be relocated within this
 repository and the destination may not follow it. Stating the pairing as data
 is what keeps those two facts independent; deriving the destination from
-directory placement is what made them the same fact. A row whose source lies
-inside a deployed surface is carved out of that surface's own walk and
-delivered by its row instead, so every file is emitted exactly once whichever
-side of a relocation its source currently sits on.
+directory placement is what made them the same fact.
 
 EVERY install renders, whatever triple it was given: a default-triple install
 is one triple among the possible ones, not a special case with a copy behind
@@ -398,7 +399,7 @@ it, which is what makes a default install and a tuned one the same code path
 and the same guarantee. The render pass receives the effective triple and the
 tier resolver the invocation built, so an install can never deliver
 definitions tuned differently from what its own banners claim. Every target
-that pass meets is freshly copied or provably untouched tool output (see the
+that pass meets is absent or provably untouched tool output (see the
 banner's body hash below), so it leaves no numbered backups behind. Only a
 NON-DEFAULT triple earns a clause on the summary line — a default render is
 the non-event report-by-exception exists for.
@@ -412,11 +413,44 @@ generation does it. The overwrite always happens; the backup only keeps
 divergent human work from being destroyed by it, and *.bak files under an
 installed tree are deletable at will.
 
+A shipped package's destination is the one place that does not hold, and the
+difference is of unit rather than of degree. The directory is this
+repository's entire — its contents are ours and none of it is a consuming
+project's to maintain — so an install REMOVES IT WHOLE and writes the package
+fresh rather than reconciling it file by file. That is what retires a file
+whose source here has since been deleted, by construction instead of by
+detection: the copy writes what the package holds now and has no way to notice
+what it used to hold. Nothing inside one is set aside first, so a local edit
+made there is gone at the next install rather than preserved beside itself.
+Two rules at two granularities, and the boundary between them is the one the
+SHIPPED_PACKAGES table already draws: per-file and banner-gated out on the
+deployed surfaces, where a consuming project's own files legitimately sit;
+wholesale inside a package destination, where they do not.
+
+Last, an install PRUNES (prune_stale). Overwriting is only half of keeping an
+artifact tree true to its source: a definition whose template has since been
+deleted is written by nothing and so survives every re-install, drifting there
+forever — reported ORPHAN by check, and carried by a diff between two render
+slots as a permanent `Only in` line. So a file under a deployed surface that
+this run did NOT write, that carries one of this tool's banners, and whose
+body still hashes to that banner's claim is DELETED, together with any
+directory the deletion empties. The two complements are the point of the rule
+and not exceptions to it: a banner whose hash does not match is hand-edited and
+is never deleted (that is the .bak branch's territory and it stays there), and
+a file carrying no banner of ours is not ours at all — a consuming project's
+.claude/ holds other people's files. The shipped packages' destinations are
+outside the sweep entirely, and need nothing from it: the copy half replaced
+each of them whole. The prune runs AFTER both halves have written, so
+the write set is a fact on disk rather than a prediction and a run that failed
+mid-render leaves one stale file too many rather than one live definition too
+few. Every path it deletes is named in the report, --verbose or not.
+
 An install writes exactly as generation does (see the content-write paragraph
-above): an extant installed file is rewritten through its own inode, so a tree
-installed by one user updates cleanly under another so long as the group can
-write. Ownership and mode are whatever the first install left; only a file this
-run creates is chmodded, and only to carry the source's executable bit.
+above): an extant definition under a deployed surface is rewritten through its
+own inode, so a tree installed by one user updates cleanly under another so
+long as the group can write. Ownership and mode are whatever the first install
+left. A COPIED file is always a fresh one — its destination went with the
+directory — and is chmodded only to carry the source's executable bit.
 
 Every COPIED file is stamped with an !INSTALLED! banner carrying the same
 !BODY-SHA256! line the generated banner carries, in whatever comment syntax
@@ -672,6 +706,7 @@ import fnmatch
 import hashlib
 import io
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -2019,7 +2054,7 @@ def check(
 
     for target, rendered in all_renders(binding, smap, overlays, globs, tuning=tuning):
         if not target.exists():
-            print(f"  {'MISSING':<8} {rel(target)} — run: just generate")
+            print(f"  {'MISSING':<8} {rel(target)} — run: just render")
             clean = False
             continue
 
@@ -2079,7 +2114,7 @@ def check(
         print(
             f"Drift detected. Edit the definition's template under "
             f"{rel(TEMPLATES_DIR)}/ or {rel(SHARED_CHUNKS)},\n"
-            f"then run: just generate"
+            f"then run: just render"
         )
         if claim_errors:
             print(
@@ -2105,9 +2140,15 @@ INSTALL_EXCLUDED_SUFFIX = ".bak"
 # its contract for someone changing it here, its CONVENTIONS carries house rules
 # for working inside this repository (kb_tools' names the tooling repo's own
 # justfile targets), and ROADMAP, AGENTS and CLAUDE are development apparatus by
-# definition. A rule and not a list: it is the same vocabulary the contract-doc
-# precedence chain is spelled in, so it is closed, and adding a package or a
-# docs/ directory below one needs no edit here.
+# definition. Adding a package, or a docs/ directory below one, needs no edit
+# here: the names are matched wherever they sit.
+#
+# Two groups and a tail, which is the order the set reads in rather than
+# alphabetical: the contract-doc precedence chain, then the development
+# apparatus, then the maintainer-facing prose a package writes under a name of
+# its own. Only that tail grows per-document — a name outside the chain cannot
+# be derived from it — so a package doc that needs to stay here earns a line,
+# and one that does not is shipping.
 #
 # Matched by NAME at any depth, never by placement or suffix. `README.md` is
 # deliberately absent: it is the one name in that vocabulary a package writes
@@ -2116,7 +2157,15 @@ INSTALL_EXCLUDED_SUFFIX = ".bak"
 # kb_tools/installed/CONVENTIONS.md.tmpl is written into a consuming project's
 # own KB by a build — and match nothing here.
 INSTALL_EXCLUDED_DOCS = frozenset(
-    {"SPEC.md", "ARCHITECTURE.md", "CONVENTIONS.md", "ROADMAP.md", "AGENTS.md", "CLAUDE.md"}
+    {
+        "SPEC.md",
+        "ARCHITECTURE.md",
+        "CONVENTIONS.md",
+        "ROADMAP.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "THESIS.md",
+    }
 )
 
 # The shipped code packages: (source directory in this repository, destination
@@ -2131,10 +2180,10 @@ INSTALL_EXCLUDED_DOCS = frozenset(
 # fact only for as long as the destination is derived from directory
 # placement.
 #
-# Rows are read by install_pairs (which carves a row's files out of the
-# surface walk when its source lies inside a surface, so nothing is emitted
-# twice) and by assert_install_root (which must guard a package source
-# wherever it sits). Relocating a package is therefore an edit to this table
+# Rows are read by package_destinations (which every other reader goes
+# through — the copy set, the wholesale destination removal, and the prune's
+# step-around) and by assert_install_root, which must guard a package source
+# wherever it sits. Relocating a package is therefore an edit to this table
 # and to nothing else.
 SHIPPED_PACKAGES = (
     ("kb_tools", "agents/kb_tools"),
@@ -2171,7 +2220,7 @@ def vendored(key: Path) -> bool:
     """Is this install key inside a shipped package's `_vendor/` tree?
 
     Decided on the DESTINATION key, as every other piece of install accounting
-    is (install_pairs), and never on the source path: a source root that itself
+    is (package_pairs), and never on the source path: a source root that itself
     sits somewhere under a `_vendor/` directory would otherwise carve out the
     whole product. Directory names match at any depth; a file named `_vendor`
     is not one."""
@@ -2238,53 +2287,24 @@ def install_content(source: Path, *, surface: str) -> str | None:
     return stamp_installed(text, style=style)
 
 
-def provably_ours(extant: bytes) -> bool:
-    """Do these extant bytes still hash to their own banner's claim? Bytes that
-    are not utf-8 text carry no banner and prove nothing."""
-    try:
-        return body_untouched(extant.decode("utf-8"))
-    except UnicodeDecodeError:
-        return False
+def install_file(source: Path, target: Path, content: str | None) -> None:
+    """Write one copied file into a destination this install has just emptied.
 
-
-def install_file(source: Path, target: Path, content: str | None) -> str:
-    """Write one copied file, under the same per-target safety generation uses.
-
-    Returns the outcome — "unchanged", "written", or "backed up" — where
-    "backed up" means the extant target was not provably this tool's output
-    (its body did not hash to its own banner's claim, or it carried no banner
-    at all) and was copied aside before being replaced. The replacement itself
-    is never in question: the tree is an artifact.
-
-    The extant target is read ONCE and every verdict is reached over those bytes
-    in memory; the write that follows goes straight through the target's own
-    inode, so an update never touches ownership, mode, or timestamps — see the
-    content-write paragraph in the module docstring for why that matters in a
-    tree whose files another user installed. Only a file created by this call is
-    chmodded, and only to carry the source's executable bit.
+    Every file the copy half delivers lands inside a shipped package's
+    destination, and replace_package_destinations removed each of those
+    directories entire before the first write — so no target here outlives the
+    install, and there is nothing extant to compare against, set aside, or
+    refuse. The unit inside a package destination is the directory, and that is
+    the whole of the rule there (SPEC.md, Write Safety).
 
     Bytes throughout: the copy set includes filetypes this tool never decodes
-    (a stamped file's content is already utf-8 text, encoded here), and both the
-    comparison and the write have to be byte-exact.
+    (a stamped file's content is already utf-8 text, encoded here), and the
+    write has to be byte-exact.
     """
-    desired = source.read_bytes() if content is None else content.encode("utf-8")
-    if not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(desired)
-        if source.stat().st_mode & EXEC_BITS:
-            target.chmod(target.stat().st_mode | EXEC_BITS)
-        return "written"
-
-    extant = target.read_bytes()
-    if extant == desired:
-        return "unchanged"
-    outcome = "written"
-    if not provably_ours(extant):
-        back_up(target)
-        outcome = "backed up"
-    # In place: write_bytes opens the extant inode "wb" and truncates it.
-    target.write_bytes(desired)
-    return outcome
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes() if content is None else content.encode("utf-8"))
+    if source.stat().st_mode & EXEC_BITS:
+        target.chmod(target.stat().st_mode | EXEC_BITS)
 
 
 def excluded_from_install(relpath: Path) -> bool:
@@ -2298,61 +2318,102 @@ def excluded_from_install(relpath: Path) -> bool:
 
 
 def assert_install_root(root: Path, *, source_root: Path = REPO_ROOT) -> None:
-    """Guard against installing this repository into itself.
+    """Refuse an install ROOT that would write the product into this
+    repository's own tree.
 
-    An install stamps an !INSTALLED! banner into every copied file and renders
-    definitions into ROOT's two surfaces, so a ROOT overlapping a package
-    source rewrites the source it is copying from; a second run — the content
-    now hashing to its own banner — nests a second banner inside the first
-    and, being unrecognizable as this tool's output, does so with no backup.
+    Two refusals, each with its own proposition, and neither is a data-loss
+    guard: no ROOT rewrites a package source, and no destination the install
+    removes wholesale (replace_package_destinations) can reach one, because a
+    destination is always ROOT/agents/<package> and nothing puts that over a
+    source sitting at this repository's top level. What both prevent is the
+    product materializing inside its own source.
+
+    **ROOT is this repository's root.** `agents/` and `commands/` are names in
+    the install product, not directories this repository keeps (SPEC.md,
+    Deployed Surfaces), so the render lands as an untracked copy of every
+    definition beside the templates that produced it, matched by no `.gitignore`
+    entry. The producers are the invocations that resolve ROOT to the repository
+    exactly: `just install . --subdir=`, and `just render <slug>` given a slug
+    that climbs out of `rendered/`.
+
+    **ROOT is inside a package source.** `just install kb_tools` alone does it,
+    ROOT being `kb_tools/.claude`. The first run merely writes the product into
+    the source tree; the damage lands on the NEXT one, when those files are
+    inside the tree package_pairs walks, so the copy set names sources that the
+    destination removal then deletes underneath it and the install aborts
+    partway through the copy on a file it had just enumerated. Containment is
+    the right test here and equality is not: every directory under a package
+    source is as fatal as the source itself. The sources are read from
+    SHIPPED_PACKAGES rather than assumed to sit under a deployed surface — a
+    package source outside every surface is still a source this install reads.
+
+    The first test is equality and NOT containment, because the sanctioned
+    deployment layout is a clone at `<project>/.claude/adjagent/` used as the
+    install source: `just install <project>` then resolves ROOT to
+    `<project>/.claude`, which contains every package source by construction. A
+    containment test there refuses the one workflow this repository exists to
+    serve. Equality separates them because the intended layout never makes ROOT
+    the repository — it makes ROOT a directory the repository sits under.
+
+    The cost of that narrowing, taken deliberately: a ROOT above the repository
+    (`just install .. --subdir=`) is now allowed, and it is allowed because it
+    is indistinguishable from the sanctioned layout. It lands an untracked
+    render outside this repository rather than inside it, which is a mess in
+    somebody else's directory and not a commit risk here.
 
     Both paths are resolved before comparison, so a symlink or a `..` segment
-    cannot route around the check, and containment is tested in both directions:
-    a ROOT *inside* a package source is as fatal as a ROOT *containing* one.
-
-    The guarded set is the shipped code packages, read from SHIPPED_PACKAGES
-    rather than assumed to sit under a deployed surface: a package source
-    outside every surface is still a source this install reads and must never
-    be written back into. Every row's source sits at the repository top level
-    today, so the row is the only thing guarding it — and `install .` from the
-    repo root is refused by those rows, since the repo root contains every one
-    of them.
+    cannot route around either test.
     """
     target = root.resolve()
+    repo = source_root.resolve()
+    if target == repo:
+        raise TemplateError(
+            f"install ROOT '{rel(root)}' is this repository's own root — the install would "
+            f"write the whole product into the source tree, as an untracked agents/ and "
+            f"commands/ beside the templates that render them. Install into the project that "
+            f"consumes it: `just install <project>`"
+        )
     for source, _ in SHIPPED_PACKAGES:
         source_dir = (source_root / source).resolve()
-        if target.is_relative_to(source_dir) or source_dir.is_relative_to(target):
+        if target.is_relative_to(source_dir):
             raise TemplateError(
-                f"install ROOT '{rel(root)}' is, or contains, this repository's own "
-                f"{source}/ package source ({rel(source_dir)}) — installing there would "
-                f"stamp banners into the very files it copies from. Install into a consuming "
-                f"project's .claude directory instead"
+                f"install ROOT '{rel(root)}' is inside this repository's own {source}/ package "
+                f"source ({rel(source_dir)}) — the install would write the product into the tree "
+                f"it copies from, and the next run's copy set would name files its own "
+                f"destination removal deletes underneath it. Install into the project that "
+                f"consumes it: `just install <project>`"
             )
 
 
-def package_sources(surface: str) -> tuple[Path, ...]:
-    """The surface-relative paths within `surface` that a SHIPPED_PACKAGES row
-    owns, and which that surface's own walk must therefore skip.
+def package_destinations(smap: dict[str, tuple[Path, Path]]) -> list[tuple[str, Path, Path]]:
+    """(source directory in this repository, ROOT-relative destination key,
+    absolute destination under ROOT) for every SHIPPED_PACKAGES row whose
+    owning surface is in `smap`.
 
-    Empty for every surface now that the package sources sit at the repository
-    top level — which is what made that relocation a change to
-    SHIPPED_PACKAGES alone. It stays because the carve-out is a property of the
-    table, not of today's arrangement: a package moved back under a surface
-    must still be emitted once."""
-    return tuple(
-        Path(source).relative_to(surface) for source, _ in SHIPPED_PACKAGES if Path(source).is_relative_to(surface)
-    )
+    Where a package LANDS is read off its row and never off where its source
+    sits (SHIPPED_PACKAGES), and this is the single place that reading happens:
+    package_pairs copies into these directories, replace_package_destinations
+    empties them first, and the stale-output prune steps around them. A row
+    whose surface `smap` does not cover is dropped, so
+    a narrowed run delivers — and reasons about — no package on the surface it
+    is not covering.
+    """
+    found = []
+    for source_rel, dest_rel in SHIPPED_PACKAGES:
+        destination = Path(dest_rel)
+        surface, *below = destination.parts
+        if surface in smap:
+            found.append((source_rel, destination, smap[surface][1].joinpath(*below)))
+    return found
 
 
-def install_pairs(smap: dict[str, tuple[Path, Path]], *, source_root: Path = REPO_ROOT) -> list[tuple[str, Path, Path]]:
+def package_pairs(smap: dict[str, tuple[Path, Path]], *, source_root: Path = REPO_ROOT) -> list[tuple[str, Path, Path]]:
     """(ROOT-relative key, source, target) for every file an install COPIES,
-    sorted by key: whatever the surfaces hold under `source_root`, plus the
-    shipped code packages at their frozen destinations, minus the exclusion
-    list. The definitions are not here — they are rendered, not copied, and
-    this repository has no surface directories for the walk to find. The walk
-    stays because `source_root` is a parameter: it is what makes the
-    source-to-destination mapping below testable against a source layout that
-    does have them.
+    sorted by key: the shipped code packages under `source_root`, walked from
+    each row's source and landed at each row's frozen destination, minus the
+    exclusion list. That is the whole copy set — the definitions are rendered
+    rather than copied, and nothing else in this repository is delivered by
+    copy, which is what the name says.
 
     The key is the file's destination, not its source. That is what keeps an
     install's accounting — the per-surface counts, the report, a consuming
@@ -2363,29 +2424,190 @@ def install_pairs(smap: dict[str, tuple[Path, Path]], *, source_root: Path = REP
     in `smap`, so `--surfaces commands` installs no agent-side package.
     """
     found: list[tuple[str, Path, Path]] = []
-
-    def collect(walk_root: Path, key_root: Path, out_dir: Path, *, carved: tuple[Path, ...] = ()) -> None:
+    for source_rel, key_root, destination in package_destinations(smap):
+        walk_root = source_root / source_rel
         if not walk_root.is_dir():
-            return
+            continue
         for source in sorted(walk_root.rglob("*")):
             if not source.is_file():
                 continue
             relpath = source.relative_to(walk_root)
-            if excluded_from_install(relpath) or any(relpath.is_relative_to(owned) for owned in carved):
+            if excluded_from_install(relpath):
                 continue
-            found.append(((key_root / relpath).as_posix(), source, out_dir / relpath))
-
-    for surface, (_, out_dir) in smap.items():
-        collect(source_root / surface, Path(surface), out_dir, carved=package_sources(surface))
-
-    for source_rel, dest_rel in SHIPPED_PACKAGES:
-        destination = Path(dest_rel)
-        surface, *below = destination.parts
-        if surface not in smap:
-            continue
-        collect(source_root / source_rel, destination, smap[surface][1].joinpath(*below))
-
+            found.append(((key_root / relpath).as_posix(), source, destination / relpath))
     return sorted(found, key=lambda pair: pair[0])
+
+
+def replace_package_destinations(smap: dict[str, tuple[Path, Path]]) -> list[str]:
+    """Remove every shipped package's destination directory entire, returning
+    the ROOT-relative key of each one that was there to remove.
+
+    A shipped package's destination belongs to this repository whole. Its
+    contents are ours, nothing in it is a consuming project's to maintain, and
+    so the unit that gets replaced is the DIRECTORY and not the file. That is
+    what retires a file whose source here has since been deleted — the copy
+    that follows writes what the package holds now and has no way to notice
+    what it used to hold — and it is why no row of the per-target write-safety
+    table reaches inside one (SPEC.md, Write Safety). The banner prune does not
+    reach inside one either: two rules at two granularities, and this is the
+    coarse one.
+
+    Exactly the destinations package_destinations derives from the
+    SHIPPED_PACKAGES rows and nothing else: not a parent, not a sibling,
+    nothing matched by a pattern.
+
+    Every destination goes BEFORE any file is written, rather than each one
+    going immediately ahead of its own copy. The two are independent — removal
+    reads nothing the copy produces, and the copy reads its sources from this
+    repository rather than from ROOT, which assert_install_root has already
+    established cannot be the same place — so the order is free, and taking it
+    this way makes it unrepresentable for a later removal to delete files an
+    earlier copy has just written. That is what a table row whose destination
+    nested inside another's would otherwise do, silently. A copy that raises
+    partway therefore leaves a package short of files rather than holding stale
+    ones; the install has failed either way, and the remedy for both states is
+    the same re-install.
+    """
+    removed = []
+    for _, key, destination in package_destinations(smap):
+        if destination.is_dir():
+            shutil.rmtree(destination)
+            removed.append(key.as_posix())
+    return removed
+
+
+# The three states a file under a deployed surface can be in when this run did
+# not write it, and what the prune does with each. Named as three, because the
+# rule is as much the two it refuses to touch as the one it deletes.
+PRUNE_STALE = "stale"  # our banner, body hashes to it -> deleted
+PRUNE_EDITED = "edited"  # our banner, body does NOT hash to it -> kept
+PRUNE_FOREIGN = "foreign"  # no banner of ours to read a claim from -> kept
+
+
+def prune_verdict(extant: bytes) -> str:
+    """Which of the three states these extant bytes are in.
+
+    The prune is the only reader of this question now — no write path asks it,
+    because a generation target is provably the tool's own output or refused,
+    and a copy target never outlives the install that wrote it. Three states
+    and not two: "hand-edited" and "not ours" are both kept, but for different
+    reasons and reported differently.
+
+    A file whose banner predates the hash line reads PRUNE_FOREIGN, not
+    PRUNE_EDITED: it carries no claim to check, which is the same nothing a
+    consuming project's own file carries. Both are kept, so only the bucket
+    differs — and the conservative bucket is the right one for a claim that
+    cannot be read.
+    """
+    try:
+        text = extant.decode("utf-8")
+    except UnicodeDecodeError:
+        # Bytes that are not utf-8 text carry no banner to read a claim from.
+        return PRUNE_FOREIGN
+    if banner_body(text) is None:
+        return PRUNE_FOREIGN
+    return PRUNE_STALE if body_untouched(text) else PRUNE_EDITED
+
+
+@dataclass(frozen=True)
+class Prune:
+    """What one prune pass found, in the three states the rule distinguishes.
+
+    `pruned` and `kept_edited` are ROOT-relative keys, the same vocabulary the
+    rest of the install report names files in. `foreign` is a count and not a
+    list: naming a consuming project's own files back at it is noise, and the
+    install has no opinion about any of them.
+    """
+
+    pruned: list[str]
+    kept_edited: list[str]
+    foreign: int
+
+
+def remove_emptied(directory: Path, *, stop: Path) -> None:
+    """Remove `directory` and each ancestor the prune left empty, deepest
+    first, never removing `stop` (a surface root) or anything above it.
+
+    An emptied directory is exactly as stale as the file that was in it — a
+    `diff -rq` between two render slots reports `Only in latest: design-topics`
+    as loudly as it reports a file — and only a directory the prune itself
+    emptied is ever reachable here, since the climb stops at the first one
+    still holding anything.
+    """
+    while directory != stop and directory.is_relative_to(stop) and directory.is_dir() and not any(directory.iterdir()):
+        directory.rmdir()
+        directory = directory.parent
+
+
+def prune_stale(smap: dict[str, tuple[Path, Path]], *, written: set[Path]) -> Prune:
+    """Delete the files under ROOT's deployed surfaces that this repository no
+    longer produces — and only those.
+
+    Four states, and the rule is as much the three it leaves alone as the one
+    it takes:
+
+        in `written`                  -> this run just wrote it: never a
+                                         candidate, decided on path identity
+                                         and never on content
+        our banner, body hashes to it -> unmodified output of an earlier
+                                         install whose templates no longer
+                                         declare it. DELETED: nothing will ever
+                                         rewrite it, `check` reports it ORPHAN
+                                         forever, and a diff between two render
+                                         slots carries it as a permanent
+                                         `Only in` line
+        our banner, body does not     -> hand-edited. KEPT, always. This is the
+                                         content the numbered-.bak branch
+                                         preserves rather than destroys, and a
+                                         template no longer claiming it makes it
+                                         more the consumer's, not less
+        no banner of ours             -> not ours. KEPT, and not named: a
+                                         consuming project's .claude/ holds
+                                         other people's files
+
+    The shipped packages' destinations are stepped around entire
+    (package_destinations): what lands there is a copy set, and this rule is
+    about the definition surfaces.
+
+    Runs AFTER both halves of the install have written, which is what makes
+    `written` a fact on disk rather than a prediction, and what keeps a render
+    that raised from ever reaching it: a failed run leaves the tree with a
+    stale file too many, never a live definition too few.
+    """
+    packages = [destination for _, _, destination in package_destinations(smap)]
+    pruned: list[str] = []
+    kept_edited: list[str] = []
+    foreign = 0
+    for surface, (_, out_dir) in sorted(smap.items()):
+        stale: list[Path] = []
+        for path in sorted(out_dir.rglob("*")):
+            if path in written or path.is_symlink() or not path.is_file():
+                continue
+            if any(path.is_relative_to(destination) for destination in packages):
+                continue
+            relpath = path.relative_to(out_dir)
+            # A path no install would ever emit is not a path an install wrote.
+            # The *.bak safety copies above all: they hold precisely the
+            # hand-edited content this rule exists to preserve, and they would
+            # otherwise be reported as kept on every run forever.
+            if excluded_from_install(relpath):
+                continue
+            key = (Path(surface) / relpath).as_posix()
+            verdict = prune_verdict(path.read_bytes())
+            if verdict == PRUNE_FOREIGN:
+                foreign += 1
+            elif verdict == PRUNE_EDITED:
+                kept_edited.append(key)
+            else:
+                stale.append(path)
+                pruned.append(key)
+        for path in stale:
+            path.unlink()
+        # After every unlink in this surface, so emptiness is final rather than
+        # a function of walk order.
+        for directory in {path.parent for path in stale}:
+            remove_emptied(directory, stop=out_dir)
+    return Prune(pruned=pruned, kept_edited=kept_edited, foreign=foreign)
 
 
 def quiet_pass(run: Callable[[], bool], *, verbose: bool) -> bool:
@@ -2425,11 +2647,17 @@ def install(
 ) -> bool:
     """Install the full product into `root` (a consuming project's .claude).
 
-    Two halves, in order. First a recursive copy of everything install_pairs
-    names under `source_root` — for this repository, the shipped packages at
-    their frozen destinations — minus the exclusion list, with an !INSTALLED!
+    Two halves and a sweep, in order. First a recursive copy of everything package_pairs
+    names under `source_root` — the shipped packages, at their frozen
+    destinations — minus the exclusion list, with an !INSTALLED!
     banner stamped into every copied file whose type admits one and whose
-    provenance is this repository's (so never under `_vendor/`). Then the
+    provenance is this repository's (so never under `_vendor/`). Each package's
+    destination directory is removed entire before that copy begins
+    (replace_package_destinations): the directory is this repository's whole,
+    so it is replaced as a unit rather than reconciled file by file, and a file
+    whose source here was deleted is retired by construction instead of
+    surviving in a consumer's tree forever. Nothing inside one is set aside
+    first. Then the
     ordinary generation pass, which renders the definitions into the surfaces
     under `root`.
 
@@ -2440,34 +2668,56 @@ def install(
     than a copy and a special case. Every target the pass meets is absent or
     provably untouched output, so it leaves no backups behind.
 
-    Reports by exception. A clean install — every target either fresh or
-    overwritten with output provably this tool's own — is one summary line and
-    nothing else: what landed where. The lines beyond it are problems only, and
-    each names its files: a pass that came back unclean, and a target whose
-    extant content no install of this repo wrote, whose prior bytes this run put
-    aside as a .bak. --verbose still lists every file and names the two verbatim
-    populations apart: the unbannered ones, whose filetype (never their state)
-    is the whole of what makes them so, and the vendored ones under `_vendor/`,
-    which a banner would misattribute to this repository. A re-vendor to a new
-    pin therefore leaves one numbered .bak per changed file in a consumer's
-    tree — an unstamped file can never be proved this tool's own — which is the
-    per-upgrade cost of not lying about provenance.
+    Then the stale-output prune (prune_stale), which deletes what the two
+    halves did NOT write and this repository can prove it wrote earlier —
+    yesterday's definition whose template has since been deleted. Nothing else:
+    a hand-edited file and a file with no banner of ours are both left where
+    they are.
+
+    Reports by exception. A clean install is one summary line and nothing else:
+    what landed where. The lines beyond it are problems only, and each names
+    its files — today, a pass that came back unclean, and what the prune did.
+    No copied file can contribute one: each lands in a destination this run
+    emptied first, so there is no extant content to be set aside and no .bak a
+    copy can produce. --verbose still lists every file and names the two
+    verbatim populations apart: the unbannered ones, whose filetype (never
+    their state) is the whole of what makes them so, and the vendored ones
+    under `_vendor/`, which a banner would misattribute to this repository.
+    The prune reports the same
+    way and is never silent when it acts: deleting a file in a tree the operator
+    owns is a problem-class event by definition, so every pruned path is named
+    whether or not --verbose asked, and so is every file kept back from the
+    prune because its content is not ours.
 
     The copy finishes before the render begins, so a render that raises leaves
     the packages complete and the definitions partial under ROOT. What landed
     is printed on the way out too — an operator shown only the error would read
     it as "nothing happened."
+
+    A replaced package directory is named on the summary line rather than in a
+    block of its own. It is the ordinary path — every install that finds one
+    replaces it — so a block would fire on every run and report-by-exception
+    would mean nothing; but it is still a directory whose contents went,
+    operator edits included, so it is never unnamed either.
     """
     assert_install_root(root, source_root=source_root)
-    pairs = install_pairs(smap, source_root=source_root)
+    pairs = package_pairs(smap, source_root=source_root)
     if not pairs:
-        print(f"ERROR: no installable files under {rel(source_root)}/")
+        # The copy set is exactly the shipped packages, so an empty one means
+        # their sources are not where SHIPPED_PACKAGES says — a broken
+        # invocation, not a product with nothing to copy. Refused before the
+        # first write, since the render half alone would deliver definitions
+        # whose toolchain never arrived.
+        print(f"ERROR: no shipped package source found under {rel(source_root)}/ — nothing to copy")
         return False
+
+    # Before the first write, and after the check that there is anything to
+    # write at all: a run with nothing to deliver removes nothing.
+    wiped = replace_package_destinations(smap)
 
     landed: dict[str, int] = {}
     unbannered: list[str] = []
     unstamped: list[str] = []
-    clobbered: list[str] = []
     for key, source, target in pairs:
         surface = key.split("/", 1)[0]
         # Two ways a copied file goes out verbatim, reported apart because the
@@ -2479,12 +2729,10 @@ def install(
             unstamped.append(key)
         elif content is None and not bannerable(source):
             unbannered.append(key)
-        outcome = install_file(source, target, content)
+        install_file(source, target, content)
         landed[surface] = landed.get(surface, 0) + 1
-        if outcome == "backed up":
-            clobbered.append(key)
         if verbose:
-            print(f"  {outcome:<10} {key}")
+            print(f"  written    {key}")
 
     def summary(counts: dict[str, int]) -> str:
         return ", ".join(f"{n} under {surface}/" for surface, n in sorted(counts.items()))
@@ -2517,6 +2765,11 @@ def install(
         print(f"installed: {copied} → {rel(root)} — the packages are in place; the render after them failed")
         raise
 
+    # Last, and only on a run that got this far: the write set is now a fact on
+    # disk, and a run that failed above leaves a stale file behind rather than
+    # a live definition missing.
+    stale = prune_stale(smap, written={target for _, _, target in pairs} | {target for target, _ in renders})
+
     counts = summary(landed)
 
     tuned = ""
@@ -2530,19 +2783,34 @@ def install(
             f"; {rendered} rendered under family {rel(tuning.family)}, "
             f"tier[{map_spec(tuning.tier_map)}] pin[{map_spec(tuning.pin_map)}]"
         )
-    print(f"installed: {counts} → {rel(root)}{tuned}")
+    # On the summary line rather than in a block of its own: a package
+    # directory is replaced whole on EVERY install that finds one, so it is the
+    # ordinary path and not a problem, and a clean re-install stays one line.
+    # It is named all the same, because the operator's own edits inside one go
+    # with it and nothing sets them aside.
+    whole = f"; replaced whole, local edits included: {', '.join(wiped)}" if wiped else ""
+    print(f"installed: {counts} → {rel(root)}{whole}{tuned}")
     if verbose and unbannered:
         print(f"unbannered (type admits no comment): {len(unbannered)} file(s) — " + ", ".join(unbannered))
     if verbose and unstamped:
         print(f"unstamped (vendored third-party source): {len(unstamped)} file(s) — " + ", ".join(unstamped))
+    if verbose and stale.foreign:
+        print(f"left alone (no banner of this repository's): {stale.foreign} file(s) under the surfaces")
     if not integrity:
         print("integrity: NOT CLEAN — see the report above")
-    if clobbered:
+    if stale.pruned:
         print(
-            f"replaced: {len(clobbered)} installed file(s) held content no install of this repo "
-            "wrote; each one's prior content is beside it as a numbered *.bak, yours to delete:"
+            f"pruned: {len(stale.pruned)} installed file(s) this repository no longer produces, "
+            "each still provably unmodified since it was installed, deleted:"
         )
-        for key in clobbered:
+        for key in stale.pruned:
+            print(f"  {key}")
+    if stale.kept_edited:
+        print(
+            f"kept: {len(stale.kept_edited)} installed file(s) this repository no longer produces "
+            "hold content no install of this repo wrote; each is left where it is, yours to delete:"
+        )
+        for key in stale.kept_edited:
             print(f"  {key}")
     return ok
 

@@ -5,9 +5,10 @@ definition is either dead — stranded when its last caller left — or a delibe
 exception the next reader has to be told about. Neither is visible to the
 interpreter or to the suite: nothing imports a stranded name, so nothing breaks,
 and it survives every green run until somebody happens to read the module. A
-one-off script found `replay._ID_MARKER_RE` that way once, and its output was
-read rather than obeyed, because a re-export and a test-only helper are
-unreferenced for good reasons. This file is the standing form. The difference is
+one-off script found a stranded marker pattern in the driver that way once, and
+its output was read rather than obeyed, because a re-export and a test-only
+helper are unreferenced for good reasons. This file is the standing form. The
+difference is
 :data:`CLASSIFIED`: every orphan is named there with the reason it is one, and an
 orphan that is not named fails.
 

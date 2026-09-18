@@ -54,20 +54,11 @@ _SUBJECT_RE = re.compile(rf"^{re.escape(LEDGER_PREFIX)} ([^\s|]+) \| ")
 # everything else carries a word in the brackets so the two cannot be
 # confused by a parser or by a reader.
 _TAG = f"[{LEDGER_PREFIX[:-1]}]"
-CARD_PREFIX = "[card]"
-
-# Stated on every render, unconditionally. The display obligation belongs at
-# read-time because that is where it was being missed.
-CONTRACT_LINE = "Any message to the user opens with the checklist above, verbatim, in the message body."
-
-
-# The consumer-side invocation every generated card command is built from.
-_INVOCATION = "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util"
 
 # The build's scratch layout, repo-root-relative. One definition per path, read
-# by the cards that name it, by the coverage checks that read it, and by
-# `kb_driver.steps`, which imports these rather than restating them: a card that
-# spelled its own path could send an artifact somewhere the tool never looks.
+# by the coverage checks that look there and by `kb_driver.steps`, which imports
+# these rather than restating them: a second spelling could send an artifact
+# somewhere the tool never looks.
 SCRATCH_RELROOT = f"{kb_util.SCRATCH_DIRNAME}/{kb_util.SCRATCH_BUILD_DIRNAME}"
 
 # Where the build charter lands, repo-root-relative and tracked. Not under the
@@ -91,145 +82,6 @@ NO_CHARTER_BODY = "charter: none — this build was given none and runs on its s
 
 class PipelineError(RuntimeError):
     """A git invocation the pipeline depends on failed."""
-
-
-# --- generated card obligations -------------------------------------------
-#
-# A card obligation is a plain string unless it names something that would go
-# stale as one: a stage id in a command, a runner that differs per consumer, or
-# a loop cap the driver enforces. Those are built at render time from the
-# stage, the repo, and the cap constants, so a card can never advertise the
-# wrong stage id, the wrong runner, or a cap the run does not use.
-
-
-def _kb_util_command(op: str, *arguments: str, values: str | None = None) -> str:
-    """One sanctioned ``kb_util`` invocation, as a card renders it.
-
-    Every generated command below is built here, so the consumer-side prefix has
-    one spelling and a card can never name a second front end. ``op`` is always
-    a ``kb_util`` op constant, never a literal, so a card cannot advertise a
-    subcommand the CLI does not have.
-
-    ``values`` is the values file a metadata op is to be called on, given as the
-    placeholder alone: the flag in front of it comes from ``kb_util``, so the
-    card carries the whole of the op's required argument without any card site
-    spelling the flag. Every other argument is passed positionally, because
-    every other flag belongs to one op rather than to a whole class of them.
-    """
-    tail = () if values is None else (kb_util.VALUES_FLAG, values)
-    return " ".join((_INVOCATION, op, *arguments, *tail))
-
-
-def _front_end_command(module: str, flags: Sequence[str]) -> str:
-    """One build front end's invocation, as a card renders it.
-
-    ``kb_docgraph`` and ``kb_claimgraph`` are module CLIs rather than
-    ``kb_util`` ops, so they are built from ``kb_util``'s own module-invocation
-    and flag helpers for the reason :func:`_kb_util_command` is built from its
-    op constants: a card cannot name a front end that does not exist, and cannot
-    spell one a way the consumer does not run.
-    """
-    return " ".join((kb_util.module_invocation(module), *flags))
-
-
-@dataclass(frozen=True)
-class RecordStep:
-    """The card's record obligation, expanded to the full sanctioned command.
-
-    ``note`` is the spec's guidance for what to record, rendered as an
-    angle-bracketed placeholder inside ``--note``; ``aside`` is a trailing
-    parenthetical. The stage id comes from the stage being rendered, never
-    from a hand-written string.
-
-    The first stage records through ``start-build`` and every other through
-    ``advance-step``, which is the whole of the split: the boundary that opens
-    a build takes a charter path instead of a stage id, so it is a different op
-    rather than a different argument. What the card names is the call that
-    records the stage it fronts.
-    """
-
-    note: str | None = None
-    aside: str | None = None
-
-    def render(self, stage: "Stage", repo_root: Path) -> str:
-        if stage.id == FIRST_STAGE_ID:
-            command = _kb_util_command(kb_util.OP_START_BUILD, f"[{kb_util.CHARTER_FLAG} {CHARTER_RELPATH}]")
-        else:
-            command = _kb_util_command(kb_util.OP_ADVANCE_STEP, f"--stage {stage.id}")
-        if self.note:
-            command += f' --note "<{self.note}>"'
-        return f"record: {command}" + (f"  ({self.aside})" if self.aside else "")
-
-
-@dataclass(frozen=True)
-class StageStatusStep:
-    """The stage-coverage read, expanded to the full sanctioned command.
-
-    The stage id comes from the stage being rendered, exactly as
-    :class:`RecordStep`'s does, so a card asks about the stage it fronts and
-    never about another.
-    """
-
-    def render(self, stage: "Stage", repo_root: Path) -> str:
-        command = _kb_util_command(kb_util.OP_SHOW_STAGE_STATUS, f"--stage {stage.id}")
-        return (
-            f"ask what this stage still has to cover rather than reconstructing it: {command}"
-            "  (each unit comes back with where it is satisfied from — dispatch against those and "
-            "compose no path of your own; however the work is divided, that set is what has to come back)"
-        )
-
-
-def _refresh_line(repo_root: Path) -> str:
-    """The refresh obligation, named in the consumer's own runner.
-
-    A justfile consumer must be told ``just kb-refresh``, a Makefile consumer
-    ``make kb-refresh``; kb_util already detects which, so the card asks it
-    rather than hardcoding one. Both steps below open with this, so the
-    refresh-only obligation is literally the gate's first half.
-    """
-    return f"run `{kb_util.refresh_cmd(repo_root)}`"
-
-
-@dataclass(frozen=True)
-class GateStep:
-    """The refresh-then-verify obligation, named in the consumer's own runner."""
-
-    def render(self, stage: "Stage", repo_root: Path) -> str:
-        return f"{_refresh_line(repo_root)} then `{kb_util.verify_cmd(repo_root)}`"
-
-
-# The loop caps. Each has exactly one definition here, the cards render from
-# it, and the driver's step table imports it — so a run can never contradict
-# the card it just printed, because there is nothing to keep in sync.
-PHASE_5_FIX_CAP = 1
-
-
-def _cap_values() -> dict[str, int]:
-    """The cap slots a :class:`CappedLine` may name, read at render time.
-
-    Built per render rather than once at import, so the constants above stay
-    the only definition: nothing holds a copy of a cap taken before it moved.
-    """
-    return {
-        "phase_5_fix_cap": PHASE_5_FIX_CAP,
-    }
-
-
-@dataclass(frozen=True)
-class CappedLine:
-    """A card obligation naming a loop cap, filled from the constants above.
-
-    Only lines declared this way are formatted. A blanket format pass over
-    every card string would be a trap: any card may carry a literal brace.
-    """
-
-    template: str
-
-    def render(self, stage: "Stage", repo_root: Path) -> str:
-        return self.template.format_map(_cap_values())
-
-
-CardItem = str | RecordStep | StageStatusStep | GateStep | CappedLine
 
 
 # --- coverage ---------------------------------------------------------------
@@ -307,14 +159,13 @@ class CoverageUnit:
 
 @dataclass(frozen=True)
 class CoverageReport:
-    """A stage's declared units, or the reason it declares none.
+    """A stage's declared units.
 
-    Two constructors and no third: :meth:`declared` refuses an empty unit
-    tuple, :meth:`undeclared` carries a reason and holds no units, and a report
-    holding neither cannot be built at all — which is what keeps
-    ``all(unit.satisfied for unit in ())`` out of reach. Stated as the
-    biconditional it is: ``reason`` is non-``None`` exactly when there are no
-    units.
+    One constructor: :meth:`declared` refuses an empty unit tuple — which is
+    what keeps ``all(unit.satisfied for unit in ())`` out of reach. A check
+    that cannot read its declaring artifact reports that as one unsatisfied
+    unit carrying the reason as its ``detail``, the same as any other missing
+    unit; there is no separate shape for it.
 
     Units are ordered by id, so two asks of an unchanged tree render alike.
 
@@ -325,18 +176,15 @@ class CoverageReport:
     """
 
     units: tuple[CoverageUnit, ...]
-    reason: str | None
     degenerate: bool = False
     unit_class: str = ""
 
     def __post_init__(self) -> None:
-        if not self.units and self.reason is None:
-            raise ValueError("a coverage report declaring no units must carry the reason it declares none")
-        if self.units and self.reason is not None:
-            raise ValueError("a coverage report carrying units declares them, so it holds no reason")
+        if not self.units:
+            raise ValueError("a coverage report must declare at least one unit")
         if self.degenerate and len(self.units) != 1:
             raise ValueError("a degenerate report is the one unit standing for a stage with no decomposition")
-        if self.units and bool(self.unit_class) == self.degenerate:
+        if bool(self.unit_class) == self.degenerate:
             raise ValueError(
                 "a decomposed report states what its units are as a class; "
                 "a degenerate report's one unit is that class already"
@@ -348,17 +196,7 @@ class CoverageReport:
         cls, units: Sequence[CoverageUnit], *, degenerate: bool = False, unit_class: str = ""
     ) -> "CoverageReport":
         """The units a stage declares, and what they are as a class. Refuses an empty tuple."""
-        return cls(units=tuple(units), reason=None, degenerate=degenerate, unit_class=unit_class)
-
-    @classmethod
-    def undeclared(cls, reason: str) -> "CoverageReport":
-        """No units, and why.
-
-        Three shapes reach here, and none of them is coverage of any amount: a
-        declaring artifact that could not be read, one that declares nothing to
-        cover, and one whose declarations cannot be told apart on disk.
-        """
-        return cls(units=(), reason=reason)
+        return cls(units=tuple(units), degenerate=degenerate, unit_class=unit_class)
 
 
 def _file_unit(
@@ -603,11 +441,8 @@ def _check_meta_docs(ctx: CheckContext) -> CoverageReport:
     what it wrote, so the question at both boundaries is the same question — the
     document is there — and the answer is the same computation. Existence is
     not quality here any more than anywhere else: whether the review improved it
-    is the reviewer's ruling and reaches the run as severities, never as a unit.
-    Nor is it whether a fix round changed anything: that comparison needs the
-    bytes a round composed against the bytes standing at the moment it composed
-    them, and by this boundary the second is gone
-    (``kb_driver.run._assemble_overview``).
+    is the reviewer's ruling, which reaches the run as severities and never as a
+    unit.
     """
     kb = kb_util.kb_root(ctx.repo_root)
     return CoverageReport.declared(
@@ -791,8 +626,8 @@ class ClaimgraphInvocation:
 CLAIMGRAPH_SCOPE_BLOCK_HOSTED = "block-hosted"
 CLAIMGRAPH_SCOPE_FULL = "full"
 
-# The three claim-graph invocations, named before the table so each stage's own
-# card renders from the same value the stage declares.
+# The three claim-graph invocations, named before the table so the stage that
+# declares one and the flags composed from it are one value.
 _DECLARED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_BLOCK_HOSTED)
 _DISCOVERED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_FULL)
 _ATTRIBUTED_INVOCATION = ClaimgraphInvocation(which_pass=2)
@@ -800,23 +635,17 @@ _ATTRIBUTED_INVOCATION = ClaimgraphInvocation(which_pass=2)
 
 @dataclass(frozen=True)
 class Stage:
-    """One pipeline stage: contract id, human label, action card, coverage.
+    """One pipeline stage: contract id, human label, coverage.
 
-    ``card`` is the stage's procedural obligations — what executing it requires
-    — single-sourced here exactly as the stage list is, and rendered at the
-    moment of action rather than carried in an agent definition. It is the
-    completeness counterpart to the ordering interlocks: the interlocks say
-    *when*, the card says *what*.
+    ``display`` is what the stage is *for*, in the reader's words, and it is the
+    whole of what this table says about purpose. It reaches a reader three ways
+    and no other: the checklist line, :func:`stage_status`' ``FACT`` line, and
+    the boundary commit's subject.
 
     ``coverage`` reports the units the stage must cover and which of them are
     satisfied. Every stage has one: a stage with no enumerable decomposition
     returns a degenerate report of one unit rather than no report at all, which
     is how a stage that gates on nothing says so instead of being silent.
-
-    ``user_gate`` marks a stage the build stops at for an answer only the user
-    can give. The confirmation renders where the user is expected by reading
-    this flag off the table, so a gate that moves takes that sentence with it
-    where a literal would go on naming the stage the gate used to be at.
 
     ``work_is_inference`` marks a stage whose work is a model call — the stages
     a build spending none does without. It is the *other* half of what excuses
@@ -833,20 +662,17 @@ class Stage:
 
     id: str
     display: str
-    card: tuple[CardItem, ...]
     coverage: Callable[["CheckContext"], CoverageReport]
     # Runs after coverage passes and before the boundary commit, so whatever it
     # writes is swept into that commit. Returns report lines.
     pre_commit: Callable[["CheckContext"], list[str]] | None = None
-    user_gate: bool = False
     work_is_inference: bool = False
     claimgraph_invocation: ClaimgraphInvocation | None = None
 
 
 # The frozen vocabulary. Ids are a cross-team contract — templates elsewhere
 # are written against these exact strings — so an id is never renamed in
-# place; a change means a new id and a migration. Card text is the same kind
-# of contract: agent definitions are trimmed against it, not the reverse.
+# place; a change means a new id and a migration.
 #
 # **A stage is as small as the most expensive thing in it that must not be
 # repeated** (SPEC.md, The Driver's Contract). A boundary is a stage, so a stage
@@ -854,7 +680,7 @@ class Stage:
 # behind a step that can fail, and a resume re-spends what had already been
 # earned. That is what decides where the tail's boundaries fall:
 # `overview-drafted` is the overview document written, and `phase-5` is the
-# review cycle over it — one stage each, because the draft and the review are two
+# review of it — one stage each, because the draft and the review are two
 # model calls and neither may pay for the other's failure. Splitting them is also
 # what retired the alternative, which was to trust the draft's scratch file on
 # re-entry: an output no boundary accounts for is discarded, and a boundary
@@ -869,87 +695,27 @@ STAGES: tuple[Stage, ...] = (
     Stage(
         "start",
         "build started",
-        card=(
-            "put this in front of the user exactly as it prints, adding nothing and leaving nothing out: "
-            + _kb_util_command(
-                kb_util.OP_SHOW_CONFIRMATION,
-                "--source <path> [--source ...]",
-                f"[{kb_util.CHARTER_VALUES_FLAG} <values-file>]",
-            ),
-            f"whatever the user then says that is not an answer to an unsettled fact is charter text: write it, "
-            f"and any charter the invocation carried, to {CHARTER_RELPATH} in their own words — that is the "
-            f"path the record below names, and a build given no charter records that it was given none",
-            StageStatusStep(),
-            RecordStep(),
-            # Nothing is dispatched at this boundary and nothing is handed on:
-            # the driver walks the next stage itself. The line this replaced
-            # instructed a reader to dispatch a coordinator, which is a route
-            # the build does not have — there is no coordinator seat, and a
-            # card naming one sends its reader to look for it.
-            "nothing is dispatched here: the run walks straight on into the next stage, whose own card is "
-            "what prints next",
-        ),
         coverage=_check_charter_written,
-        user_gate=True,
     ),
     Stage(
         "document-graph",
         "document tree derived",
-        card=(
-            "derive the document tree from the build's sources, one --source per volume root and never for a "
-            "file reached by \\input: "
-            + _front_end_command(
-                kb_util.DOCGRAPH_MODULE,
-                kb_util.docgraph_flags(
-                    sources=("<volume-root> [--source ...]",),
-                    bibliographies=("<path.bib> [--bibliography ...]",),
-                    kb_root_path=kb_util.KB_DIRNAME,
-                ),
-            ),
-            "a red report is a defect in the front end or in the corpus; there is no fix cycle for it and no "
-            "seat to run one",
-            StageStatusStep(),
-            RecordStep(),
-        ),
         coverage=_check_document_tree,
     ),
     Stage(
         "spine-seed",
         "claim-graph spine seeded",
-        card=(
-            "seed the claim-graph spine over the tree: "
-            + _kb_util_command(kb_util.OP_GRAPH_INIT, "[--runner just|make]"),
-            "the tree is committed before this runs — the seed's own preflight refuses a dirty worktree",
-            StageStatusStep(),
-            RecordStep(),
-        ),
         coverage=_check_spine_seeded,
     ),
     Stage(
         "claims-declared",
         "declared claim graph",
-        card=(
-            "author the claims the corpus's own author marked, mechanically: "
-            + _front_end_command(kb_util.CLAIMGRAPH_MODULE, _DECLARED_INVOCATION.flags),
-            "it refuses a tree that already carries claim-graph artifacts; that refusal is the double-run "
-            "guard, not a fault to work around",
-            StageStatusStep(),
-            RecordStep(),
-        ),
         coverage=_check_claims_declared,
         claimgraph_invocation=_DECLARED_INVOCATION,
     ),
     Stage(
         "claims-discovered",
         "claim discovery",
-        card=(
-            "read every document the declared pass left awaiting and mint a claim per result it states: "
-            + _front_end_command(kb_util.CLAIMGRAPH_MODULE, _DISCOVERED_INVOCATION.flags),
-            "one inference per awaiting document, and the build's only expensive stage — it writes per "
-            "document, so a stopped run keeps what it already read",
-            StageStatusStep(),
-            RecordStep(),
-        ),
         coverage=_check_claims_discovered,
         work_is_inference=True,
         claimgraph_invocation=_DISCOVERED_INVOCATION,
@@ -957,24 +723,12 @@ STAGES: tuple[Stage, ...] = (
     Stage(
         "depends-attributed",
         "dependency attribution",
-        card=(
-            "attribute each claim's dependencies over the graph that now exists: "
-            + _front_end_command(kb_util.CLAIMGRAPH_MODULE, _ATTRIBUTED_INVOCATION.flags),
-            "every value it writes is unscored; grading is the maintenance path's and enters later",
-            StageStatusStep(),
-            RecordStep(aside="the head's exit: the tool refuses to record this stage over a red verify"),
-        ),
         coverage=_check_verify_gates,
         claimgraph_invocation=_ATTRIBUTED_INVOCATION,
     ),
     Stage(
         "phase-3a",
         "validation gate",
-        card=(
-            GateStep(),
-            StageStatusStep(),
-            RecordStep(aside="the tool refuses to record this stage red"),
-        ),
         coverage=_check_verify_gates,
         # Seeded at the gate rather than at the finish: these are the KB's
         # orientation docs, and every stage after this one runs against a KB
@@ -985,27 +739,12 @@ STAGES: tuple[Stage, ...] = (
     Stage(
         "overview-drafted",
         "overview drafted",
-        card=(
-            "confirm docent commands present; absence -> escalate",
-            f"the stage assembles {OVERVIEW_DOC} from the index and one passage tech-writer answers with",
-            StageStatusStep(),
-            RecordStep(),
-        ),
         coverage=_check_meta_docs,
         work_is_inference=True,
     ),
     Stage(
         "phase-5",
         "meta-documentation",
-        card=(
-            CappedLine(
-                "tech-writer-reviewer reviews the documents the stage before this one wrote, tech-writer "
-                "answers each round's findings; fix-cycle cap {phase_5_fix_cap}; findings persisting -> escalate"
-            ),
-            StageStatusStep(),
-            RecordStep(),
-            "return: build finished, all stages [x]",
-        ),
         coverage=_check_meta_docs,
         work_is_inference=True,
     ),
@@ -1108,9 +847,8 @@ def recorded_charter(repo_root: Path) -> str | None:
 def current_stage(recorded: set[str]) -> Stage | None:
     """The stage to act on — the first unrecorded one — or None when complete.
 
-    One definition serves both the checklist's ``[*]`` marker and the action
-    card, so the card can never advertise a different stage than the checklist
-    points at.
+    One definition serves the checklist's ``[*]`` marker and the zero-argument
+    coverage read alike, so the two can never point at different stages.
     """
     return next((stage for stage in STAGES if stage.id not in recorded), None)
 
@@ -1135,17 +873,6 @@ def checklist_lines(recorded: set[str]) -> list[str]:
     return lines
 
 
-def card_lines(stage: Stage, repo_root: Path) -> list[str]:
-    """The stage's action card, prefixed so it cannot be read as checklist.
-
-    Generated obligations (:class:`RecordStep`, :class:`GateStep`) resolve here
-    against ``stage`` and ``repo_root``; plain strings pass through.
-    """
-    return [f"{CARD_PREFIX} next action — {stage.id} ({stage.display}):"] + [
-        f"{CARD_PREFIX} · {item if isinstance(item, str) else item.render(stage, repo_root)}" for item in stage.card
-    ]
-
-
 def status_line(recorded: set[str]) -> str:
     """The one-line verdict naming which of the three world-states holds."""
     count = len(recorded)
@@ -1159,20 +886,19 @@ def status_line(recorded: set[str]) -> str:
 
 
 def _print_report(
-    repo_root: Path,
     recorded: set[str],
     *,
     advisory: str | None = None,
     stage_status: Sequence[str] = (),
 ) -> None:
-    """The full render: status, checklist, coverage, action card, contract line.
+    """The full render: status, checklist, and a refusal's unsatisfied units.
 
     The checklist block stays contiguous and is the only thing matching
     ``^\\[[x* ]\\] ``; every other line carries a word-prefix instead, so a
     parser can lift the checklist without knowing about the rest.
 
-    ``stage_status`` is a refusal's unsatisfied units, rendered between the
-    checklist and the card that corrects them.
+    ``stage_status`` is a refusal's unsatisfied units, rendered under the
+    checklist — what is not covered, beside where the build stands.
     """
     print(status_line(recorded))
     if advisory is not None:
@@ -1181,13 +907,6 @@ def _print_report(
         print(line)
     for line in stage_status:
         print(line)
-    stage = current_stage(recorded)
-    if stage is not None:
-        for line in card_lines(stage, repo_root):
-            print(line)
-    # Stated at read-time, every time: the observed failure was an agent
-    # referencing collapsed tool output instead of embedding this render.
-    print(f"{_TAG} {CONTRACT_LINE}")
 
 
 def _record(repo_root: Path, stage: Stage, body: str | None = None) -> None:
@@ -1219,8 +938,8 @@ def _record(repo_root: Path, stage: Stage, body: str | None = None) -> None:
 def _unseeded_advisory(repo_root: Path) -> str | None:
     """The note a checklist carries while ``kb-root/`` does not exist yet, if it does not.
 
-    One statement, read by every render that can meet an unseeded repo — the
-    status render and the confirmation's checklist block alike.
+    One statement, read by the status render, which is where an unseeded repo
+    is met.
     """
     if kb_util.kb_root(repo_root).is_dir():
         return None
@@ -1235,10 +954,10 @@ def show_status(repo_root: Path) -> int:
 
     ``repo_root`` is a git root, not necessarily a seeded one: the ledger
     lives in the commit trail, so a KB that does not exist yet is *status*
-    — the confirmation step of a fresh build reads this before the spine
-    is seeded — and it is named in the render rather than left implied.
+    — a fresh build reads this before the spine is seeded — and it is named
+    in the render rather than left implied.
     """
-    _print_report(repo_root, recorded_stages(repo_root), advisory=_unseeded_advisory(repo_root))
+    _print_report(recorded_stages(repo_root), advisory=_unseeded_advisory(repo_root))
     return EXIT_OK
 
 
@@ -1249,10 +968,8 @@ def _unit_phrase(unit: CoverageUnit) -> str:
 def _named_missing(report: CoverageReport) -> tuple[CoverageUnit, ...]:
     """The unsatisfied units a refusal names one by one.
 
-    Empty in the two shapes where instances say nothing a reader can act on: an
-    undeclared report, whose units were never enumerated at all, and a
-    decomposed report with nothing satisfied — the stage did not happen, and
-    naming a hundred instances of that obscures the one fact.
+    Empty where a decomposed report has nothing satisfied — the stage did not
+    happen, and naming a hundred instances of that obscures the one fact.
     ``show-stage-status`` is where the paths are obtained in that state.
 
     Anything else names every unsatisfied unit and never a subset: those are
@@ -1261,8 +978,6 @@ def _named_missing(report: CoverageReport) -> tuple[CoverageUnit, ...]:
     one unit names it either way, there being no instances for a class
     statement to stand above.
     """
-    if report.reason is not None:
-        return ()
     missing = tuple(unit for unit in report.units if not unit.satisfied)
     if len(missing) == len(report.units) and len(report.units) > 1:
         return ()
@@ -1272,10 +987,8 @@ def _named_missing(report: CoverageReport) -> tuple[CoverageUnit, ...]:
 def _coverage_refusal(report: CoverageReport) -> str | None:
     """The report's refusal reason, or None when the stage may be recorded.
 
-    One decision, and the whole of it: no refusal iff the report is declared
-    and every unit in it is satisfied. An undeclared report is a refusal
-    because a stage whose unit source could not be read cannot be shown
-    complete.
+    One decision, and the whole of it: no refusal iff every unit in the report
+    is satisfied.
 
     The verdict is binary; the message says which shape of failure produced it,
     over the units :func:`_named_missing` decides are worth naming.
@@ -1285,8 +998,6 @@ def _coverage_refusal(report: CoverageReport) -> str | None:
     :func:`_report_vacuous_units` — and building a report can run the verify
     gates.
     """
-    if report.reason is not None:
-        return report.reason
     if all(unit.satisfied for unit in report.units):
         return None
     named = _named_missing(report)
@@ -1320,7 +1031,7 @@ def _excused(report: CoverageReport, stage: Stage, ctx: CheckContext) -> Coverag
     changes and verify is cheap, so the cost of asking twice is nothing beside
     a validity gate silently skipped.
     """
-    if report.reason is not None or not (ctx.no_inference and stage.work_is_inference):
+    if not (ctx.no_inference and stage.work_is_inference):
         return report
     return replace(
         report,
@@ -1359,10 +1070,6 @@ COVERED = "COVERED"
 MISSING = "MISSING"
 FACT = "FACT"
 
-#: Not a fourth status: the word a ``FACT`` line opens its detail with when the
-#: stage's units could not be enumerated at all.
-UNDECLARED = "UNDECLARED"
-
 #: What an argument-derived unit reports on a read. ``start``'s charter rides
 #: the record, so a read holds no value to check — which is a fact about the
 #: question asked, never about the tree.
@@ -1390,14 +1097,8 @@ def stage_status(repo_root: Path, stage: Stage) -> list[str]:
     The context is built here, and empty of them: a read is not a record, so
     an argument-derived unit reports :data:`ARGUMENT_ON_A_READ` rather than a
     claim about the tree.
-
-    An undeclared stage is one ``FACT`` line and no units — its report carries
-    the reason, which names the declaring artifact and the call that restores
-    it — because a stage whose units were never enumerated has none to list.
     """
     report = stage.coverage(CheckContext(repo_root))
-    if report.reason is not None:
-        return [_stage_fact(stage, f"{UNDECLARED}: {report.reason}")]
     lines = [_stage_fact(stage, f"{len(report.units)} coverage unit(s) declared")]
     for unit in report.units:
         if unit.satisfied:
@@ -1411,17 +1112,17 @@ def show_stage_status(repo_root: Path, stage_id: str | None) -> int:
     """Print one stage's coverage. Read-only; always exit 0.
 
     Zero-argument resolves through :func:`current_stage` — the same decision
-    the checklist's ``[*]`` marker and the action card share — so asking what
-    remains where the build actually stands takes no stage id. A complete build
-    has no such stage and says so rather than falling back to the last one.
+    the checklist's ``[*]`` marker makes — so asking what remains where the
+    build actually stands takes no stage id. A complete build has no such stage
+    and says so rather than falling back to the last one.
 
     ``stage_id`` names any stage, recorded or unreached: a recorded stage's
     report is how a resumed build reads what actually landed, and an unreached
-    stage's ``UNDECLARED`` is a true answer to a read.
+    stage's ``MISSING`` lines are as true an answer to a read as a recorded
+    stage's ``COVERED`` ones.
 
-    Neither a checklist nor a card is rendered. This is not ``show-status``,
-    whose render is quoted verbatim into every user message and would then
-    carry a unit list of a corpus's own length inside a contract line's payload.
+    No checklist is rendered: this read is as long as the corpus has units,
+    where ``show-status``' render is the fixed-length one.
     """
     if stage_id is not None:
         stage = _STAGE_BY_ID[stage_id]
@@ -1439,15 +1140,15 @@ def show_stage_status(repo_root: Path, stage_id: str | None) -> int:
     return EXIT_OK
 
 
-def _refuse(repo_root: Path, recorded: set[str], stage: Stage, report: CoverageReport, refusal: str) -> int:
-    """Report incomplete coverage and render the card — the card IS the fix.
+def _refuse(recorded: set[str], stage: Stage, report: CoverageReport, refusal: str) -> int:
+    """Report incomplete coverage, naming the units that are not covered.
 
     The units the refusal names are rendered as the same ``MISSING`` lines
     ``show-stage-status`` prints, so a caller who was refused and a reader who
     asked are looking at one computation.
     """
     kb_util.to_stderr(f"{_TAG} cannot record '{stage.id}' — {refusal}. Nothing committed.")
-    _print_report(repo_root, recorded, stage_status=[_missing_line(unit) for unit in _named_missing(report)])
+    _print_report(recorded, stage_status=[_missing_line(unit) for unit in _named_missing(report)])
     return EXIT_POSTCONDITION_FAILED
 
 
@@ -1471,16 +1172,16 @@ def start_build(repo_root: Path, charter: str) -> int:
             f"{_TAG} this build is already started — nothing committed. "
             f"Use '{kb_util.OP_ADVANCE_STEP}' to record the next stage."
         )
-        _print_report(repo_root, recorded)
+        _print_report(recorded)
         return EXIT_ALREADY_STARTED
     stage = _STAGE_BY_ID[FIRST_STAGE_ID]
     report = stage.coverage(CheckContext(repo_root, charter=charter))
     refusal = _coverage_refusal(report)
     if refusal is not None:
-        return _refuse(repo_root, recorded, stage, report, refusal)
+        return _refuse(recorded, stage, report, refusal)
     _report_vacuous_units(report)
     _record(repo_root, stage, body=f"{CHARTER_BODY_FIELD} {charter}" if charter else NO_CHARTER_BODY)
-    _print_report(repo_root, recorded_stages(repo_root))
+    _print_report(recorded_stages(repo_root))
     return EXIT_OK
 
 
@@ -1504,7 +1205,7 @@ def advance_step(repo_root: Path, stage_id: str, note: str | None = None, no_inf
             "process already complete" if len(recorded) == len(STAGES) else f"stage '{stage.id}' is already recorded"
         )
         print(f"{_TAG} {banner} — nothing committed.")
-        _print_report(repo_root, recorded)
+        _print_report(recorded)
         return EXIT_OK
 
     unrecorded = [s.id for s in STAGES[: STAGE_IDS.index(stage.id)] if s.id not in recorded]
@@ -1514,14 +1215,14 @@ def advance_step(repo_root: Path, stage_id: str, note: str | None = None, no_inf
             f"unrecorded: {', '.join(unrecorded)}. Record them in order, or re-read the "
             f"checklist below for where this build actually stands."
         )
-        _print_report(repo_root, recorded)
+        _print_report(recorded)
         return EXIT_OUT_OF_ORDER
 
     ctx = CheckContext(repo_root, note=note, no_inference=no_inference)
     report = _excused(stage.coverage(ctx), stage, ctx)
     refusal = _coverage_refusal(report)
     if refusal is not None:
-        return _refuse(repo_root, recorded, stage, report, refusal)
+        return _refuse(recorded, stage, report, refusal)
     _report_vacuous_units(report)
 
     if stage.pre_commit is not None:
@@ -1529,201 +1230,7 @@ def advance_step(repo_root: Path, stage_id: str, note: str | None = None, no_inf
             print(f"{_TAG} {line}")
 
     _record(repo_root, stage, body=note)
-    _print_report(repo_root, recorded_stages(repo_root))
-    return EXIT_OK
-
-
-# --- the build's opening gate ----------------------------------------------
-#
-# One read in front of the gate: the whole confirmation — every fact the answer
-# turns on — as a message to be relayed unchanged. It writes nothing, and what
-# the answer releases is `start-build`, which is already an op of its own; no
-# second call opens a build.
-#
-# The render is read by a person and by the agent relaying it at once, so it is
-# plain declaratives throughout: a line here is either a fact about this
-# repository or a question with the answer that holds if it is not asked.
-
-CONFIRMATION_TAG = "[confirmation]"
-CHARTER_TAG = "[charter]"
-
-_CONFIRMATION_FIELD_WIDTH = 14
-
-
-def _confirmation(text: str) -> str:
-    return f"{CONFIRMATION_TAG} {text}"
-
-
-def _confirmation_field(name: str, detail: str) -> str:
-    return _confirmation(f"{name:<{_CONFIRMATION_FIELD_WIDTH}} {detail}")
-
-
-def _source_lines(sources: Sequence[Path]) -> tuple[list[str], int]:
-    """One line per source, resolved, and how many of them are not there.
-
-    A source the build cannot read is the confirmation's business and not a
-    later stage's: the sources are the one thing a caller supplies from outside
-    the repository, and a typo in one is invisible until a specialist is
-    dispatched against it.
-    """
-    lines = []
-    missing = 0
-    for source in sources:
-        resolved = source.resolve()
-        if resolved.exists():
-            lines.append(_confirmation_field("source", str(resolved)))
-        else:
-            missing += 1
-            lines.append(_confirmation_field("source", f"{resolved} — this path does not exist"))
-    return lines, missing
-
-
-def _determination_line(repo_root: Path) -> str:
-    """The kb-root tri-state, and what the state means for an invocation opening a build.
-
-    Two of the three are ordinary. The third is not: a build is opened over an
-    absent or spine-only ``kb-root/`` and refused over a populated one, the
-    document graph writing the tree whole — so the consequence is stated here,
-    where a reader still has the chance to act on it, rather than met as a
-    refusal on the next command. Continuing a build already under way is the
-    other case and reads this line as history: the ledger's recorded stages
-    below say which of the two this repository is in.
-    """
-    state = kb_util.kb_root_state(repo_root)
-    if state == kb_util.KB_ROOT_ABSENT:
-        detail = f"{kb_util.KB_DIRNAME}/ does not exist yet"
-    elif state == kb_util.KB_ROOT_SPINE_ONLY:
-        detail = f"{kb_util.KB_DIRNAME}/ exists but holds nothing outside {kb_util.INDEX_DIRNAME}/"
-    else:
-        detail = (
-            f"{kb_util.KB_DIRNAME}/ holds a document tree — a build opened over it is refused, "
-            f"since the document graph would overwrite it; a build already under way resumes into it"
-        )
-    return _confirmation_field("kb-root", detail)
-
-
-def _charter_lines(charter: str | None) -> list[str]:
-    """The charter quoted back for the user to check, one tagged line each.
-
-    The tag is added per line and the file gets the text without it: a charter
-    is prose, and one line of prose reading ``[x] done`` would otherwise be a
-    stage as far as anything reading the checklist block is concerned.
-    """
-    if charter is None:
-        return [_confirmation_field("charter", "none supplied — what you say now is the whole of it")]
-    return [
-        _confirmation("The charter this build will carry, quoted back a line at a time:"),
-        *(f"{CHARTER_TAG} {line}" for line in charter.splitlines()),
-    ]
-
-
-def _user_gate_line() -> str:
-    """Where this build expects the user, read off the stage table.
-
-    Derived rather than stated: the table says which stages stop for an answer,
-    so a gate that is added or moved is named here without anyone remembering
-    to come and say so.
-    """
-    gates = [f"{stage.id} ({stage.display})" for stage in STAGES if stage.user_gate]
-    return _confirmation(
-        f"This build stops for you at {len(gates)} of its {len(STAGES)} stages: {', '.join(gates)}. "
-        f"Everywhere else it runs unattended, and stops early only to escalate."
-    )
-
-
-def _unsettled_lines(repo_root: Path) -> list[str]:
-    """The per-project facts the confirmation settles, each with what holds if it is not answered.
-
-    A default nobody states is a decision made silently, which is what these
-    lines exist to prevent. An entry appears only where there is something to
-    settle — a repository already carrying a justfile or a Makefile has its
-    runner answer — and the heading goes with the entries: a heading over
-    nothing reads as a question the user is being asked to answer. What becomes
-    of the rest of the answer holds either way, so the charter line always
-    prints.
-    """
-    items: list[str] = []
-    if kb_util.detected_runner(repo_root) is None:
-        created = kb_util.runner_filename(kb_util.DEFAULT_RUNNER)
-        items.append(
-            _confirmation(
-                f"  Task runner — this repository has neither a justfile nor a Makefile, and the KB's "
-                f"maintenance commands arrive as one include line in one of them. Default: a {created} "
-                f"is created carrying that line."
-            )
-        )
-    heading = (
-        [_confirmation("Unsettled. Each is followed by what this build does if you say nothing:")] if items else []
-    )
-    opening = "Anything else" if items else "Anything"
-    return [
-        *heading,
-        *items,
-        _confirmation(f"{opening} you say is charter text, and reaches the build in your own words."),
-    ]
-
-
-def show_confirmation(repo_root: Path, *, sources: Sequence[Path], charter: str | None) -> int:
-    """Print the build's opening confirmation whole. Reads everything, decides nothing.
-
-    What comes back is the message itself, not material for one: the parse, the
-    charter, the run map, where the build expects the user, what is still
-    unsettled, and the environment report, in the order a person reads them. A caller that summarized, re-ordered or
-    selected from it would be making the judgements this call exists to remove.
-
-    Exit codes: ``0`` there is something to confirm; ``1`` a blocking item
-    stands in the way — a preflight ``FAIL`` or a source that is not there — so
-    the answer cannot start a build yet. The only write anywhere below is the
-    scratch directory ``preflight`` creates.
-    """
-    source_lines, missing = _source_lines(sources)
-    print(_confirmation("Confirm this before the build starts. Nothing has been written yet."))
-    print(_confirmation_field("repository", str(repo_root)))
-    for line in source_lines:
-        print(line)
-    print(_confirmation_field("knowledge base", str(kb_util.kb_root(repo_root))))
-    print(_determination_line(repo_root))
-    for line in _charter_lines(charter):
-        print(line)
-
-    print(_confirmation("The stages this build runs, and where it stands now:"))
-    recorded = recorded_stages(repo_root)
-    advisory = _unseeded_advisory(repo_root)
-    if advisory is not None:
-        print(advisory)
-    for line in checklist_lines(recorded):
-        print(line)
-    print(_user_gate_line())
-
-    for line in _unsettled_lines(repo_root):
-        print(line)
-
-    print(_confirmation("The environment checks this build just ran:"))
-    preflight_rc = kb_util.run_preflight(repo_root)
-
-    if preflight_rc != 0 or missing:
-        kb_util.to_stderr(
-            _confirmation(
-                "The build cannot start: the items marked above have to be cleared first. "
-                "Relay this message unchanged; there is nothing to confirm until they are."
-            )
-        )
-        return 1
-    print(
-        _confirmation(
-            "Relay this message to the user unchanged, wait for the answer, and write nothing until it arrives."
-        )
-    )
-    # The baton, generated for the same reason a card's record step is: the op
-    # and its one flag come from the CLI's own constants, so this cannot name a
-    # call that does not exist or spell one the consumer does not run.
-    print(
-        _confirmation(
-            f"next: write the charter to {CHARTER_RELPATH} where the answer carries one, then record "
-            f"the boundary with "
-            f"{_kb_util_command(kb_util.OP_START_BUILD, f'[{kb_util.CHARTER_FLAG} {CHARTER_RELPATH}]')}"
-        )
-    )
+    _print_report(recorded_stages(repo_root))
     return EXIT_OK
 
 

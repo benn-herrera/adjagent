@@ -1,4 +1,4 @@
-"""Baton completeness, and the two cards whose action is read off the mode.
+"""Baton completeness.
 
 Every enumerated exit code renders a baton, and an unlisted code renders the
 fallback: an unrecognized exit state is the one place a relaying session will
@@ -22,7 +22,7 @@ from kb_tools.kb_driver import baton, ledger
 
 # A table transcribed from the design rather than from the code under test —
 # the point of the guard is that the two agree.
-DESIGN_CODES = (0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22)
+DESIGN_CODES = (0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
 
 
 def _asks(block: str) -> str:
@@ -43,7 +43,9 @@ def test_every_code_renders_a_complete_card(code: int) -> None:
     # card rather than the no-barrier one — this guard is over the enumeration.
     block = baton.render(
         code,
-        baton.BatonContext(invocation="--config cfg.toml", pair="start.proceed", question="q?", run_dir="/runs/1"),
+        baton.BatonContext(
+            invocation="--config cfg.toml", pair="spine-seed.runner-choice", question="q?", run_dir="/runs/1"
+        ),
     )
     lines = block.splitlines()
     assert all(line.startswith(baton.PREFIX) for line in lines)
@@ -94,7 +96,7 @@ def test_missing_question_on_a_raised_barrier_is_visible_rather_than_blank() -> 
     """The alarm, still armed: a raised barrier with no question looks like the defect it is."""
     block = baton.render(
         baton.EXIT_BARRIER,
-        baton.BatonContext(invocation="--config cfg.toml", pair="start.proceed"),
+        baton.BatonContext(invocation="--config cfg.toml", pair="spine-seed.runner-choice"),
     )
     assert "(missing — read the barrier record and report it verbatim)" in _asks(block)
 
@@ -193,27 +195,3 @@ def test_a_head_record_refusal_names_an_action_that_row_has(tmp_path: Path, caps
     assert head_stage in asks
     assert kb_pipeline.MISSING in asks
     assert outcome.exit_code == baton.EXIT_COVERAGE
-
-
-# ---------------------------------------------------------------------------
-# Mode-scoped cards
-# ---------------------------------------------------------------------------
-
-
-def test_a_mode_card_overrides_only_a_code_the_shared_table_has() -> None:
-    """A mode's table is an override, so an entry with no base card is a typo, not a new code."""
-    for mode, specs in baton._MODE_BATONS.items():
-        assert mode in (baton.MODE_RUN, baton.MODE_WATCH)
-        assert set(specs) <= set(baton.CODES)
-
-
-def test_watch_mode_exit_0_never_directs_a_completion_report() -> None:
-    """Watch's 0 says the build is running; run's 0 says it finished. Same number, two cards."""
-    watching = baton.render(baton.EXIT_OK, baton.BatonContext(mode=baton.MODE_WATCH))
-    running = baton.render(baton.EXIT_OK, baton.BatonContext(mode=baton.MODE_RUN))
-
-    assert "report completion" not in watching
-    assert "still running" in _asks(watching)
-    assert f"{kb_util.DRIVER_INVOCATION} watch" in _then_run(watching)
-    # The run-mode card is untouched: this is a mode override, not a rewrite.
-    assert "report completion" in running

@@ -19,27 +19,26 @@ policy, and owns everything downstream of the classification:
   environment the run was launched in, and both the exit and its card say so
   rather than naming a defect in the driver.
 * **Contract validation — existence and parse only.** Declared artifacts exist
-  and are non-empty; the envelope parses; the ``VERDICT`` line parses;
-  the ``SCOPE`` line parses. Never content quality — that is the
-  reviewers' job. A **second ``init``** fails this check rather than passing on
-  the premature success it announces. That is a *step-model* rule and so it is
-  here: one call is one turn for this driver, where the layer below promises no
-  such thing and returns the same call as an ordinary success having counted
-  the events (the brief-side defense is ``{dispatch_discipline}``).
+  and are non-empty; the ``VERDICT`` line parses. Never content quality — that
+  is the reviewers' job. A **second ``init``** fails this check rather than
+  passing on the premature success it announces. That is a *step-model* rule and
+  so it is here: one call is one turn for this driver, where the layer below
+  promises no such thing and returns the same call as an ordinary success having
+  counted the events.
 * **The one re-ask.** A contract failure re-briefs the *same* step once, with
   the validator's complaint appended to the identical composed brief; a second
   failure is exit 17, naming the step and the complaint. It is not a barrier:
   no pre-supplied answer can resolve a step that cannot produce its declared
   output shape twice.
-* **Persistence, three routes**, keyed to the seat's own definition.
-  ``driver`` — a never-writer SINGLE's returned text *is* the artifact, and
-  this module writes it to a contract path the model never chose, through a temp
-  and a rename so the path never holds bytes nobody finished writing.
-  ``wave-session`` and ``worker`` — the call wrote its own artifacts and this
-  module only validates them. The routes are the mechanism, not a sandbox: the
-  CLI does not enforce a definition's tool list, so a never-writer that writes
-  anyway is a definition-compliance defect, invisible here except where an
-  output contract happens to notice.
+* **Persistence, one route plus its absence**, keyed to the seat's own
+  definition. ``driver`` — a never-writer SINGLE's returned text *is* the
+  artifact, and this module writes it to a contract path the model never chose,
+  through a temp and a rename so the path never holds bytes nobody finished
+  writing. ``—`` is a row that leaves nothing behind and must declare no
+  artifact. The route is the mechanism, not a sandbox: the CLI does not enforce
+  a definition's tool list, so a never-writer that writes anyway is a
+  definition-compliance defect, invisible here except where an output contract
+  happens to notice.
 
 **The driver process never writes under ``kb-root/``.** Its writes from
 here are exactly two — the composed brief in the run directory, and the
@@ -56,10 +55,9 @@ ladder for them to land on, which is why they are stated twice rather than
 moved down. No brief text can reach argv at all — ``inference.build_argv``
 has no parameter through which it could.
 
-**What this module deliberately does not do.** It parses the envelope and hands
-it back; appending its deviations to ``deviations.jsonl`` needs the run id and
-the stage, which are the run loop's. It counts nothing about rounds, caps, or
-position, and it selects no successor.
+**What this module deliberately does not do.** It parses what a return declares
+and hands it back. It counts nothing about rounds, caps, or position, and it
+selects no successor.
 
 **Dependency note.** ``call`` depends on ``{inference, prompt_templates, envelope,
 runlog, config}``. Naming an exit code additionally requires ``baton``, and executing a
@@ -84,7 +82,7 @@ from .. import inference
 from ..kb_survey.manifest import write_text_atomic
 from . import baton, prompt_templates, runlog, steps
 from .config import DriverConfig
-from .envelope import Envelope, ParseError, Scope, Verdict, parse_envelope, parse_scope, parse_verdict
+from .envelope import ParseError, Verdict, parse_verdict
 
 _log = runlog.logger("call")
 
@@ -101,23 +99,14 @@ MODEL_FLAG = "--model"
 REASK_SUFFIX = prompt_templates.REASK_SUFFIX
 
 # The units this module serves. Every other row in the step table is a
-# driver-op, a refresh, or a gate, and none of those spawns inference.
-CALL_UNITS = (steps.Unit.SINGLE, steps.Unit.WAVE, steps.Unit.WAVE_STAR)
+# driver-op or a gate, and neither spawns inference.
+CALL_UNITS = (steps.Unit.SINGLE,)
 
-# The three persistence routes, plus the absence of one: a calling row whose
-# whole return travels in the envelope writes nothing at all. A route describes
-# where an artifact comes from, so a row with no artifact has none — but it must
-# then declare no artifact either, which `_check` asserts. `tool` belongs to
-# rows that make no call.
-CALL_WRITERS = (steps.Writer.NONE, steps.Writer.DRIVER, steps.Writer.WAVE_SESSION, steps.Writer.WORKER)
-
-# The parses that read a *document* rather than a return. On a never-writer row
-# the document IS the return, so the distinction costs nothing; on the
-# write-to-disk route it is the whole point — the seat writes the design to the
-# path the driver named and returns only the envelope, precisely because a
-# design carried as a message body is truncated in transport and what a
-# truncation takes is the tail, where the scope line sits.
-DOCUMENT_PARSES = frozenset({steps.Parse.SCOPE})
+# The persistence route, plus the absence of one: a calling row may leave
+# nothing behind at all. A route describes where an artifact comes from, so a
+# row with no artifact has none — but it must then declare no artifact either,
+# which `_check` asserts. `tool` belongs to rows that make no call.
+CALL_WRITERS = (steps.Writer.NONE, steps.Writer.DRIVER)
 
 _REASK_HEADING = "## Re-ask — the previous return did not satisfy this brief's output contract"
 _REASK_PREAMBLE = (
@@ -138,17 +127,12 @@ class CallRequest:
     binds them**: every value of a :data:`steps.PATH_SLOTS` slot is an absolute
     path that exists, or — where the slot is optional — the named absence, so
     that no brief states a path a seat can only act on by going looking.
-    ``members`` is the count that fixes the call
-    unit: a ``wave*`` row is a WAVE above one member and a SINGLE at one, which
-    is what lets the one-volume mini-run exercise both paths without a second
-    code path.
     """
 
     step: steps.Step
     seq: int
     slots: Mapping[str, str] = field(default_factory=dict)
     outputs: tuple[Path, ...] = ()
-    members: int = 1
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -163,9 +147,7 @@ class CallOutcome:
 
     exit_code: int
     result_text: str = ""
-    envelope: Envelope | None = None
     verdict: Verdict | None = None
-    scope: Scope | None = None
     written: tuple[Path, ...] = ()
     attempts: int = 0
     detail: tuple[str, ...] = ()
@@ -197,7 +179,7 @@ _call_is_live = False
 
 @contextmanager
 def _single_flight() -> Iterator[None]:
-    """Exactly one ``claude`` subprocess at a time. Parallelism lives inside a wave.
+    """Exactly one ``claude`` subprocess at a time.
 
     A driver policy and not the layer below's, which serves callers that make no
     such promise: a tool asking a seat a question is not a build and owns its own
@@ -218,14 +200,6 @@ def _require_no_model(tokens: Sequence[str], **context: object) -> None:
     """Refuse a ``--model`` in either spelling argparse accepts. Exit 15 for both."""
     smuggled = [token for token in tokens if token == MODEL_FLAG or token.startswith(f"{MODEL_FLAG}=")]
     runlog.require(not smuggled, "the driver never passes --model", smuggled=" ".join(smuggled), **context)
-
-
-def is_wave(step: steps.Step, *, members: int) -> bool:
-    """One call is a SINGLE. A ``wave*`` row is a WAVE only above one member."""
-    runlog.require(members >= 1, "a call needs at least one member", step=step.id, members=members)
-    if step.unit is steps.Unit.WAVE:
-        return True
-    return step.unit is steps.Unit.WAVE_STAR and members > 1
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -301,26 +275,15 @@ class Caller:
         build can absorb.
         """
         step = request.step
-        template, wave = self._check(request)
+        template = self._check(request)
         brief_text = prompt_templates.render(
             template,
             slots=request.slots,
-            constants=steps.CONSTANT_SLOTS,
-            row=prompt_templates.RowSlots(step_id=step.id, seat=step.seat),
-            wave=wave,
             directory=self.prompt_templates_dir,
         )
         _log.info(
             "call composed",
-            extra={
-                "context": {
-                    "step": step.id,
-                    "unit": "WAVE" if wave else "SINGLE",
-                    "seat": step.seat or "(seatless)",
-                    "members": request.members,
-                    "writer": step.writer.value,
-                }
-            },
+            extra={"context": {"step": step.id, "seat": step.seat, "writer": step.writer.value}},
         )
 
         attempts = 0
@@ -330,7 +293,7 @@ class Caller:
             text = _reask_brief(brief_text, complaint) if re_ask else brief_text
             brief_path = prompt_templates.persist(self.paths.briefs, seq=request.seq, step_id=label, text=text)
 
-            ask = self._ask(request, brief_path=brief_path, label=label, wave=wave)
+            ask = self._ask(request, brief_path=brief_path, label=label)
             attempts += ask.attempts
             if not ask.result.ok:
                 return self._transport_failure(request, ask=ask, attempts=attempts)
@@ -363,15 +326,15 @@ class Caller:
 
     # --- boundary checks -------------------------------------------------------
 
-    def _check(self, request: CallRequest) -> tuple[str, bool]:
-        """The call boundary. Returns the template to compose and whether this is a WAVE."""
+    def _check(self, request: CallRequest) -> str:
+        """The call boundary. Returns the template to compose."""
         step = request.step
         template = step.template or ""
         runlog.require(step.unit in CALL_UNITS, "this step makes no call", step=step.id, unit=step.unit.value)
         runlog.require(template, "a call step names no template", step=step.id)
         runlog.require(
             step.writer in CALL_WRITERS,
-            "a call step's writer is not one of the three persistence routes",
+            "a call step's writer is not a persistence route this module serves",
             step=step.id,
             writer=step.writer.value,
         )
@@ -388,9 +351,7 @@ class Caller:
             step=step.id,
         )
 
-        parses = set(step.parses)
-        wave = is_wave(step, members=request.members)
-        runlog.require(wave or step.seat, "a SINGLE names the seat it calls", step=step.id)
+        runlog.require(step.seat, "a call step names the seat it calls", step=step.id)
         if step.writer is steps.Writer.NONE:
             # A row taking no persistence route leaves nothing behind, so an
             # artifact declared for one would be an artifact nobody was asked to
@@ -411,26 +372,16 @@ class Caller:
                 step=step.id,
                 outputs=len(request.outputs),
             )
-        if step.writer is steps.Writer.WORKER and DOCUMENT_PARSES & parses:
-            # The write-to-disk route reads its declared blocks off the file the
-            # seat wrote, so there has to be exactly one file to read them from.
-            runlog.require(
-                len(request.outputs) == 1,
-                "a worker-writes row declaring a document parse needs exactly one declared artifact",
-                step=step.id,
-                outputs=len(request.outputs),
-            )
-        return template, wave
+        return template
 
     # --- transport, with the retry policy ------------------------------------
 
-    def _bounds(self, step: steps.Step, *, wave: bool) -> Bounds:
+    def _bounds(self, step: steps.Step) -> Bounds:
         """The two per-call bounds: the silence watchdog, and a total that a step may override."""
         timeouts = self.config.timeouts
-        default = timeouts.wave_seconds if wave else timeouts.single_seconds
         return Bounds(
             silence_seconds=timeouts.silence_seconds,
-            total_seconds=timeouts.by_step.get(step.id, default),
+            total_seconds=timeouts.by_step.get(step.id, timeouts.single_seconds),
         )
 
     def _backoff(self, attempt: int) -> float:
@@ -457,16 +408,16 @@ class Caller:
             total_seconds=bounds.total_seconds,
         )
 
-    def _ask(self, request: CallRequest, *, brief_path: Path, label: str, wave: bool) -> _Ask:
+    def _ask(self, request: CallRequest, *, brief_path: Path, label: str) -> _Ask:
         """One ask: invocations up to the attempt budget, stopping at the first that stands."""
         step = request.step
         _require_no_model(self.config.claude.command, command=" ".join(self.config.claude.command))
         argv = inference.build_argv(
             command=self.config.claude.command,
             permission_mode=self.config.run.permission_mode,
-            agent=None if wave else step.seat,
+            agent=step.seat,
         )
-        bounds = self._bounds(step, wave=wave)
+        bounds = self._bounds(step)
         budget = self.config.retry.transport_attempts
 
         for attempt in range(1, budget + 1):
@@ -567,10 +518,8 @@ class Caller:
         """Validate the return, persist it where the route says, and check the artifacts.
 
         Raises :class:`ParseError` — the one re-ask's trigger — for every way a
-        return can fail its contract. **Every parse that reads the return runs
-        before any write**, so a malformed return never overwrites the artifact
-        a resume would read. The document parses run after, because what they
-        read is a file this module did not write and the seat did.
+        return can fail its contract. **Every parse runs before any write**, so
+        a malformed return never overwrites the artifact a resume would read.
         """
         step = request.step
         if result.init_count > 1:
@@ -583,25 +532,15 @@ class Caller:
             )
             raise ParseError(
                 f"{result.init_count} init events in one call: the session dispatched asynchronously and "
-                f"answered before its members did (every member call needs run_in_background: false); "
-                f"capture: {result.capture_path}"
+                f"answered before the work it dispatched had finished (a dispatch this call waits on needs "
+                f"run_in_background: false); capture: {result.capture_path}"
             )
 
         text = result.result_text
-        parses = set(step.parses)
-        wave_envelope = parse_envelope(text, step=step.id) if steps.Parse.ENVELOPE in parses else None
-        verdict = parse_verdict(text) if steps.Parse.VERDICT in parses else None
+        verdict = parse_verdict(text) if steps.Parse.VERDICT in step.parses else None
 
         written = (self._persist(request, text=text),) if step.writer is steps.Writer.DRIVER else ()
         self._check_artifacts(request)
-
-        # The document parses read the artifact on the write-to-disk route and
-        # the return everywhere else. On a never-writer row the two are the same
-        # bytes, since `_persist` above just wrote the return to that path.
-        document = text
-        if step.writer is steps.Writer.WORKER and DOCUMENT_PARSES & parses:
-            document = request.outputs[0].read_text(encoding="utf-8")
-        scope = parse_scope(document) if steps.Parse.SCOPE in parses else None
 
         _log.info(
             "call met its contract",
@@ -617,9 +556,7 @@ class Caller:
         return CallOutcome(
             exit_code=baton.EXIT_OK,
             result_text=text,
-            envelope=wave_envelope,
             verdict=verdict,
-            scope=scope,
             written=written,
             attempts=attempts,
         )
@@ -639,8 +576,8 @@ class Caller:
         if not text.strip():
             raise ParseError(f"the returned text is empty, and it is the artifact this step declares ({target.name})")
         # The driver's writes are its run directory and the never-writer
-        # artifacts under the scratch layout. KB content is the workers' and the
-        # runner's, and nothing here may reach it.
+        # artifacts under the scratch layout. KB content is the runner's and the
+        # run loop's, and nothing here may reach it.
         runlog.require(
             _within(target, self.scratch_root),
             "the driver persists only under the scratch layout root",

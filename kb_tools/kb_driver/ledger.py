@@ -19,24 +19,15 @@ a driver exit code in exactly one place:
 | ``show-status`` | 0 · 2 | 0 · 14 |
 | ``kb_docgraph`` | 0 · 1 · 2 | 0 · 11 · 14 |
 | ``kb_claimgraph`` | 0 · 1 · 2 · 3 | 0 · 11 · 14 · 14 |
-| ``validate-build`` | 0 · 1 · 2 | 0 · 11 · 14 |
-| write op | 0 · 2 · 7 · 8 | 0 · 14 · 15 · **retry**, then 14 |
 | runner target | 0 · other | 0 · 11 |
 
 An rc outside its op's vocabulary is a driver/tool contract violation, not a
 pipeline outcome: it routes through :func:`runlog.require` and exits 15.
-That rule is why the write ops' rc 8 has a row at all: enrolling it is what
-keeps "the file was contended" from reading as "the tool is broken".
 
 **Dependency note.** ``ledger`` depends on ``runlog``. Naming an exit code
 additionally requires ``baton``, the stateless exit-code vocabulary; copying
 the constants here instead would be exactly the drift the single-source rule
-exists to prevent. :func:`write_op`'s vocabulary is keyed by
-``kb_write.ops.ExitCode`` for the same reason — that class is where the write
-API's three outcomes are defined, and a driver-side copy of the numbers would
-be a second definition of the contract this module exists to honour. The
-direction is the legal one: ``kb_driver`` may import ``kb_write``, and
-``kb_write`` imports no driver module.
+exists to prevent.
 
 Stdlib only.
 """
@@ -49,7 +40,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import kb_util
-from ..kb_write import ops as write_ops
 from . import baton, runlog
 
 _log = runlog.logger("ledger")
@@ -93,9 +83,9 @@ _SHOW_STATUS_EXITS = {0: baton.EXIT_OK, 2: baton.EXIT_ENVIRONMENT}
 # there, no repository root), which is an environment fault. `kb_claimgraph`'s
 # rc 3 is the same kind: the spine is not seeded, which is the stage before it.
 #
-# Neither maps rc 1 to a fix cycle. There is no distiller wave in the head and
-# no seat to run one: every check either tool makes compares one mechanical
-# product against another, so a red one is a defect in the tool or its input.
+# Neither maps rc 1 to a fix cycle. There is no seat in the head to run one:
+# every check either tool makes compares one mechanical product against
+# another, so a red one is a defect in the tool or its input.
 _DOCGRAPH_EXITS = {0: baton.EXIT_OK, 1: baton.EXIT_GATE_RED, 2: baton.EXIT_ENVIRONMENT}
 _CLAIMGRAPH_EXITS = {
     0: baton.EXIT_OK,
@@ -103,19 +93,6 @@ _CLAIMGRAPH_EXITS = {
     2: baton.EXIT_ENVIRONMENT,
     3: baton.EXIT_ENVIRONMENT,
 }
-# The validator's three rungs, which keep "the validator could not run" from
-# reading as "the design is broken": rc 1 is a FAILing check (exit 11, a finding
-# a repair round can close), rc 2 is an unreadable input (exit 14).
-_VALIDATE_EXITS = {0: baton.EXIT_OK, 1: baton.EXIT_GATE_RED, 2: baton.EXIT_ENVIRONMENT}
-
-#: How many times a contended write op is re-run before its rc is mapped. The
-#: bound is this program's to pick, and three is the
-#: number the agent-side contract in ``prompt-templates/fragments/write-op-contract.tmpl`` states
-#: for the other caller. The two bounds are deliberately not single-sourced:
-#: they govern different retriers — an agent re-running its own Bash call, and
-#: the driver re-running its own subprocess — and each has to be legible where
-#: it is stated.
-WRITE_OP_RETRY_LIMIT = 3
 
 #: How many of a failing op's own report lines ride the :class:`Outcome`'s
 #: detail — which is what the relay card puts under its ASK, and what an
@@ -126,32 +103,6 @@ WRITE_OP_RETRY_LIMIT = 3
 FAILURE_DETAIL_LINES = 40
 
 _ELIDED = "… {count} line(s) of the report omitted here — the whole of it is in the run log …"
-
-# The write ops' rc vocabulary. ``ExitCode`` is
-# the tool-side definition; what this table adds is the driver exit each of its
-# four codes earns.
-#
-# **8 is enrolled and is not a driver exit.** It means the values were right
-# and a concurrent writer moved the file, so the answer is the identical
-# invocation again — never a re-ask of the model, because re-asking for values
-# that were already correct is how a second id gets minted for one thing.
-# ``_outcome``'s ``retry_rc`` runs it; only an 8 that outlives the bound
-# reaches this table, and it lands on 14 with a ``restore:`` line, because a
-# file still contended after four attempts is a fault in the environment the
-# run shares rather than in anything the driver composed.
-#
-# **7 is 15, not 11.** A refusal says the values are wrong, and a
-# driver-invoked op's values were composed by the driver — no model wrote them,
-# so no fix wave can address them and no re-ask can help. That is a driver
-# defect, which is exit 15's meaning. A future row whose values come out of a
-# worker's envelope rather than out of the driver's own construction has a
-# different answer to that rc, and changing it is a change to this table.
-_WRITE_OP_EXITS = {
-    write_ops.ExitCode.WRITTEN: baton.EXIT_OK,
-    write_ops.ExitCode.ENVIRONMENT: baton.EXIT_ENVIRONMENT,
-    write_ops.ExitCode.REFUSED: baton.EXIT_INTERNAL,
-    write_ops.ExitCode.RETRY: baton.EXIT_ENVIRONMENT,
-}
 
 # The two maintenance targets, and `kb_util`'s hint function for each — the
 # single source of runner detection, reused rather than reimplemented.
@@ -165,15 +116,12 @@ _TARGET_HINTS = {
 class Outcome:
     """One row's result: the driver exit that holds, and the evidence for it.
 
-    ``exit_code`` is :data:`baton.EXIT_OK` when the row passed. When ``barrier``
-    names a ``<stage>.<kind>`` pair, ``exit_code`` is the code that holds if
-    that barrier goes unanswered — deciding it belongs to ``barriers.py``.
+    ``exit_code`` is :data:`baton.EXIT_OK` when the row passed.
     """
 
     exit_code: int
     stdout: str = ""
     detail: tuple[str, ...] = ()
-    barrier: str = ""
 
     @property
     def ok(self) -> bool:
@@ -267,39 +215,10 @@ def _outcome(
     op: str,
     exits: Mapping[int, int],
     otherwise: int | None = None,
-    barriers: Mapping[int, str] | None = None,
     relay: bool = True,
-    retry_rc: int | None = None,
 ) -> Outcome:
-    """Run one op and map its rc. ``otherwise`` accepts an open rc vocabulary.
-
-    ``retry_rc`` names the one rc whose answer is to run the **identical**
-    ``argv`` again — the write ops' 8, a contended file. It is re-run up
-    to :data:`WRITE_OP_RETRY_LIMIT` times before its mapped exit holds. Nothing
-    about the invocation changes between attempts and nothing about the model
-    is consulted at any point: a retry here is a second subprocess and never a
-    second dispatch.
-    """
-    attempts = 0
-    while True:
-        attempts += 1
-        result = _run(argv, repo_root=repo_root, relay=relay)
-        if result is None or result.returncode != retry_rc or attempts > WRITE_OP_RETRY_LIMIT:
-            break
-    if attempts > 1:
-        # Report by exception: one line for the whole retried sequence, naming
-        # what was re-run and how many times, so a run that never contended
-        # says nothing at all.
-        _log.warning(
-            "re-ran the identical invocation after a contended write",
-            extra={
-                "context": {
-                    "argv": " ".join(argv),
-                    "invocations": attempts,
-                    "returncode": None if result is None else result.returncode,
-                }
-            },
-        )
+    """Run one op and map its rc. ``otherwise`` accepts an open rc vocabulary."""
+    result = _run(argv, repo_root=repo_root, relay=relay)
     if result is None:
         return Outcome(
             baton.EXIT_ENVIRONMENT,
@@ -314,17 +233,8 @@ def _outcome(
         )
     fallback = baton.EXIT_INTERNAL if otherwise is None else otherwise
     exit_code = exits.get(result.returncode, fallback)
-    detail: tuple[str, ...] = ()
-    if exit_code != baton.EXIT_OK:
-        detail = _failure_detail(op, result)
-    if result.returncode == retry_rc:
-        detail = (
-            *detail,
-            f"{attempts} identical invocations, every one rc {result.returncode} — restore: re-run "
-            f"once whatever else is writing that file has finished",
-        )
-    barrier = "" if barriers is None else barriers.get(result.returncode, "")
-    return Outcome(exit_code, stdout=result.stdout, detail=detail, barrier=barrier)
+    detail: tuple[str, ...] = () if exit_code == baton.EXIT_OK else _failure_detail(op, result)
+    return Outcome(exit_code, stdout=result.stdout, detail=detail)
 
 
 def _kb_util(*args: str) -> tuple[str, ...]:
@@ -463,9 +373,9 @@ def record_stage(repo_root: Path, *, stage: str, note: str = "", no_inference: b
 def show_status(repo_root: Path, *, relay: bool = True) -> Outcome:
     """The display source: the render printed at every transition and barrier.
 
-    Pass ``relay=False`` for a read that is not a transition — resume position,
-    watch-mode polling — where printing the render again would be noise rather
-    than display.
+    Pass ``relay=False`` for a read that is not a transition — a resume
+    position — where printing the render again would be noise rather than
+    display.
     """
     return _outcome(
         _kb_util(kb_util.OP_SHOW_STATUS),
@@ -473,71 +383,6 @@ def show_status(repo_root: Path, *, relay: bool = True) -> Outcome:
         op=f"kb_util {kb_util.OP_SHOW_STATUS}",
         exits=_SHOW_STATUS_EXITS,
         relay=relay,
-    )
-
-
-# --- the write ops ------------------------------------------------------------
-
-
-def write_op(repo_root: Path, *, op: str, args: Sequence[str] = ()) -> Outcome:
-    """Run one ``kb_write`` op as a subprocess, with rc 8 enrolled and retried.
-
-    No current driver row invokes a write op through this function — the one
-    that did, ``p3.markers`` (placing a leaf's Tier-2 markers), is deleted with
-    the distillation stage it belonged to. The *agent-side* callers remain,
-    called from inside a wave session where no driver code sees the rc at all
-    (that caller's contract is ``prompt-templates/fragments/write-op-contract.tmpl``). The rc
-    vocabulary is declared once, here, for whichever caller reaches it: rc 8 is
-    in it (an unenrolled rc exits 15 as a broken tool), and it maps to a
-    bounded retry of the identical invocation rather than to a driver exit or
-    a re-ask.
-
-    ``args`` is the op's own flags. The report is not relayed, for
-    ``run_target``'s reason: a tool report the driver acts on is evidence, and
-    it is on the returned :class:`Outcome` and in the run log either way.
-    """
-    runlog.require(op in kb_util.WRITE_OPS, "not a kb_tools write op", op=op)
-    return _outcome(
-        _kb_util(op, *args),
-        repo_root=repo_root,
-        op=f"kb_util {op}",
-        exits=_WRITE_OP_EXITS,
-        retry_rc=write_ops.ExitCode.RETRY,
-        relay=False,
-    )
-
-
-# --- the built-tree validator -------------------------------------------------
-#
-# A subprocess op like every other: `kb_util` is the one sanctioned front end.
-#
-# The report is not relayed. The display relay carries what a session pastes
-# into its message body; this is evidence, and `run.py` writes the validator's
-# report to the round's findings file where the review reads it.
-
-# The validator takes the built tree and nothing else: it walks the tree for
-# the documents it checks, so there is no second input to disagree with what
-# is on disk. There is no severity argument because there is none in the
-# validator: the verdict is the tool's rc, and this maps it.
-
-
-def validate_build(repo_root: Path, *, kb_root: Path) -> Outcome:
-    """Check a built tree's structure — up-links, parent correctness, reachability.
-
-    No current driver row calls this: it fronted ``p3a.validate``, deleted with
-    the phase-0/1 stages. Kept because ``kb_util validate-build`` and
-    ``kb_survey.validate.validate_build`` are themselves kept per this
-    project's docbuild plan (they are stdlib-only, import no parser, and are
-    the pandoc replacement's own acceptance checker) — this is their
-    driver-side adapter, latent until a caller needs it again.
-    """
-    argv = _kb_util(kb_util.OP_VALIDATE_BUILD, "--kb-root", str(kb_root))
-    return _outcome(
-        argv,
-        repo_root=repo_root,
-        op=f"kb_util {kb_util.OP_VALIDATE_BUILD}",
-        exits=_VALIDATE_EXITS,
-        relay=False,
     )
 
 

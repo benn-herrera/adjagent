@@ -1,4 +1,4 @@
-"""The outer loop: stage iteration, step execution, cap loops, resume, exit selection.
+"""The outer loop: stage iteration, step execution, resume, exit selection.
 
 The sequencer. It walks ``steps.py``'s table in order, computes each row's
 per-call slots, hands calls to ``call.py``, records stages through
@@ -21,15 +21,6 @@ a dying process half-earned, and the stage table is what makes discarding it
 cheap, every row that spends a model call standing immediately in front of its
 own boundary (``steps.STEPS``; SPEC.md, The Driver's Contract).
 
-Within a ``wave*`` step the skip is per member (:func:`pending_members`, through
-:meth:`Runner._wave`) — a wave killed mid-flight re-briefs only the members whose
-artifacts are absent, and if that leaves exactly one, the step collapses to a
-SINGLE. **No row in the current table is a wave**: that is the run side of the
-call machinery's wave route, which outlives the last stage that used it
-(``steps.Unit.WAVE``, ``steps.Writer.WAVE_SESSION``), and a wave row returning to
-the table owes the rule above an answer of its own — member granularity is the
-same trust in an unaccounted artifact, asked one member at a time.
-
 **A launch is an invocation that finds ``start`` unrecorded, and nothing
 configures that.** There is no build-mode setting and no row states a mode it
 belongs to: the ledger's recorded-stage set is read at the top of every walk and
@@ -39,16 +30,12 @@ stage — so it runs on a launch and never on a resume, by the same skip that
 makes a recorded stage unwalked — where a ``kb-root/`` holding documents this
 build did not write refuses rather than being overwritten.
 
-**A round is counted by the process that runs it, and recorded by the stage's
-own boundary.** A stage is recorded once, so its ledger entry says that every
-round it ran is behind it and an unrecorded stage has run none — and the entry
-states how many, in the boundary commit's own body
-(:meth:`Runner._stage_note`). Nothing reads a round number back off disk: a
-findings filename carries its round so that two rounds' findings are two files,
-and no counter is derived from a name. So a file a dying process left behind is
-not a round, spends nothing against a cap, and is overwritten by the round that
-really runs; and the rounds an unrecorded stage ran are work no boundary
-accounts for, which a resume re-runs rather than adopts.
+**Nothing here counts a call, and no call's number is read back off disk.** A
+stage's rows are a fixed sequence, so what a stage spent is what its rows are:
+``phase-5`` dispatches one review and one revision, and its ledger entry says
+both are behind it. A file an earlier process left under the scratch layout is
+therefore not a spent anything — it is work no boundary accounts for, and the
+row that really runs overwrites it.
 
 **Barriers are exits.** Nothing here blocks on a human. A raise persists the
 barrier record, relays it, and ends the walk with the registry's exit code; the
@@ -59,23 +46,20 @@ one process is an automatic stop.
 **No row grades what it writes.** Every rigor value and every on-point fraction
 a minting row authors is the unscored literal, and stays it: the build authors
 the graph and the maintenance tooling scores it, through its own front door.
-``*pending*`` is the expected terminal state, and nothing here refuses it. The
-converse is refused, at every row declaring ``writes_register``:
-:meth:`Runner._check_minted_grades` reads what the row's seat wrote and stops
-the stage over a grade it assigned itself. Riding the declared property rather
-than a row id is what makes a later minting row guarded by construction — no
-row in the current table declares it, but the guard stands ready for one that
-does.
+``*pending*`` is the expected terminal state, and nothing here refuses it. No
+row of this table mints anything, either: the three ``kb_claimgraph``
+invocations mint mechanically, inside the tool, checked by that tool's own gate
+and by ``phase-3a``'s verify coverage.
 
 **No stage repairs a gate.** ``phase-3a`` runs the three verifiers and either
 records or stops: what each of them compares is one mechanically-produced
 artifact against another, so a red one is a defect in a tool or in what was
 authored and there is nothing for a seat to remediate in the KB. ``phase-5``
-drives the one remaining cycle — review, fix, re-review
-(:class:`ReviewCycle`) — over the documents ``overview-drafted`` wrote and its
-boundary committed. **That cycle turns on ``critical`` alone**: a warning and a
-note are reported by :meth:`Runner._report_round` and carried past, so the only
-finding that spends a fix round is one the reviewer itself called critical.
+is a fixed sequence over the documents ``overview-drafted`` wrote and its
+boundary committed — one review, then one revision answering it
+(:meth:`Runner._p5_review_and_fix`). **No severity fails the stage**: every
+finding the reviewer sorted is reported by :meth:`Runner._report_review`, the
+revision answers what it can, and the stage records.
 
 **Scope**: the walk covers :data:`steps.TABLE_STAGE_IDS` — every stage of the
 pipeline. ``execute`` still takes the stage list, because a test that means to
@@ -99,22 +83,26 @@ spending no inference is finished without those rows.
 Stdlib only.
 """
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
-from .. import inference, kb_index_lib, kb_pipeline, kb_readme, kb_util
-from . import barriers, baton, call, envelope, ledger, runlog, steps, watch
-from .config import NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig, run_dir_parent
+from .. import inference, kb_pipeline, kb_readme, kb_util
+from . import barriers, baton, call, checklist, envelope, ledger, runlog, steps
+from .config import NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig
 
 _log = runlog.logger("run")
 
+#: The review ``p5.fix``'s handler dispatches ahead of its own call.
+REVIEW_STEP = "p5.review"
+
 # Rows whose execution belongs to another row's handler rather than to the
-# linear walk. The loop row is the cycle: it drives its stage's review, fix and
-# re-review for as many rounds as its series allows, so the walk must not also
-# run them in table order. Every other row is walked.
-LOOP_DRIVEN_STEPS: frozenset[str] = frozenset({"p5.review"})
+# linear walk, so the walk must not also run them in table order. `p5.review`
+# is the one: its stage is a fixed sequence of two calls, and running them from
+# one handler is what puts both in front of one boundary rather than leaving the
+# review's call accounted for by nothing (SPEC.md, The Driver's Contract).
+DRIVEN_STEPS: frozenset[str] = frozenset({REVIEW_STEP})
 
 # Preflight's own remediation marker. `ov.docent-check` relays the `restore:`
 # line preflight already prints for a missing docent command rather than
@@ -160,7 +148,6 @@ def _context(config: DriverConfig, paths: runlog.RunPaths, result: Result) -> ba
         question=result.question,
         admissible=result.admissible,
         run_dir=str(paths.run_dir),
-        run_dir_parent=run_dir_parent(paths.parent),
         detail=result.detail,
         unconsumed_decisions=result.unconsumed_decisions,
     )
@@ -206,11 +193,11 @@ def write_report(
 class LedgerOps:
     """The ledger surface the walk uses, bound to one repo root — the tests' seam.
 
-    The same shape ``watch.Sensors`` has, for the same reason: the loop's
-    decisions are worth testing without a git repository and a real toolchain
-    behind every one of them, and the adapter itself is tested against the real
-    ``kb_util`` in its own suite. Each callable is keyword-only, so no pair of
-    same-typed arguments can be swapped at a call site.
+    A seam rather than a direct call because the loop's decisions are worth
+    testing without a git repository and a real toolchain behind every one of
+    them, and the adapter itself is tested against the real ``kb_util`` in its
+    own suite. Each callable is keyword-only, so no pair of same-typed
+    arguments can be swapped at a call site.
     """
 
     preflight: Callable[..., ledger.Outcome]
@@ -256,46 +243,9 @@ def ledger_ops_for(repo_root: Path) -> LedgerOps:
 # --- the predicates and readings, as their own units -------------------------
 
 
-@dataclass(frozen=True)
-class Member:
-    """One member of a wave: what it is called, what it reads, what it must leave."""
-
-    name: str
-    source: str
-    artifact: Path
-
-
 def present(path: Path) -> bool:
     """Existence and non-emptiness — the only artifact question the driver asks."""
     return path.is_file() and path.stat().st_size > 0
-
-
-def pending_members(members: Sequence[Member]) -> tuple[Member, ...]:
-    """Partial-wave reconciliation, at member granularity.
-
-    A wave killed mid-flight may have left some member artifacts on disk.
-    Re-running the step drops the members whose declared artifacts are present
-    and non-empty and re-briefs only the rest.
-    """
-    return tuple(member for member in members if not present(member.artifact))
-
-
-#: The round a capped series opens at, on every invocation that reaches its
-#: stage. There is no second value it could take: the stage's ledger entry is
-#: the only record of a round, a stage has one, and it is written after the last
-#: round — so a stage being walked at all is a stage with no round recorded.
-FIRST_ROUND = 1
-
-
-def revisions_spent(*, series: str, round_number: int) -> int:
-    """How many revisions a series has spent by the time round ``round_number`` is reviewed.
-
-    The two series differ by their opening move, and that is the whole of the
-    difference: the initial series opens with a *review* of the design as
-    written, so round N follows N-1 revisions; the gate-driven series is opened
-    by a revision carrying the gate's direction, so round N follows N.
-    """
-    return round_number if series == steps.SERIES_GATE else round_number - 1
 
 
 #: What a bibliography file is called. The document graph takes the flag once
@@ -325,55 +275,6 @@ def bibliographies_beside(repo_root: Path, sources: Sequence[str]) -> tuple[Path
     return tuple(sorted({path for directory in directories for path in directory.glob(f"*{BIBLIOGRAPHY_SUFFIX}")}))
 
 
-# --- the findings loop, as data ----------------------------------------------
-
-
-@dataclass(frozen=True, kw_only=True)
-class ReviewCycle:
-    """One findings loop's rows and authors.
-
-    One shape: review, fix from what the review wrote, re-review — bounded by
-    the loop row's own cap. The rows are data rather than control flow, so the
-    loop reads as one sequence whichever stage drives it.
-
-    ``authors`` are the findings filenames' authors, in the order the member
-    table lists them — the reviewing seats, so a findings path says who judged.
-    """
-
-    loop_step: str
-    review_step: str
-    fix_step: str
-    authors: tuple[str, ...]
-
-
-@dataclass(frozen=True, kw_only=True)
-class RoundsSpent:
-    """What one stage's findings loop cost, as its boundary commit states it.
-
-    The rounds a stage ran are an attribute of that stage's own ledger entry and
-    of nothing else — there is no per-round entry, the ledger's entries being the
-    stage vocabulary — so this is what the record carries and the only place the
-    count survives the process at all.
-    """
-
-    rounds: int
-    fixes: int
-
-
-REVIEW_CYCLES: Mapping[str, ReviewCycle] = MappingProxyType(
-    {
-        # The loop row and the fix row are the same row: this stage has no
-        # separate loop row, so the row that escalates is the row that drives.
-        "phase-5": ReviewCycle(
-            loop_step="p5.fix",
-            review_step="p5.review",
-            fix_step="p5.fix",
-            authors=(steps.META_REVIEW_SEAT,),
-        ),
-    }
-)
-
-
 # --- what a Runner may hold --------------------------------------------------
 
 #: Every attribute a :class:`Runner` may hold, and the whole of it.
@@ -389,8 +290,7 @@ REVIEW_CYCLES: Mapping[str, ReviewCycle] = MappingProxyType(
 #: * **the invocation fixes it**, so the invocation that resumes fixes it the
 #:   same way — the constructor's arguments, and ``scratch``, computed from one;
 #: * **every reader runs in the writer's own stage**, so no resume observes it —
-#:   ``_seq``, whose readers are the call it numbers, and ``_rounds``, written by
-#:   ``phase-5``'s findings loop and read by ``phase-5``'s own record row;
+#:   ``_seq``, whose readers are the call it numbers;
 #: * **the walk re-derives it before any row reads it** — ``_recorded``, re-read
 #:   from the ledger at the top of :meth:`Runner.run`.
 #:
@@ -417,7 +317,6 @@ RUNNER_ATTRIBUTES: frozenset[str] = frozenset(
         "scratch",
         "_seq",
         "_recorded",
-        "_rounds",
     }
 )
 
@@ -459,14 +358,6 @@ class Runner:
         self.scratch = repo_root / steps.SCRATCH_ROOT
         self._seq = 0
         self._recorded: frozenset[str] = frozenset()
-        # What each stage's findings loop cost this process, for the boundary
-        # commit that then records it. **Not resumption state**: written by
-        # `phase-5`'s loop row and read by `phase-5`'s own record row, so no
-        # resume stands between the two — and discarded with the process exactly
-        # as the round number is, the next invocation of an unrecorded stage
-        # opening at `FIRST_ROUND` again rather than reading a count from
-        # anywhere.
-        self._rounds: dict[str, RoundsSpent] = {}
         self._check_attributes()
 
     def _check_attributes(self) -> None:
@@ -501,7 +392,7 @@ class Runner:
 
     def run(self) -> Result:
         """Walk this run's stages in ledger order. Exit 0 when every one is recorded."""
-        missing = sorted(set(steps.STEP_IDS) - set(_HANDLERS) - LOOP_DRIVEN_STEPS)
+        missing = sorted(set(steps.STEP_IDS) - set(_HANDLERS) - DRIVEN_STEPS)
         runlog.require(not missing, f"step table rows with no handler: {', '.join(missing)}")
 
         self._recorded = self._recorded_stages()
@@ -568,7 +459,7 @@ class Runner:
     def _run_stage(self, stage: str) -> None:
         self._check_attributes()
         for step in steps.steps_for(stage):
-            if step.id in LOOP_DRIVEN_STEPS:
+            if step.id in DRIVEN_STEPS:
                 continue
             if not self._applies(step):
                 _log.info(
@@ -577,23 +468,7 @@ class Runner:
                 )
                 continue
             _log.info("step", extra={"context": {"step": step.id, "stage": stage, "unit": step.unit.value}})
-            self._run_step(step)
-
-    def _run_step(self, step: steps.Step) -> None:
-        """Execute one row, with the guards its own declaration calls for.
-
-        ``writes_register`` is one such declaration: the row's seat authors
-        register entries, so what it wrote is checked for a grade it may not
-        have supplied. The before-scan is taken here rather than inside a
-        handler, so the guard rides the property and not a handler that
-        remembered to call it.
-        """
-        if not step.writes_register:
             _HANDLERS[step.id](self, step)
-            return
-        existing = frozenset(self._authored_ids())
-        _HANDLERS[step.id](self, step)
-        self._check_minted_grades(step, existing=existing)
 
     def _applies(self, step: steps.Step) -> bool:
         """The one condition left: what this run will spend.
@@ -624,23 +499,20 @@ class Runner:
     def _decide(self, pair: str, *, artifacts: Sequence[Path] = (), detail: Sequence[str] = ()) -> Decision:
         """Resolve a barrier, or end the run at it.
 
-        Returns only a *continuing* answer. An absent answer, an answer already
-        spent in this process, and an answer that is itself a stop
-        (``cancel``, ``no``, ``stop``) all end the run through the same record
-        and the same code — they differ in what the record says, not in what
-        happens.
+        Every admissible answer continues, so what ends the run here is an
+        unanswered barrier: no answer was supplied, or one was already spent in
+        this process. Both reach the same record and the same code.
         """
         spec = barriers.spec(pair)
         decision = self.answers.take(pair)
-        if decision is not None and decision.answer not in spec.stopping:
+        if decision is not None:
             return decision
-        raise _Halt(self._raise_barrier(spec, answered=decision, artifacts=artifacts, detail=detail))
+        raise _Halt(self._raise_barrier(spec, artifacts=artifacts, detail=detail))
 
     def _raise_barrier(
         self,
         spec: barriers.BarrierSpec,
         *,
-        answered: Decision | None,
         artifacts: Sequence[Path],
         detail: Sequence[str],
     ) -> Result:
@@ -660,20 +532,14 @@ class Runner:
             render=status.stdout,
             artifacts=[self._repo_relative(path) for path in artifacts],
             run_dir=str(self.paths.run_dir),
-            answered="" if answered is None else answered.answer,
             unconsumed=self.answers.unconsumed,
         )
-        question = spec.question
-        if answered is not None:
-            # An answered stop is not a question: asking it again would invite
-            # an answer that has already been given and honored.
-            question = f"none — {spec.pair} was answered {answered.answer!r}; report the stop and stop"
 
         result = self._result(
             spec.exit_code,
             detail=tuple(detail),
             pair=spec.pair,
-            question=question,
+            question=spec.question,
             admissible=spec.answers,
             barrier_record=self.paths.barriers / f"{spec.stage}-{spec.kind}.md",
         )
@@ -688,7 +554,6 @@ class Runner:
                 "context": {
                     "pair": spec.pair,
                     "exit_code": spec.exit_code,
-                    "answered": "" if answered is None else answered.answer,
                     "record": str(result.barrier_record),
                 }
             },
@@ -703,10 +568,10 @@ class Runner:
     def _recorded_stages(self) -> frozenset[str]:
         """The recorded-stage set, from the ledger's own render."""
         status = self._halt_unless(self.ops.show_status(relay=False))
-        # `watch.recorded_stages` is the one parse of the checklist block. A
+        # `checklist.recorded_stages` is the one parse of the checklist block. A
         # second regex over the same render here is how two readings of one
         # format start to disagree.
-        return watch.recorded_stages(status.stdout)
+        return checklist.recorded_stages(status.stdout)
 
     def _display(self) -> None:
         """The complete verbatim stdout of show-status, at every stage transition."""
@@ -741,32 +606,14 @@ class Runner:
         *,
         slots: Mapping[str, str],
         outputs: Sequence[Path] = (),
-        members: int = 1,
     ) -> call.CallOutcome:
         """One row's call. A failed contract ends the run at the code ``call.py`` chose."""
         self._seq += 1
         outcome = self.caller.execute(
-            call.CallRequest(step=step, seq=self._seq, slots=dict(slots), outputs=tuple(outputs), members=members)
+            call.CallRequest(step=step, seq=self._seq, slots=dict(slots), outputs=tuple(outputs))
         )
         if not outcome.ok:
             raise _Halt(self._result(outcome.exit_code, detail=outcome.detail))
-
-        if outcome.envelope is not None:
-            # The deviation log is the wave-side half of the experiment's
-            # comparison; the driver's own retries and cap decisions are the
-            # other half, and they are run.log records.
-            envelope.append_deviations(
-                self.paths.deviations,
-                outcome.envelope.deviations,
-                run_id=self.paths.run_id,
-                stage=step.stage,
-                step=step.id,
-            )
-            if outcome.envelope.gaps:
-                _log.warning(
-                    "the wave reported gaps",
-                    extra={"context": {"step": step.id, "gaps": " | ".join(outcome.envelope.gaps)}},
-                )
         return outcome
 
     # --- pre-stage rows ------------------------------------------------------
@@ -816,11 +663,6 @@ class Runner:
         if not present(self.repo_root / self.config.run.charter_file):
             return None
         return str(self.config.run.charter_file)
-
-    def _pre_proceed(self, step: steps.Step) -> None:
-        """``pre.proceed``: the start barrier, resolved before anything is seeded or recorded."""
-        del step
-        self._decide(barriers.START_PROCEED)
 
     def _pre_kb_root(self, step: steps.Step) -> None:
         """``pre.kb-root``: refuse to open a build over a KB this build did not write.
@@ -987,10 +829,9 @@ class Runner:
         """``discover.build``: stage C-inf, one ask per awaiting document.
 
         The model this row spends is spawned inside ``kb_claimgraph``, through
-        that package's own seat seam, so no flag of this driver replaces it.
-        That is the row's ``spends_own_inference`` declaration, and a run told to
-        spend none stops before this stage rather than reaching it — so there is
-        no condition left here to warn about.
+        that package's own seat seam, and the whole of the row is that call —
+        which is the row's ``spends_own_inference`` declaration, and why a run
+        told to spend none never reaches this handler at all.
         """
         self._claim_graph(step)
 
@@ -1021,16 +862,7 @@ class Runner:
     def _stage_note(self, stage: str) -> str:
         """What the boundary commit says about this stage beyond that it happened.
 
-        Two clauses, and a stage carries whichever of them it earned.
-
-        **The rounds its findings loop ran.** A round is not a ledger entry of
-        its own: the ledger's entries are the stage vocabulary, which is closed
-        and ordered, and a cycle's rounds are neither — so the rounds a stage ran
-        are an attribute of that stage's one entry, written here. It is also the
-        only record of them there is, since the count lives in the process that
-        ran them, and that is what a reader of the trail needs: a stage recorded
-        after four rounds and one recorded after one are the same `[x]` in the
-        checklist.
+        One clause, and only a build that dropped a row earns it.
 
         **A dropped row is the one thing about a finished build its own product
         cannot state.** A document a stage never read looks exactly like one it
@@ -1042,121 +874,30 @@ class Runner:
         The rows are named rather than counted: which of a stage's rows cost a
         model call is the step table's answer (``steps.inference_rows``), and a
         note stating a number would be a second view of it.
+
+        What a stage that ran everything *did* needs no clause: its rows are a
+        fixed sequence, so its entry saying the stage is behind the build says
+        every one of them ran.
         """
-        clauses = []
-        spent = self._rounds.get(stage)
-        if spent is not None:
-            clauses.append(
-                f"review: {spent.rounds} round(s), {spent.fixes} fix round(s). This boundary is the whole "
-                f"record of them — the stage records once, so an entry says every round it ran is behind it "
-                f"and an unrecorded stage has run none."
-            )
-        if self.config.run.no_inference:
-            dropped = steps.inference_rows(stage)
-            if dropped:
-                clauses.append(
-                    f"{NO_INFERENCE_FLAG}: this build spent no model call, so {', '.join(dropped)} did not run. "
-                    f"Every row of this stage that costs none ran; what the dropped rows would have authored is "
-                    f"absent from the KB, and whatever the stage before them wrote about it stands."
-                )
-        return " ".join(clauses)
+        if not self.config.run.no_inference:
+            return ""
+        dropped = steps.inference_rows(stage)
+        if not dropped:
+            return ""
+        return (
+            f"{NO_INFERENCE_FLAG}: this build spent no model call, so {', '.join(dropped)} did not run. "
+            f"Every row of this stage that costs none ran; what the dropped rows would have authored is "
+            f"absent from the KB, and whatever the stage before them wrote about it stands."
+        )
 
     def _stage_recorded(self, stage: str) -> None:
         self._recorded = self._recorded | {stage}
         self._display()
 
-    def _wave(
-        self,
-        step: steps.Step,
-        members: Sequence[Member],
-        *,
-        slots: Callable[[tuple[Member, ...]], Mapping[str, str]],
-        declares_artifacts: bool = True,
-    ) -> call.CallOutcome | None:
-        """One ``wave*`` row, reconciled at member granularity.
-
-        Members whose work is already on disk are dropped and only the rest are
-        briefed; all present is no call at all. ``slots`` is a function of the
-        *pending* set rather than a mapping, because everything a mint-bearing
-        brief carries — the member table, the existing-id inventory — must be
-        computed after the drop, not before it. ``None`` is returned when there
-        was nothing left to ask.
-
-        ``declares_artifacts`` says whether the row has a named artifact per
-        member for ``call.py`` to validate.
-        """
-        if declares_artifacts:
-            pending = pending_members(members)
-        else:
-            pending = tuple(members)
-        if not pending:
-            _log.info(
-                "every member's artifact is already on disk; skipping the wave",
-                extra={"context": {"step": step.id, "of": len(members)}},
-            )
-            return None
-        if len(pending) < len(members):
-            _log.info(
-                "partial-wave re-entry: re-briefing only the members whose artifacts are absent",
-                extra={"context": {"step": step.id, "of": len(members), "pending": len(pending)}},
-            )
-        return self._call(
-            step,
-            slots=slots(pending),
-            outputs=tuple(member.artifact for member in pending) if declares_artifacts else (),
-            members=len(pending),
-        )
-
-    # --- capped loops: shared machinery ---------------------------------------
-    #
-    # What a series has spent is the round arithmetic and nothing else, because
-    # the rounds a process runs are the rounds it performed: there is no earlier
-    # process's act to reconcile against, an unrecorded stage's rounds being work
-    # no boundary accounts for and re-run rather than adopted.
-
-    def _only_series(self, step: steps.Step) -> steps.LoopSeries:
-        """The one capped series a single-series loop row carries (every loop but ``p1a.loop``)."""
-        runlog.require(len(step.series) == 1, "this loop row carries exactly one capped series", step=step.id)
-        return step.series[0]
-
-    def _spend_or_escalate(
-        self,
-        entry: steps.LoopSeries,
-        *,
-        spent: int,
-        artifacts: Sequence[Path],
-        detail: Sequence[str] = (),
-    ) -> None:
-        """The cap arithmetic, in the one place every capped loop reads it.
-
-        ``effective_cap = cap + grants_this_process``. Below the cap this
-        returns and the round proceeds; at it, :meth:`_decide` ends the run
-        unless one more round was authorized, and a second exhaustion re-raises
-        the same pair, whose spent answer turns it into a stop rather than a loop.
-        """
-        effective_cap = entry.cap + self.answers.grants(entry.cap_barrier)
-        if spent < effective_cap:
-            return
-        self._decide(
-            entry.cap_barrier,
-            artifacts=artifacts,
-            detail=(f"{spent} round(s) spent against a cap of {effective_cap}", *detail),
-        )
-        self.answers.grant(entry.cap_barrier)
-
-    # --- the runner targets: the `refresh` and `gate` row subtypes -----------
+    # --- the runner targets: the `gate` row subtype --------------------------
 
     def _run_target(self, target: str) -> ledger.Outcome:
         return self.ops.run_target(target=target)
-
-    def _refresh(self, step: steps.Step) -> None:
-        """A ``refresh`` row: the derived index rebuilt before anything reads it.
-
-        Single-writer by construction rather than by a lock — the driver runs
-        exactly one subprocess at a time, which is what makes the property free.
-        """
-        del step
-        self._halt_unless(self._run_target(kb_util.TARGET_REFRESH))
 
     def _gate(self) -> ledger.Outcome:
         """A ``gate`` row: ``kb-refresh`` then ``kb-verify``. Returns verify's outcome.
@@ -1169,99 +910,9 @@ class Runner:
         self._halt_unless(self._run_target(kb_util.TARGET_REFRESH))
         return self._run_target(kb_util.TARGET_VERIFY)
 
-    def _mint_remedy(self, stage: str) -> tuple[str, ...]:
-        """The baton lines: the driver never rolls back, so it names the manual remedy.
-
-        Destructive git from inside a sequencer is a worse failure than a named
-        stop, so this is prose for an operator and never a command the driver
-        runs. The boundary it names is the ledger's own commit prefix, imported
-        rather than restated.
-        """
-        return (
-            f"{stage} is mint-bearing and its mechanical check is red; " f"the driver does not roll back",
-            f"manual remedy: 'git reset --hard' to the last '{kb_pipeline.LEDGER_PREFIX}' boundary commit, "
-            f"then re-run — a re-entry mints nothing for material the register scan already covers",
-        )
-
-    # --- the register scan: the one source of the id inventory ---------------
-
     @property
     def _kb_root(self) -> Path:
         return kb_util.kb_root(self.repo_root)
-
-    def _authored_ids(self) -> Mapping[str, kb_index_lib.IdRecord]:
-        """Every authored node id, from a **register scan** and never from ``.index/``.
-
-        The counter-evidence is decisive and live: run-3 held forty-five
-        authored ids with every ``.index/*.jsonl`` at zero bytes. An inventory
-        read from the derived index would have concluded "no existing ids" and
-        minted a second full set. This scan reads authored Markdown, so it is
-        correct whether or not a refresh has run.
-        """
-        inventory = kb_index_lib.scan_authored_ids(self._kb_root)
-        _log.info(
-            "existing-id inventory read from the register scan",
-            extra={"context": {"ids": len(inventory), "kb_root": str(self._kb_root)}},
-        )
-        return inventory
-
-    def _registers_on_disk(self) -> tuple[str, ...]:
-        """Every register the scan found, kb-root-relative, in path order."""
-        return tuple(sorted({record.register_path for record in self._authored_ids().values() if record.register_path}))
-
-    def _register_path(self, register_rel: str) -> Path:
-        return self._kb_root / register_rel
-
-    def _minted_grades(self, *, existing: frozenset[str]) -> Iterator[tuple[str, str]]:
-        """Every graded value carried by a register entry not in ``existing``.
-
-        The three the build must not author, all of them register-resident: a
-        claim's ``confidence``, a support's ``quality``, and the on-point
-        ``fraction`` of each warrant edge staged in a ``sup-`` entry. Read
-        through ``kb_index_lib``'s own parsers, so a grammar change reaches this
-        scan and the refresh together.
-        """
-        pending = kb_index_lib.PENDING_FRACTION
-        for register_rel in self._registers_on_disk():
-            path = self._register_path(register_rel)
-            for entry in kb_index_lib.parse_claim_quality_file(path, self._kb_root):
-                if entry.id not in existing and entry.confidence is not None:
-                    yield entry.id, f"confidence {kb_index_lib.format_solidity(entry.confidence)}"
-            for sup_id, fields in kb_index_lib.parse_support_quality_entries(path, self._kb_root).items():
-                if sup_id not in existing and fields["quality"] is not None:
-                    yield sup_id, f"quality {kb_index_lib.format_solidity(fields['quality'])}"
-            for sup_id, pairs in kb_index_lib.parse_register_staged_supports(path).items():
-                if sup_id in existing:
-                    continue
-                for claim_id, fraction in pairs:
-                    if fraction is not pending:
-                        yield sup_id, f"on-point fraction for {claim_id} {kb_index_lib.format_solidity(fraction)}"
-
-    def _check_minted_grades(self, step: steps.Step, *, existing: frozenset[str]) -> None:
-        """Every entry this row wrote carries the unscored literal where a grade would go.
-
-        **The build does no scoring**: a rigor value grades a written derivation
-        and an on-point fraction grades how much of one bears on the claim it is
-        offered for. Both are judgments the maintenance tooling supplies through
-        its own front door and nothing in this pipeline computes. A seat that
-        supplies one has graded its own work, and a stage recorded over it is
-        green on a value nobody derived. Only the driver can ask this, because
-        only the driver knows which row is running.
-
-        Scoped by subtraction rather than by a blanket scan, because a re-walk
-        of the stage re-enters at this row with the entries an earlier attempt
-        wrote already on disk.
-        """
-        offenders = sorted(set(self._minted_grades(existing=existing)))
-        if not offenders:
-            return
-        self._halt(
-            baton.EXIT_GATE_RED,
-            f"{step.stage}: {len(offenders)} value(s) written here are self-assigned grades, "
-            f"where {kb_index_lib.PENDING_LITERAL} is the only one a mint may write",
-            *(f"self-assigned: {node_id} — {value}" for node_id, value in offenders),
-            *self._mint_remedy(step.stage),
-        )
 
     # --- phase-3a ------------------------------------------------------------
 
@@ -1282,28 +933,14 @@ class Runner:
         del step
         self._halt_unless(self._gate())
 
-    # --- phase-5: the findings loop ------------------------------------------
+    # --- phase-5: the review, and the one revision that answers it ------------
 
-    def _findings_at(self, *, stage: str, series: str, round_number: int, author: str) -> Path:
-        return self.scratch / steps.findings(stage=stage, series=series, round_number=round_number, author=author)
+    def _findings_path(self, step: steps.Step) -> Path:
+        """Where the review row's findings land: one review, one author, one file."""
+        return self.scratch / steps.findings(stage=step.stage, author=steps.META_REVIEW_SEAT)
 
-    def _findings_set(self, cycle: ReviewCycle, *, series: str, round_number: int) -> tuple[Path, ...]:
-        """One round's findings paths, one per reviewing seat, in member-table order."""
-        stage = steps.STEPS_BY_ID[cycle.review_step].stage
-        return tuple(
-            self._findings_at(stage=stage, series=series, round_number=round_number, author=author)
-            for author in cycle.authors
-        )
-
-    def _report_round(
-        self,
-        verdict: envelope.Verdict,
-        *,
-        stage: str,
-        round_number: int,
-        findings: Sequence[Path],
-    ) -> None:
-        """State the round's counts by severity and where the findings are.
+    def _report_review(self, verdict: envelope.Verdict, *, stage: str, findings: Path) -> None:
+        """State the review's counts by severity, where the findings are, and what follows.
 
         **The whole statement is in the message text**, because the console tee
         prints messages alone and a count in the record's context would reach the
@@ -1311,30 +948,27 @@ class Runner:
         announcement carries its value in its words.
 
         **Both forms are stated**, the way ``kb_docgraph.build._declarations``
-        states its zero: only a critical finding stops this stage, so a warning
-        and a note now travel past the gate, and a build that said nothing about
-        them would read exactly like a build whose reviewer raised none.
+        states its zero: no severity fails this stage, so a build that said
+        nothing about what the reviewer raised would read exactly like a build
+        whose reviewer raised nothing (SPEC.md, The Driver's Contract). This line
+        is also where the stage says it ran both of its calls: the review it is
+        reporting, and the revision it names as following.
         """
-        # Scoped to the carried severities and never to the round's outcome: a
-        # round carrying a warning past the gate may still be stopping on a
-        # critical beside it, and a line claiming the build goes on would be
-        # false exactly there.
-        carried = verdict.warning + verdict.note
+        raised = verdict.critical + verdict.warning + verdict.note
         consequence = (
-            f"the gate reads critical alone, so the {carried} finding(s) at warning or note "
-            "are reported here and repaired by nobody"
-            if carried
-            else "the gate reads critical alone, and the reviewer raised no finding at warning "
-            "or note over these documents"
+            f"no severity fails this stage, so the {raised} finding(s) are answered by the one revision "
+            "that follows and by nothing after it"
+            if raised
+            else "the reviewer raised no finding at any severity over these documents, and the one "
+            "revision that follows runs regardless"
         )
-        where = ", ".join(self._repo_relative(path) for path in findings)
+        where = self._repo_relative(findings)
         _log.info(
-            f"{stage} review round {round_number}: critical={verdict.critical} warning={verdict.warning} "
+            f"{stage} review: critical={verdict.critical} warning={verdict.warning} "
             f"note={verdict.note} — {consequence}; findings: {where}",
             extra={
                 "context": {
                     "stage": stage,
-                    "round": round_number,
                     "critical": verdict.critical,
                     "warning": verdict.warning,
                     "note": verdict.note,
@@ -1342,34 +976,6 @@ class Runner:
                 }
             },
         )
-
-    def _review_round(self, cycle: ReviewCycle, *, series: str, round_number: int) -> envelope.Verdict:
-        """One review round: a SINGLE never-writer whose return ``call.py`` persists.
-
-        The seat returns its findings, ``call.py`` writes them at the path this
-        row declares and parses the VERDICT off what it wrote.
-        """
-        step = steps.STEPS_BY_ID[cycle.review_step]
-        paths = self._findings_set(cycle, series=series, round_number=round_number)
-        # Each document named for itself, because the pair this brief reads and
-        # the set this stage's boundary checks are no longer the same set: the
-        # reviewer still judges CONVENTIONS.md, which `phase-3a` stamped and no
-        # boundary here asks after.
-        readme = self._kb_root / kb_pipeline.OVERVIEW_DOC
-        conventions = self._kb_root / kb_pipeline.CONVENTIONS_DOC
-        outcome = self._call(
-            step,
-            slots={
-                "readme-path": self._brief_path(readme),
-                "conventions-path": self._brief_path(conventions),
-            },
-            outputs=paths,
-        )
-        runlog.require(outcome.verdict is not None, "a review returned without the verdict its row declares")
-        assert outcome.verdict is not None  # required above
-
-        self._report_round(outcome.verdict, stage=step.stage, round_number=round_number, findings=paths)
-        return outcome.verdict
 
     def _meta_docs(self, step: steps.Step, *, source: Path | None) -> None:
         """``ov.docs`` and ``p5.fix``: ask the seat for prose, then assemble the document.
@@ -1394,17 +1000,9 @@ class Runner:
             },
             outputs=(prose,),
         )
-        # A call carrying a remediation source *is* a fix round: it was handed a
-        # reviewer's findings and asked to answer them, which is the one case
-        # where composing the document that already stands is a failure.
-        self._assemble_overview(
-            step,
-            prose=prose,
-            target=self._kb_root / kb_pipeline.OVERVIEW_DOC,
-            fixing=source is not None,
-        )
+        self._assemble_overview(step, prose=prose, target=self._kb_root / kb_pipeline.OVERVIEW_DOC)
 
-    def _assemble_overview(self, step: steps.Step, *, prose: Path, target: Path, fixing: bool) -> None:
+    def _assemble_overview(self, step: steps.Step, *, prose: Path, target: Path) -> None:
         """The stage's own half: the packaged template, the derived facts, the seat's answer.
 
         The one place this driver writes under ``kb-root/``, and it writes bytes
@@ -1412,17 +1010,10 @@ class Runner:
         reaches the file as the value of one slot, in a document whose every
         other word is the template's or the index's.
 
-        **A fix round that composes the document already standing there answered
-        the review with nothing, and this is the only place that can tell.** The
-        stage's coverage check runs at the boundary, once, after every round has
-        run, by which point the document differs from ``HEAD`` merely because the
-        draft created it — so from there a no-op fix and a real one are the same
-        observation. Here both byte strings are in hand, and what ends the round
-        is a comparison between two artifacts rather than a reading of one
-        (``kb_tools/CONVENTIONS.md``). The draft is exempt because re-composing
-        what stands is exactly what it is for on a resume past a lost boundary:
-        the answer on disk is work no boundary accounts for, and re-earning it
-        byte for byte is the discard working.
+        Both call sites compose over whatever stands: the draft because
+        re-composing what stands is exactly what it is for on a resume past a
+        lost boundary, and the revision because it is asked the same question the
+        draft was, from the tree, with the review beside it.
         """
         try:
             text = kb_readme.assemble(
@@ -1438,68 +1029,46 @@ class Runner:
             # anything an operator supplied, so this is a defect in the install
             # rather than a state a build can absorb.
             raise runlog.BoundaryError(str(exc)) from exc
-        if fixing and target.is_file() and text == target.read_text(encoding="utf-8"):
-            self._halt(
-                baton.EXIT_CONTRACT,
-                f"{step.id}: the answer composes {self._repo_relative(target)} byte for byte as it already "
-                f"stands, so this round answered the review with no change to the document it was asked to fix",
-            )
-            return
         target.write_text(text, encoding="utf-8")
         _log.info(
             "the overview document was assembled from the index and the seat's answer",
             extra={"context": {"step": step.id, "document": self._repo_relative(target)}},
         )
 
-    def _review_loop(self, step: steps.Step) -> None:
-        """The cycle ``p5.fix`` drives.
+    def _p5_review_and_fix(self, step: steps.Step) -> None:
+        """``p5.fix``: the stage's whole work — one review, then one revision answering it.
 
-        Review, fix from what the review wrote, re-review — until the round
-        comes back with no critical finding or the cap escalates.
+        **A sequence, not a loop.** The review runs, its findings are reported at
+        every severity, and the revision is handed the file it wrote. Nothing
+        re-reviews, nothing is counted, and no severity the reviewer returns
+        fails the stage: what a reviewer called critical and what it called a
+        note reach the same one revision and the same boundary behind it.
 
-        **The round is this process's own count, opening at
-        :data:`FIRST_ROUND`.** A stage reached by the walk is a stage the ledger
-        does not record, and a stage's entry is the only place a round is ever
-        recorded, so there is no round behind this one to find: whatever an
-        earlier process ran here is work no boundary accounts for, and it is
-        re-run rather than adopted. Nothing on disk is consulted for the number,
-        which is what keeps a findings file a dying process left from reading as
-        a completed round and spending a fix budget of one on a crash.
-
-        **The gate is ``critical`` and the severities the reviewer sorted its
-        findings into are what it reads.** A count of open findings discards
-        that sorting, so a note observing that a filename goes unmentioned in a
-        document halts a build exactly as hard as a defect does — which is what
-        a reviewer told to decide what is critical has already ruled it is not.
-        A warning and a note travel past this gate instead, reported by
-        :meth:`_report_round` and repaired by nobody, and the documents stand as
-        the seat wrote them.
+        The review is a SINGLE never-writer: the seat returns its findings,
+        ``call.py`` writes them at the path the row declares and parses the
+        ``VERDICT`` off what it wrote. One reviewing seat, so its findings file
+        already *is* the revision's one remediation source and nothing merges
+        anything.
         """
-        cycle = REVIEW_CYCLES[step.stage]
-        entry = self._only_series(step)
-
-        round_number = FIRST_ROUND
-        verdict = self._review_round(cycle, series=entry.letter, round_number=round_number)
-
-        while verdict.critical > 0:
-            findings = self._findings_set(cycle, series=entry.letter, round_number=round_number)
-            self._spend_or_escalate(
-                entry,
-                spent=revisions_spent(series=entry.letter, round_number=round_number),
-                artifacts=findings,
-                detail=tuple(f"findings: {self._repo_relative(path)}" for path in findings),
-            )
-            # One reviewing seat, so its findings file already *is* the one
-            # remediation source; nothing merges anything.
-            self._meta_docs(steps.STEPS_BY_ID[cycle.fix_step], source=findings[0])
-            round_number += 1
-            verdict = self._review_round(cycle, series=entry.letter, round_number=round_number)
-
-        # The stage's own boundary is where these land, and this is the hand-off
-        # to the row that writes it.
-        self._rounds[step.stage] = RoundsSpent(
-            rounds=round_number, fixes=revisions_spent(series=entry.letter, round_number=round_number)
+        review = steps.STEPS_BY_ID[REVIEW_STEP]
+        findings = self._findings_path(review)
+        # Each document named for itself, because the pair this brief reads and
+        # the set this stage's boundary checks are no longer the same set: the
+        # reviewer still judges CONVENTIONS.md, which `phase-3a` stamped and no
+        # boundary here asks after.
+        outcome = self._call(
+            review,
+            slots={
+                "readme-path": self._brief_path(self._kb_root / kb_pipeline.OVERVIEW_DOC),
+                "conventions-path": self._brief_path(self._kb_root / kb_pipeline.CONVENTIONS_DOC),
+            },
+            outputs=(findings,),
         )
+        runlog.require(outcome.verdict is not None, "a review returned without the verdict its row declares")
+        assert outcome.verdict is not None  # required above
+        self._report_review(outcome.verdict, stage=review.stage, findings=findings)
+
+        self._meta_docs(step, source=findings)
 
     # --- overview-drafted ----------------------------------------------------
 
@@ -1538,14 +1107,13 @@ class Runner:
 
 
 #: Row id → the handler that executes it. A row with no entry here and no place
-#: in :data:`LOOP_DRIVEN_STEPS` fails the boundary check at the top of the walk,
+#: in :data:`DRIVEN_STEPS` fails the boundary check at the top of the walk,
 #: so a new row cannot be silently unexecuted.
 _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType(
     {
         "pre.lock": Runner._pre_lock,
         "pre.preflight": Runner._pre_preflight,
         "pre.charter": Runner._pre_charter,
-        "pre.proceed": Runner._pre_proceed,
         "pre.kb-root": Runner._pre_kb_root,
         "start.record": Runner._start_record,
         "dg.build": Runner._dg_build,
@@ -1563,7 +1131,7 @@ _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType
         "ov.docent-check": Runner._ov_docent_check,
         "ov.docs": Runner._ov_docs,
         "ov.record": Runner._record_stage,
-        "p5.fix": Runner._review_loop,
+        "p5.fix": Runner._p5_review_and_fix,
         "p5.record": Runner._record_stage,
     }
 )
@@ -1612,7 +1180,7 @@ def execute(
     a parameter for the same reason ``ops`` and ``invoker`` are — a test that
     means to exercise one stage's rows should not have to walk every other
     stage to reach them — but no caller narrows it to buy a green any more: the
-    default is the whole walk and a replayed run is honestly green over it.
+    default is the whole walk.
     ``prompt_templates_dir`` is the same
     parameterization ``call.Caller`` already documents — composition
     parameterized at its source, so a scenario can be composed against templates

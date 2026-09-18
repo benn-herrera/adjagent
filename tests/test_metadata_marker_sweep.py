@@ -210,7 +210,7 @@ def test_the_module_sweep_reaches_the_modules_that_could_compose_one() -> None:
     """
     swept = set(_modules(_CODE_ROOT))
 
-    for relative in ("kb_cmd/cli.py", "kb_driver/prompt_templates.py", "kb_driver/replay.py", "kb_pipeline.py"):
+    for relative in ("kb_cmd/cli.py", "kb_driver/prompt_templates.py", "kb_driver/run.py", "kb_pipeline.py"):
         assert _CODE_ROOT / relative in swept, relative
 
 

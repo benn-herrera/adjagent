@@ -508,6 +508,100 @@ def test_a_reference_list_entry_is_a_work_and_not_a_citation_of_one():
 
 
 # ---------------------------------------------------------------------------
+# Stage B — the readings that meet a tree an earlier pass has minted into
+#
+# Each of these plants one marker where `kb_write.ops._insert_marker` puts one
+# and asserts the reading still sees its construct. Every case carries a guard
+# that fails loudly if the marker ever stops landing where the test assumes,
+# because a marker that missed its mark would make the assertion vacuous rather
+# than wrong. The module docstring says which readings need this and which two
+# are excluded by `identify` instead.
+# ---------------------------------------------------------------------------
+
+_MARKER = render.render_tier2_marker("clm-aa1111")
+
+
+def test_an_anchor_wrapped_across_a_marker_s_line_still_reaches_the_inventory():
+    """A theorem's optional argument puts the cross-reference on the marked line.
+
+    That is the display line, which is where a Tier-2 marker is appended — so a
+    marker lands between two attributes :data:`tree.ANCHOR_RE` requires adjacent
+    whenever the reader hard-wrapped the tag. Read raw the anchor is not there at
+    all, and nothing downstream carries a second count to disagree with:
+    ``depends.build`` and :func:`inventory._proofs` consume exactly these records.
+    """
+    text = (
+        "> **theorem**\n>\n"
+        f'> **Theorem 1** (Sharpening of <a href="other.md#thm:prior" data-reference-type="ref" {_MARKER}\n'
+        '> data-reference="thm:prior">Theorem 4</a>). *It holds.*\n'
+    )
+    assert not tree.ANCHOR_RE.search(
+        tree.unquote(text)
+    ), "the marker must land between two attributes or this passes vacuously"
+
+    read = inventory._anchors(_document(text), [], tree.Tree(root=None, documents={}, children={}, parents={}))
+
+    assert [(anchor.href, anchor.label, anchor.line) for anchor in read] == [("other.md#thm:prior", "thm:prior", 2)]
+
+
+def test_a_marker_on_a_proof_s_display_line_does_not_rebind_it_to_the_block_above(conforming):
+    """The failure this refuses mis-points an edge rather than losing one.
+
+    :meth:`inventory.Proof.names` joins the head's ``(href, label)`` pairs against
+    the anchor records :func:`inventory._anchors` produced, so the two readings
+    must see the same bytes. An emptied head is falsy, ``subjects`` falls through
+    to :func:`inventory._adjacent_subject`, and the proof binds to whichever block
+    sits above it — here a different theorem, in the same document, that the
+    author never said it proves. A containment edge is authored mechanically with
+    no model asked, so nothing downstream is positioned to disagree.
+    """
+    anchor = f'<a href="claim.md#thm:main" data-reference-type="ref" {_MARKER}\n> data-reference="thm:main">1</a>'
+    _write(
+        conforming,
+        {
+            "vol/claim.md": f'{_UPLINK}\n\n# Claim\n\n> <span id="thm:main">**Theorem**</span>\n>\n'
+            "> **Theorem 1** (The named result). *It holds.*\n",
+            "vol/proof.md": f"{_UPLINK}\n\n# Proof\n\n"
+            "> **theorem**\n>\n> **Theorem 2** (The adjacent result). *It also holds.*\n\n"
+            f"> **proof**\n>\n> *Proof of Theorem {anchor}.* By reduction.\n",
+        },
+    )
+    assert not tree.ANCHOR_RE.search(
+        tree.unquote(anchor)
+    ), "the marker must land between two attributes or this passes vacuously"
+
+    proof = next(found for found in inventory.scan(tree.read(conforming)).proofs if found.document == "vol/proof.md")
+
+    assert [block.title for block in proof.subjects] == ["The named result"]
+
+
+def test_a_marker_on_a_wrapped_reference_entry_leaves_the_work_titled_with_its_own_words():
+    """``references.md`` is a leaf, so a claim may be identified in it and marked.
+
+    Where the reader hard-wrapped an entry's opening ``<div>``, a marker on its
+    first line puts a ``>`` inside the attribute run:
+    :data:`inventory.BIBLIOGRAPHY_ENTRY_RE` closes the tag on the marker, the rest
+    of the real tag falls into the captured text, and
+    :func:`inventory._collapse_entry` cannot remove it, having no opening ``<`` to
+    match. The entry is still found — it is titled with markup, and that title is
+    the whole of what the ``work-`` node says about the work.
+    """
+    text = (
+        '<div id="refs" class="references csl-bib-body hanging-indent">\n\n'
+        f'<div id="ref-nobody2026" {_MARKER}\nclass="csl-entry">\n\n'
+        "Nobody. 2026. *Nothing*.\n\n</div>\n\n</div>\n"
+    )
+    raw = inventory.BIBLIOGRAPHY_ENTRY_RE.search(tree.unquote(text))
+    assert "csl-entry" in inventory._collapse_entry(
+        raw.group("text")
+    ), "the marker must close the tag early or this passes vacuously"
+
+    assert [(work.key, work.text) for work in inventory._works(_document(text))] == [
+        ("nobody2026", "Nobody. 2026. *Nothing*.")
+    ]
+
+
+# ---------------------------------------------------------------------------
 # The off-graph endcap
 #
 # THE FIXTURE, and why it is here rather than under `fixtures/`. The trigger is

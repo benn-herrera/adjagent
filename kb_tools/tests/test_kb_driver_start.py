@@ -100,7 +100,7 @@ def _drive(
     tmp_path: Path,
     *,
     calls: Calls,
-    decisions: Sequence[str] = ("start.proceed=yes",),
+    decisions: Sequence[str] = (),
     stages: Sequence[str] = ("start",),
 ) -> run.Result:
     return run.execute(
@@ -182,9 +182,9 @@ def test_a_resume_continues_from_the_recorded_stage_with_no_mode_on_the_command_
 
     The repository is the one the launch guard just refused — a populated
     ``kb-root/`` — and this invocation walks straight past it into the stage the
-    ledger left unrecorded, carrying no flag, no ``--decide`` and no config key
-    to say so. That is the whole mechanism R-A leaves standing: the recorded set
-    is re-read every invocation and is the only thing that distinguishes the two.
+    ledger left unrecorded, carrying no flag and no config key to say so. That
+    is the whole mechanism R-A leaves standing: the recorded set is re-read
+    every invocation and is the only thing that distinguishes the two.
     """
     calls = Calls(recorded=[kb_pipeline.FIRST_STAGE_ID])
 
@@ -192,12 +192,11 @@ def test_a_resume_continues_from_the_recorded_stage_with_no_mode_on_the_command_
         _repo(tmp_path, state=kb_util.KB_ROOT_POPULATED),
         tmp_path,
         calls=calls,
-        decisions=(),
         stages=("start", "document-graph"),
     )
 
     assert result.exit_code == baton.EXIT_OK, result.detail
-    assert calls.started == 0, "the whole start stage is skipped, the guard and the proceed barrier with it"
+    assert calls.started == 0, "the whole start stage is skipped, the launch guard with it"
     assert calls.document_graphs == 1, "the walk continued into the first unrecorded stage"
     assert "document-graph" in calls.recorded
 

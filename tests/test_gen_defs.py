@@ -1591,8 +1591,8 @@ class TestCheckReportsRefactorBlastRadius(unittest.TestCase):
         self.family.write_text(_tiers_toml(), encoding="utf-8")
         self.tuning = _tuning(self.family)
         # The baseline: alpha and beta still carry the duplicated (typo'd)
-        # phrase inline — the pre-refactor state `just generate` would have
-        # produced, and that `check` must diff against rather than overwrite.
+        # phrase inline — the pre-refactor state a render would have produced,
+        # and that `check` must diff against rather than overwrite.
         self.assertTrue(_quiet(gen_defs.generate, _binding({}), self.smap, tuning=self.tuning))
 
     def _refactor(self):
@@ -1930,75 +1930,9 @@ class TestWriteSafetyBackupBranches(unittest.TestCase):
         self.assertEqual(self._backups(), [])
 
 
-class TestInstallCopySet(unittest.TestCase):
-    """An install is a plain recursive copy of both surfaces, plus the shipped
-    packages at the destinations SHIPPED_PACKAGES names, minus the exclusion
-    list — no complement computation, generated definitions included.
-
-    The scratch source tree is laid out the way this repository is: the
-    packages at the top level, reaching their `agents/…` destinations by their
-    rows rather than by placement, and `agents/mad/` holding what the surface
-    itself owns — the participant contract and the two topic sets."""
-
-    SOURCE_FILES = (
-        "agents/gen.md",  # a generated definition — copied like any other file
-        "agents/hand.md",
-        "agents/mad/participant-contract.md",  # the surface's own, not a package's
-        "agents/mad/review-topics/topic.md",  # likewise: rendered into the surface
-        "kb_tools/kb_util.py",
-        "kb_tools/runner-snippets/kb.just",
-        "kb_tools/tests/test_kb_util.py",  # excluded: tests/
-        "kb_tools/tests/fixtures/mini-kb/index.md",  # excluded: tests/
-        "kb_tools/__pycache__/kb_util.cpython-311.pyc",  # excluded
-        "agents/.pytest_cache/CACHEDIR.TAG",  # excluded
-        "agents/hand.md.00.bak",  # excluded: generator safety copy
-        "agents/.DS_Store",  # excluded
-        "commands/guest.md",
-    )
-    EXPECTED = {
-        "agents/gen.md",
-        "agents/hand.md",
-        "agents/mad/participant-contract.md",
-        "agents/mad/review-topics/topic.md",
-        "agents/kb_tools/kb_util.py",
-        "agents/kb_tools/runner-snippets/kb.just",
-        "commands/guest.md",
-    }
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
-        self.templates = self.root / "templates"
-        (self.templates / "agents").mkdir(parents=True)
-        self.src = self.root / "src"
-        for name in self.SOURCE_FILES:
-            path = self.src / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"content of {name}\n", encoding="utf-8")
-        self.out = self.root / "out"
-        self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.templates, output_root=self.out)
-
-    def _keys(self, smap=None):
-        return {key for key, _, _ in gen_defs.install_pairs(self.smap if smap is None else smap, source_root=self.src)}
-
-    def test_copy_set_is_the_surfaces_minus_the_exclusions(self):
-        self.assertEqual(self._keys(), self.EXPECTED)
-
-    def test_targets_mirror_source_subpaths(self):
-        targets = {key: target for key, _, target in gen_defs.install_pairs(self.smap, source_root=self.src)}
-        # A surface's own files mirror; a package's land where its row says
-        # (TestShippedPackageMapping owns that half).
-        self.assertEqual(
-            targets["agents/mad/participant-contract.md"],
-            self.out / "agents" / "mad" / "participant-contract.md",
-        )
-        self.assertEqual(targets["commands/guest.md"], self.out / "commands" / "guest.md")
-
-    def test_surfaces_filter_narrows_the_copy_set(self):
-        agents_only = gen_defs.surface_map(templates_root=self.templates, output_root=self.out, surfaces="agents")
-        self.assertNotIn("commands/guest.md", self._keys(agents_only))
+class TestInstallExclusions(unittest.TestCase):
+    """The exclusion list an install applies to a shipped package's source,
+    matched on the source-relative path at any depth."""
 
     def test_exclusion_predicate_is_depth_independent(self):
         for excluded in (
@@ -2041,7 +1975,6 @@ class TestShippedPackageMapping(unittest.TestCase):
     NESTED = ("agents/kb_tools", "agents/liaison_tools")
     TOP_LEVEL = ("kb_tools", "liaison_tools")
 
-    COMMON_FILES = ("agents/hand.md", "agents/mad/review-topics/topic.md", "commands/guest.md")
     PACKAGE_FILES = (
         "kb_tools/kb_util.py",
         "kb_tools/runner-snippets/kb.just",
@@ -2049,12 +1982,9 @@ class TestShippedPackageMapping(unittest.TestCase):
         "liaison_tools/post-openai.py",
     )
     EXPECTED_KEYS = {
-        "agents/hand.md",
-        "agents/mad/review-topics/topic.md",
         "agents/kb_tools/kb_util.py",
         "agents/kb_tools/runner-snippets/kb.just",
         "agents/liaison_tools/post-openai.py",
-        "commands/guest.md",
     }
 
     def setUp(self):
@@ -2070,10 +2000,6 @@ class TestShippedPackageMapping(unittest.TestCase):
         """A source tree with the packages rooted at `prefix`, and
         SHIPPED_PACKAGES pointed at them for the duration of the test."""
         source = self.root / f"src-{prefix or 'top'}"
-        for name in self.COMMON_FILES:
-            path = source / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"content of {name}\n", encoding="utf-8")
         for name in self.PACKAGE_FILES:
             path = source / prefix / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -2086,15 +2012,13 @@ class TestShippedPackageMapping(unittest.TestCase):
 
     def _pairs(self, source: Path, surfaces: str = "both"):
         smap = gen_defs.surface_map(templates_root=self.templates, output_root=self.out, surfaces=surfaces)
-        return gen_defs.install_pairs(smap, source_root=source)
+        return gen_defs.package_pairs(smap, source_root=source)
 
     def test_both_source_layouts_install_the_same_keys(self):
         for prefix in ("agents", ""):
             with self.subTest(layout=prefix or "top-level"):
                 keys = [key for key, _, _ in self._pairs(self._layout(prefix))]
                 self.assertEqual(set(keys), self.EXPECTED_KEYS)
-                # Emitted exactly once each: a package inside a surface is
-                # carved out of that surface's walk rather than seen twice.
                 self.assertEqual(len(keys), len(set(keys)))
 
     def test_both_source_layouts_install_to_the_same_targets(self):
@@ -2124,8 +2048,9 @@ class TestShippedPackageMapping(unittest.TestCase):
                 self.assertEqual(keys, sorted(keys))
 
     def test_surface_filter_drops_the_agent_side_packages(self):
+        # Both rows land under agents/, so a commands-only run copies nothing.
         keys = {key for key, _, _ in self._pairs(self._layout(""), surfaces="commands")}
-        self.assertEqual(keys, {"commands/guest.md"})
+        self.assertEqual(keys, set())
 
     def test_install_root_guard_covers_a_relocated_package_source(self):
         source = self._layout("")
@@ -2135,12 +2060,18 @@ class TestShippedPackageMapping(unittest.TestCase):
 
 
 class TestInstallSourceGuard(unittest.TestCase):
-    """`install ROOT` refuses a ROOT overlapping a shipped package's source.
+    """`install ROOT` refuses a ROOT that writes the product into its own source.
 
-    Installing over a package source rewrites the files the copy is reading
-    from — and the second run, whose content now hashes to its own banner,
-    nests another one with no backup. The justfile's `<target>/.claude` shape
-    is the case that must keep working."""
+    Two propositions, tested differently. ROOT *is* the repository root — an
+    untracked render beside the templates that produced it. ROOT is *inside* a
+    package source — where the next run's copy set names files its own
+    destination removal deletes underneath it.
+
+    The first is equality rather than containment because the sanctioned
+    deployment layout clones this repository into the consuming project's
+    `.claude/`, which makes ROOT a directory containing every package source.
+    That layout, and the justfile's `<target>/.claude` shape, are the cases that
+    must keep working."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -2163,12 +2094,12 @@ class TestInstallSourceGuard(unittest.TestCase):
             gen_defs.assert_install_root(root, source_root=self.src)
         return str(caught.exception)
 
-    def test_root_that_contains_the_package_sources_is_refused(self):
-        # `install .` from the repo root: every package source sits under it,
-        # so the rows refuse it without a surface name being involved.
+    def test_root_that_is_the_repository_root_is_refused(self):
+        # `just install . --subdir=`, and `just render` with a slug that climbs
+        # out of rendered/, both resolve ROOT to exactly this.
         message = self._refuses(self.src)
-        self.assertIn("kb_tools/ package source", message)
-        self.assertIn("copies from", message)
+        self.assertIn("this repository's own root", message)
+        self.assertIn("agents/ and commands/", message)
 
     def test_root_that_is_a_package_source_is_refused(self):
         self.assertIn("kb_tools/ package source", self._refuses(self.src / "kb_tools"))
@@ -2176,15 +2107,32 @@ class TestInstallSourceGuard(unittest.TestCase):
     def test_root_inside_a_package_source_is_refused(self):
         self.assertIn("kb_tools/ package source", self._refuses(self.src / "kb_tools" / "kb_driver"))
 
-    def test_a_root_above_a_nested_package_source_is_refused(self):
-        # The guard reads the row rather than a top-level name, so a row whose
-        # source sits below the repository root is guarded at its own depth: a
-        # ROOT that merely CONTAINS one is refused. No row is nested today,
-        # which is why this one is supplied.
-        original = gen_defs.SHIPPED_PACKAGES
-        gen_defs.SHIPPED_PACKAGES = original + (("nested/pack", "agents/pack"),)
-        self.addCleanup(setattr, gen_defs, "SHIPPED_PACKAGES", original)
-        self.assertIn("nested/pack/ package source", self._refuses(self.src / "nested"))
+    def test_the_clone_in_dot_claude_deployment_layout_passes(self):
+        # The sanctioned layout: this repository cloned into the consuming
+        # project's gitignored .claude/adjagent/ and used as the install source,
+        # so `just install <project>` resolves ROOT to <project>/.claude — a
+        # directory containing every package source by construction. Testing
+        # containment here refuses the one workflow the repository exists to
+        # serve, which is why the first test is equality.
+        project = self.root / "consumer"
+        clone = project / ".claude" / "adjagent"
+        clone.mkdir(parents=True)
+        for name in ("kb_tools/kb_util.py", "liaison_tools/post.py"):
+            path = clone / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"content of {name}\n", encoding="utf-8")
+        gen_defs.assert_install_root(project / ".claude", source_root=clone)  # no raise
+        # The dogfood install from inside the clone, and a render slot under it,
+        # are ordinary consumers of the same checkout.
+        gen_defs.assert_install_root(clone / ".claude", source_root=clone)
+        gen_defs.assert_install_root(clone / "rendered" / "latest", source_root=clone)
+
+    def test_a_root_above_the_repository_is_allowed(self):
+        # The deliberate cost of equality: a ROOT above the repository is
+        # indistinguishable from the sanctioned layout's <project>/.claude, so
+        # it proceeds. What it lands is a mess outside this repository rather
+        # than an untracked render inside it.
+        gen_defs.assert_install_root(self.src.parent, source_root=self.src)  # no raise
 
     def test_a_root_named_like_a_deployed_surface_is_an_ordinary_consumer(self):
         # `agents/` and `commands/` are not directories in this repository, so
@@ -2195,10 +2143,10 @@ class TestInstallSourceGuard(unittest.TestCase):
 
     def test_a_root_reaching_the_source_through_a_symlink_is_refused(self):
         # Resolution happens before comparison, so neither a link nor a `..`
-        # segment routes around the containment check.
+        # segment routes around either test.
         link = self.root / "link-to-src"
         link.symlink_to(self.src, target_is_directory=True)
-        self.assertIn("package source", self._refuses(link))
+        self.assertIn("this repository's own root", self._refuses(link))
         self.assertIn("package source", self._refuses(self.src / "agents" / ".." / "kb_tools"))
 
     def test_the_justfile_install_shape_still_passes(self):
@@ -2327,114 +2275,11 @@ class TestInstalledBanner(unittest.TestCase):
             self.assertTrue(gen_defs.bannerable(Path(kept)), kept)
 
 
-class TestInstallWriteSafety(unittest.TestCase):
-    """Re-install safety for copied files: the banner's body hash separates a
-    silent overwrite from a numbered backup, exactly as in generation. The
-    overwrite itself is never in question — the tree is an artifact."""
-
-    SOURCE = "---\nname: hand\n---\nprompt body\n"
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        root = Path(self._tmp.name)
-        self.source = root / "hand.md"
-        self.source.write_text(self.SOURCE, encoding="utf-8")
-        self.target = root / "out" / "hand.md"
-
-    def _install(self):
-        return gen_defs.install_file(
-            self.source,
-            self.target,
-            gen_defs.install_content(self.source, surface="agents"),
-        )
-
-    def _backups(self):
-        return sorted(path.name for path in self.target.parent.glob("*.bak"))
-
-    def test_absent_target_is_created_with_its_banner(self):
-        self.assertEqual(self._install(), "written")
-        text = self.target.read_text(encoding="utf-8")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, text)
-        self.assertTrue(gen_defs.body_untouched(text))
-        self.assertEqual(self._backups(), [])
-
-    def test_matching_hash_is_overwritten_without_a_backup(self):
-        self._install()
-        self.source.write_text("---\nname: hand\n---\nrevised body\n", encoding="utf-8")
-        self.assertEqual(self._install(), "written")
-        self.assertIn("revised body", self.target.read_text(encoding="utf-8"))
-        self.assertEqual(self._backups(), [])
-
-    def test_mismatched_hash_is_backed_up_first(self):
-        self._install()
-        edited = self.target.read_text(encoding="utf-8") + "hand-added\n"
-        self.target.write_text(edited, encoding="utf-8")
-        self.assertEqual(self._install(), "backed up")
-        self.assertEqual(self._backups(), ["hand.md.00.bak"])
-        self.assertEqual(
-            (self.target.parent / "hand.md.00.bak").read_text(encoding="utf-8"),
-            edited,
-        )
-        # Replaced all the same: the backup protects the work, not the file.
-        self.assertTrue(gen_defs.body_untouched(self.target.read_text("utf-8")))
-
-    def test_unbannered_target_is_backed_up_first(self):
-        # The 1.5.0-installed tree: copies landed with no banner at all, so
-        # the first 1.6.0 install cannot prove any of them untouched.
-        self.target.parent.mkdir(parents=True)
-        self.target.write_text(self.SOURCE, encoding="utf-8")
-        self.assertEqual(self._install(), "backed up")
-        self.assertEqual(self._backups(), ["hand.md.00.bak"])
-
-    def test_unchanged_target_is_not_rewritten(self):
-        self._install()
-        stamp = self.target.stat().st_mtime_ns
-        self.assertEqual(self._install(), "unchanged")
-        self.assertEqual(self.target.stat().st_mtime_ns, stamp)
-        self.assertEqual(self._backups(), [])
-
-    def test_crlf_normalized_target_is_replaced_without_a_backup(self):
-        # A consuming checkout (autocrlf, or an editor that normalizes) widened
-        # every newline in the installed tree. Nobody edited anything, so the
-        # re-install must not accuse them of it — and must not leave a .bak per
-        # file per run for the rest of the tree's life.
-        self._install()
-        widened = self.target.read_bytes().replace(b"\n", b"\r\n")
-        self.target.write_bytes(widened)
-        self.assertEqual(self._install(), "written")
-        self.assertEqual(self._backups(), [])
-        # Still not forgiving: an edit inside the widened file is an edit.
-        self.target.write_bytes(widened + b"hand-added\r\n")
-        self.assertEqual(self._install(), "backed up")
-        self.assertEqual(self._backups(), ["hand.md.00.bak"])
-
-    def test_verbatim_file_copies_and_still_backs_up_a_difference(self):
-        # A filetype with no comment syntax gets no banner, so it can never be
-        # proven ours — but an identical copy is still not a write.
-        source = self.source.with_name("settings.json")
-        source.write_text('{"a": 1}\n', encoding="utf-8")
-        target = self.target.with_name("settings.json")
-
-        def install():
-            return gen_defs.install_file(
-                source,
-                target,
-                gen_defs.install_content(source, surface="agents"),
-            )
-
-        self.assertEqual(install(), "written")
-        self.assertEqual(target.read_text(encoding="utf-8"), '{"a": 1}\n')
-        self.assertEqual(install(), "unchanged")
-        target.write_text('{"a": 2}\n', encoding="utf-8")
-        self.assertEqual(install(), "backed up")
-
-
 class TestInstallWritePath(unittest.TestCase):
-    """An install writes CONTENT and nothing else. An update goes through the
-    target's own inode — no utime/chmod, which require ownership of a file
-    another user may have installed — and only a file this run creates is
-    chmodded, to carry the source's executable bit."""
+    """A copied file is always a freshly created one — its destination
+    directory went whole before the first write — so the only metadata
+    question left is the source's executable bit, which an installed tool has
+    to land with."""
 
     SOURCE = "---\nname: hand\n---\nprompt body\n"
 
@@ -2449,58 +2294,19 @@ class TestInstallWritePath(unittest.TestCase):
     def _install(self, source=None, target=None):
         source = self.source if source is None else source
         target = self.target if target is None else target
-        return gen_defs.install_file(source, target, gen_defs.install_content(source, surface="agents"))
-
-    def _revise(self, body):
-        self.source.write_text(f"---\nname: hand\n---\n{body}\n", encoding="utf-8")
+        gen_defs.install_file(source, target, gen_defs.install_content(source, surface="agents"))
 
     def _mode(self, path):
         return stat.S_IMODE(path.stat().st_mode)
 
-    def test_update_keeps_the_target_inode(self):
+    def test_creation_lands_the_content_and_its_banner(self):
         self._install()
-        before = self.target.stat().st_ino
-        self._revise("revised body")
-        self.assertEqual(self._install(), "written")
-        self.assertIn("revised body", self.target.read_text(encoding="utf-8"))
-        self.assertEqual(self.target.stat().st_ino, before)
-
-    def test_update_preserves_an_odd_target_mode(self):
-        self._install()
-        self.target.chmod(0o646)
-        self._revise("revised body")
-        self.assertEqual(self._install(), "written")
-        self.assertEqual(self._mode(self.target), 0o646)
-
-    def test_backup_branch_keeps_the_target_inode_too(self):
-        self._install()
-        self.target.write_text(
-            self.target.read_text(encoding="utf-8") + "hand-added\n",
-            encoding="utf-8",
-        )
-        before = self.target.stat().st_ino
-        self.assertEqual(self._install(), "backed up")
-        self.assertEqual(self.target.stat().st_ino, before)
-
-    def test_backup_is_a_content_copy_with_its_own_identity(self):
-        self._install()
-        self.target.chmod(0o646)
-        self.target.write_text(
-            self.target.read_text(encoding="utf-8") + "hand-added\n",
-            encoding="utf-8",
-        )
-        pre_overwrite = self.target.read_bytes()
-        self._revise("revised body")
-        self.assertEqual(self._install(), "backed up")
-        backup = self.target.parent / "hand.md.00.bak"
-        self.assertEqual(backup.read_bytes(), pre_overwrite)
-        # A recovery artifact, not a mirror: its own inode, and the mode this
-        # process gives a file it creates — nothing cloned off the target,
-        # which cloning would have required ownership of.
-        self.assertNotEqual(backup.stat().st_ino, self.target.stat().st_ino)
-        probe = self.target.parent / "probe"
-        probe.write_bytes(b"")
-        self.assertEqual(self._mode(backup), self._mode(probe))
+        text = self.target.read_text(encoding="utf-8")
+        self.assertIn(gen_defs.INSTALLED_NOTICE, text)
+        self.assertTrue(gen_defs.body_untouched(text))
+        # The parent directory is made on the way: a package's subdirectories
+        # went with its destination and nothing else recreates them.
+        self.assertTrue(self.target.parent.is_dir())
 
     def test_creation_carries_the_sources_exec_bit(self):
         # An installed tool has to land runnable, and stamping rewrites the
@@ -2511,19 +2317,40 @@ class TestInstallWritePath(unittest.TestCase):
         source.write_text("#!/usr/bin/env bash\nexec true\n", encoding="utf-8")
         source.chmod(0o755)
         target = self.target.with_name("tool.sh")
-        self.assertEqual(self._install(source, target), "written")
+        self._install(source, target)
         self.assertTrue(self._mode(target) & 0o111)
         self.assertIn(gen_defs.INSTALLED_NOTICE, target.read_text(encoding="utf-8"))
-
-        # And survives an update, which preserves the mode by not touching it.
-        source.write_text("#!/usr/bin/env bash\nexec false\n", encoding="utf-8")
-        self.assertEqual(self._install(source, target), "written")
-        self.assertTrue(self._mode(target) & 0o111)
 
     def test_creation_leaves_a_non_executable_source_non_executable(self):
         self.assertFalse(self._mode(self.source) & 0o111)
         self._install()
         self.assertFalse(self._mode(self.target) & 0o111)
+
+
+class TestBackupIdentity(unittest.TestCase):
+    """The numbered .bak a generation write leaves when its target is not
+    provably this tool's own output. A recovery artifact, not a mirror."""
+
+    def test_backup_is_a_content_copy_with_its_own_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "probe.md"
+            target.write_text("their content\n", encoding="utf-8")
+            target.chmod(0o646)
+            backup = gen_defs.back_up(target)
+
+            self.assertEqual(backup, root / "probe.md.00.bak")
+            self.assertEqual(backup.read_text(encoding="utf-8"), "their content\n")
+            # Its own inode, and the mode this process gives a file it creates
+            # — nothing cloned off the target, which cloning would have
+            # required ownership of.
+            self.assertNotEqual(backup.stat().st_ino, target.stat().st_ino)
+            probe = root / "probe"
+            probe.write_bytes(b"")
+            mode = lambda path: stat.S_IMODE(path.stat().st_mode)  # noqa: E731
+            self.assertEqual(mode(backup), mode(probe))
+            # The target is untouched by the copy: back_up only reads it.
+            self.assertEqual(mode(target), 0o646)
 
 
 class TestQuietPass(unittest.TestCase):
@@ -2573,7 +2400,7 @@ class TestInstallPassContract(unittest.TestCase):
 
     A scratch repository stands in for this one: one template whose output
     declares a tier the family gives overlay overrides for, and a source tree
-    holding that output's render — the state `just generate` leaves behind.
+    holding that output's render — the state a render leaves behind.
     """
 
     CHUNKS: dict[str, dict] = {}
@@ -2601,6 +2428,11 @@ class TestInstallPassContract(unittest.TestCase):
         self.tuning = _tuning(self.family, entries=entries)
         self.binding = _binding(self.CHUNKS)
         self.src.mkdir(exist_ok=True)
+        # A shipped package source, because the copy half is exactly the
+        # shipped packages now: an install finding none refuses before writing.
+        (self.src / "kb_tools").mkdir()
+        self.source_tool = self.src / "kb_tools" / "probe_tool.py"
+        self.source_tool.write_text('"""a probe tool."""\n', encoding="utf-8")
         surfaces = gen_defs.surface_map(templates_root=self.templates, output_root=self.src)
         _quiet(gen_defs.generate, self.binding, surfaces, overlays=self.overlays, tuning=self.tuning)
         self.source_def = self.src / "agents" / "probe.md"
@@ -2650,7 +2482,7 @@ class TestInstallPassContract(unittest.TestCase):
 
     def test_a_raising_pass_still_names_what_landed(self):
         # The copy completes before the render runs, so a template that cannot
-        # render still leaves the copied half live under ROOT. An operator
+        # render still leaves the shipped packages live under ROOT. An operator
         # shown only "error: unknown chunk" reads that as "nothing happened".
         self.template.write_text(self.BODY.replace("body\n", "body @!no-such-chunk!@\n"), encoding="utf-8")
         buf = io.StringIO()
@@ -2667,25 +2499,17 @@ class TestInstallPassContract(unittest.TestCase):
         report = buf.getvalue()
         self.assertIn(f"installed: 1 under agents/ → {gen_defs.rel(self.root)}", report)
         self.assertIn("the packages are in place", report)
-        # Said because it is true: the tree really is live.
-        self.assertEqual(
-            (self.root / "agents" / "probe.md").read_bytes(),
-            self.source_def.read_bytes(),
-        )
+        # Said because it is true: the package really is live, and stamped.
+        landed = (self.root / "agents" / "kb_tools" / "probe_tool.py").read_text(encoding="utf-8")
+        self.assertIn(gen_defs.INSTALLED_NOTICE, landed)
+        self.assertEqual(gen_defs.banner_body(landed), self.source_tool.read_text(encoding="utf-8"))
+        # And the render really did not happen.
+        self.assertFalse((self.root / "agents" / "probe.md").exists())
 
 
 class TestInstallEndToEnd(unittest.TestCase):
     """Real installs of this repository into scratch targets: default-triple,
     tuned, and re-installed."""
-
-    # A hand-maintained agent definition: frontmatter of its own, no
-    # !GENERATED! banner. That is the only shape the FRONTMATTER-style
-    # !INSTALLED! banner is stamped into, and no definition in either deployed
-    # surface has that shape any more, so the fixture is built here — the
-    # invariant belongs to the file class, not to some file staying
-    # hand-maintained.
-    HAND_FRONTMATTER = "---\nname: probe-guest\ndescription: scratch stand-in for a hand-maintained agent.\n---\n"
-    HAND_BODY = "\nThe prompt a guest model is relayed.\n\n## Behavior\n\nA last line, which must survive.\n"
 
     # Third-party source as a shipped package would vendor it. The vendored
     # file and its non-vendored sibling are byte-identical on purpose: what
@@ -2841,20 +2665,24 @@ class TestInstallEndToEnd(unittest.TestCase):
         self.assertNotIn("unbannered", report)
         self.assertNotIn(".tmpl", report)
 
-    def test_replaced_local_edit_is_the_only_thing_reported(self):
+    def test_a_local_edit_inside_a_package_destination_goes_with_the_directory(self):
+        # The package destinations are this repository's whole, so the unit
+        # that is replaced is the directory. No numbered backup reaches inside
+        # one, and the report says so on its summary line rather than setting
+        # anything aside.
         self._install()
         edited = self.root / "agents" / "kb_tools" / "kb_util.py"
-        edited.write_text(edited.read_text(encoding="utf-8") + "\n# local edit\n", encoding="utf-8")
+        original = edited.read_text(encoding="utf-8")
+        edited.write_text(original + "\n# local edit\n", encoding="utf-8")
         report = self._install_report()
-        # The one target whose extant content this tool did not write is named,
-        # and its prior bytes are beside it.
-        self.assertIn("agents/kb_tools/kb_util.py", report)
-        self.assertEqual([path.name for path in self.root.rglob("*.bak")], ["kb_util.py.00.bak"])
-        # Named specifically: the other ~130 clean overwrites stay silent.
-        self.assertEqual(
-            [line for line in report.splitlines() if line.startswith("  ")],
-            ["  agents/kb_tools/kb_util.py"],
-        )
+        self.assertEqual(edited.read_text(encoding="utf-8"), original)
+        self.assertEqual(sorted(self.root.rglob("*.bak")), [])
+        self.assertNotIn("replaced: ", report)
+        # Still one line — replacing a package directory is the ordinary path —
+        # but the directories whose contents went are named on it.
+        lines = report.splitlines()
+        self.assertEqual(len(lines), 1, report)
+        self.assertIn("replaced whole, local edits included: agents/kb_tools, agents/liaison_tools", lines[0])
 
     def test_verbose_lists_every_file_and_names_the_unbannered_ones(self):
         report = self._install_report(verbose=True)
@@ -2865,7 +2693,7 @@ class TestInstallEndToEnd(unittest.TestCase):
         self.assertIn(f"  created    {gen_defs.rel(self.root / 'agents' / 'python-coder.md')}", report)
         unbannered = [line for line in report.splitlines() if line.startswith("unbannered")]
         self.assertEqual(len(unbannered), 1, report)
-        expected = [key for key, source, _ in gen_defs.install_pairs(self.smap) if not gen_defs.bannerable(source)]
+        expected = [key for key, source, _ in gen_defs.package_pairs(self.smap) if not gen_defs.bannerable(source)]
         self.assertIn(f"{len(expected)} file(s)", unbannered[0])
         self.assertIn(expected[0], unbannered[0])
 
@@ -2918,6 +2746,9 @@ class TestInstallEndToEnd(unittest.TestCase):
         self.assertIn("agents/kb_tools/_vendor/LICENSE.txt", unbannered[0])
         self.assertNotIn("walker.py", unbannered[0])
 
+    def _package_key(self, name: str) -> bool:
+        return any(name.startswith(f"{key.as_posix()}/") for _, key, _ in gen_defs.package_destinations(self.smap))
+
     def test_reinstall_is_idempotent(self):
         self._install()
         first = {
@@ -2927,9 +2758,21 @@ class TestInstallEndToEnd(unittest.TestCase):
         second = {
             name: ((self.root / name).read_bytes(), (self.root / name).stat().st_mtime_ns) for name in self._installed()
         }
-        # Byte-stable and not even rewritten: the banner text is deterministic
-        # and an identical target is skipped outright.
-        self.assertEqual(first, second)
+        # Byte-stable everywhere: the banner text is deterministic, so the same
+        # sources re-install to the same tree.
+        self.assertEqual(
+            {name: content for name, (content, _) in first.items()},
+            {name: content for name, (content, _) in second.items()},
+        )
+        # Not even rewritten, on the surfaces: an identical target is skipped
+        # outright. Inside a package destination there is nothing to skip —
+        # the directory went and the file is new — so the mtimes move there and
+        # only there, which is the visible edge of the two granularities.
+        surfaces = {name: stamp for name, (_, stamp) in first.items() if not self._package_key(name)}
+        self.assertEqual(surfaces, {name: stamp for name, (_, stamp) in second.items() if not self._package_key(name)})
+        packages = [name for name in first if self._package_key(name)]
+        self.assertTrue(packages)
+        self.assertTrue(all(first[name][1] != second[name][1] for name in packages))
         self.assertEqual(sorted(self.root.rglob("*.bak")), [])
 
     def test_installed_copies_are_bannered_and_sources_are_not(self):
@@ -2967,9 +2810,8 @@ class TestInstallEndToEnd(unittest.TestCase):
         # the product delivers takes either. Every *.md with frontmatter under
         # the surfaces is generated and so exempt, and the frontmatter-less
         # markdown the HTML style existed for was a package's own
-        # documentation, which no longer installs. Both are covered on scratch
-        # fixtures: test_hand_maintained_definition_takes_a_frontmatter_banner
-        # and test_html_banner_wraps_agents_material_without_frontmatter.
+        # documentation, which no longer installs. Both are covered as unit
+        # cases over install_content, in TestInstalledBanner.
         for name, bannered in (
             ("agents/kb_tools/kb_util.py", True),
             ("agents/python-coder.md", False),
@@ -2977,26 +2819,6 @@ class TestInstallEndToEnd(unittest.TestCase):
             text = (self.root / name).read_text(encoding="utf-8")
             self.assertEqual(gen_defs.INSTALLED_NOTICE in text, bannered, name)
             self.assertTrue(gen_defs.body_untouched(text), name)
-
-    def test_bare_command_keeps_its_first_body_line(self):
-        # The fixture is built here rather than read from commands/: the
-        # invariant belongs to the file class — any frontmatter-less command —
-        # and not to some definition staying hand-maintained, which no command
-        # in the surface is any more. A scratch source root overlaid onto the
-        # installed tree still travels the real install walk, which is what
-        # reads a bare *.md's surface and picks its banner style from it.
-        self._install()
-        src = Path(self._tmp.name) / "src"
-        (src / "commands").mkdir(parents=True)
-        source = "End the active guest-model session pointer.\n\n## Behavior\n"
-        (src / "commands" / "bare.md").write_text(source, encoding="utf-8")
-        self._install(source_root=src)
-        installed = (self.root / "commands" / "bare.md").read_text(encoding="utf-8")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, installed)
-        # The banner lands in a frontmatter block of its own, above content
-        # that is otherwise byte-identical — the first body line, which Claude
-        # Code lists a frontmatter-less command by, is still the source's.
-        self.assertEqual(gen_defs.banner_body(installed), "---\n" + source)
 
     def _extract(self, path):
         """The extraction the liaison definitions run, verbatim: drop every line
@@ -3009,48 +2831,6 @@ class TestInstallEndToEnd(unittest.TestCase):
             text=True,
             check=False,
         )
-
-    def _install_hand_maintained_agent(self) -> Path:
-        """Install one hand-maintained definition (HAND_FRONTMATTER +
-        HAND_BODY) from a scratch source root, overlaid onto the real installed
-        tree so it travels the real install walk — which is what reads a *.md's
-        own frontmatter and picks the banner style from it. Returns its path
-        under ROOT."""
-        self._install()
-        src = Path(self._tmp.name) / "hand-src"
-        (src / "agents").mkdir(parents=True)
-        (src / "agents" / "probe-guest.md").write_text(self.HAND_FRONTMATTER + self.HAND_BODY, encoding="utf-8")
-        self._install(source_root=src)
-        return self.root / "agents" / "probe-guest.md"
-
-    def test_hand_maintained_definition_takes_a_frontmatter_banner(self):
-        # A *.md carrying frontmatter of its own gets the banner as comment
-        # lines INSIDE that block, where every frontmatter reader drops it: not
-        # a second block above the definition's own, and not an HTML comment,
-        # either of which would put banner text where a prompt body is read.
-        installed = self._install_hand_maintained_agent().read_text(encoding="utf-8")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, installed)
-        self.assertTrue(gen_defs.body_untouched(installed))
-        # Still exactly one frontmatter block, and every byte the source had
-        # below its opening delimiter is still there, unshifted.
-        self.assertEqual(installed.count("---\n"), 2, installed)
-        self.assertEqual(
-            gen_defs.banner_body(installed),
-            (self.HAND_FRONTMATTER + self.HAND_BODY)[len("---\n") :],
-        )
-
-    @unittest.skipUnless(shutil.which("sed"), "extraction needs sed")
-    def test_installed_definition_still_extracts_frontmatter_free(self):
-        # The frontmatter-style !INSTALLED! banner has to survive contact with
-        # the real consumer of an installed definition's body: the guest-relay
-        # extraction, which must drop the whole block and lose no body content.
-        done = self._extract(self._install_hand_maintained_agent())
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertNotIn(gen_defs.INSTALLED_NOTICE, done.stdout)
-        self.assertNotIn("!BODY-SHA256!", done.stdout)
-        # Byte-identical to the body that went in: the banner cost the prompt
-        # nothing at either end.
-        self.assertEqual(done.stdout, self.HAND_BODY)
 
     @unittest.skipUnless(shutil.which("sed"), "extraction needs sed")
     def test_every_generated_definition_extracts_frontmatter_free(self):
@@ -3125,6 +2905,194 @@ class TestInstallEndToEnd(unittest.TestCase):
         # only its banner records the triple it was rendered under.
         untouched = (self.root / "agents" / "go-coder.md").read_text(encoding="utf-8")
         self.assertEqual(gen_defs.banner_body(untouched), plain_body)
+
+    # ── the stale-output prune ───────────────────────────────────────────────
+    #
+    # One rule and its three complements. `_retire` is how every case below
+    # stages its subject: a definition this repository really did install, moved
+    # to a path no template declares — which is byte-for-byte the state an
+    # installed tree is left in when a template is deleted here, and the only
+    # state the prune's delete branch is allowed to fire on.
+
+    def _retire(self, name: str, to: str) -> Path:
+        """Move an installed definition to a path no template declares, and
+        return it. Its banner still hashes to its own body: it IS this tool's
+        output, just output nothing produces any more."""
+        retired = self.root / to
+        retired.parent.mkdir(parents=True, exist_ok=True)
+        (self.root / "agents" / name).rename(retired)
+        return retired
+
+    def _prune_lines(self, report: str, head: str) -> list[str]:
+        """The indented keys under the report block `head` opens, or []."""
+        lines = report.splitlines()
+        starts = [i for i, line in enumerate(lines) if line.startswith(head)]
+        if not starts:
+            return []
+        keys = []
+        for line in lines[starts[0] + 1 :]:
+            if not line.startswith("  "):
+                break
+            keys.append(line.strip())
+        return keys
+
+    def test_prune_deletes_output_no_template_declares_any_more(self):
+        self._install()
+        retired = self._retire("python-coder.md", "agents/retired-coder.md")
+        report = self._install_report()
+        self.assertFalse(retired.exists())
+        self.assertEqual(self._prune_lines(report, "pruned:"), ["agents/retired-coder.md"])
+        # Deleted, not set aside: provably unmodified output is reproducible
+        # from the template at will, so a copy of it protects nothing — the
+        # same reading that keeps the overwrite path from writing a .bak.
+        self.assertEqual(sorted(self.root.rglob("*.bak")), [])
+        # The live definition it was moved out of came back, and everything
+        # else the install delivers is still there.
+        self.assertTrue((self.root / "agents" / "python-coder.md").is_file())
+        self.assertIn("agents/kb-docent.md", self._installed())
+
+    def test_prune_never_deletes_a_hand_edited_file(self):
+        # Complement one: the banner is ours, the body does not hash to it.
+        # Unreproducible content, and a template no longer claiming it makes it
+        # more the consumer's rather than less.
+        self._install()
+        retired = self._retire("go-coder.md", "agents/retired-edited.md")
+        edited = retired.read_text(encoding="utf-8") + "\nA local paragraph nothing here can regenerate.\n"
+        retired.write_text(edited, encoding="utf-8")
+        report = self._install_report()
+        self.assertTrue(retired.exists())
+        self.assertEqual(retired.read_text(encoding="utf-8"), edited)
+        self.assertEqual(self._prune_lines(report, "kept:"), ["agents/retired-edited.md"])
+        self.assertEqual(self._prune_lines(report, "pruned:"), [])
+
+    def test_prune_never_deletes_a_file_with_no_banner_of_ours(self):
+        # Complement two: a consuming project's .claude/ holds other people's
+        # files, and the install has no opinion about any of them — including
+        # the silence, which is why the report never names them.
+        self._install()
+        theirs = self.root / "agents" / "their-own-agent.md"
+        body = "---\nname: their-own-agent\n---\n\nSomeone else wrote this.\n"
+        theirs.write_text(body, encoding="utf-8")
+        report = self._install_report()
+        self.assertEqual(theirs.read_text(encoding="utf-8"), body)
+        self.assertNotIn("their-own-agent", report)
+        self.assertEqual(self._prune_lines(report, "pruned:"), [])
+
+    def test_a_hand_edit_to_a_LIVE_definition_takes_the_backup_path_not_the_prune(self):
+        # Complement three: membership in the write set is decided on path
+        # identity before content is read at all, so the one file state that
+        # looks most like a prune candidate — our banner, body not hashing to
+        # it — is still written and backed up rather than deleted.
+        self._install()
+        live = self.root / "agents" / "prompt-engineer.md"
+        live.write_text(live.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
+        report = self._install_report()
+        self.assertTrue(live.is_file())
+        self.assertEqual([path.name for path in self.root.rglob("*.bak")], ["prompt-engineer.md.00.bak"])
+        self.assertEqual(self._prune_lines(report, "pruned:"), [])
+        self.assertEqual(self._prune_lines(report, "kept:"), [])
+
+    def test_prune_removes_a_directory_it_empties_and_spares_one_it_does_not(self):
+        # An emptied directory is exactly as stale as the file that was in it:
+        # `diff -rq` between two render slots reports it just as loudly.
+        self._install()
+        self._retire("kb-docent.md", "agents/mad/retired-topics/topic.md")
+        kept = self._retire("kb-maintainer.md", "agents/mad/mixed-topics/topic.md")
+        theirs = kept.parent / "notes.md"
+        theirs.write_text("Not ours, no banner.\n", encoding="utf-8")
+        self._install()
+        self.assertFalse((self.root / "agents" / "mad" / "retired-topics").exists())
+        # Pruned out from under, but the directory holds a file that is not
+        # ours, so neither it nor its parent goes anywhere.
+        self.assertFalse(kept.exists())
+        self.assertTrue(theirs.is_file())
+        self.assertTrue((self.root / "agents" / "mad" / "participant-contract.md").is_file())
+
+    def test_prune_does_not_walk_into_a_shipped_package_destination(self):
+        # The package destinations are the OTHER rule's, so the prune never
+        # sorts a file inside one into the three states. Driven against
+        # prune_stale directly, because an install would also remove the
+        # fixture by replacing the directory whole — and this asserts which of
+        # the two rules did it.
+        self._install()
+        inside = self.root / "agents" / "kb_tools" / "kb_util.py"
+        self.assertTrue(
+            gen_defs.body_untouched(inside.read_text(encoding="utf-8")),
+            "the fixture must be a file the prune WOULD take",
+        )
+        # A write set holding every installed file EXCEPT this one: the single
+        # condition that would otherwise make it a candidate.
+        written = {path for path in self.root.rglob("*") if path.is_file()} - {inside}
+        stale = gen_defs.prune_stale(self.smap, written=written)
+        self.assertTrue(inside.is_file())
+        self.assertEqual(stale.pruned, [])
+        self.assertEqual(stale.kept_edited, [])
+
+    # ── the wholesale package replacement ────────────────────────────────────
+
+    def test_a_package_file_with_no_source_does_not_survive_a_reinstall(self):
+        # The gap the wholesale replacement exists to close: a per-file copy
+        # writes what the package holds now and has no way to notice what it
+        # used to hold, so a file whose source here was deleted used to sit in
+        # a consumer's tree forever. Removing the directory retires it by
+        # construction, and the banner it happens to carry has nothing to do
+        # with it — this fixture's does still hash to its own claim.
+        self._install()
+        orphan = self.root / "agents" / "kb_tools" / "retired_tool.py"
+        orphan.write_bytes((self.root / "agents" / "kb_tools" / "kb_util.py").read_bytes())
+        self.assertTrue(gen_defs.body_untouched(orphan.read_text(encoding="utf-8")))
+        self._install()
+        self.assertFalse(orphan.exists())
+        self.assertTrue((self.root / "agents" / "kb_tools" / "kb_util.py").is_file())
+
+    def test_a_file_with_no_banner_inside_a_package_destination_goes_too(self):
+        # Inside a package destination the three states are not consulted at
+        # all: the directory is the unit, so a file the banner prune would have
+        # kept on a deployed surface goes with it.
+        self._install()
+        theirs = self.root / "agents" / "liaison_tools" / "their-notes.txt"
+        theirs.write_text("No banner anywhere in this.\n", encoding="utf-8")
+        self._install()
+        self.assertFalse(theirs.exists())
+        self.assertTrue((self.root / "agents" / "liaison_tools" / "post-openai.py").is_file())
+
+    def test_the_replacement_reaches_exactly_the_destinations_the_table_names(self):
+        # Not a parent, not a sibling, nothing pattern-matched. The two
+        # neighbours are the ones a careless rmtree target would take with it.
+        self._install()
+        sibling = self.root / "agents" / "kb_tools_notes.md"
+        sibling.write_text("A consuming project's own file, named like a package.\n", encoding="utf-8")
+        nested = self.root / "agents" / "mad" / "their-own.md"
+        nested.write_text("Also theirs.\n", encoding="utf-8")
+        self._install()
+        self.assertTrue(sibling.is_file())
+        self.assertTrue(nested.is_file())
+        # The parent above all: the whole agents/ surface is not a package.
+        self.assertTrue((self.root / "agents" / "python-coder.md").is_file())
+
+    def test_a_fresh_install_replaces_nothing_and_says_nothing(self):
+        # Nothing was there to remove, so the summary line carries no clause —
+        # the naming is about contents that went, not about the rule existing.
+        report = self._install_report()
+        self.assertNotIn("replaced whole", report)
+        self.assertEqual(len(report.splitlines()), 1, report)
+
+    def test_the_removal_is_bounded_to_the_rows_the_surface_map_covers(self):
+        # A run that delivers no agents surface removes no agents-side package:
+        # the bound is the SHIPPED_PACKAGES row read through the surface map,
+        # which is the same reading package_pairs copies by.
+        self._install()
+        commands_only = {"commands": self.smap["commands"]}
+        self.assertEqual(gen_defs.package_destinations(commands_only), [])
+        self.assertEqual(gen_defs.replace_package_destinations(commands_only), [])
+        self.assertTrue((self.root / "agents" / "kb_tools" / "kb_util.py").is_file())
+
+    def test_a_clean_reinstall_says_nothing_about_pruning(self):
+        # Report by exception, unchanged: with nothing stale in the tree the
+        # prune is as silent as every other clean pass.
+        self._install()
+        report = self._install_report()
+        self.assertEqual(len(report.splitlines()), 1, report)
 
 
 class TestShippedFamilyFiles(unittest.TestCase):
@@ -3225,10 +3193,10 @@ class TestFloorRung(unittest.TestCase):
                 claim = gen_defs.tuning_claim(text)
                 self.assertEqual((claim.seat, claim.member), ("none", "none"))
 
-    def test_the_census_is_thirty_six_pin_sites_and_twelve_without(self):
+    def test_the_census_is_thirty_six_pin_sites_and_thirteen_without(self):
         # A census, and it moves: adding a template moves one of these numbers,
         # and that is a deliberate edit here. Losing a pin site moves them too.
-        self.assertEqual((len(self.pinned), len(self.unpinned)), (36, 12))
+        self.assertEqual((len(self.pinned), len(self.unpinned)), (36, 13))
 
 
 class TestStockRung(unittest.TestCase):

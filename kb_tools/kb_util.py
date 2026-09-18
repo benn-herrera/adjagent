@@ -32,12 +32,9 @@ under ``preflight``; and drives the build's stage ledger through
 ``show-status`` / ``start-build`` / ``advance-step``, with ``show-stage-status``
 reading one stage's coverage beside them.
 
-``show-confirmation`` stands in front of the build's opening gate: it renders
-the whole confirmation as one message and writes nothing. What the answer then
-releases is ``start-build``, already above — one route into a build, so there is
-no second door to keep in step with it. The target definitions themselves ship
-in ``runner-snippets/`` (``kb.just`` / ``kb.mk``) and are included from the
-installed tree, never copied into the consumer's file.
+The target definitions themselves ship in ``runner-snippets/`` (``kb.just`` /
+``kb.mk``) and are included from the installed tree, never copied into the
+consumer's file.
 
 ``validate-build`` joins that op set as the built-tree validator's front end:
 handed a KB tree, it walks that tree and checks its structure. The tree is the
@@ -73,7 +70,6 @@ import functools
 import re
 import subprocess
 import sys
-import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,19 +117,17 @@ _MAKEFILE_NAMES = ("Makefile", "makefile", "GNUmakefile")
 _RAW_CMD = "PYTHONPATH=.claude/agents python3 -m kb_tools.{module}"
 
 #: This CLI's consumer-side invocation, up to but not including the op — the one
-#: spelling every rendered card, brief slot and remediation hint is built from.
-#: No card, brief, definition or recipe hand-writes a `kb_util` command line.
-#: `kb_pipeline`'s card commands and `kb_driver.steps`' brief slots are
-#: both pinned to this string in test, so the three cannot drift apart.
+#: spelling every rendered remediation hint is built from.
+#: No brief, definition or recipe hand-writes a `kb_util` command line.
 INVOCATION = _RAW_CMD.format(module="kb_util")
 
 #: The driver's consumer-side invocation, up to but not including the mode. It
 #: is published here beside :data:`INVOCATION` rather than inside `kb_driver`
 #: because both are the same fact — how a consuming repo reaches an installed
 #: module — and a change to that reaches them together only while one string
-#: builds both. `kb_driver.baton`'s `THEN RUN:` lines and `kb_driver.watch`'s
-#: restore hint are the consumers; the relaying session runs what they print,
-#: so a spelling without the prefix does not resolve where that session stands.
+#: builds both. `kb_driver.baton`'s `THEN RUN:` lines are the consumer; the
+#: relaying session runs what they print, so a spelling without the prefix does
+#: not resolve where that session stands.
 DRIVER_INVOCATION = _RAW_CMD.format(module="kb_driver")
 
 
@@ -142,17 +136,11 @@ DRIVER_INVOCATION = _RAW_CMD.format(module="kb_driver")
 # `kb_docgraph` and `kb_claimgraph` are module CLIs of their own rather than ops
 # of this one (ARCHITECTURE.md, The Document Graph and The Claim Graph). Their
 # module names and their flags are single-sourced here for the reason
-# `INVOCATION` is: two consumers spell each invocation — the stage card that
-# prints the command a person runs, and `kb_driver.ledger`, which runs it as a
-# subprocess — and a flag spelled at both is a flag renamed at one.
+# `INVOCATION` is: `kb_driver.ledger` composes the argv it runs as a subprocess,
+# and a flag spelled where it is used is a flag renamed in one place of two.
 
 DOCGRAPH_MODULE = "kb_docgraph"
 CLAIMGRAPH_MODULE = "kb_claimgraph"
-
-
-def module_invocation(module: str) -> str:
-    """The consumer-side invocation of one ``kb_tools`` module CLI, up to its flags."""
-    return _RAW_CMD.format(module=module)
 
 
 def docgraph_flags(*, sources: Sequence[str], bibliographies: Sequence[str], kb_root_path: str) -> tuple[str, ...]:
@@ -177,8 +165,8 @@ def docgraph_flags(*, sources: Sequence[str], bibliographies: Sequence[str], kb_
 # `kb_claimgraph`'s flags are NOT here, and the asymmetry is the point: which of
 # its three invocations a run is making is a *stage* of the build pipeline, and
 # `kb_pipeline.ClaimgraphInvocation` is where the two vocabularies are paired —
-# read by the card that prints the command, by the driver that runs it, and by
-# the tool that parses it back. A second spelling here would be the third.
+# read by the driver that runs the command and by the tool that parses it back.
+# A second spelling here would be the third.
 
 # Canonical installed lines — the one line the installer manages in a
 # consuming repo's runner file; the target definitions live in the installed
@@ -207,8 +195,8 @@ DEFAULT_RUNNER = "make"
 # here.
 #
 # Named rather than spelled at each use because this CLI's invocations are
-# *rendered* elsewhere: `kb_pipeline`'s stage cards build the command an agent
-# is told to run, `kb_driver.ledger` builds the argv the driver spawns, and
+# *rendered* elsewhere: `kb_pipeline`'s refusals build the command an agent is
+# told to run next, `kb_driver.ledger` builds the argv the driver spawns, and
 # `kb_driver.steps.LedgerOp` takes its member values from the two ledger-write
 # tokens below. A renderer holding its own literal could advertise an op this
 # parser does not have; reading these, it cannot.
@@ -240,7 +228,7 @@ OP_ADVANCE_STEP = "advance-step"
 NO_INFERENCE_FLAG = "--no-inference"
 
 #: Where a run's evidence goes. Spelled here for a different reason than the
-#: flag above: no op takes it, but both of the driver's modes declare it and the
+#: flag above: no op takes it, but the driver's `run` mode declares it and the
 #: relay cards print it back in the commands they offer — and a card is rendered
 #: by ``kb_driver.baton``, which imports no driver module and so cannot read the
 #: driver's own constant. This is the module it can read.
@@ -250,14 +238,6 @@ RUN_DIR_FLAG = "--run-dir"
 # reconstructed. It records nothing, so it is a reading verb over the ledger
 # rather than a fourth ledger op.
 OP_SHOW_STAGE_STATUS = "show-stage-status"
-
-# The read that stands in front of the build's opening gate: the whole
-# confirmation as one message, so a caller relays it rather than composing one.
-# It writes nothing, and what the user's answer releases is `start-build` above
-# and nothing else — one door into a build, so there is no second route for this
-# one to drift from. The spine seed is not part of opening one: `graph-init`
-# runs at `spine-seed`, over a tree `document-graph` has by then written.
-OP_SHOW_CONFIRMATION = "show-confirmation"
 
 # The built-tree validator: walks a built KB tree and checks its structure.
 OP_VALIDATE_BUILD = "validate-build"
@@ -319,8 +299,8 @@ WRITE_OPS: tuple[str, ...] = (
 
 # The metadata surface's one read-only op. Kept out
 # of `WRITE_OPS` on purpose: that tuple is what the driver's ledger admits as a
-# spawnable write, what `steps.WRITE_OP_SLOTS` renders a brief slot for, and
-# what carries the write ops' four-code exit vocabulary. This op writes nothing,
+# spawnable write, and what carries the write ops' four-code exit vocabulary.
+# This op writes nothing,
 # no brief invokes it, and it can never earn the contended-file code — so it is
 # a sibling constant, keyed by `kb_write.ops.READ_OPS`.
 OP_RENDER_CITATION = "render-citation"
@@ -330,12 +310,10 @@ READ_OPS: tuple[str, ...] = (OP_RENDER_CITATION,)
 
 #: The one argument every metadata op takes, published for the same reason
 #: :data:`INVOCATION` and :data:`WRITE_OPS` are: this flag is *rendered* as well
-#: as declared. :func:`_add_values_option` builds the option from it,
-#: `kb_pipeline._kb_util_command` appends it to every card command, and
-#: `kb_driver.steps.CONSTANT_SLOTS` publishes it as the `@!values-flag!@` brief
-#: slot — so the third token of the sanctioned invocation moves with a rename
-#: exactly as the first two do. Hand-typing it anywhere is exactly the staleness
-#: this single-sourcing exists to make impossible, which is why
+#: as declared. :func:`_add_values_option` builds the option from it, so the
+#: third token of the sanctioned invocation moves with a rename exactly as the
+#: first two do. Hand-typing it anywhere is exactly the staleness this
+#: single-sourcing exists to make impossible, which is why
 #: `steps.TEMPLATE_PROHIBITIONS` refuses a template that spells it.
 VALUES_FLAG = "--values"
 
@@ -935,81 +913,10 @@ def graph_init_kb(repo_root: Path, runner: str | None = None) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# The charter values file
-#
-# The write ops' transport, over one value: a TOML file of `[[entry]]` tables
-# with prose in a `'''` literal block. A charter carries backslashes, quotes and
-# dollar signs as a matter of course, and a literal block holds all of it with
-# no escape grammar and without ever passing through a shell — which is the
-# whole reason that transport exists, and it holds for a charter exactly as it
-# holds for a rationale.
-#
-# The charter arrives as TEXT and never as a path: a caller handed a path
-# chooses a location, and the one it chose was the scratch tree a restage wipes.
-# Here the op owns the location and the caller owns nothing but the words.
-# ---------------------------------------------------------------------------
-
-#: The array-of-tables name, one across every values file this CLI reads.
-ENTRY_TABLE = "entry"
-
-#: The charter values file's whole vocabulary. One key, so a refusal names it
-#: and the closed set rather than locating a line: a file this small states its
-#: own line numbers.
-CHARTER_KEY = "charter"
-
-#: The flag ``show-confirmation`` reads that file through — the metadata ops'
-#: transport, deliberately not their flag (:func:`_add_charter_values_option`).
-CHARTER_VALUES_FLAG = "--charter-values"
-
 #: ``start-build``'s own flag, naming a charter that already stands on disk.
-#: Spelled once because two surfaces render it: the subparser that declares it
-#: and the ``start`` card that tells a caller to run it.
+#: Spelled once because the subparser that declares it and the driver row that
+#: runs it are two surfaces over one token.
 CHARTER_FLAG = "--charter"
-
-
-def read_charter_values(path: Path) -> str:
-    """The charter text a values file carries.
-
-    One build has one charter, so exactly one ``[[entry]]`` is read: a file
-    carrying none, or several, is refused rather than joined or truncated. The
-    text is returned as supplied but for a closing newline where it lacks one,
-    since what it is about to become is a text file.
-
-    Raises :class:`ValueError` naming the offending key, or :class:`OSError`
-    when the file cannot be read; the caller turns those into the exit code.
-    """
-    try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"{path}: not a readable values file: {exc}") from exc
-
-    unknown = sorted(set(document) - {ENTRY_TABLE})
-    if unknown:
-        raise ValueError(
-            f"{path}: unknown top-level key(s) {', '.join(unknown)}; this file carries "
-            f"[[{ENTRY_TABLE}]] tables and nothing else — the op travels on the command line"
-        )
-    entries = document.get(ENTRY_TABLE)
-    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
-        raise ValueError(
-            f"{path}: one [[{ENTRY_TABLE}]] table is read and this file carries "
-            f"{len(entries) if isinstance(entries, list) else 0}; one build has one charter"
-        )
-    entry = entries[0]
-    unknown = sorted(set(entry) - {CHARTER_KEY})
-    if unknown:
-        raise ValueError(
-            f"{path}: unknown key(s) {', '.join(unknown)} in [[{ENTRY_TABLE}]]; "
-            f"this op's whole vocabulary is '{CHARTER_KEY}'"
-        )
-    text = entry.get(CHARTER_KEY)
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError(
-            f"{path}: '{CHARTER_KEY}' is required and carries the build's charter in the words "
-            f"it was given in; a charter saying nothing is refused rather than written"
-        )
-    return text if text.endswith("\n") else f"{text}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1086,7 +993,7 @@ def run_validate(*, kb_root: Path) -> int:
 # if-chain because here it cannot be reached by the wrong op.
 #
 # `preflight`, `graph-init`, `show-status`, `show-stage-status`,
-# `show-confirmation`, `start-build`, `advance-step` and
+# `start-build`, `advance-step` and
 # `show-run-lock` anchor on `find_git_root()`: each reports on, or creates, an
 # environment that may have no KB yet. The two record ops are there because the
 # ledger is the commit trail: a build's first stages are recorded before anything
@@ -1122,21 +1029,6 @@ def _handle_graph_init(args: argparse.Namespace) -> int:
         # spine standing in a worktree the next preflight refuses.
         print(f"{GRAPH_INIT_TAG} next: {OP_START_BUILD} [{CHARTER_FLAG} <path>]")
     return rc
-
-
-def _handle_show_confirmation(args: argparse.Namespace) -> int:
-    from kb_tools import kb_pipeline
-
-    # The values grammar is read at the surface: what a caller may write in a
-    # file is this module's, and the op takes text.
-    try:
-        charter = read_charter_values(args.charter_values) if args.charter_values is not None else None
-    except (OSError, ValueError) as exc:
-        to_stderr(f"[{OP_SHOW_CONFIRMATION}] error: {exc}")
-        return EXIT_ENVIRONMENT_UNFIT
-    # The git root, for `show-status`' reason: this renders before anything is
-    # seeded, and kb-root/ not existing yet is one of the things it reports.
-    return kb_pipeline.show_confirmation(find_git_root(), sources=args.source, charter=charter)
 
 
 def _handle_install_targets(args: argparse.Namespace) -> int:
@@ -1340,28 +1232,6 @@ def _add_values_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_charter_values_option(parser: argparse.ArgumentParser) -> None:
-    """``--charter-values``, carrying the charter text, on ``show-confirmation``.
-
-    The metadata ops' transport under a name of its own. The file's grammar is
-    theirs — ``[[entry]]`` tables, prose in a ``'''`` literal block — but its
-    vocabulary, its one-entry rule and its exit ladder are not, and
-    :data:`VALUES_FLAG` advertises all three: an op spelling that flag promises
-    a batch and the 7/8 write ladder, and this op has neither. It is also not
-    ``start-build``'s :data:`CHARTER_FLAG`, which names a charter that already
-    stands on disk; this carries the words of one, and writes nothing.
-    """
-    parser.add_argument(
-        CHARTER_VALUES_FLAG,
-        type=Path,
-        metavar="FILE",
-        help=f"path to the TOML values file whose one [[{ENTRY_TABLE}]] table carries "
-        f"{CHARTER_KEY} = '''<the charter's own words>''', quoted back a line at a time for the "
-        f"user to check. Write this file under {SCRATCH_DIRNAME}/ — it is the call's input, and "
-        f"an uncommitted file anywhere else fails the clean-worktree check",
-    )
-
-
 def _add_create_option(parser: argparse.ArgumentParser) -> None:
     """``--create``, declared on the two register inserts and on no other op.
 
@@ -1499,31 +1369,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runner_option(uninstall)
     uninstall.set_defaults(handler=_handle_uninstall_targets)
 
-    show_confirmation_help = (
-        "print the build's opening confirmation whole — the parse, the charter, the stage "
-        "checklist, the per-project facts still unsettled with the default each takes, and the "
-        "preflight report — as one message to put in front of the user unchanged. Reads "
-        "everything and writes nothing but the scratch directory preflight creates. Exit 0 ready "
-        "to confirm, 1 a blocking item stands in the way, 2 the root will not resolve"
-    )
-    show_confirmation = add_parser(
-        OP_SHOW_CONFIRMATION, help=show_confirmation_help, description=show_confirmation_help
-    )
-    show_confirmation.add_argument(
-        "--source",
-        type=Path,
-        action="append",
-        required=True,
-        metavar="PATH",
-        help="path to one source the build reads, repeated once per source; each is echoed "
-        "resolved, and one that does not exist is a blocking item",
-    )
-    _add_charter_values_option(show_confirmation)
-    show_confirmation.set_defaults(handler=_handle_show_confirmation)
-
     show_status_help = (
-        "print the build's stage checklist and the current stage's action card, read back "
-        "from the git commit trail. Read-only: writes nothing and exits 0 in every world-state"
+        "print the build's stage checklist — every stage, what it is for, and which are "
+        "recorded — read back from the git commit trail. Read-only: writes nothing and exits 0 "
+        "in every world-state"
     )
     show_status = add_parser(OP_SHOW_STATUS, help=show_status_help, description=show_status_help)
     show_status.set_defaults(handler=_handle_show_status)

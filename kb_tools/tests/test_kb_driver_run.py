@@ -1,11 +1,10 @@
-"""The run loop's own vocabulary: resume-skip, round arithmetic, and the driver-wide contracts.
+"""The run loop's own vocabulary: resume-skip and the driver-wide contracts.
 
-End-to-end walks of the surviving stages (``phase-3a`` through ``phase-5`') —
-barriers, the two capped series, exit selection, fix-wave partitioning, the
-wave-session-persists route — are ``test_kb_driver_buildout.py``'s: that file
-owns the only stages this table still has rows for, and duplicating its
-scenario scaffold here would be a second answer to a question it already
-has one for.
+End-to-end walks of the surviving stages (``phase-3a`` through ``phase-5``) —
+barriers, the review sequence, exit selection, the driver-persists route — are
+``test_kb_driver_buildout.py``'s: that file owns the only stages this table
+still has rows for, and duplicating its scenario scaffold here would be a
+second answer to a question it already has one for.
 
 What is left here is the vocabulary those scenarios are built from and two
 contracts that hold over the whole step table rather than over any one stage:
@@ -18,7 +17,8 @@ from pathlib import Path
 import pytest
 
 from kb_tools import kb_pipeline
-from kb_tools.kb_driver import barriers, call, config, prompt_templates, replay, run, runlog, steps
+from kb_tools.kb_driver import barriers, call, config, prompt_templates, run, runlog, steps
+from kb_tools.tests import _fake_model as fake_model
 
 
 def _runner(tmp_path: Path) -> run.Runner:
@@ -35,7 +35,7 @@ def _runner(tmp_path: Path) -> run.Runner:
         config=cfg,
         paths=paths,
         repo_root=root,
-        caller=call.Caller(invoker=replay.dry_run_invoker(), config=cfg, repo_root=root, paths=paths),
+        caller=call.Caller(invoker=fake_model.FakeInvoker(fake_model.clean()), config=cfg, repo_root=root, paths=paths),
         answers=barriers.Resolver(config_decisions={}),
         ops=run.ledger_ops_for(root),
     )
@@ -50,23 +50,6 @@ def test_present_is_existence_and_non_emptiness_and_nothing_else(tmp_path: Path)
     assert run.present(full)
     assert not run.present(empty)
     assert not run.present(absent)
-
-
-def test_pending_members_drops_only_the_members_whose_artifacts_landed(tmp_path: Path) -> None:
-    """Partial-wave reconciliation, at member granularity."""
-    done = run.Member(name="a", source="A.tex", artifact=tmp_path / "a.md")
-    missing = run.Member(name="b", source="B.tex", artifact=tmp_path / "b.md")
-    done.artifact.write_text("survey\n", encoding="utf-8")
-
-    assert run.pending_members((done, missing)) == (missing,)
-
-
-@pytest.mark.parametrize(
-    ("series", "round_number", "expected"),
-    [("r", 1, 0), ("r", 3, 2), ("g", 1, 1), ("g", 2, 2)],
-)
-def test_revisions_spent_differs_only_by_the_series_opening_move(series: str, round_number: int, expected: int) -> None:
-    assert run.revisions_spent(series=series, round_number=round_number) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +93,12 @@ def test_the_constructor_runs_the_same_guard(tmp_path: Path, monkeypatch: pytest
     The guard's question is the difference between the two sets, and which side
     of it moved does not change the answer.
     """
-    monkeypatch.setattr(run, "RUNNER_ATTRIBUTES", run.RUNNER_ATTRIBUTES - {"_rounds"})
+    monkeypatch.setattr(run, "RUNNER_ATTRIBUTES", run.RUNNER_ATTRIBUTES - {"_seq"})
 
     with pytest.raises(runlog.BoundaryError) as raised:
         _runner(tmp_path)
 
-    assert "_rounds" in str(raised.value)
+    assert "_seq" in str(raised.value)
 
 
 def test_no_row_hands_a_seat_the_charter() -> None:
@@ -134,7 +117,7 @@ def test_no_row_hands_a_seat_the_charter() -> None:
 
 def test_every_row_of_the_table_has_a_handler_or_a_driver() -> None:
     """A row nobody executes is a stage that silently does not happen."""
-    covered = set(run._HANDLERS) | run.LOOP_DRIVEN_STEPS
+    covered = set(run._HANDLERS) | run.DRIVEN_STEPS
 
     assert covered == set(steps.STEP_IDS)
 
@@ -148,8 +131,5 @@ def test_the_slots_the_loop_supplies_compose_every_shipped_template() -> None:
         text = prompt_templates.render(
             step.template,
             slots={slot: f"<{slot}>" for slot in step.slots},
-            constants=steps.CONSTANT_SLOTS,
-            row=prompt_templates.RowSlots(step_id=step.id, seat=step.seat),
-            wave=step.unit is steps.Unit.WAVE,
         )
         assert text.strip()

@@ -488,6 +488,27 @@ bullet beneath the `INVARIANT-S2` heading is an `axiom` node under the id
 scoring fields. Claim nodes are the universal core; the other three kinds
 are populated per project (Project Scoping, below).
 
+**A referenced equation is a `clm-` node, minted because the reference needs a
+target.** Point 9 leaves an equation's `\label` inside the maths fence rather
+than as an addressable id, so a cross-reference to an equation resolves to a
+document and to nothing narrower. Where a claim-bearing block holds the
+labelled equation, or a proof does, the reference resolves through to that
+block's claim or that proof's subject and nothing is minted; everywhere else
+the equation is minted, bounded by the author's own cross-references — an
+equation nobody cites is scaffolding and mints nothing. No prefix is added:
+`kb_schema.ID_KINDS` is untouched and the out-of-scope ruling below is
+unengaged.
+
+**Its identity is the label, and the title is what carries it** — the only
+authored field a `clm-` entry offers that a formula sealed inside a maths
+fence can reach, since it holds neither a block's own display line nor a
+Tier-2 marker's line to be found by. **It is terminal, as a `work-` node is,
+though for a different reason**: a `work-` node is terminal because whatever
+the cited work rests on is outside this corpus too; an equation node is
+terminal because point 9's maths fence holds the LaTeX verbatim, nothing
+inside it rewritten into an anchor, so no reference can originate from one and
+it closes no cycle by existing.
+
 **The external work is the fifth kind, and it is not minted either.** A
 `work-` node stands for a work the corpus **cites and does not contain** — the
 off-graph endcap. Its identity is the citation key, so its id is `work-` plus
@@ -517,6 +538,20 @@ this corpus does not contain rather than a result one of its documents states.
 Framework nodes stand outside that relation for the same reason, so this is one
 more kind outside it and not a schema without precedent. What holds in its place
 is the other direction: every `rests-on` edge's target has an entry.
+
+**Marker coverage does not reach an equation node, and both halves of the
+exemption matter.** A `clm-` node minted for a referenced equation is hosted
+by a leaf like any other claim — bidirectional coverage above is satisfied in
+the ordinary way — but the inline marker that makes a claim's position
+recoverable in a multi-claim leaf has nowhere to go: an equation's position
+*is* its `\label`, which point 9 guarantees verbatim inside the maths fence,
+and no marker may be written there without altering the mathematics the fence
+exists to preserve. So the node neither needs a marker nor counts toward the
+threshold that demands one of every claim beside it: dropping it from the
+count and not only from the demand, or minting one equation node would change
+what is required of the claims that were already there — a leaf hosting one
+block claim and four equations stays a leaf with one claim as far as that
+threshold is concerned.
 
 **Edge classes.** Five, discriminated by the `relation` field on
 `kb_index_lib.DependsOnEdge`. Every edge of every class is materialized in
@@ -836,8 +871,8 @@ PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util render-citation --values <
 
 `kb_driver/` runs a KB build end to end: it sequences the stages, dispatches
 each seat, checks what came back, records the ledger, and stops at a
-decision instead of taking one. **No inference performs sequencing, loop
-counting, recording, or display** — those belong to the toolchain, enforced
+decision instead of taking one. **No inference performs sequencing, recording,
+or display** — those belong to the toolchain, enforced
 mechanically (ARCHITECTURE.md, The Driver). **A barrier is an *exit*, never
 a prompt**: the driver never blocks on a human, so the answer arrives on the
 next invocation through `--decide` or a config table.
@@ -868,10 +903,7 @@ carries on past it, so the run produces a real KB built without them rather
 than a resumable stop. It is not a bound and not a substitution: the ledger
 ops, the runner targets, the coverage checks, the barriers and every write
 still happen for real, and every stage is still walked and still recorded.
-`--dry-run` is the different thing it is often confused with — it replaces the
-calls the driver dispatches with synthetic ones so the state machine can be
-smoke-tested, and it makes no claim about a model spawned inside a tool the
-driver invokes. `--through <stage>` is the one bound, naming the last stage to
+`--through <stage>` is the one bound, naming the last stage to
 walk by stage id or by the stage's own display name. **A bounded run is not a
 failed one**: it leaves the ledger standing where it stopped, and the next
 invocation resumes there rather than redoing what landed.
@@ -925,22 +957,23 @@ than one boundary and a per-stage answer would let two stages disagree about
 it. A record says only what the build was; which checks that excuses is the
 toolchain's own classification and is not nameable from a command line.
 
-**A review's severities are the reviewer's ruling, and a gate over one reads
-them rather than counting what they sort.** Where a stage ends on a seat's
-review, what stops the build is a **critical** finding and nothing else. A
-warning and a note are reported and the build carries on, the documents standing
-as written with those findings outstanding against them. A gate summing open
-findings discards the judgement it asked for: a note observing that a filename
-goes unmentioned in a document would halt a build exactly as hard as a defect
-does, which is the opposite of what a reviewer asked to decide what is critical
-has ruled about it. A critical finding is the one a repair round is spent on,
-and a review clean of them passes on its first pass.
+**No stage exits on a review's findings, and a stage that ends on a seat's
+review is a fixed sequence rather than a loop.** The review runs, one revision
+answers what it wrote, and the stage records: nothing re-reviews, nothing counts
+what the revision closed, and no severity the reviewer returns fails the stage.
+The documents stand as written, with whatever findings are outstanding against
+them. A stage that ends when a reviewer stops finding problems is a stage
+exiting on a model's opinion, which is the failure `CONVENTIONS.md` records
+under "a `kb_claimgraph` stage never exits on a model's opinion": reviewer
+instructions that make problems inexhaustible make such a stage unable to
+terminate, and a gate reading one severity rather than another only narrows
+which opinion it hangs on.
 
-**A severity that no longer stops must still be seen, and that is the other half
-of the same guarantee.** The stage states each round's counts, one per severity,
-and names the findings artifact so a reader can go look — in both directions,
-a round that raised no warning and no note saying so in as many words. Whether
-to promote a severity to a stop is a decision made later from the record of what
+**Findings that stop nothing must still be seen, and that is the other half of
+the same guarantee.** The stage states the review's counts, one per severity,
+and names the findings artifact so a reader can go look — in both directions, a
+review that raised nothing saying so in as many words. Whether a class of
+finding should stop a build is a decision made later from the record of what
 those findings actually were, so a silent carry-past would spend the evidence
 that decision runs on; and an absence that reads like success is the failure
 this states the zero form against.
@@ -953,19 +986,11 @@ judgment about work that already exists, reaching the graph through the
 maintenance tooling's own write ops on a later pass. `*pending*` is a legal
 value everywhere the format admits one (Claim-Graph Nodes and Edges, above), so
 no stage boundary is gated on a number and nothing in the build refuses one
-left unscored. What the build does refuse is the converse: a seat that grades
-its own minted work stops the stage.
-
-**The entry point is the one document with a size budget.** It is read at the
-start of a reading session and stays resident, so its length is paid on every
-turn of that session. The build states the budget to the seat that writes it —
-as a **word** count, and as the number to write to — and asks that seat to
-measure nothing, a model estimating words far better than it counts tokens,
-which it cannot do at all. What the build refuses is a runaway: a document
-several times the budget stops the stage, and one merely over it is accepted,
-because failing a seat for the error of writing to a number by eye would be
-gating on arithmetic no inference performs. No other document carries a size
-rule.
+left unscored. Nor does the converse need a refusal standing over it: no seat
+this build dispatches mints anything. Every id, edge and register entry a build
+writes is minted mechanically, inside `kb_claimgraph`, which writes the unscored
+literal by construction — and the validation gate over what it wrote is what
+holds it there.
 
 **The build derives the tree and grades none of it.** The skeleton is computed
 from the surveyed sources (The Skeleton Is Derived, above) before any seat is
@@ -993,8 +1018,7 @@ took, and the flag that changes it, before its first stage**. A config file
 remains available for a run that sets more than the arguments carry, and where
 both are given the argument wins for the field it names.
 
-Exit codes are two mode-scoped ladders, enumerated in
-`baton.RUN_MODE_EXIT_CODES` and `baton.WATCH_MODE_EXIT_CODES`. Every
+Exit codes are one ladder, enumerated in `baton.RUN_MODE_EXIT_CODES`. Every
 terminating invocation prints a relay card naming what to ask and what to
 run next, and an unrecognized code prints the fallback card rather than
 being interpreted.
@@ -1073,14 +1097,30 @@ file's prose outside those sections may not.
   <a href="<path>#<fragment>" data-reference-type="<type>" data-reference="<label>">
   ```
 
-  `<type>` is the referencing macro's own kind — `ref` and `eqref` are distinct,
-  and a consumer that must not treat an equation as a node tells them apart
-  here. `<label>` is the author's own `\label` as the source spelled it, and it
-  rides every anchor whether or not the fragment does. **An anchor may be
-  hard-wrapped between its attributes, and inside a labelled block (point 12)
-  the continuation line carries that block's quote prefix** — so a recogniser
-  anchored to a single line, or one reading the raw bytes rather than the
-  quote-stripped ones, matches nothing.
+  `<type>` is the referencing macro's own kind — the field a consumer reads to
+  tell `ref` from `eqref`, or any other distinction its own job turns on — but
+  those two are an example, not the vocabulary: pandoc also writes `ref+label`
+  and `ref+Label` for the cleveref family, and will write whatever the next
+  macro spells the type as. A consumer reads the attribute as it stands and
+  tests for the kinds
+  it must act on; a closed list of the kinds it will *accept* refuses the next
+  spelling silently.
+
+  `<label>` is the author's own `\label` as the source spelled it, and it
+  rides every anchor whether or not the fragment does. **It may hold a
+  list**: a cleveref command takes several labels, and the reader emits one
+  anchor whose `data-reference` carries all of them, comma-separated — naming
+  several targets and stating several relationships, and discriminated from a
+  single label by `<type>` alone. A `\ref` takes exactly one label, and that
+  label may itself contain a comma — this corpus carries four,
+  `\ref{cor: decay, hyper, unif}` among them — so what separates a list from a
+  comma-bearing single label is the type and never the comma; a reader that
+  splits on the comma regardless shatters those four into dead fragments.
+
+  **An anchor may be hard-wrapped between its attributes, and inside a
+  labelled block (point 12) the continuation line carries that block's quote
+  prefix** — so a recogniser anchored to a single line, or one reading the raw
+  bytes rather than the quote-stripped ones, matches nothing.
 
   **The definition end.** Where the source labelled something the tree can
   address, the label survives *on that thing*, as an identifier the document

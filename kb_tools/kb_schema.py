@@ -24,6 +24,7 @@ Four vocabularies live here:
 Stdlib only.
 """
 
+import re
 import secrets
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -200,6 +201,45 @@ def work_key(node_id: str) -> str | None:
     """The citation key inside ``node_id``, or ``None`` if it is not a work id."""
     prefix, _, key = node_id.partition("-")
     return key if prefix == WORK_PREFIX and key else None
+
+
+# ---------------------------------------------------------------------------
+# The equation node's title grammar
+# ---------------------------------------------------------------------------
+#
+# A referenced equation that no claim-bearing block and no proof holds is minted
+# as an ordinary `clm-` node, so nothing about its id or its register entry
+# distinguishes it. What does distinguish it is its TITLE, and that is not a
+# display choice: a block-hosted claim is joined back to its block by title and a
+# prose claim by its Tier-2 marker, and an equation has neither — its `\label`
+# lives inside the maths fence rather than as an addressable id, so the title is
+# the only authored field that can carry it. The grammar is therefore a join key,
+# spelled here for the same reason `WORK_ID_RE` is: two packages have to agree on
+# it, `kb_claimgraph` composing it and `verify_kb_metadata` reading it, and
+# neither may import the other.
+
+#: How an equation node's title is spelled: the hosting document's own H1 and
+#: the equation's own ``\label``, both the author's words.
+_EQUATION_TITLE = "Equation (`{label}`) — {heading}"
+
+#: The same statement read backwards. A backtick cannot appear in a LaTeX label,
+#: which is what lets the delimiters be unambiguous without an escape grammar.
+_EQUATION_TITLE_RE = re.compile(r"^Equation \(`([^`]+)`\) — .+$", re.DOTALL)
+
+
+def equation_title(*, label: str, heading: str) -> str:
+    """The register title of the node standing for the equation labelled ``label``."""
+    return _EQUATION_TITLE.format(label=label, heading=heading)
+
+
+def equation_label(title: str) -> str | None:
+    """The ``\\label`` inside an equation node's title, or ``None`` for any other title.
+
+    This is what makes a ``clm-`` entry an equation node to every reader of the
+    authored bytes: the id says nothing, and the title says which equation.
+    """
+    found = _EQUATION_TITLE_RE.match(title)
+    return found.group(1) if found is not None else None
 
 
 # Character set and length backing the hash body, used to MINT new ids.

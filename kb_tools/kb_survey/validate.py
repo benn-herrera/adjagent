@@ -42,7 +42,7 @@ argument that could change that, and neither entry point takes one that could ar
 measurement into a gate or disarm a gate into a measurement.
 
 **Report order.** Pre-build findings come back in check order — 1, 2, 4 — and
-post-build findings in theirs — 3, 4, the ``mf:`` guard. Within a gate check they
+post-build findings in theirs — 3, 4. Within a gate check they
 are sorted by ``(check, detail)``, where every detail begins with the offending
 identity: a section id, a KB path, or a ``file:line-line`` coordinate. Check 2's
 ``FACT`` lines are ordered by the distribution they report (leaves descending by
@@ -59,7 +59,7 @@ from pathlib import Path, PurePosixPath
 from .. import kb_index_lib, kb_links
 from ..kb_index_lib import ENTRY_POINT_FILENAME, INDEX_FILENAME, UPLINK_MARKER
 from . import skeleton as survey_skeleton
-from .manifest import ID_PREFIX, Manifest
+from .manifest import Manifest
 
 TAG = "survey-validate"
 
@@ -78,7 +78,6 @@ CHECK_DEPTH = "2-depth"
 CHECK_FAN_OUT = "2-fan-out"
 CHECK_TREE_DIFF = "3-tree-diff"
 CHECK_REACHABILITY = "4-reachability"
-CHECK_ID_GUARD = "guard-mf-token"
 
 # How many entries a FACT list prints. A report-length constant and the only number
 # in check 2: nothing about the document is judged by it, and nothing gates on it.
@@ -232,7 +231,7 @@ def _check_reachability(paths: Sequence[str]) -> list[Finding]:
     return [Finding(PASS, CHECK_REACHABILITY, f"{len(known)} paths, every parent index present")]
 
 
-# --- the built tree: check 3, post-build check 4, the mf: guard ---------------
+# --- the built tree: check 3 and post-build check 4 ---------------------------
 
 
 @dataclass(frozen=True)
@@ -267,7 +266,7 @@ def _tree_paths(kb_root: Path) -> dict[str, Path]:
 def _documents(kb_root: Path) -> dict[str, str]:
     """Every authored document's text, by kb-root-relative path.
 
-    One read serves all three post-build checks, so no document is opened twice and
+    One read serves both post-build checks, so no document is opened twice and
     none is read by one check and skipped by another.
     """
     return {relative: path.read_text(encoding="utf-8") for relative, path in _tree_paths(kb_root).items()}
@@ -431,29 +430,6 @@ def _check_build_reachability(documents: Mapping[str, str]) -> list[Finding]:
     ]
 
 
-def _check_id_guard(documents: Mapping[str, str]) -> list[Finding]:
-    """The ``mf:`` guard: a manifest id is per-run and never enters ``kb-root/``.
-
-    A literal token grep, which is the whole point of a constant prefix: misuse is
-    checkable by one token rather than by set membership over hundreds of ids. It
-    reads the document as written rather than the scrubbed copy the link scan reads —
-    a per-run id fenced in a code block is in the built tree just the same.
-    """
-    findings: list[Finding] = []
-    for path in sorted(documents):
-        hits = [number for number, line in enumerate(documents[path].splitlines(), start=1) if ID_PREFIX in line]
-        if hits:
-            findings.append(
-                Finding(
-                    FAIL,
-                    CHECK_ID_GUARD,
-                    f"{path}:{hits[0]} carries the manifest-id token {ID_PREFIX!r} ({len(hits)} lines in this file) — "
-                    "manifest ids are per-run and never enter the KB",
-                )
-            )
-    return findings or [Finding(PASS, CHECK_ID_GUARD, f"no {ID_PREFIX!r} token in {len(documents)} authored documents")]
-
-
 # --- the entry points ---------------------------------------------------------
 
 
@@ -496,7 +472,6 @@ def validate_build(*, paths: Sequence[str] | None, kb_root: Path) -> list[Findin
     return [
         *_check_tree_diff(paths, documents.keys()),
         *_check_build_reachability(documents),
-        *_check_id_guard(documents),
     ]
 
 

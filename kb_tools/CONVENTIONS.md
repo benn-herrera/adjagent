@@ -7,8 +7,13 @@ directory's copies; the repository-root documents are named as root.
 
 - **Never run these tools ad-hoc.** Use the consuming project's runner
   target (`kb-verify` / `kb-refresh` / `kb-stats`, or the `kb_util` build
-  ops through the runner include) — see SPEC.md, Runner Targets, for why
-  ad-hoc invocation isn't sanctioned.
+  ops through the runner include) — see SPEC.md, Runner Targets, for the
+  sanctioned channels. The exception is a measurement script of your own
+  over already-built kb-roots, and it runs through `measure-kb-roots`
+  (`kb-testing/justfile`, whose `[doc]` states the argv it hands you).
+  Reaching an op these tools already expose is running them, read-only or
+  not. Write the script read-only; nothing checks that. The report a
+  measurement lands in cites the script by path.
 - **`pandoc.py` is the only module that names the `pandoc` binary.** It is
   the single enumerated stdlib-only exception (SPEC.md, Corpus Invariants),
   and the property that makes it enumerable is that nothing else in the
@@ -91,6 +96,26 @@ directory's copies; the repository-root documents are named as root.
   target as a ghost id with the record sitting in `claims.jsonl` the whole
   time. Note which question you are asking: `kb_schema.ID_KINDS` is what gets
   *minted* and excludes `work` deliberately; this is what exists.
+- **Never enumerate what you will accept in a field this package does not
+  fill.** `OP_FIELDS` and `NODE_KINDS` above end at "point at the constant";
+  this inverts, because no constant is total over a vocabulary nobody here
+  defines. Read such a field whole and branch only on the values you must act
+  on — `tree.CLEVEREF_REFERENCE_TYPES` — handing everything else downstream
+  under its own name, the way an unrecognised Div class falls back to itself in
+  `authored_blocks.lua`. A table that must stay closed keeps its residue
+  counted and reported instead
+  (`Census.unclassified`, `build.py`'s `stage-B-unclassified` line); a pattern
+  or a branch enumerating its accepted values leaves the unanticipated one no
+  trace at all. This is a scar: `tree.ANCHOR_RE` spelled `data-reference-type`
+  as `([a-z]+)`, which matches `ref` and `eqref` and neither spelling pandoc
+  gives the cleveref family (`\cref`, `\Cref`, `\autoref`), so every cleveref
+  reference in the corpus reached the trees and was read as none — one paper
+  recorded all thirty of its claims as resting on nothing. SPEC.md's
+  cross-reference join says only that the type is the referencing macro's own
+  kind and enumerates no vocabulary: a character class enumerating one is a
+  second contract, and a count of the spellings written down here would be a
+  third. A model's answer to one of our own asks is not this case — that format
+  is ours, and its parser stays strict.
 
 - **A test's placement is decided by what it drives, not by convenience.**
   A test that exercises a `kb_tools` function or module in isolation belongs

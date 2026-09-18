@@ -121,11 +121,9 @@ class TestNavigationConventionSingleSourced(unittest.TestCase):
     tree — or, at the third, every directory-form subtree query answering
     empty.
 
-    ``kb_tools.kb_driver.replay`` is not a site: it wrote the very up-links and
-    index nodes the validator's reachability check read, but the distillation
-    stages that let a replayed run stand in for are gone with the LaTeX-reading
-    pipeline they belonged to, and the driver never derives KB navigation
-    content of its own.
+    ``kb_tools.kb_driver`` is not a site: the driver never derives KB
+    navigation content of its own — the tree it walks arrives already built
+    from the pandoc front end.
     """
 
     #: The three modules the convention was spelled in, and the names each binds.

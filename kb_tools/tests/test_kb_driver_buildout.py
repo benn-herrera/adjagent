@@ -12,8 +12,9 @@ end. What survives here is everything downstream of an already-built tree:
   a defect in a tool or in what was authored.
 * **``overview-drafted`` writes the overview document and ``phase-5`` reviews
   it.** Two stages and two boundaries, because each spends a model call and
-  neither may pay for the other's failure; the review side still runs the capped
-  cycle — review, fix from the findings, re-review, escalate at the cap.
+  neither may pay for the other's failure. The review side is a fixed sequence
+  — one review, then one revision answering its findings — and no severity the
+  reviewer returns fails the stage.
 
 The fixture's ``repo`` starts at the state the pandoc pipeline hands off: a KB
 spine, with every domain's leaves already distilled (:func:`distilled`) by the
@@ -33,7 +34,8 @@ from pathlib import Path
 import pytest
 
 from kb_tools import kb_index_lib, kb_pipeline, kb_readme, kb_util
-from kb_tools.kb_driver import barriers, baton, config, envelope, ledger, prompt_templates, replay, run, runlog, steps
+from kb_tools.kb_driver import barriers, baton, config, envelope, ledger, prompt_templates, run, runlog, steps
+from kb_tools.tests import _fake_model as fake_model
 
 #: A KB with nothing in it, used only to read the emitter's own artifact
 #: vocabulary off ``build_all_records``. A list of filenames here would be a
@@ -138,7 +140,7 @@ class Script:
 
     def __init__(self, returns: Mapping[str, object]) -> None:
         self._returns = dict(returns)
-        self.calls: list[replay.ReplayContext] = []
+        self.calls: list[fake_model.Context] = []
 
     @property
     def order(self) -> list[str]:
@@ -148,7 +150,7 @@ class Script:
     def count(self, step_id: str) -> int:
         return sum(1 for context in self.calls if context.step.endswith(step_id))
 
-    def contexts(self, step_id: str) -> list[replay.ReplayContext]:
+    def contexts(self, step_id: str) -> list[fake_model.Context]:
         return [context for context in self.calls if context.step.endswith(step_id)]
 
     def brief(self, step_id: str) -> str:
@@ -156,15 +158,15 @@ class Script:
         assert contexts, f"{step_id} was never called"
         return contexts[-1].brief_text()
 
-    def scenario(self) -> replay.Scenario:
-        def scenario(context: replay.ReplayContext) -> replay.Response:
+    def scenario(self) -> fake_model.Scenario:
+        def scenario(context: fake_model.Context) -> fake_model.Response:
             self.calls.append(context)
             for step_id, scripted in self._returns.items():
                 if not context.step.endswith(step_id) and not context.step.endswith(f"{step_id}-reask"):
                     continue
                 answers = scripted if isinstance(scripted, (list, tuple)) else [scripted]
                 answer = answers[min(self.count(step_id) - 1, len(answers) - 1)]
-                return replay.clean(answer(context) if callable(answer) else str(answer))(context)
+                return fake_model.clean(answer(context) if callable(answer) else str(answer))(context)
             raise AssertionError(f"no scripted return for {context.step}")
 
         return scenario
@@ -173,7 +175,7 @@ class Script:
 def render_for(recorded: Sequence[str]) -> str:
     lines = [f"[kb-build] status: in progress ({len(recorded)} recorded)"]
     lines += [f"[{'x' if stage in recorded else ' '}] {stage}  {stage} display" for stage in kb_pipeline.STAGE_IDS]
-    lines.append("[card] next action — do the thing")
+    lines.append("[kb-build] next action — do the thing")
     return "\n".join(lines) + "\n"
 
 
@@ -345,7 +347,7 @@ def drive(
     return run.execute(
         config=config.load(path, admissible=barriers.ADMISSIBLE),
         paths=paths,
-        invoker=replay.ReplayInvoker(script.scenario()),
+        invoker=fake_model.FakeInvoker(script.scenario()),
         ops=ops if ops is not None else fake.ops(repo_root),
         repo_root=repo_root,
         stages=stages,
@@ -362,24 +364,20 @@ def drive(
 #: else. It writes no file, because the stage assembles the document.
 PASSAGE = "This corpus is three volumes of synthetic material. Start at the first."
 
-#: What the seat returns at ``p5.fix``, and it differs from :data:`PASSAGE` on
-#: purpose: a fix round composing the document already on disk is refused, so a
-#: scenario that scripts the draft's own answer back is scripting a failure.
-#: :func:`test_a_fix_round_that_changes_nothing_fails_the_round` is where that
-#: is the point.
+#: What the seat returns at ``p5.fix``. It differs from :data:`PASSAGE` so that
+#: a case can tell which of the two calls the standing document was assembled
+#: over; the revision runs either way.
 FIXED_PASSAGE = "This corpus is three volumes of synthetic material, and index.md is where a reader starts."
 
 
-def phase_5_script(*, rounds: Sequence[envelope.Verdict] = (CLEAN,)) -> Script:
+def phase_5_script(*, verdict: envelope.Verdict = CLEAN) -> Script:
     return Script(
         {
             "ov.docs": PASSAGE,
             "p5.fix": FIXED_PASSAGE,
-            # `replay.verdict` composes the line `envelope.parse_verdict` reads,
-            # so a scripted round cannot spell a format the driver would refuse.
-            "p5.review": [
-                replay.verdict(critical=item.critical, warning=item.warning, note=item.note) for item in rounds
-            ],
+            # `fake_model.verdict` composes the line `envelope.parse_verdict` reads,
+            # so a scripted review cannot spell a format the driver would refuse.
+            "p5.review": fake_model.verdict(critical=verdict.critical, warning=verdict.warning, note=verdict.note),
         }
     )
 
@@ -389,7 +387,7 @@ def stamp_leaf(repo_root: Path, path: str) -> Path:
     leaf = kb_util.kb_root(repo_root) / path
     leaf.parent.mkdir(parents=True, exist_ok=True)
     body = f"[Up: {path}](../index.md)\n\nA distilled leaf.\n"
-    leaf.write_text(replay.stamped_leaf(body, claims=()), encoding="utf-8")
+    leaf.write_text(fake_model.stamped_leaf(body, claims=()), encoding="utf-8")
     return leaf
 
 
@@ -487,7 +485,7 @@ def test_an_environment_fault_stops_the_run_the_same_way_a_red_gate_does(
 
 
 # ---------------------------------------------------------------------------
-# phase-5: meta-docs, one fix cycle, and the docent check
+# phase-5: meta-docs, the fixed review sequence, and the docent check
 # ---------------------------------------------------------------------------
 
 
@@ -502,129 +500,106 @@ def test_the_stage_assembles_the_overview_document_reviews_it_and_records(
     result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
 
     assert result.exit_code == baton.EXIT_OK
-    assert script.order == ["ov.docs", "p5.review"]
+    assert script.order == ["ov.docs", "p5.review", "p5.fix"]
     assert fake.recorded[-1] == "phase-5"
 
     document = (kb_util.kb_root(repo) / kb_pipeline.OVERVIEW_DOC).read_text(encoding="utf-8")
     # The seat's answer reaches the document verbatim, and nothing else it
-    # returned does — every other word is the template's or the index's.
-    assert PASSAGE in document
+    # returned does — every other word is the template's or the index's. The
+    # revision ran last, so its answer is the one standing.
+    assert FIXED_PASSAGE in document
     assert not kb_readme.slots(document), "a slot reached the knowledge base unfilled"
     # The counts the seat was never asked for: this corpus has no claims, and
     # the document says so because the index does.
     assert f"{len(DOMAINS) * LEAVES_PER_DOMAIN} documents" in document
 
 
-def test_a_critical_finding_runs_one_fix_cycle_and_then_escalates_to_phase_5s_own_key(
-    repo: Path, tmp_path: Path, templates: Path
+@pytest.mark.parametrize("verdict", [CLEAN, CARRIED, CRITICAL], ids=["clean", "carried", "critical"])
+def test_no_severity_the_reviewer_returns_fails_the_stage(
+    repo: Path, tmp_path: Path, templates: Path, verdict: envelope.Verdict
 ) -> None:
-    distilled(repo)
-    script = phase_5_script(rounds=(CRITICAL,))
+    """The same two calls and the same boundary, whatever the reviewer ruled.
 
-    result = drive(
-        repo_root=repo,
-        tmp_path=tmp_path,
-        templates=templates,
-        script=script,
-        fake=FakeLedger(recorded=RECORDED_THROUGH_3A),
-        stages=META_STAGES,
-    )
-
-    assert result.exit_code == baton.EXIT_GATE_RED
-    assert result.pair == "phase-5.cap-exhausted"
-    assert script.count("p5.fix") == kb_pipeline.PHASE_5_FIX_CAP
-
-
-def test_a_fix_round_that_changes_nothing_fails_the_round(repo: Path, tmp_path: Path, templates: Path) -> None:
-    """The seat answers the findings with the draft's own passage, so the document does not move.
-
-    This is the failure the stage's boundary check cannot see. That check runs
-    once, after the last round, and by then the overview differs from ``HEAD``
-    because the draft created it — so it is satisfied identically whether the
-    fix repaired anything or returned what it was already given. The comparison
-    that can tell them apart is between the bytes the round composed and the
-    bytes standing when it composed them, and it lives where the round runs.
-
-    Exit 17 and not the cap: the cap is what bounds a seat that keeps finding
-    work, and this seat did none. Spending the rest of the budget re-reviewing a
-    document nobody touched would turn a contract failure into a timeout.
+    A gate over a review's severities is a stage exiting on a model's opinion,
+    and a loop over one is a build that ends when a reviewer runs out of things
+    to say. The stage is a structure instead: the review runs, the revision
+    answers what it wrote, the stage records, and the findings stand in the run
+    log for a reader to act on later.
     """
     distilled(repo)
-    # The draft's answer, returned again as the fix. Every other word of the
-    # document is the template's or the index's and neither moved, so the
-    # composed bytes are the standing bytes.
-    script = Script({"ov.docs": PASSAGE, "p5.fix": PASSAGE, "p5.review": replay.verdict(critical=1)})
     fake = FakeLedger(recorded=RECORDED_THROUGH_3A)
-
-    result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
-
-    assert result.exit_code == baton.EXIT_CONTRACT
-    assert script.count("p5.fix") == 1, "the round is refused where it composed, not after another review"
-    assert "phase-5" not in fake.recorded, "a stage whose fix answered nothing does not reach its boundary"
-    document = (kb_util.kb_root(repo) / kb_pipeline.OVERVIEW_DOC).read_text(encoding="utf-8")
-    assert PASSAGE in document, "the standing document is left as the draft wrote it"
-
-
-def _findings_path(repo: Path, *, round_number: int) -> Path:
-    """Where one round's findings land — the path the review row declares."""
-    return (
-        repo
-        / steps.SCRATCH_ROOT
-        / steps.findings(
-            stage="phase-5",
-            series=steps.SERIES_INITIAL,
-            round_number=round_number,
-            author=steps.META_REVIEW_SEAT,
-        )
-    )
-
-
-def test_a_findings_file_a_dead_process_left_is_not_a_round_and_spends_no_fix_budget(
-    repo: Path, tmp_path: Path, templates: Path
-) -> None:
-    """A round is recorded by the stage's boundary, so a file on disk is not one.
-
-    The zero-byte file is what a process killed mid-write leaves. Counted as a
-    completed round it made the next review round 2, which is one revision spent
-    against a cap of one — so the crash exhausted the stage's whole fix budget
-    and the build escalated instead of repairing anything.
-    """
-    distilled(repo)
-    orphan = _findings_path(repo, round_number=1)
-    orphan.parent.mkdir(parents=True, exist_ok=True)
-    orphan.touch()
-    fake = FakeLedger(recorded=RECORDED_THROUGH_3A)
-    script = phase_5_script(rounds=(CRITICAL, CLEAN))
+    script = phase_5_script(verdict=verdict)
 
     result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
 
     assert result.exit_code == baton.EXIT_OK
-    assert result.pair == "", "the orphan spent the cap and escalated"
+    assert result.pair == "", "a finding is reported, and a report is not a barrier"
+    assert script.order == ["ov.docs", "p5.review", "p5.fix"]
+    assert fake.recorded[-1] == "phase-5"
+
+
+def test_a_revision_composing_the_document_already_standing_is_not_a_failure(
+    repo: Path, tmp_path: Path, templates: Path
+) -> None:
+    """The seat answers with the draft's own passage, so the document does not move.
+
+    Nothing here compares what the revision composed against what stood: the
+    stage runs two calls and records, and a revision that reaches the same
+    passage from the same tree has answered the question it was asked. The
+    document that stands is the one the revision composed, byte for byte the
+    draft's.
+    """
+    distilled(repo)
+    script = Script({"ov.docs": PASSAGE, "p5.fix": PASSAGE, "p5.review": fake_model.verdict(critical=1)})
+    fake = FakeLedger(recorded=RECORDED_THROUGH_3A)
+
+    result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
+
+    assert result.exit_code == baton.EXIT_OK
     assert script.count("p5.fix") == 1
     assert fake.recorded[-1] == "phase-5"
-    # The rounds that ran are 1 and 2, round 1 landing over the orphan. A count
-    # that started high would have produced a round 3 instead.
-    assert _findings_path(repo, round_number=2).is_file()
-    assert not _findings_path(repo, round_number=3).exists()
+    document = (kb_util.kb_root(repo) / kb_pipeline.OVERVIEW_DOC).read_text(encoding="utf-8")
+    assert PASSAGE in document
 
 
-@pytest.mark.parametrize(
-    ("rounds", "expected"),
-    [((CLEAN,), "review: 1 round(s), 0 fix round(s)"), ((CRITICAL, CLEAN), "review: 2 round(s), 1 fix round(s)")],
-    ids=["no-fix", "one-fix"],
-)
-def test_the_stages_own_boundary_is_what_records_the_rounds_its_cycle_ran(
-    repo: Path,
-    tmp_path: Path,
-    templates: Path,
-    rounds: Sequence[envelope.Verdict],
-    expected: str,
+def _findings_path(repo: Path) -> Path:
+    """Where the review's findings land — the path the review row declares."""
+    return repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT)
+
+
+def test_a_findings_file_a_dead_process_left_is_overwritten_by_the_review_that_runs(
+    repo: Path, tmp_path: Path, templates: Path
 ) -> None:
-    """The rounds are an attribute of the stage's one ledger entry and of nothing else.
+    """Nothing on disk is read as evidence that a call already happened.
 
-    There is no per-round entry — the ledger's entries are the stage vocabulary —
-    so the boundary commit's body is the whole record of how many rounds the
-    stage took, and a stage that ran no cycle carries no such clause.
+    The zero-byte file is what a process killed mid-write leaves. A stage the
+    walk reaches is a stage no boundary accounts for, so its review runs and
+    lands on that path rather than being skipped or counted.
+    """
+    distilled(repo)
+    orphan = _findings_path(repo)
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.touch()
+    fake = FakeLedger(recorded=RECORDED_THROUGH_3A)
+    script = phase_5_script(verdict=CRITICAL)
+
+    result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
+
+    assert result.exit_code == baton.EXIT_OK
+    assert script.count("p5.review") == 1
+    assert fake.recorded[-1] == "phase-5"
+    assert orphan.read_text(encoding="utf-8").strip(), "the review that ran did not land on the orphan's path"
+
+
+def test_a_stage_that_ran_everything_records_a_boundary_with_no_note(
+    repo: Path, tmp_path: Path, templates: Path
+) -> None:
+    """The rows are a fixed sequence, so the entry saying the stage is behind the build says it ran them.
+
+    A note stating what a stage spent would be a second view of the step table,
+    and it would go stale against it silently. The one thing a finished build
+    cannot state about itself is a row it *dropped*, which is the note that
+    survives (``test_kb_driver_head.py`` drives it).
     """
     distilled(repo)
     fake = FakeLedger(recorded=RECORDED_THROUGH_3A_PREDECESSOR)
@@ -633,47 +608,23 @@ def test_the_stages_own_boundary_is_what_records_the_rounds_its_cycle_ran(
         repo_root=repo,
         tmp_path=tmp_path,
         templates=templates,
-        script=phase_5_script(rounds=rounds),
+        script=phase_5_script(verdict=CRITICAL),
         fake=fake,
         stages=("phase-3a", *META_STAGES),
     )
 
-    assert expected in fake.notes["phase-5"]
-    assert fake.notes["phase-3a"] == "", "a stage with no findings loop has no rounds to record"
-    assert fake.notes["overview-drafted"] == "", "the draft spends no round either, and says nothing about one"
-
-
-def test_a_warning_and_a_note_are_carried_past_the_gate_and_the_stage_records(
-    repo: Path, tmp_path: Path, templates: Path
-) -> None:
-    """The gate is the reviewer's own severity, not a count of what it left open.
-
-    A reviewer that raised no critical finding has ruled that nothing here stops
-    the build, and the counting gate discarded that ruling — a note observing an
-    unmentioned filename spent the stage's one fix round and escalated. The
-    documents stand as written, the stage records, and the run walks on.
-    """
-    distilled(repo)
-    fake = FakeLedger(recorded=RECORDED_THROUGH_3A)
-    script = phase_5_script(rounds=(CARRIED,))
-
-    result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
-
-    assert result.exit_code == baton.EXIT_OK
-    assert result.pair == "", "a warning is reported, and a report is not a barrier"
-    assert script.count("p5.fix") == 0, "no fix round is spent on a finding the reviewer did not call critical"
-    assert fake.recorded[-1] == "phase-5"
+    assert [fake.notes[stage] for stage in ("phase-3a", *META_STAGES)] == ["", "", ""]
 
 
 @pytest.mark.parametrize(
     ("returned", "expected"),
     [
-        (CARRIED, "3 finding(s) at warning or note are reported here and repaired by nobody"),
-        (CLEAN, "the reviewer raised no finding at warning or note"),
+        (CARRIED, "the 3 finding(s) are answered by the one revision that follows"),
+        (CLEAN, "the reviewer raised no finding at any severity"),
     ],
     ids=["non-zero", "zero"],
 )
-def test_the_round_reports_its_counts_by_severity_and_where_the_findings_are(
+def test_the_review_reports_its_counts_by_severity_and_where_the_findings_are(
     repo: Path,
     tmp_path: Path,
     templates: Path,
@@ -685,16 +636,13 @@ def test_the_round_reports_its_counts_by_severity_and_where_the_findings_are(
 
     The zero form is the load-bearing half: a build that said nothing when the
     reviewer raised no warning would read exactly like one whose warnings went
-    unreported, and promoting a warning to a critical on our own schedule
-    depends on having seen it. The console tee prints messages alone, so the
-    counts and the path are asserted against the message text and not the
-    record's context.
+    unreported, and promoting a severity to a stop on our own schedule depends
+    on having seen it. The console tee prints messages alone, so the counts and
+    the path are asserted against the message text and not the record's context.
     """
     distilled(repo)
-    script = phase_5_script(rounds=(returned,))
-    findings = steps.findings(
-        stage="phase-5", series=steps.SERIES_INITIAL, round_number=1, author=steps.META_REVIEW_SEAT
-    )
+    script = phase_5_script(verdict=returned)
+    findings = steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT)
 
     with caplog.at_level("INFO", logger="kb_driver.run"):
         drive(
@@ -707,10 +655,10 @@ def test_the_round_reports_its_counts_by_severity_and_where_the_findings_are(
         )
 
     line = next(
-        (message for message in caplog.messages if message.startswith("phase-5 review round 1:")),
+        (message for message in caplog.messages if message.startswith("phase-5 review:")),
         None,
     )
-    assert line is not None, "the review round reported no counts at all"
+    assert line is not None, "the review reported no counts at all"
     assert f"critical={returned.critical} warning={returned.warning} note={returned.note}" in line
     assert expected in line
     assert f"findings: {steps.SCRATCH_ROOT}/{findings}" in line
@@ -721,7 +669,7 @@ def test_the_fix_call_reads_the_reviewers_findings_and_the_first_pass_does_not(
 ) -> None:
     """One template, two call sites: the difference is one slot with a named absence."""
     distilled(repo)
-    script = phase_5_script(rounds=(CRITICAL, CLEAN))
+    script = phase_5_script(verdict=CRITICAL)
 
     drive(
         repo_root=repo,
@@ -733,9 +681,7 @@ def test_the_fix_call_reads_the_reviewers_findings_and_the_first_pass_does_not(
     )
 
     assert field(script.brief("ov.docs"), "Findings") == steps.NOTHING
-    findings = steps.findings(
-        stage="phase-5", series=steps.SERIES_INITIAL, round_number=1, author=steps.META_REVIEW_SEAT
-    )
+    findings = steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT)
     assert field(script.brief("p5.fix"), "Findings").endswith(Path(findings).name)
 
 
@@ -747,7 +693,7 @@ def test_every_path_a_brief_hands_a_seat_resolves_without_a_base(repo: Path, tmp
     three critical findings about it.
     """
     distilled(repo)
-    script = phase_5_script(rounds=(CRITICAL, CLEAN))
+    script = phase_5_script(verdict=CRITICAL)
 
     drive(
         repo_root=repo,
@@ -764,7 +710,7 @@ def test_every_path_a_brief_hands_a_seat_resolves_without_a_base(repo: Path, tmp
         ("p5.review", "CONVENTIONS"): repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC,
         ("p5.fix", "Findings"): repo
         / steps.SCRATCH_ROOT
-        / steps.findings(stage="phase-5", series=steps.SERIES_INITIAL, round_number=1, author=steps.META_REVIEW_SEAT),
+        / steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT),
     }
     for (step_id, name), expected in stated.items():
         stated_path = field(script.brief(step_id), name)
@@ -807,7 +753,7 @@ def test_missing_docent_commands_stop_the_build_with_preflights_own_restore_line
 # ---------------------------------------------------------------------------
 # What a resume re-spends: the boundary is the whole of the answer
 #
-# The seat is replayed, so the "expensive" row costs a scripted return here. The
+# The seat is a test double, so the "expensive" row costs a scripted return here. The
 # property under test is what the walk *asks for* a second time, which is a
 # decision it takes from the ledger and from nothing else — and asking it of a
 # real model would price the same assertion in hours.
@@ -841,7 +787,7 @@ def test_a_resume_past_a_recorded_boundary_does_not_buy_the_draft_again(
 
     assert result.exit_code == baton.EXIT_OK
     assert second.count("ov.docs") == 0, "a recorded stage is not re-walked, so its call is not re-issued"
-    assert second.order == ["p5.review"]
+    assert second.order == ["p5.review", "p5.fix"]
 
 
 def test_a_resume_after_a_lost_boundary_re_runs_the_draft_over_the_answer_on_disk(
@@ -892,8 +838,6 @@ def test_the_slots_the_loop_supplies_compose_every_build_out_template(templates:
         text = prompt_templates.render(
             step.template,
             slots={slot: f"<{slot}>" for slot in step.slots},
-            constants=steps.CONSTANT_SLOTS,
-            wave=step.unit is steps.Unit.WAVE,
             directory=templates,
         )
         assert text.strip()

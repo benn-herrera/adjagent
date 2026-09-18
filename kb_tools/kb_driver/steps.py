@@ -1,18 +1,16 @@
 """The ordered step table — the only place that says what happens next.
 
-The pipeline sequence as data. No brief template, no worker, and no wave
-session ever names a stage id, a record command, or a successor step; the rows
-below are the sequencer, and everything else in the driver reads them. The
+The pipeline sequence as data. No brief template and no dispatched seat ever
+names a stage id, a record command, or a successor step; the rows below are the
+sequencer, and everything else in the driver reads them. The
 guard is ``prompt_templates.lint`` run over :data:`TEMPLATE_PROHIBITIONS`, which also
 carries the metadata markers — the other thing a brief may never spell.
 
 What this module holds: rows, their call unit and seat, the template and the
 per-call slots the run loop must compute, the artifacts the contract check
-looks for, the parses each return must survive, the barriers a row can raise,
-and the capped loop series. What it must not hold: subprocess calls, file
-writes, template text, or a cap literal — caps have exactly one definition, in
-``kb_pipeline`` beside ``STAGES``, and are imported here so a run can never
-contradict the card it just printed.
+looks for, the parses each return must survive, and the barriers a row can
+raise. What it must not hold: subprocess calls, file writes, or template text.
+Stage order comes from ``kb_pipeline`` and is never restated here.
 
 **Scope**: the rows below cover every stage of the pipeline, and a run walks all
 of them. :data:`TABLE_STAGE_IDS` is sliced from ``kb_pipeline.STAGE_IDS`` so it
@@ -29,39 +27,31 @@ from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 
-from .. import kb_index_lib, kb_pipeline, kb_util
-from . import envelope
+from .. import kb_pipeline, kb_util
 
 # --- vocabularies -----------------------------------------------------------
 
 
 class Unit(StrEnum):
-    """A step's call unit. ``WAVE_STAR`` is a WAVE with >1 member and a SINGLE with one."""
+    """A step's call unit. ``SINGLE`` is the one that dispatches a seat."""
 
     DRIVER_OP = "driver-op"
-    REFRESH = "refresh"
     GATE = "gate"
     SINGLE = "SINGLE"
-    WAVE = "WAVE"
-    WAVE_STAR = "wave*"
 
 
 class Writer(StrEnum):
-    """Who writes a step's artifacts — the three persistence routes."""
+    """Who writes a step's artifacts — the persistence routes."""
 
     NONE = "—"
     DRIVER = "driver"
-    WAVE_SESSION = "wave-session"
-    WORKER = "worker"
     TOOL = "tool"
 
 
 class Parse(StrEnum):
     """The formats a step's return must survive. Existence and parse only, never quality."""
 
-    ENVELOPE = "envelope"
     VERDICT = "verdict"
-    SCOPE = "scope"
 
 
 class LedgerOp(StrEnum):
@@ -75,29 +65,17 @@ class LedgerOp(StrEnum):
     ADVANCE_STEP = kb_util.OP_ADVANCE_STEP
 
 
-# The two revision-series letters a capped loop's findings are named by. `r` is
-# every current loop row's own series; `g` is a second series a row can open for
-# a revision reached by a different path than its first pass — no current row
-# does. The letter rides the filename so that one stage's two series can never
-# name one file. It labels and never counts: a round number is the running
-# process's own, and the stage's boundary commit is what records the rounds it
-# ran.
-SERIES_INITIAL = "r"
-SERIES_GATE = "g"
-
-
 # --- the scratch layout this cut touches ------------------------------------
 #
 # The `.claude-temp/kb-build/` layout is a contract governing build artifacts —
 # things later stages consume and postconditions check. These constants are the
-# driver's own statement of it, and `@!layout-paths!@` is filled from them, so
-# what a brief says and what the driver constructs cannot drift. Later
-# increments extend the block as their rows land.
+# driver's own statement of it: a row declares its outputs as patterns over
+# them, and the run loop resolves the path it writes from the same format
+# string, so a row's declaration and the file it produces cannot drift.
 
-# Every path a stage card also names, or a postcondition checks, is imported
-# rather than restated: `kb_pipeline` states it once, its postconditions check
-# it there, and its cards render the commands that write it. A card that
-# spelled its own path could send an artifact somewhere the tool never looks.
+# Every path a postcondition checks is imported rather than restated:
+# `kb_pipeline` states it once and its coverage checks read it there. A second
+# spelling here could send an artifact somewhere the tool never looks.
 SCRATCH_ROOT = kb_pipeline.SCRATCH_RELROOT
 
 # The charter is not a member of this layout and may not become one: it is an
@@ -105,28 +83,28 @@ SCRATCH_ROOT = kb_pipeline.SCRATCH_RELROOT
 # names its path permanently, so it lives at `kb_pipeline.CHARTER_RELPATH` in
 # the tracked tree. Staging deletes this one wholesale.
 
-# Every capped loop's evidence lands in `review/` under one filename grammar, so
-# that a reader can tell one round's findings from another's and one author's
-# from another's. One format string, so a stage that writes three files per round
-# and a stage that writes one cannot end up with two readings of the same name.
-# Nothing reads a round number back out of a name: a file here is evidence, and
-# the round it belongs to is the running process's own count.
-_FINDINGS_FMT = "review/{stage}-{series}{round}-{author}.md"
-FINDINGS = _FINDINGS_FMT.format(stage="<stage>", series="<series>", round="<N>", author="<author>")
+# A review's evidence lands in `review/` under one filename grammar, so that a
+# reader can tell one stage's findings from another's and one author's from
+# another's. One format string, so a stage whose review dispatches several seats
+# and a stage that dispatches one cannot end up with two readings of the same
+# name. A file here is evidence and nothing else: nothing is read back out of a
+# name, and a review runs once per stage, so the file a dying process left is
+# overwritten by the review that really runs.
+_FINDINGS_FMT = "review/{stage}-{author}.md"
+FINDINGS = _FINDINGS_FMT.format(stage="<stage>", author="<author>")
 
 
-def findings(*, stage: str, series: str, round_number: int, author: str) -> str:
-    """One round's findings path for one author, scratch-relative."""
-    return _FINDINGS_FMT.format(stage=stage, series=series, round=round_number, author=author)
+def findings(*, stage: str, author: str) -> str:
+    """One review's findings path for one author, scratch-relative."""
+    return _FINDINGS_FMT.format(stage=stage, author=author)
 
 
 # The seat's whole half of the meta-documentation stages: one prose answer, which
 # the driver persists here and then substitutes into the packaged overview
 # template beside the counts it read out of the KB. Deliberately not under
-# `review/` — that grammar is the findings loop's, and a file there belongs to
-# one of its rounds — and deliberately one path rather than one per round: the
-# latest answer is the one the document stands on, and the round bookkeeping is
-# the loop's own.
+# `review/` — that grammar is the review's, and a file there is what a reviewing
+# seat wrote — and deliberately one path per stage: the latest answer is the one
+# the document stands on.
 _PROSE_FMT = "{stage}/overview-prose.md"
 OVERVIEW_PROSE = _PROSE_FMT.format(stage="<stage>")
 
@@ -134,19 +112,6 @@ OVERVIEW_PROSE = _PROSE_FMT.format(stage="<stage>")
 def overview_prose(*, stage: str) -> str:
     """Where ``stage``'s seat's prose answer lands, scratch-relative."""
     return _PROSE_FMT.format(stage=stage)
-
-
-#: The whole scratch layout, as an enumerable structure rather than a comment
-#: block: every path the driver constructs or briefs a seat with is a member,
-#: so single-sourcing is a question asked of a tuple instead of a region.
-SCRATCH_LAYOUT: tuple[str, ...] = (
-    FINDINGS,
-    OVERVIEW_PROSE,
-)
-
-
-def _layout_paths() -> str:
-    return "\n".join(f"{SCRATCH_ROOT}/{path}" for path in SCRATCH_LAYOUT)
 
 
 # --- the KB documents the last three stages author ---------------------------
@@ -157,63 +122,6 @@ def _layout_paths() -> str:
 # already do for registers.
 
 META_REVIEW_SEAT = "tech-writer-reviewer"
-
-
-# --- slots filled from driver constants -------------------------------------
-#
-# The one wiring point where a code constant becomes brief prose. Every entry
-# here exists because the same value is also something the toolchain *does*:
-# the deviation vocabulary the driver accepts, the paths it constructs, the
-# grammars it parses, the subcommands `kb_util` declares. A template restating
-# any of them by hand would be a second definition, which this wiring rules out
-# by construction rather than by a test comparing prose to code.
-
-# The unscored literal, as the register format spells it and as
-# `run._check_minted_grades` tests for it. One definition — `kb_index_lib`'s —
-# reaching both the prose a minting seat writes it under and the scan that then
-# checks nothing else was written.
-PENDING_RULE = (
-    f"An unscored value is written as the literal `{kb_index_lib.PENDING_LITERAL}`, and only as that. "
-    f"A value left at the literal is unscored, which a mechanical scan reports as an unscored entry "
-    f"rather than as a low one."
-)
-
-#: One slot per metadata write op: the sanctioned invocation up to and
-#: including the op token, so a brief that has to name one writes
-#: `@!insert-claim-entry!@ --values <path>` rather than a command line of its own
-#: — no brief hand-writes a `kb_util` invocation.
-#:
-#: Both halves come from `kb_util`: the prefix from `INVOCATION`, the token from
-#: `WRITE_OPS`, which is also what `build_parser` names its subparsers from. A
-#: brief therefore cannot advertise an op the CLI does not have, and cannot
-#: spell the invocation a way the consumer does not run.
-#:
-#: A slot key is the op token verbatim — the op names the slot that expands to
-#: it, with no transliteration between the two spellings. These slots stop at
-#: the op: the flag that follows it is :data:`VALUES_FLAG_SLOT` below, and only
-#: the values file's own path — which differs per brief — is the template's to
-#: write.
-WRITE_OP_SLOTS: Mapping[str, str] = MappingProxyType({op: f"{kb_util.INVOCATION} {op}" for op in kb_util.WRITE_OPS})
-
-#: The write ops' one flag, as a slot of its own rather than folded into the
-#: nine above. A brief writes
-#: `@!insert-claim-entry!@ @!values-flag!@ <path>`, so the whole invocation up to
-#: the caller's own path is `kb_util`'s spelling and none of it is hand-typed —
-#: which is what `TEMPLATE_PROHIBITIONS` then enforces by refusing a template
-#: that spells the flag. Separate from the op slots because the fragment
-#: `fragments/write-op-contract.tmpl` names the flag without naming any one op.
-VALUES_FLAG_SLOT = kb_util.VALUES_FLAG
-
-CONSTANT_SLOTS: Mapping[str, str] = MappingProxyType(
-    {
-        **WRITE_OP_SLOTS,
-        "values-flag": VALUES_FLAG_SLOT,
-        "deviation-kinds": ", ".join(envelope.DEVIATION_KINDS),
-        "layout-paths": _layout_paths(),
-        "scope-line-contract": envelope.SCOPE_LINE_CONTRACT,
-        "pending-rule": PENDING_RULE,
-    }
-)
 
 
 # --- what a brief says when it hands a seat a path ----------------------------
@@ -232,8 +140,8 @@ NOTHING = "(none)"
 REQUIRED_PATH_SLOTS: frozenset[str] = frozenset({"kb-root", "readme-path", "conventions-path"})
 
 #: The path slots whose subject a build may legitimately not have, and which
-#: therefore admit :data:`NOTHING`. A first review round has no findings to
-#: answer, which is an absence with a name rather than a file that is missing.
+#: therefore admit :data:`NOTHING`. The draft has no findings to answer, which
+#: is an absence with a name rather than a file that is missing.
 OPTIONAL_PATH_SLOTS: frozenset[str] = frozenset({"remediation-source-path"})
 
 #: Every slot of this driver's own vocabulary whose value is a filesystem path,
@@ -289,7 +197,7 @@ WRITE_FLAG_TOKENS: tuple[str, ...] = (kb_util.VALUES_FLAG,)
 def _template_prohibitions() -> dict[str, re.Pattern[str]]:
     # Boundaries exclude `.` and `-` so that one id does not match inside
     # another that extends it — each is flagged under its own name — and so a
-    # layout path the driver itself supplies (`review/phase-3a-r1-…`) is not
+    # layout path the driver itself supplies (`review/phase-3a-…`) is not
     # read as prose naming a stage.
     patterns: dict[str, re.Pattern[str]] = {}
     for stage_id in kb_pipeline.STAGE_IDS:
@@ -309,23 +217,14 @@ TEMPLATE_PROHIBITIONS: Mapping[str, re.Pattern[str]] = MappingProxyType(_templat
 # --- the row -----------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class LoopSeries:
-    """One capped revision series: its filename letter, its cap, its escalation."""
-
-    letter: str
-    cap: int
-    cap_barrier: str
-
-
 @dataclass(frozen=True, kw_only=True)
 class Step:
     """One row of the step table.
 
     ``outputs`` are layout patterns, scratch-relative, with ``<...>`` marking a
-    segment the run loop expands (a volume slug, a round number). ``slots`` are
-    the per-call values the run loop computes; fragment slots and the constants
-    of :data:`CONSTANT_SLOTS` are the composer's and are deliberately absent.
+    segment the run loop expands (a stage id, a seat name). ``slots`` are
+    the per-call values the run loop computes; the slots the composer resolves
+    for itself — fragments, alternatives — are deliberately absent.
     """
 
     id: str
@@ -338,30 +237,18 @@ class Step:
     outputs: tuple[str, ...] = ()
     parses: tuple[Parse, ...] = ()
     raises: tuple[str, ...] = ()
-    series: tuple[LoopSeries, ...] = ()
     ledger_op: LedgerOp | None = None
-    #: This row's seat authors register entries. Every graded field the KB
-    #: has — a claim's rigor, a support's rigor, a warrant edge's on-point
-    #: fraction — lives in one, so this is the property that makes
-    #: ``run._check_minted_grades`` necessary, and the run loop reads it off
-    #: the row rather than off a list of ids. A row added with this property
-    #: is guarded by declaring it, and only by declaring it: the same rows
-    #: are the ones that must be briefed with an existing-id inventory, and
-    #: ``test_kb_driver_steps`` holds the two facts equal so neither can be
-    #: set without the other.
-    writes_register: bool = False
-    #: This row runs a tool that spawns its **own** model, through a seam no
-    #: flag of this driver reaches — ``kb_claimgraph``'s ``ask.SeatAsk``. Every
-    #: other call a run makes is the driver's own dispatch, which ``replay.py``
-    #: substitutes for, so this property is exactly the set of rows a
-    #: ``--dry-run`` cannot stand in for. :attr:`spends_inference` is what reads
-    #: it; nothing else does.
+    #: This row's **whole** work is a model call spawned inside a tool the
+    #: driver invokes — ``kb_claimgraph``'s ``ask.SeatAsk`` — so a build
+    #: spending none drops the row outright. It is not "reaches
+    #: ``ask.SeatAsk``": ``depends.attribute`` reaches it too and declares
+    #: nothing here, because only part of that row costs a call and the rest
+    #: settles edges that must not be discarded with the questions — it gets
+    #: the tool's own ``--no-inference`` passed through instead
+    #: (``run._claim_graph``). The field is a declaration rather than a derived
+    #: fact for that reason: the split is the row's to state.
+    #: :attr:`spends_inference` is what reads it; nothing else does.
     spends_own_inference: bool = False
-
-    @property
-    def barrier_pairs(self) -> tuple[str, ...]:
-        """Every ``<stage>.<kind>`` this row can raise, including its caps' escalations."""
-        return self.raises + tuple(series.cap_barrier for series in self.series)
 
     @property
     def spends_inference(self) -> bool:
@@ -370,9 +257,9 @@ class Step:
         The two routes are not otherwise comparable and that is why this exists:
         :attr:`spends_own_inference` is a model spawned *inside* a tool the
         driver invokes, and a row naming a ``seat`` is a model the driver
-        dispatches through its own transport. Only the second is what
-        ``--dry-run`` replays. A run spending no inference does without both, so
-        it is this union — never either half — that decides which rows it walks.
+        dispatches through its own transport. A run spending no inference does
+        without both, so it is this union — never either half — that decides
+        which rows it walks.
         """
         return self.spends_own_inference or self.seat is not None
 
@@ -420,7 +307,6 @@ STEPS: tuple[Step, ...] = (
     # briefs that quote it read one answer instead of each asking the
     # filesystem their own question.
     Step(id="pre.charter", stage=_START, unit=Unit.DRIVER_OP),
-    Step(id="pre.proceed", stage=_START, unit=Unit.DRIVER_OP, raises=("start.proceed",)),
     # The launch guard, and it is a launch guard because of where it sits: every
     # row of this stage is skipped once `start` is recorded, so this row runs on
     # the invocation that opens a build and on no other. A resume therefore
@@ -504,13 +390,12 @@ STEPS: tuple[Step, ...] = (
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
     # --- claims-discovered — stage C-inf ---------------------------------------
-    # One of the head's two inference-spending rows, and both spend it inside
+    # The whole of this row is a model call, and it is spawned inside
     # `kb_claimgraph` rather than through this driver's own transport: the seat
-    # is that package's `ask.SeatAsk`, which no flag of this driver reaches. So
-    # So `--dry-run`, which replaces the models this driver dispatches, cannot
-    # replace either of these — which is what `spends_own_inference` marks, and
-    # the reason it stays a field of its own beside `seat` rather than being
-    # collapsed into `Step.spends_inference`.
+    # is that package's `ask.SeatAsk`. That is what `spends_own_inference`
+    # declares, and it is why the field sits beside `seat` rather than being
+    # collapsed into it — the two routes are dropped by the same flag and reached
+    # by different code.
     #
     # `--no-inference` excludes this row outright, which is not a bound: the
     # walk continues, `discover.record` still writes the boundary, and the
@@ -556,7 +441,7 @@ STEPS: tuple[Step, ...] = (
     ),
     # --- phase-3a — validation gate -------------------------------------------
     # Gate and record, and nothing between them: `kb-refresh` then `kb-verify`,
-    # green or the run stops. The repair wave this stage used to drive is gone
+    # green or the run stops. The repair dispatch this stage used to drive is gone
     # with its subject — every gate the three verifiers run compares one
     # mechanically-produced artifact against another, so a red one is a defect
     # in a tool or in what was authored, and neither is a seat's to rewrite in
@@ -610,7 +495,13 @@ STEPS: tuple[Step, ...] = (
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
-    # --- phase-5 — the review cycle over what was drafted ---------------------
+    # --- phase-5 — the review of what was drafted, and the one revision -------
+    # **A fixed sequence, not a loop.** The review runs, the revision answers
+    # what it wrote, and the stage records: nothing re-reviews, nothing counts,
+    # and no severity the reviewer returns fails the stage. The two rows are one
+    # unit of work standing in front of one boundary, which is why `p5.review` is
+    # driven by `p5.fix`'s handler rather than walked (`run.DRIVEN_STEPS`).
+    #
     # `ov.docs` and `p5.fix` share one template and one slot list: there is no
     # separate fix template, and the two calls differ only in whether a
     # reviewer's findings are the input — which is a slot, filled with a named
@@ -628,8 +519,9 @@ STEPS: tuple[Step, ...] = (
         outputs=(FINDINGS,),
         parses=(Parse.VERDICT,),
     ),
-    # phase-5 has no separate loop row, so the row that escalates is the
-    # row that drives: `p5.fix` owns the review-fix-re-review cycle.
+    # The row the walk runs: its handler dispatches the review above it and then
+    # makes this call, so the stage's two calls stand together in front of the
+    # boundary below.
     Step(
         id="p5.fix",
         stage=_PHASE_5,
@@ -639,13 +531,6 @@ STEPS: tuple[Step, ...] = (
         template="phase-5-overview-passage.single.tmpl",
         slots=("kb-root", "remediation-source-path"),
         outputs=(OVERVIEW_PROSE,),
-        series=(
-            LoopSeries(
-                letter=SERIES_INITIAL,
-                cap=kb_pipeline.PHASE_5_FIX_CAP,
-                cap_barrier="phase-5.cap-exhausted",
-            ),
-        ),
     ),
     Step(
         id="p5.record",
