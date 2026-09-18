@@ -625,16 +625,19 @@ literal by construction, and `depends-attributed`'s verify coverage is what
 holds it there. SPEC.md's "the build authors the claim graph and grades none of
 it" is satisfied by that, not by a driver-side scan of what a seat wrote.
 
-An invocation can enter from two states, and one of them is covered.
-`kb_tools/tests/test_kb_driver_head.py` drives the head against a consumer
-holding its LaTeX sources and no `kb-root/` at all — a launch, made the way the
-launch line specifies one — and stops before `claims-discovered`, because that
-stage is inference whole. That is the same place `--no-inference` stops such a
-build, arrived at by the same property rather than by agreement. **The resume
-entry — a consumer whose tree is already built and whose head stages are already
-recorded — has no suite.** Covering it means injecting a model at the `Invoker`
-seam from a test, which the driver's own surface offers no flag for and must
-not: a consumer's installed copy carries no fake model.
+An invocation can enter from two states, and `kb_tools/tests/test_kb_driver_head.py`
+drives both against a real repository and a real ledger. The launch runs against
+a consumer holding its LaTeX sources and no `kb-root/` at all — made the way the
+launch line specifies one — and `--no-inference` carries it to a closed-out
+build, every row that would cost a model call dropped and every stage still
+recorded. **The resume entry — a consumer whose tree is already built and whose
+head stages are already recorded — is the same file's second walk of one
+consumer**: the first invocation is bounded at `depends-attributed`, and nothing
+on the second says it is resuming, so what says it is continuing a build rather
+than opening one is the ledger's own recorded stages, read back out of
+`show-status`'s render. It spends its inference into a model injected at the
+`Invoker` seam, which the driver's own surface offers no flag for and must not:
+a consumer's installed copy carries no fake model.
 
 ### The Derived Index (`<kb-root>/.index/`)
 
