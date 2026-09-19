@@ -61,8 +61,9 @@ a built KB:
    boundary has been crossed.
 4. **Stdlib only.** No third-party runtime dependency, no vendored layout library, no DOT,
    no Graphviz.
-5. **The golden is regenerated through `write_mini_kb_golden`, never hand-edited.**
-   No runner target does this today — that gap is R3.
+5. **The golden is regenerated through `just regenerate-mini-kb-golden`, never hand-edited.**
+   That target calls `write_mini_kb_golden`, which is the only writer. A row's evidence
+   names the target, never a bare interpreter invocation.
 6. **A row reports numbers with the command that produced them**, before and after, on
    `mini-kb` and on at least two of the real KBs above. `viewBox`, crossing count and
    total edge length are the three; a row that moves one and not the others says so.

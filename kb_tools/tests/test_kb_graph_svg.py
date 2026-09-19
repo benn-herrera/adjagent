@@ -10,7 +10,7 @@ with no freshness gate — the drift surface the canonical-direction rule exists
 to prevent — and it could go stale against the fixture it derives from. Built
 this way it cannot, and a change to an emitter's record shape surfaces as a
 golden diff instead of hiding behind a frozen copy. :func:`render_mini_kb_golden`
-and :func:`write_mini_kb_golden` are that helper, and the regeneration recipe
+and :func:`write_mini_kb_golden` are that helper, and ``just regenerate-mini-kb-golden``
 runs through them so the recipe and this suite build the index the same way.
 
 **The copy must carry the fixture's ``CLAUDE.md``** or the framework nodes it

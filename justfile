@@ -241,6 +241,16 @@ test surface="" *pytest_args: _venv
       else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen-defs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }} "${@:2}"
 
+# The one writer of kb_tools/tests/fixtures/graph/mini-kb.svg (standing rule 5,
+# ROADMAP_PLANS/CLAIM_GRAPH_LAYOUT_PLAN.md) is `write_mini_kb_golden` itself, so
+# this recipe calls it rather than re-deriving the render — the golden and the
+# suite that checks it are built the same way by construction. Same interpreter
+# and PYTHONPATH as `test`, because the function lives in a test module that
+# imports pytest at module scope.
+[doc("[dev] regenerate kb_tools/tests/fixtures/graph/mini-kb.svg via write_mini_kb_golden")]
+regenerate-mini-kb-golden: _venv
+    PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -c "from kb_tools.tests.test_kb_graph_svg import write_mini_kb_golden; print(write_mini_kb_golden())"
+
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
 # `*paths` (positional-arguments, set above) arrives as "$@" with each path
