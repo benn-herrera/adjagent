@@ -246,8 +246,6 @@ KB_EVAL_BRIEF := justfile_directory() / "test-data" / "fixtures" / "kb-quality-e
 KB_EVAL_EXTRACT_SCRIPT := justfile_directory() / "test-data" / "fixtures" / "extract-kb-eval-prompt.py"
 
 # Claude executable to use. Can be overridden to
-# ```./test-data/fixtures/claude-gemma.sh``` which export envars for having
-# claude use locally hosted gemma-4 models instead of Antrhopic-hosted
 CLAUDE := "claude"
 
 # No runaway-cost guard, deliberately: subscription
@@ -290,15 +288,15 @@ kb-headless-eval run_tag kb_dir corpus_note:
     # eval is read-only against kb-root/ plus exactly one bounded write
     # (report_path, fully specified above, not a pattern the model
     # chooses), and headless mode has no TTY to answer a permission prompt
-    # regardless. --model fable checked against `claude --help` above,
-    # matching KB_EVAL_BRIEF's own dispatch contract ("model: fable").
+    # regardless. --model opus checked against `claude --help` above,
+    # matching KB_EVAL_BRIEF's own dispatch contract ("model: opus").
     # Blocking, not detached: the eval is a bounded
     # single pass over an already-built KB, and its own last step ("on
     # completion, report the deliverable") wants to run in the same
     # invocation, not a separate status/harvest round trip.
     set +e
     ( cd "{{kb_dir}}" && {{CLAUDE}} -p "${substituted_body}" \
-        --model fable \
+        --model opus \
         --output-format stream-json --verbose \
         --permission-mode bypassPermissions \
         > "${log_file}" 2>&1 )
