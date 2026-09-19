@@ -107,6 +107,13 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     of a gitignored build product that a free re-render fixes; what its name implies, that a render is
     correct, it is structurally unable to see.
 
+    **A second route reaches the same answer.** Every verdict `check` produces restates what a
+    `render-diff` between two slots already shows, with one exception: `ORPHAN`, a target directory
+    holding a file we own and no longer ship. That is an install concern, pruned by the install that
+    owns it under SPEC's rule that a banner is what makes a file ours — not a reason to keep a
+    verification verb. The rung pairs go with it: `check-floor`, `check-stock`, `generate-floor`,
+    `generate-stock`, `_render-rung`, `_check-rung`.
+
     **Its maintenance burden sits on the wrong half.** The part that invokes rendering costs nothing to
     keep current precisely because it is blind. The part that reads output independently — the banner
     and tuning claims, the comparable-body trim — must track every format change, and when it falls

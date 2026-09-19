@@ -125,10 +125,11 @@ SCRATCH := ".claude-temp"
 # fixed ahead of the forwarded flags, so the render always lands directly
 # under the slot with no .claude nest.
 #
-# The flags that produced a slot are recorded in it as RENDER-FLAGS.txt — the
-# record RULED 3 of ROADMAP_PLANS/RENDER_VERIFICATION_PLAN.md requires, so a
+# The flags that produced a slot are recorded in it as RENDER-FLAGS.txt, so a
 # `render-diff` between two slots rendered under different tunings shows why
-# they differ instead of reading as unexplained drift.
+# they differ instead of reading as unexplained drift. A comparison's flag sets
+# belong to the invocations that produced each side, never to what an operator
+# recalls between them.
 [doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) — every other --* flag forwards verbatim to gen-defs.py via install (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
 render *args:
     #!/usr/bin/env bash
