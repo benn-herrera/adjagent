@@ -283,20 +283,25 @@ kb-headless-eval run_tag kb_dir corpus_note:
     # value) exits nonzero, which -e turns into this recipe refusing too.
     substituted_body="$(python3 "{{KB_EVAL_EXTRACT_SCRIPT}}" "{{KB_EVAL_BRIEF}}" "${kb_root_abs}" "${report_path}" "{{corpus_note}}")"
 
+    # The model is read from KB_EVAL_BRIEF's own dispatch contract, never
+    # stated here, so the two cannot again say different things — see
+    # KB_EVAL_EXTRACT_SCRIPT's own docstring for the --field mode's
+    # contract. A refusal there (missing/malformed dispatch line) exits
+    # nonzero, which -e turns into this recipe refusing too.
+    eval_model="$(python3 "{{KB_EVAL_EXTRACT_SCRIPT}}" --field model "{{KB_EVAL_BRIEF}}")"
+
     # bypassPermissions again — sanctioned here too even though the report
     # write lands in the real adjagent repo, not a throwaway fixture: the
     # eval is read-only against kb-root/ plus exactly one bounded write
     # (report_path, fully specified above, not a pattern the model
     # chooses), and headless mode has no TTY to answer a permission prompt
-    # regardless. --model opus checked against `claude --help` above,
-    # matching KB_EVAL_BRIEF's own dispatch contract ("model: opus").
-    # Blocking, not detached: the eval is a bounded
+    # regardless. Blocking, not detached: the eval is a bounded
     # single pass over an already-built KB, and its own last step ("on
     # completion, report the deliverable") wants to run in the same
     # invocation, not a separate status/harvest round trip.
     set +e
     ( cd "{{kb_dir}}" && {{CLAUDE}} -p "${substituted_body}" \
-        --model opus \
+        --model "${eval_model}" \
         --output-format stream-json --verbose \
         --permission-mode bypassPermissions \
         > "${log_file}" 2>&1 )
