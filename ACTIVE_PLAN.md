@@ -79,7 +79,6 @@ a built KB:
 | **R1** | **Brandes–Köpf coordinate assignment**, replacing the priority method in Sugiyama's phase 4. It is the method that *compacts* — the priority method only ever spreads a layer, which is the whole of the 7,626px above. Larger than what it replaces and known to be so. **Its four candidate alignments and how a row combines them is this row's to rule**, with the choice and its reasoning in `layout.py`'s docstring | — | **The spread figure re-measured on the same 126-claim sheet**, before and after, with the command. Crossings do not rise on `mini-kb` or on the corpus sheets — coordinates may not undo the ordering phase's work. Total edge length reported both ways: the priority method bought 81% shorter edges and a row that gives that back has traded the wrong way. Golden regenerated, determinism test green |
 | **R2** | **Network simplex layering**, replacing longest-path in Sugiyama's phase 2. Longest-path pushes every node as high as it can go; network simplex minimises total edge length, **so it produces fewer long edges to route — which is upstream of everything R1 does**, because a spanning edge costs a full `COLUMN_PITCH` in every layer it crosses and width is O(edges), not O(nodes) | R1 | Dummy-node count reported before and after — that is the mechanism, and it should fall. `viewBox` and total edge length on `mini-kb` and two corpus sheets. Crossings do not rise. Determinism test green, golden regenerated |
 | **R3** | **A runner target regenerates the `mini-kb` golden.** Every ladder row so far has invoked `write_mini_kb_golden` through the venv python by hand, and standing rule 5 forbids hand-editing the golden while naming no way to regenerate it. Small, and it unblocks the two rows above from improvising | — | A target exists, the rows above use it, and no row's evidence names a bare interpreter invocation |
-| **R4** | **Two docstring defects in landed code**, neither blocking anything: `kb_graph/__init__.py`'s module map documents `model`, `layout` and `style` and omits `svg.py`, which exists in the package; and `kb_index_lib.build_claims_records`'s docstring says `claims.jsonl` holds four node types while the function also emits a `support` record per entry in `state.supports` — five written, four documented | — | Both corrected. No behaviour changes |
 
 ## Out of scope
 
@@ -100,5 +99,3 @@ improvising a command line.
 **R1 before R2**, though the dependency is evidential rather than technical: R1's
 compaction is measured against the current layering, and moving both at once leaves no way
 to attribute the change. R2 then re-measures on R1's baseline.
-
-**R4 any time.** It shares no file with the others.
