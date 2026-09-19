@@ -362,8 +362,13 @@ recognise.** There is one kind of build and one kind of continuation
 unrecorded is opening a build, and one that finds it recorded is resuming,
 re-derived from the ledger every time (`Runner._recorded`) and configured
 nowhere — `config.RunSection` carries no mode field, and `[run] build_mode`
-is refused at load as an unrecognized key, the general rule every `[run]` key
-`config.load` does not read falls under. What keeps `dg.build` from re-deriving the tree over
+is refused at load as an unrecognized key, the general rule every key
+`config.load` does not read falls under — in `[claude]`, `[timeouts]`,
+`[retry]` and `[log]` as in `[run]`, each section's recognized set being its
+own reads (`config._refuse_unknown_keys`) rather than a vocabulary written
+down twice. `[barriers]` is the one section checked otherwise, having a
+registry of admissible pairs to check against.
+What keeps `dg.build` from re-deriving the tree over
 the documents a spine is stamped into is therefore the ledger — a recorded stage
 is not re-walked — plus one guard for the case the ledger cannot speak to: a
 `kb-root/` this build did not write. `pre.kb-root` is that guard, the last row of

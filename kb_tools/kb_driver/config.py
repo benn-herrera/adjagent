@@ -41,10 +41,13 @@ what a ledger with recorded stages already says, re-derived from the ledger on
 every invocation. A setting whose vocabulary has one member is a question with
 one answer, so ``[run] build_mode``, its vocabulary and its default are deleted
 outright rather than kept as a single-valued vestige. It needs no key of its
-own to be refused by, because **every key in ``[run]`` that :func:`load` does
-not read is refused, naming the section and the key** — an unknown key here is
-never inert: a file that still carries one means something by it, and silently
-ignoring it would walk a different build than the file asks for.
+own to be refused by, because **every key :func:`load` does not read is
+refused, naming its section and the key** — in ``[run]``, ``[claude]``,
+``[timeouts]``, ``[retry]`` and ``[log]`` alike. An unknown key is never inert:
+a file that still carries one means something by it, and silently ignoring it
+would walk a different build than the file asks for. ``[barriers]`` is checked
+differently because it is the one section with a vocabulary to check
+against — the registry's own registered pairs, below.
 
 **One field says what a run is made of; one bounds how far it goes.**
 ``no_inference`` drops every row that would cost a model call, row by row, and
@@ -242,11 +245,15 @@ def _table(parent: Mapping[str, object], key: str, *, section: str) -> dict:
 class _TrackedTable(dict):
     """A table that remembers every key read through :meth:`get`.
 
-    ``[run]`` has no enumerated key vocabulary to check an unknown key
+    No section has an enumerated key vocabulary to check an unknown key
     against — the recognized set is derived from the reads themselves, so it
     cannot drift from what :func:`load` actually consults. Every field helper
     below reads through ``.get``, so wrapping the table is enough to capture
-    the whole set with no change to the helpers.
+    the whole set with no change to the helpers. :func:`_table` reads through
+    ``.get`` too, which is what makes a nested table a read key of its parent
+    rather than an unknown one: ``[timeouts.by_step]`` and ``[claude] env``
+    reach their values through the helper that fetched the table, and the
+    fetch is the read.
     """
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -256,6 +263,21 @@ class _TrackedTable(dict):
     def get(self, key: str, default: object = None) -> object:
         self.read_keys.add(key)
         return super().get(key, default)
+
+
+def _refuse_unknown_keys(table: _TrackedTable, *, section: str) -> None:
+    """Refuse every key of one section that :func:`load` did not read.
+
+    Called once per section, after that section is built, so what counts as
+    recognized is the set of reads that built it. The state refused is a
+    hand-authored config file — an operator's ``--config`` or a consuming
+    repo's committed one — where a key sits that nothing consults: the default
+    stays in force and the run reports itself configured.
+    """
+    unknown = sorted(set(table) - table.read_keys)
+    if unknown:
+        plural = "s" if len(unknown) > 1 else ""
+        raise ConfigError(f"[{section}] unknown key{plural}: {', '.join(unknown)}")
 
 
 def _required(section: str, key: str, flag: str) -> str:
@@ -391,6 +413,11 @@ def _reject_model_keys(claude_raw: Mapping[str, object]) -> None:
     omits the flag unconditionally. An honored
     model key would therefore be a lie; the key is named and refused at load
     instead, so exit 13's baton has a key to report.
+
+    It runs before the section is built, so a model key always meets this
+    refusal and never the general unknown-key one: the two never report the
+    same key, and the operator gets the message that says why no such key
+    exists rather than the one that says this one is unrecognized.
     """
     for key in claude_raw:
         if key == "model" or key.startswith("model_"):
@@ -587,19 +614,17 @@ def load(
         no_inference=_bool_field(run_raw, "no_inference", section="run", default=False),
         through=_stage_field(run_raw, "through", section="run", flag=THROUGH_FLAG),
     )
-    unknown = sorted(set(run_raw) - run_raw.read_keys)
-    if unknown:
-        plural = "s" if len(unknown) > 1 else ""
-        raise ConfigError(f"[run] unknown key{plural}: {', '.join(unknown)}")
+    _refuse_unknown_keys(run_raw, section="run")
 
-    claude_raw = _table(raw, "claude", section="claude")
+    claude_raw = _TrackedTable(_table(raw, "claude", section="claude"))
     _reject_model_keys(claude_raw)
     claude = ClaudeSection(
         command=_str_list_field(claude_raw, "command", section="claude", default=DEFAULT_CLAUDE_COMMAND),
         env=_str_map(claude_raw, "env", section="claude"),
     )
+    _refuse_unknown_keys(claude_raw, section="claude")
 
-    timeouts_raw = _table(raw, "timeouts", section="timeouts")
+    timeouts_raw = _TrackedTable(_table(raw, "timeouts", section="timeouts"))
     timeouts = TimeoutSection(
         single_seconds=_int_field(timeouts_raw, "single_seconds", section="timeouts", default=DEFAULT_SINGLE_SECONDS),
         silence_seconds=_int_field(
@@ -607,21 +632,24 @@ def load(
         ),
         by_step=_int_map(timeouts_raw, "by_step", section="timeouts", keys=tuple(steps.STEPS_BY_ID)),
     )
+    _refuse_unknown_keys(timeouts_raw, section="timeouts")
 
-    retry_raw = _table(raw, "retry", section="retry")
+    retry_raw = _TrackedTable(_table(raw, "retry", section="retry"))
     retry = RetrySection(
         transport_attempts=_int_field(
             retry_raw, "transport_attempts", section="retry", default=DEFAULT_TRANSPORT_ATTEMPTS
         ),
         backoff_seconds=_int_list_field(retry_raw, "backoff_seconds", section="retry", default=DEFAULT_BACKOFF_SECONDS),
     )
+    _refuse_unknown_keys(retry_raw, section="retry")
 
-    log_raw = _table(raw, "log", section="log")
+    log_raw = _TrackedTable(_table(raw, "log", section="log"))
     configured_run_dir = _str_field(log_raw, "run_dir", section="log", default="")
     log = LogSection(
         level=_str_field(log_raw, "level", section="log", default=DEFAULT_LOG_LEVEL, choices=LOG_LEVELS),
         run_dir=run_dir if run_dir is not None else Path(configured_run_dir or DEFAULT_RUN_DIR),
     )
+    _refuse_unknown_keys(log_raw, section="log")
 
     return DriverConfig(
         path=path,

@@ -376,6 +376,60 @@ through = "start"
     assert cfg.run.through == "start"
 
 
+# One row per section the unknown-key refusal covers, carrying that section's
+# complete valid key set. ``[barriers]`` is absent because it is the one
+# section with a vocabulary of its own to be checked against — the registry's
+# registered pairs.
+SECTION_VALID_KEYS = [
+    ("claude", '[claude]\ncommand = ["claude", "--x"]\nenv = { ANTHROPIC_LOG = "debug" }\n'),
+    (
+        "timeouts",
+        '[timeouts]\nsingle_seconds = 60\nsilence_seconds = 30\n[timeouts.by_step]\n"p5.review" = 14400\n',
+    ),
+    ("retry", "[retry]\ntransport_attempts = 2\nbackoff_seconds = [1, 2]\n"),
+    ("log", '[log]\nlevel = "DEBUG"\nrun_dir = "/var/tmp/kb-driver"\n'),
+]
+_SECTIONS = [section for section, _ in SECTION_VALID_KEYS]
+
+
+@pytest.mark.parametrize("section", _SECTIONS)
+def test_an_unknown_key_in_any_section_is_refused_naming_it(tmp_path: Path, section: str) -> None:
+    """What ``[run]`` already refused, every other section refuses too.
+
+    A key nothing consults is not partial: the default stays in force and the
+    run reports itself configured, so a typo buys an inert setting and no
+    complaint.
+    """
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(_write(tmp_path, MINIMAL + f'[{section}]\nno_such_key = "x"\n'))
+
+    message = str(excinfo.value)
+    assert f"[{section}]" in message
+    assert "no_such_key" in message
+
+
+@pytest.mark.parametrize(("section", "body"), SECTION_VALID_KEYS, ids=_SECTIONS)
+def test_every_recognized_key_of_a_section_still_loads(tmp_path: Path, section: str, body: str) -> None:
+    """The refusal reads what config.load actually consults, so a key it does
+    consult by some route other than ``.get`` would be refused as unknown.
+    Each section's whole valid vocabulary, given alone, must load clean."""
+    config.load(_write(tmp_path, MINIMAL + body))
+
+
+def test_a_present_by_step_table_is_not_an_unknown_timeouts_key(tmp_path: Path) -> None:
+    """``by_step`` is a key of ``[timeouts]`` whose value is a nested table.
+
+    The helper that fetches it reads it through ``.get`` like any scalar, so a
+    legitimately present nested table registers as read; fetched any other way
+    it would be reported as an unknown key of its own parent.
+    """
+    body = MINIMAL + '[timeouts.by_step]\n"p5.review" = 14400\n'
+
+    cfg = config.load(_write(tmp_path, body))
+
+    assert cfg.timeouts.by_step == {"p5.review": 14400}
+
+
 @pytest.mark.parametrize(
     ("case", "body", "key"),
     [
@@ -392,6 +446,10 @@ def test_model_key_is_rejected_at_load_naming_the_key(tmp_path: Path, case: str,
     message = str(excinfo.value)
     assert key in message, case
     assert "--model" in message, case
+    # The general unknown-key refusal would also catch a model key. It runs
+    # second and never fires, so one key never draws two reports, and the one
+    # it draws is the one saying why no such key exists.
+    assert "unknown key" not in message, case
 
 
 def test_missing_config_file_is_a_config_error(tmp_path: Path) -> None:
