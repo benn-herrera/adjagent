@@ -241,8 +241,8 @@ test surface="" *pytest_args: _venv
       else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen-defs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }} "${@:2}"
 
-# The one writer of kb_tools/tests/fixtures/graph/mini-kb.svg (standing rule 5,
-# ROADMAP_PLANS/CLAIM_GRAPH_LAYOUT_PLAN.md) is `write_mini_kb_golden` itself, so
+# The one writer of kb_tools/tests/fixtures/graph/mini-kb.svg is
+# `write_mini_kb_golden` itself, so
 # this recipe calls it rather than re-deriving the render — the golden and the
 # suite that checks it are built the same way by construction. Same interpreter
 # and PYTHONPATH as `test`, because the function lives in a test module that
