@@ -70,26 +70,26 @@ def test_barrier_baton_carries_question_answers_and_resume_command() -> None:
         baton.EXIT_BARRIER,
         baton.BatonContext(
             invocation="--config .claude-temp/kb-build/driver-run.toml",
-            pair="phase-1b.design-gate",
-            question="phase-1b design gate — approve, revise (with direction), or cancel?",
-            admissible=("approve", "revise", "cancel"),
+            pair="spine-seed.runner-choice",
+            question="This repository has neither a justfile nor a Makefile. Which runner?",
+            admissible=("just", "make"),
         ),
     )
-    assert "phase-1b design gate — approve, revise (with direction), or cancel?" in block
+    assert "This repository has neither a justfile nor a Makefile. Which runner?" in block
     assert f"{baton.PREFIX} ADMISSIBLE ANSWERS:" in block
-    assert "approve | revise | cancel" in block
+    assert "just | make" in block
     assert "THEN RUN, WITH THE ANSWER SUBSTITUTED:" in block
     assert f"{kb_util.DRIVER_INVOCATION} run --config .claude-temp/kb-build/driver-run.toml" in block
-    assert "--decide phase-1b.design-gate=<answer>" in block
+    assert "--decide spine-seed.runner-choice=<answer>" in block
 
 
 def test_unconsumed_decisions_are_named_in_the_baton() -> None:
     block = baton.render(
         baton.EXIT_OK,
-        baton.BatonContext(unconsumed_decisions=("phase-1b.design-gate=approve",)),
+        baton.BatonContext(unconsumed_decisions=("spine-seed.runner-choice=just",)),
     )
     assert "UNCONSUMED --decide (never raised in this run):" in block
-    assert "phase-1b.design-gate=approve" in block
+    assert "spine-seed.runner-choice=just" in block
 
 
 def test_missing_question_on_a_raised_barrier_is_visible_rather_than_blank() -> None:

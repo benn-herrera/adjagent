@@ -575,12 +575,11 @@ def render_support_entry(
     canonical home — the only one the claim graph reads — is the hosting
     document's ``sup-id:`` frontmatter block
     (:func:`render_frontmatter_block`), parallel to an experiment's
-    ``strengthens:``. But a ``sup-`` id is minted a full stage before the leaf
-    that will host it exists, so the pairs are staged in the register entry
-    until that leaf is written, and ``kb_index_lib`` reads them there:
+    ``strengthens:``. But a ``sup-`` id can be minted before the leaf that will
+    host it exists, so the pairs are staged in the register entry until that
+    leaf is written, and ``kb_index_lib`` reads them there:
     :func:`kb_index_lib.parse_register_staged_supports` is the grammar, and
-    ``scan_authored_support_edges`` — which the warrant-attribution
-    postcondition is stated over — unions both homes. A ``- supports:`` block
+    ``scan_authored_support_edges`` unions both homes. A ``- supports:`` block
     written into a register is therefore read, not decoration.
 
     ``supports`` is a beneficiary claim id and its on-point fraction, ``None``

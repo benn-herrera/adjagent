@@ -106,7 +106,10 @@ def test_exit_json_records_no_barrier_for_a_plain_exit(tmp_path: Path) -> None:
 # cadence.jsonl
 # ---------------------------------------------------------------------------
 
-_STAGES = {"p2.6.apply-scores": "phase-2.6", "p3.distill": "phase-3"}
+#: Synthetic ids: ``read_cadence`` takes this map as a parameter precisely
+#: because ``runlog`` holds no stage knowledge, so these need to be registered
+#: nowhere — only to carry the shapes the capture-name grammar must survive.
+_STAGES = {"ex.first-step": "example-stage-one", "ex.second-step": "example-stage-two"}
 
 
 def _capture(paths: runlog.RunPaths, *, seq: int, label: str, attempt: int, lines: list[str]) -> Path:
@@ -122,16 +125,16 @@ def _result(*, duration_ms: int, cost: float) -> str:
 
 def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -> None:
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(paths, seq=11, label="p2.6.apply-scores", attempt=1, lines=[_result(duration_ms=1200, cost=0.25)])
-    _capture(paths, seq=12, label="p3.distill", attempt=1, lines=[_result(duration_ms=900, cost=0.5)])
+    _capture(paths, seq=11, label="ex.first-step", attempt=1, lines=[_result(duration_ms=1200, cost=0.25)])
+    _capture(paths, seq=12, label="ex.second-step", attempt=1, lines=[_result(duration_ms=900, cost=0.5)])
 
     records = runlog.read_cadence(paths, stages=_STAGES)
 
     assert records == [
         {
             "seq": 11,
-            "step": "p2.6.apply-scores",
-            "stage": "phase-2.6",
+            "step": "ex.first-step",
+            "stage": "example-stage-one",
             "attempt": 1,
             "re_ask": False,
             "duration_ms": 1200,
@@ -139,8 +142,8 @@ def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -
         },
         {
             "seq": 12,
-            "step": "p3.distill",
-            "stage": "phase-3",
+            "step": "ex.second-step",
+            "stage": "example-stage-two",
             "attempt": 1,
             "re_ask": False,
             "duration_ms": 900,
@@ -150,18 +153,18 @@ def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -
 
 
 def test_a_re_ask_and_a_hyphenated_step_id_are_told_apart(tmp_path: Path) -> None:
-    """``p2.6.apply-scores`` and ``-reask`` both contain the separator.
+    """``ex.first-step`` and ``-reask`` both contain the separator.
 
     A reader splitting on the first or last hyphen gets one of them wrong, so
     the capture-name pattern is anchored at both ends instead.
     """
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(paths, seq=11, label="p2.6.apply-scores-reask", attempt=2, lines=[_result(duration_ms=5, cost=0.0)])
+    _capture(paths, seq=11, label="ex.first-step-reask", attempt=2, lines=[_result(duration_ms=5, cost=0.0)])
 
     (record,) = runlog.read_cadence(paths, stages=_STAGES)
 
-    assert record["step"] == "p2.6.apply-scores"
-    assert record["stage"] == "phase-2.6"
+    assert record["step"] == "ex.first-step"
+    assert record["stage"] == "example-stage-one"
     assert record["re_ask"] is True
     assert record["attempt"] == 2
 

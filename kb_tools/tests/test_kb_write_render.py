@@ -594,10 +594,11 @@ class TestEntryGrammar(unittest.TestCase):
         """Render → parse via the production function → values match.
 
         ``kb_index_lib.parse_register_staged_supports`` is the grammar, and it
-        is what the tree walk behind ``scan_authored_support_edges`` — and so
-        the phase-2.6 postcondition — stands on. Parsing the rendered block with
-        anything else here would prove the renderer agreed with this test's own
-        idea of the format, which is the agreement that was never in doubt.
+        is what the tree walk behind ``scan_authored_support_edges`` stands on.
+        Parsing the rendered
+        block with anything else here would prove the renderer agreed with this
+        test's own idea of the format, which is the agreement that was never in
+        doubt.
         """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

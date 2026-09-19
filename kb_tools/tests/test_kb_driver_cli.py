@@ -159,7 +159,7 @@ def test_an_inadmissible_decision_is_refused_at_load(tmp_path: Path, capsys: pyt
 def test_malformed_decide_exits_13_before_the_run_directory_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = cli.main(_run_args(tmp_path, "--decide", "phase-1b-design-gate"))
+    code = cli.main(_run_args(tmp_path, "--decide", "example-stage-example-kind"))
 
     assert code == baton.EXIT_CONFIG
     assert "malformed" in capsys.readouterr().out
