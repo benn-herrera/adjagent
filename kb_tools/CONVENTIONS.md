@@ -120,10 +120,11 @@ directory's copies; the repository-root documents are named as root.
 - **A test's placement is decided by what it drives, not by convenience.**
   A test that exercises a `kb_tools` function or module in isolation belongs
   in `kb_tools/tests/` and runs under `test` (`just test`). A test that
-  drives a corpus through the pipeline — a `kb-driver` build, a staged
-  multi-document corpus, anything reaching a `kb-testing/` runner target —
-  is an integration test and belongs in `kb-testing/`, never in
-  `kb_tools/tests/`. Two written forms coexist there: the justfile recipes
+  drives a corpus through the pipeline — a `kb-driver` build over staged
+  corpus material, a staged multi-document corpus, anything reaching a
+  `kb-testing/` runner target — is an integration test and belongs in
+  `kb-testing/`, never in `kb_tools/tests/`. A build over a tracked
+  single-document fixture is not that: it drives the driver, not a corpus. Two written forms coexist there: the justfile recipes
   that already drive staged corpora end to end, and a pytest tree at
   `kb-testing/tests/` for integration tests better expressed that way — the
   choice between the two is only how the test is written, never what kind
