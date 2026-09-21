@@ -329,12 +329,12 @@ resting on nothing — a wrong answer arrived at silently, which is the thing th
 stage's rulings above exist to refuse.
 """
 
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from .. import kb_index_lib
+from ..kb_write import render
 from .graph import AuthoredGraph, ClaimNode
 from .inventory import (
     NOT_A_CLAIM_TARGET,
@@ -379,10 +379,13 @@ class AttributionError(ClaimGraphError):
 class Question:
     """One source claim, the candidates it may depend on, and where they came from.
 
-    ``evidence`` is the reference line each candidate was enumerated from, in
-    the source document's own words. It is what the ask shows instead of the
-    whole document: the pair is the question, and the line carrying the
-    reference is the context that decides it.
+    ``evidence`` is the passage each candidate was enumerated from — the
+    anchor's own paragraph, in the source document's words, collapsed to one line
+    (:func:`_reference_line`). It is what the ask shows instead of the whole
+    document: the pair is the question, and the prose the reference sits in is
+    the context that decides it. It is a **set** rather than one entry per
+    candidate: two references in one paragraph are enumerated from the same
+    passage, and showing it twice would say nothing the once does not.
     """
 
     source: ClaimNode
@@ -626,19 +629,56 @@ def _target_end(
 
 
 def _reference_line(tree: Tree, anchor: Anchor) -> str:
-    """The source line the anchor sits on, in the author's own words, collapsed to one line.
+    """The author's words around the anchor — its whole paragraph, collapsed to one line.
 
-    Marker-stripped as well as unquoted, because this value is not read by this
-    package: it becomes :attr:`Question.evidence` and renders verbatim into the
-    ask's reference-lines slot. A Tier-2 marker is appended to the end of the
-    line its claim is located by, and this stage always runs over a tree two
-    earlier passes have minted into — so an author who states a result by
-    reference puts the anchor and the marker on one line, and the seat choosing
-    a dependency direction would be reading the metadata alongside the prose.
+    **A paragraph rather than a physical line, because the wrap is pandoc's.**
+    The built markdown is hard-wrapped near 72 columns, so a physical line is a
+    unit the converter chose and not one the author wrote in: the anchor lands on
+    whichever side of a wrap it fell on, and the word saying what the reference is
+    doing there — *By*, *using*, *follows from* — sits on the line above as
+    readily as on the anchor's own. Read line by line over the built ModernCorp
+    tree, 0 of 22 values reaching :attr:`Question.evidence` carried any of by /
+    from / follows from / using / via / in view of / applying / combining / rests
+    on / since / because / building on, and some were markup alone — half an
+    anchor tag, cut at a wrap. Read paragraph by paragraph, 15 of 19 carry one.
+
+    The blank-line block is also the narrowest unit :attr:`Anchor.line` can name.
+    A wrapped line holds parts of several sentences and a sentence runs across
+    several lines, so a line number names a set of sentences rather than one, and
+    an anchor carries no offset to narrow that set with.
+
+    **No length bound, and that is measured rather than assumed.** Over the same
+    tree's 243 anchors the paragraph runs to 2789 characters at its longest and
+    2277 at the 99th percentile, and the longest ones are ordinary prose. The case
+    a bound would be for — a display-maths fence flush against the prose, which
+    this corpus writes with no blank line around it — sits at the median rather
+    than in the tail (1223 characters against 1218). Ending the run at a fence was
+    measured too: it changes no value's cue phrase, 15 of 19 either way, and
+    leaves the evidence opening mid-sentence on the words after the fence, "with
+    ``$`\\rho`$`` the discount rate" for a paragraph whose subject stood two fences
+    above — the defect this function exists to avoid, paid for a second time.
+
+    **Marker-stripped and unquoted before the block is found, not after.** This
+    value is not read by this package: it becomes :attr:`Question.evidence` and
+    renders verbatim into the ask's reference-lines slot. A Tier-2 marker is
+    appended to the end of the line its claim is located by, and this stage always
+    runs over a tree two earlier passes have minted into — so an author who states
+    a result by reference puts the anchor and the marker on one line, and the seat
+    choosing a dependency direction would be reading the metadata alongside the
+    prose. Unquoting first is what makes the boundary right inside a blockquote,
+    where the blank line separating two quoted paragraphs is written ``>``: read
+    quoted, that line is not blank and the run swallows the whole quote.
     """
     lines = unquote(strip_markers(tree.documents[anchor.document].text)).splitlines()
-    line = lines[anchor.line] if anchor.line < len(lines) else ""
-    return re.sub(r"\s+", " ", line).strip()
+    if anchor.line >= len(lines):
+        return ""
+    start = anchor.line
+    while start > 0 and lines[start - 1].strip():
+        start -= 1
+    end = anchor.line + 1
+    while end < len(lines) and lines[end].strip():
+        end += 1
+    return render.collapse_prose(" ".join(lines[start:end]))
 
 
 def cycle_edges(edges: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]:

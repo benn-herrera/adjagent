@@ -10,14 +10,14 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
 ## Items
 
-1. **(STICKY) Periodic load-bearing-ness pruning pass** over definition clauses, across model generations: apply strip-first-observe-patch (README.md, "Variants and platform compatibility") on a cadence, using behavioral probe sets as the instrument. Byte-level checks (`gen-defs.py`'s `check` verb — ARCHITECTURE.md, The Two Checks) exist today; behavioral checks do not yet.
+1. **(STICKY) Periodic load-bearing-ness pruning pass** over definition clauses, across model generations: apply strip-first-observe-patch (README.md, "Variants and platform compatibility") on a cadence, using behavioral probe sets as the instrument. Byte-level instruments exist today — `just render-diff` between two render slots, and the render-property assertions in `tests/test_gen_defs.py` (ARCHITECTURE.md, Verification, and Why There Is No Verification Verb); behavioral ones do not yet.
 
 2. **Claude Code release reconciliation.** The generator authors agent definitions and slash commands against the harness's definition format and its dispatch behavior, so a release that moves either moves this repository's templates with it. The binary moved `2.1.220` → `2.1.272`, fifty-two releases. The definition surface was surveyed against the new build; what follows is what that established.
 
     **Verified and requiring no change:**
 
     - **Tool declaration.** Eight definitions name tools, and between them they name five: `Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch`. None was renamed or removed, and a definition naming a tool that does not resolve fails to launch rather than degrading — so this surface is safe or loudly broken, never quietly wrong. The other definitions omit `tools`, which still means inherit.
-    - **`model`.** Every rendered value is in the accepted vocabulary (`opus` 23, `sonnet` 11, `haiku` 1, `fable` 1). **This is the one behavior that moved under us**: releases `.259`–`.261` fixed frontmatter `model:` being ignored in some contexts, so the tier map begins taking effect where it may have been inert. The rungs (`check-floor`, `check-stock`) are worth re-running under the new binary for that reason.
+    - **`model`.** Every rendered value is in the accepted vocabulary (`opus` 23, `sonnet` 11, `haiku` 1, `fable` 1). **This is the one behavior that moved under us**: releases `.259`–`.261` fixed frontmatter `model:` being ignored in some contexts, so the tier map begins taking effect where it may have been inert. The floor and stock tunings are worth re-rendering under the new binary for that reason — each is a `just render <slug>` with the tuning flags that name it, diffed against a default slot by `just render-diff`.
     - **`omitClaudeMd`** (new at `.271`) — **deliberately not set.** Both the operator baseline and the project's own conventions reaching every dispatched seat is the design, and the field's only use is to switch that off.
 
     **Settled as nonexistent. Do not re-open, and do not add either field to a definition:**
@@ -33,7 +33,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
     **Closed by a live-inference walk, not a mechanical one.** The `--no-inference` recipes spend no model call by construction, so they exercise the build pipeline and dispatch nothing — a moved dispatch default passes straight through them. What settles this is `kb-driver-arxiv-corpus` over `ARXIV_LIVE_IDS`, and it was run: both papers reached `claims-discovered` and `depends-attributed`, so seats launch, receive briefs, and return parseable answers under the new build. Re-render and re-install were no-ops, the templates being unchanged.
 
-    **The pins were verified honored, at the output side.** `runs/<id>/<ts>/calls/*.stream.jsonl` carries the model id per session, and a floor-rung run (`--model-tier-map=all=haiku --model-pin-map=all=haiku`, the tuning `generate-floor` uses) reported `claude-haiku-4-5-20251001` throughout. That is the direct check: the definition states the pin, and the stream says what served the call. Neither `/usage` nor the console log breaks usage down by model, so this is the only instrument for it.
+    **The pins were verified honored, at the output side.** `runs/<id>/<ts>/calls/*.stream.jsonl` carries the model id per session, and a floor-tuned run (`--model-tier-map=all=haiku --model-pin-map=all=haiku`) reported `claude-haiku-4-5-20251001` throughout. That is the direct check: the definition states the pin, and the stream says what served the call. Neither `/usage` nor the console log breaks usage down by model, so this is the only instrument for it.
 
 3. **Atomic install** (dry-run-then-live, git-style): the install first runs a full dry pass and halts before writing anything if any target would be a collision — where collision = target exists, differs from the bytes this run would write, and is not provably this generator's output (the differs clause covers the unbannerable `.tmpl` payload files). Reports all collisions at once; only a clean dry pass proceeds to the live run. Doing the work twice is trivial against the whole-install runtime. **What is left here is the dry pass alone.** Pruning landed outside this item and without its gate: a deployed surface is swept per file against the banner, and a shipped package's destination is replaced whole (SPEC.md, Write Safety). Neither needs a dry run, so the collision pass is the remainder rather than the prerequisite it was written as.
 
@@ -99,27 +99,4 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    **Read first**: Phase 3's round mechanics, and whether participants are currently fresh or carried. Both
    candidates turn on that answer and neither has been checked against the protocol as written.
 
-10. **Eliminate `gen-defs.py`'s `check` verb.** It is a checker shaped like the implementation:
-    `check` calls `all_renders`, the same function the renderer calls, so it compares the producer
-    against itself. A rendering defect flows through it unseen and it reports clean. `kb_tools/AGENTS.md`
-    already rules on the shape — *"a check over a value this toolchain computed restates the
-    computation"* — and this one does not restate it, it invokes it. What it can detect is staleness
-    of a gitignored build product that a free re-render fixes; what its name implies, that a render is
-    correct, it is structurally unable to see.
-
-    **Its maintenance burden sits on the wrong half.** The part that invokes rendering costs nothing to
-    keep current precisely because it is blind. The part that reads output independently — the banner
-    and tuning claims, the comparable-body trim — must track every format change, and when it falls
-    behind it does not go quiet, it reports `REFUSED` or `MISTUNED` on bytes that are fine. All of the
-    upkeep is on the half that produces false alarms, which is how a checker of this shape trains its
-    readers to disbelieve it.
-
-    Replace it at the two use sites rather than porting it. **The test suite** wants unit tests over
-    the render — `tests/test_gen_defs.py` calls `check()` at four sites today, using it as an oracle for
-    a round trip. **`check-floor` and `check-stock`** want a diff appropriate to what a rung is actually
-    for: the floor rung exercises the `all=` merge reaching every tier, which is pins landing, and
-    comparing a template's declared pin against the rendered frontmatter is two independently produced
-    values rather than one computed twice. That is a smaller instrument and a better question, not the
-    same answer more cheaply.
-
-11. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`): installs the agent and command definitions under a prefixed namespace so the set coexists with an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a template pass tokenizing every cross-reference site (dispatch names, slash-command names in prose, the MAD roster) with a lint against bare fleet names, and a decision on how the prefix reaches runtime callers that name agents from code (the driver's `--agent <seat>` invocations): driver-config key vs. install-time stamp into the installed `kb_tools`. The published operator baseline joins the substitution set: `user-config/INSTALLED_CLAUDE.md` becomes a template (`CLAUDE.md.tmpl`) so agent references inside it — the prompt-engineer review rule, any seat named by the working preferences — render with the prefix applied at install.
+10. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`): installs the agent and command definitions under a prefixed namespace so the set coexists with an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a template pass tokenizing every cross-reference site (dispatch names, slash-command names in prose, the MAD roster) with a lint against bare fleet names, and a decision on how the prefix reaches runtime callers that name agents from code (the driver's `--agent <seat>` invocations): driver-config key vs. install-time stamp into the installed `kb_tools`. The published operator baseline joins the substitution set: `user-config/INSTALLED_CLAUDE.md` becomes a template (`CLAUDE.md.tmpl`) so agent references inside it — the prompt-engineer review rule, any seat named by the working preferences — render with the prefix applied at install.

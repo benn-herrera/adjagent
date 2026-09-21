@@ -255,7 +255,7 @@ def test_scan_of_a_bare_kb_is_empty(tmp_path: Path) -> None:
 
 
 def test_caller_partitions_unscored_ids_by_owning_register(run3_shaped_repo: Path) -> None:
-    """The consumer shape phase-2.5's batching step is written against."""
+    """The map by which unscored ids are partitioned across their owning registers."""
     inventory = kb_index_lib.scan_authored_ids(run3_shaped_repo / "kb-root")
     by_register: dict[str | None, list[str]] = {}
     for node_id, record in inventory.items():

@@ -259,10 +259,23 @@ def _selection(graph: model.ClaimGraph, domain: str | None) -> tuple[Collection[
 def _census(graph: model.ClaimGraph, sheet: layout.Sheet) -> tuple[ReportItem, ...]:
     """The ``FACT`` lines: what was drawn, each family in its declared order.
 
-    Every count but one is the drawn sheet's. The exception is the disconnected
-    component, which is reported for the corpus — connectivity, like layering,
-    is a property of the graph rather than of the view taken of it, and a whole
-    volume left unlinked is a fact about the KB whichever sheet is being read.
+    Every count but two is the drawn sheet's. The exceptions are the
+    disconnected component and the implied premise, both reported for the
+    corpus — connectivity and the reduction, like layering, are properties of
+    the graph rather than of the view taken of it, and a whole volume left
+    unlinked is a fact about the KB whichever sheet is being read.
+
+    **The implied count is reported because the picture cannot say it.** A
+    premise a drawn route already carries is not drawn (``model``'s own
+    docstring), so a census naming only what was drawn would leave a reader of
+    the report believing the sheet holds a stroke per premise. The count is all
+    that is said: naming the strokes here would be the second rendering of them
+    that the sheet deliberately does without.
+
+    **The crossing line carries two figures for the same reason.** The headline
+    is the geometric count and stays whole; not every crossing earns a bridge
+    glyph (:func:`svg.denoted_hops`), and one reported figure would say they all
+    do.
     """
     node_types = Counter(placed.node.node_type for placed in sheet.nodes)
     relations = Counter(placed.edge.relation for placed in sheet.edges)
@@ -275,9 +288,13 @@ def _census(graph: model.ClaimGraph, sheet: layout.Sheet) -> tuple[ReportItem, .
     }
     return (
         _fact("nodes", f"{len(sheet.nodes)} drawn — {_tally(node_types, kb_schema.NODE_KINDS)}"),
-        _fact("edges", f"{len(sheet.edges)} drawn — {_tally(relations, style.CENSUS_RELATIONS)}"),
+        _fact(
+            "edges",
+            f"{len(sheet.edges)} drawn, {len(graph.implied)} implied by another drawn route "
+            f"— {_tally(relations, style.CENSUS_RELATIONS)}",
+        ),
         _fact("layers", str(sheet.layer_count)),
-        _fact("crossings", str(len(sheet.hops))),
+        _fact("crossings", f"{len(sheet.hops)} drawn, {len(svg.denoted_hops(sheet))} carrying a bridge glyph"),
         _fact("defects", _tally(defects, style.CENSUS_DEFECT_CLASSES)),
     )
 

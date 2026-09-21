@@ -19,10 +19,12 @@ sources = ["AcmeWidgets.tex"]
 permission_mode = "acceptEdits"
 """
 
-# The registry the barrier module will supply once it lands; injected here so
-# answer-set validation is testable without importing it.
+# A stand-in registry, injected so answer-set validation is testable without
+# importing `barriers`. The pair is synthetic and registered nowhere — config
+# checks a decision's form and takes its vocabulary from whatever registry the
+# caller hands it, so nothing here asserts anything about a real barrier.
 ADMISSIBLE = {
-    "phase-1b.design-gate": frozenset({"approve", "revise", "cancel"}),
+    "example-stage.example-kind": frozenset({"approve", "revise", "cancel"}),
 }
 
 
@@ -80,7 +82,7 @@ backoff_seconds = [1, 2, 3]
 level = "DEBUG"
 run_dir = "/var/tmp/kb-driver"
 
-[barriers.phase-1b.design-gate]
+[barriers.example-stage.example-kind]
 decision = "approve"
 note = "Approve."
 """
@@ -96,11 +98,11 @@ note = "Approve."
     assert cfg.retry.backoff_seconds == (1, 2, 3)
     assert cfg.log.run_dir == Path("/var/tmp/kb-driver")
 
-    decision = cfg.decisions["phase-1b.design-gate"]
-    assert (decision.stage, decision.kind, decision.answer) == ("phase-1b", "design-gate", "approve")
+    decision = cfg.decisions["example-stage.example-kind"]
+    assert (decision.stage, decision.kind, decision.answer) == ("example-stage", "example-kind", "approve")
     assert decision.note == "Approve."
     assert decision.source == "config"
-    assert decision.spec == "phase-1b.design-gate=approve"
+    assert decision.spec == "example-stage.example-kind=approve"
 
 
 @pytest.mark.parametrize("mode", config.PERMISSION_MODES)
@@ -135,7 +137,7 @@ def test_flags_alone_specify_a_run_and_every_other_field_defaults() -> None:
 
 def test_a_flag_wins_over_the_file_for_the_field_it_names(tmp_path: Path) -> None:
     """Precedence, and its bound: an override replaces its own field and no other."""
-    body = MINIMAL + 'runner = "make"\n[barriers.phase-1b.design-gate]\ndecision = "approve"\n'
+    body = MINIMAL + 'runner = "make"\n[barriers.example-stage.example-kind]\ndecision = "approve"\n'
 
     cfg = config.load(
         _write(tmp_path, body),
@@ -146,7 +148,7 @@ def test_a_flag_wins_over_the_file_for_the_field_it_names(tmp_path: Path) -> Non
     assert cfg.run.sources == ("flagged.tex",), "a repeated --source replaces the list rather than extending it"
     assert cfg.run.permission_mode == "plan"
     assert cfg.run.runner == "make", "a field no flag names keeps the file's value"
-    assert cfg.decisions["phase-1b.design-gate"].answer == "approve"
+    assert cfg.decisions["example-stage.example-kind"].answer == "approve"
 
 
 def test_the_field_with_no_default_is_refused_naming_both_doors() -> None:
@@ -264,8 +266,16 @@ def test_the_run_directory_flag_wins_over_the_file_and_reaches_the_resume_line(t
         ("timeout not positive", MINIMAL + "[timeouts]\nsilence_seconds = 0\n", "silence_seconds"),
         ("backoff not integers", MINIMAL + '[retry]\nbackoff_seconds = ["5s"]\n', "backoff_seconds"),
         ("unknown log level", MINIMAL + '[log]\nlevel = "CHATTY"\n', "level"),
-        ("barrier table has no decision", MINIMAL + '[barriers.phase-1b.design-gate]\nnote = "hi"\n', "decision"),
-        ("barrier stage is not a table", MINIMAL + '[barriers]\nphase-1b = "approve"\n', "barriers.phase-1b"),
+        (
+            "barrier table has no decision",
+            MINIMAL + '[barriers.example-stage.example-kind]\nnote = "hi"\n',
+            "decision",
+        ),
+        (
+            "barrier stage is not a table",
+            MINIMAL + '[barriers]\nexample-stage = "approve"\n',
+            "barriers.example-stage",
+        ),
     ],
 )
 def test_invalid_config_is_refused_naming_the_key(tmp_path: Path, case: str, body: str, expected: str) -> None:
@@ -376,6 +386,60 @@ through = "start"
     assert cfg.run.through == "start"
 
 
+# One row per section the unknown-key refusal covers, carrying that section's
+# complete valid key set. ``[barriers]`` is absent because it is the one
+# section with a vocabulary of its own to be checked against — the registry's
+# registered pairs.
+SECTION_VALID_KEYS = [
+    ("claude", '[claude]\ncommand = ["claude", "--x"]\nenv = { ANTHROPIC_LOG = "debug" }\n'),
+    (
+        "timeouts",
+        '[timeouts]\nsingle_seconds = 60\nsilence_seconds = 30\n[timeouts.by_step]\n"p5.review" = 14400\n',
+    ),
+    ("retry", "[retry]\ntransport_attempts = 2\nbackoff_seconds = [1, 2]\n"),
+    ("log", '[log]\nlevel = "DEBUG"\nrun_dir = "/var/tmp/kb-driver"\n'),
+]
+_SECTIONS = [section for section, _ in SECTION_VALID_KEYS]
+
+
+@pytest.mark.parametrize("section", _SECTIONS)
+def test_an_unknown_key_in_any_section_is_refused_naming_it(tmp_path: Path, section: str) -> None:
+    """What ``[run]`` already refused, every other section refuses too.
+
+    A key nothing consults is not partial: the default stays in force and the
+    run reports itself configured, so a typo buys an inert setting and no
+    complaint.
+    """
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(_write(tmp_path, MINIMAL + f'[{section}]\nno_such_key = "x"\n'))
+
+    message = str(excinfo.value)
+    assert f"[{section}]" in message
+    assert "no_such_key" in message
+
+
+@pytest.mark.parametrize(("section", "body"), SECTION_VALID_KEYS, ids=_SECTIONS)
+def test_every_recognized_key_of_a_section_still_loads(tmp_path: Path, section: str, body: str) -> None:
+    """The refusal reads what config.load actually consults, so a key it does
+    consult by some route other than ``.get`` would be refused as unknown.
+    Each section's whole valid vocabulary, given alone, must load clean."""
+    config.load(_write(tmp_path, MINIMAL + body))
+
+
+def test_a_present_by_step_table_is_not_an_unknown_timeouts_key(tmp_path: Path) -> None:
+    """``by_step`` is a key of ``[timeouts]`` whose value is a nested table.
+
+    The helper that fetches it reads it through ``.get`` like any scalar, so a
+    legitimately present nested table registers as read; fetched any other way
+    it would be reported as an unknown key of its own parent.
+    """
+    body = MINIMAL + '[timeouts.by_step]\n"p5.review" = 14400\n'
+
+    cfg = config.load(_write(tmp_path, body))
+
+    assert cfg.timeouts.by_step == {"p5.review": 14400}
+
+
 @pytest.mark.parametrize(
     ("case", "body", "key"),
     [
@@ -392,6 +456,10 @@ def test_model_key_is_rejected_at_load_naming_the_key(tmp_path: Path, case: str,
     message = str(excinfo.value)
     assert key in message, case
     assert "--model" in message, case
+    # The general unknown-key refusal would also catch a model key. It runs
+    # second and never fires, so one key never draws two reports, and the one
+    # it draws is the one saying why no such key exists.
+    assert "unknown key" not in message, case
 
 
 def test_missing_config_file_is_a_config_error(tmp_path: Path) -> None:
@@ -405,7 +473,7 @@ def test_malformed_toml_is_a_config_error(tmp_path: Path) -> None:
 
 
 def test_out_of_set_barrier_decision_is_refused_at_load(tmp_path: Path) -> None:
-    body = MINIMAL + '[barriers.phase-1b.design-gate]\ndecision = "approve-ish"\n'
+    body = MINIMAL + '[barriers.example-stage.example-kind]\ndecision = "approve-ish"\n'
     with pytest.raises(config.ConfigError, match="not admissible"):
         config.load(_write(tmp_path, body), admissible=ADMISSIBLE)
 
@@ -419,8 +487,8 @@ def test_unregistered_barrier_pair_is_refused_at_load(tmp_path: Path) -> None:
 def test_barrier_answers_are_unchecked_without_a_registry(tmp_path: Path) -> None:
     # Form only: the registry lives above config in the dependency direction,
     # so a caller that has not loaded it gets structural validation alone.
-    body = MINIMAL + '[barriers.phase-1b.design-gate]\ndecision = "approve-ish"\n'
-    assert config.load(_write(tmp_path, body)).decisions["phase-1b.design-gate"].answer == "approve-ish"
+    body = MINIMAL + '[barriers.example-stage.example-kind]\ndecision = "approve-ish"\n'
+    assert config.load(_write(tmp_path, body)).decisions["example-stage.example-kind"].answer == "approve-ish"
 
 
 # ---------------------------------------------------------------------------
@@ -429,27 +497,27 @@ def test_barrier_answers_are_unchecked_without_a_registry(tmp_path: Path) -> Non
 
 
 def test_decide_parses_pair_answer_and_note() -> None:
-    decision = config.parse_decision("phase-1b.design-gate=revise:tighten the domain split")
-    assert (decision.stage, decision.kind, decision.answer) == ("phase-1b", "design-gate", "revise")
+    decision = config.parse_decision("example-stage.example-kind=revise:tighten the domain split")
+    assert (decision.stage, decision.kind, decision.answer) == ("example-stage", "example-kind", "revise")
     assert decision.note == "tighten the domain split"
     assert decision.source == "cli"
 
 
 def test_decide_splits_a_dotted_stage_id_on_its_last_dot() -> None:
-    decision = config.parse_decision("phase-2.5.cap-exhausted=stop")
-    assert (decision.stage, decision.kind) == ("phase-2.5", "cap-exhausted")
+    decision = config.parse_decision("example-stage.2.example-kind=stop")
+    assert (decision.stage, decision.kind) == ("example-stage.2", "example-kind")
 
 
 @pytest.mark.parametrize(
     "spec",
     [
-        "phase-1b.design-gate",  # no answer
-        "design-gate=approve",  # no stage
+        "example-stage.example-kind",  # no answer
+        "example-kind=approve",  # no stage
         "=approve",  # no pair
-        "phase-1b.design-gate=",  # empty answer
-        "phase-1b.design-gate=Approve",  # answers are lowercase tokens
-        "phase-1b.design-gate=approve now",  # free text belongs after the colon
-        ".design-gate=approve",  # empty stage
+        "example-stage.example-kind=",  # empty answer
+        "example-stage.example-kind=Approve",  # answers are lowercase tokens
+        "example-stage.example-kind=approve now",  # free text belongs after the colon
+        ".example-kind=approve",  # empty stage
     ],
 )
 def test_malformed_decide_is_refused(spec: str) -> None:
@@ -459,7 +527,7 @@ def test_malformed_decide_is_refused(spec: str) -> None:
 
 def test_decide_answer_is_checked_against_the_registry() -> None:
     with pytest.raises(config.ConfigError, match="not admissible"):
-        config.parse_decision("phase-1b.design-gate=maybe", admissible=ADMISSIBLE)
+        config.parse_decision("example-stage.example-kind=maybe", admissible=ADMISSIBLE)
 
 
 def test_decide_pair_is_checked_against_the_registry() -> None:

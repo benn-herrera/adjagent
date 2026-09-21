@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generator and consistency checker for the generated definitions in this
-repository — agent definitions and slash-command definitions alike.
+Generator for the generated definitions in this repository — agent definitions
+and slash-command definitions alike.
 
 Templates live in two sibling trees under templates/, and a template's surface
 tree routes its output into the matching deployed surface beneath the output
@@ -20,11 +20,9 @@ there is no metadata key for placement:
     templates/agents/mad/participant-contract.md.tmpl -> ROOT/agents/mad/participant-contract.md
 
 Every other mechanism — chunks, variants, markers, overlay anchors,
-multi-output fences, banners, write safety, numbered backups, and both checks
-— applies unchanged at a nested path. Check 2 walks *.md RECURSIVELY under each
-checked surface, so a banner stranded at a nested path is caught exactly as a
-top-level one is. The surface directories under ROOT, and the mirrored
-subdirectories beneath them, are created as needed.
+multi-output fences, banners, write safety, and numbered backups — applies
+unchanged at a nested path. The surface directories under ROOT, and the
+mirrored subdirectories beneath them, are created as needed.
 
 templates/shared-chunks.toml is the single chunk source for both template
 types. A template holds everything unique to its definition; every span of
@@ -62,30 +60,25 @@ its keys are bare; the prefix goes where one is CONSUMED (Marker syntax,
 below). Bodies are therefore identical by construction rather than by
 maintenance discipline. A template with no such block renders a single
 definition named after the template, at the template's mirrored path. Chunks,
-variants, markers, wrapping, multi-output declarations, write safety, backups,
-and the render-identity check apply identically to both template types.
+variants, markers, wrapping, multi-output declarations, write safety and
+backups apply identically to both template types.
 
 Usage — no default mode: a verb is required. `just render`, `just install`,
-and `just install-claude-md` are the sole general-purpose sanctioned entry
-points to this script's verbs, as opposed to the fixed-flag verification
-rungs (`just generate-floor`, `just check-floor`, `just generate-stock`,
-`just check-stock`) that also reach it under a locked tuning; ARCHITECTURE.md,
-Sanctioned Invocation, has the complete list of recipes reaching this
-script. They wrap:
+and `just install-claude-md` are the sanctioned entry points to this script's
+verbs; ARCHITECTURE.md, Sanctioned Invocation, has the complete list of
+recipes reaching this script. They wrap:
 
-    python3 gen-defs.py check R              # check the tree under R
     python3 gen-defs.py generate R           # render templates into R
     python3 gen-defs.py install R            # full-product install into R
     python3 gen-defs.py install-claude-md D  # merge the operator baseline into D
 
-The first three name their output root positionally, and none of them
-defaults, because there is no in-repository tree left to default to; the
-fourth names the operator's own CLAUDE.md and is described under
-"Operator-config integration" below. Each verb declares only the flags it can
-act on: what a verb cannot do is unrepresentable on its command line rather
-than refused after the fact.
+The first two name their output root positionally, and neither defaults,
+because there is no in-repository tree left to default to; the third names the
+operator's own CLAUDE.md and is described under "Operator-config integration"
+below. Each verb declares only the flags it can act on: what a verb cannot do
+is unrepresentable on its command line rather than refused after the fact.
 
-Flags common to generate, check and install:
+Flags common to generate and install:
 
     --family NAME           the model family whose tuning applies: a bare
                             family name resolved against templates/family/
@@ -99,21 +92,17 @@ Flags common to generate, check and install:
                             the claude model namespace.
     --verbose, -v           list every file, not just the exceptions.
 
-`generate` and `check` additionally take:
+`generate` additionally takes:
 
     --surfaces WHICH        agents | commands | both (default both): which
-                            surface to render or check. Cannot be combined
-                            with the selection globs below, which imply it.
+                            surface to render. Cannot be combined with the
+                            selection globs below, which imply it.
     --agent-glob PATTERNS   restrict the run to the agents outputs matching
                             PATTERNS: one or more fnmatch patterns joined by
                             "|" ("*app-expert*|*-coder*"). See below.
     --command-glob PATTERNS the same, over the commands surface.
 
-and `check` alone takes:
-
-    --no-diff               report drift without printing the diff.
-
-`install` takes none of those four: it delivers the product entire, and a
+`install` takes none of those three: it delivers the product entire, and a
 partial install is a future feature.
 
 ROOT is asserted to be an existing directory and is otherwise unconstrained —
@@ -133,7 +122,7 @@ top-level coders without reaching into a subdirectory only because none of
 those outputs live in one.
 
 Presence of either glob IMPLIES the surface(s) the run covers: --agent-glob
-alone renders/checks the agents surface only, filtered; --command-glob alone
+alone renders the agents surface only, filtered; --command-glob alone
 the commands surface only; both, both surfaces, each filtered by its own
 patterns; neither, every output, as always. --surfaces is therefore redundant
 with a glob and combining them is an argparse error. Narrowing an install is
@@ -141,8 +130,8 @@ not an error but an impossibility: `install` declares neither the globs nor
 --surfaces, so an install always delivers the whole product.
 
 Selection filters PER OUTPUT, not per template: a glob matching one output of
-a multi-output template renders or checks exactly that one, and the template's
-other outputs are left untouched on disk and reported as nothing at all.
+a multi-output template renders exactly that one, and the template's other
+outputs are left untouched on disk and reported as nothing at all.
 
 A pattern matching zero outputs — any single "|"-segment, and therefore the
 set — is a hard error naming the pattern and listing what the surface does
@@ -152,8 +141,8 @@ a clean run. What was selected is stated in the run report, per surface:
     agents: 12 of 24 outputs selected by --agent-glob
 
 Selection composes orthogonally with everything else: overlay anchors and tier
-resolution, banners and tuning claims, the write-safety table, and both checks
-all apply to the selected outputs exactly as they do to a full run.
+resolution, banners and tuning claims, and the write-safety table all apply to
+the selected outputs exactly as they do to a full run.
 
 Tier tokens and the two maps:
 
@@ -297,7 +286,8 @@ Family scope is unchanged by any of that: a loaded family file's family-wide
 text fills its anchors render-wide, for outputs with a tier and outputs with no
 pin site alike. Only MODEL-scoped entries require a tier. The banner records
 the invocation's whole triple, and tier resolution is a deterministic function
-of that triple and the templates, so check reproduces it exactly.
+of that triple and the templates, so a re-render under it reproduces the same
+bytes exactly.
 
 A filled anchor renders its family text VERBATIM in place — no lead-in, no
 wrapper, no marker of its own around it, so a family file can restore a passage
@@ -430,8 +420,8 @@ wholesale inside a package destination, where they do not.
 Last, an install PRUNES (prune_stale). Overwriting is only half of keeping an
 artifact tree true to its source: a definition whose template has since been
 deleted is written by nothing and so survives every re-install, drifting there
-forever — reported ORPHAN by check, and carried by a diff between two render
-slots as a permanent `Only in` line. So a file under a deployed surface that
+forever — carried by a diff between two render slots as a permanent `Only in`
+line. So a file under a deployed surface that
 this run did NOT write, that carries one of this tool's banners, and whose
 body still hashes to that banner's claim is DELETED, together with any
 directory the deletion empties. The two complements are the point of the rule
@@ -618,33 +608,17 @@ recipe left behind accumulated in a directory the operator owns and bought
 nothing; a single rolling file that only appears when there is something to
 recover is the fix, not a return to it.
 
-`check` runs two checks, each failing nonzero:
-
-  1. Render-identity: every target is byte-identical to its rendered template
-     (REFUSED targets are reported as such instead — they are not compared,
-     and never written). This catches hand-edits to generated output and
-     definitions left stale by a chunk or template change. The reported DIFF
-     is taken over the post-banner bytes, so a body change reads as itself
-     rather than as a body change plus a churned hash line.
-  2. Banner-claims-vs-templates: every *.md anywhere under the checked output
-     surfaces carrying a banner has the template that banner names, and that
-     template declares it (ORPHAN / MISLABELED otherwise). Check 1 walks
-     templates and so is blind to a definition claiming generation with no
-     template behind it; this walks the claims back the other way.
-
-Check takes the same ROOT and the same --surfaces / --family /
---model-tier-map / --model-pin-map flags as generate, so a tuned out-of-repo
-set gets the identical render-identity and banner-claims validation. The
-tuning claim is part of both
-checks: check runs under exactly one triple (the one it was invoked with),
-renders with it, and requires every target's !TUNING! line to match the one its
-own render produces — `seat=` and `member=` included. A target whose recorded
-family, either map, seat or member differs is reported MISTUNED naming both
-sides, instead of an opaque byte diff; a target whose tuning claim matches but
-whose bytes differ is ordinary DRIFT. Validating a tuned set therefore means
-invoking check with that set's ROOT and its tuning flags; checking the same
-directory under a different triple is expected to fail — that is the mismatch
-the banner exists to catch.
+There is no verification verb, and its absence is a decision. A render is the
+only thing that knows what a template produces, so a verb that re-rendered a
+tree and compared would be asking the producer whether it agrees with itself —
+a rendering defect reaches both sides and the report reads clean. What a
+render's output is worth comparing against is a SECOND, independently produced
+tree, which is what `just render-diff` compares: `diff -rq` between two slots
+under rendered/, each produced by its own `just render`. A stale definition in
+an installed tree is retired by the install's own prune (above) rather than
+reported by a checker, and the render's own properties are asserted in
+tests/test_gen_defs.py against values the render did not compute (ARCHITECTURE.md,
+Verification, and Why There Is No Verification Verb).
 
 Generation is deterministic and idempotent: output depends only on the
 template, the shared chunks, and the template's path.
@@ -813,9 +787,10 @@ DynamicMap = dict[str, str]
 MARKER = re.compile(rf'@!(?:({IDENTIFIER})\.)?({IDENTIFIER})((?:\s+{IDENTIFIER}="[^"]*")*)\s*!@')
 ARG = re.compile(rf'({IDENTIFIER})="([^"]*)"')
 # The banner, read back out of a definition as its claim to being generated.
-# Deliberately path-agnostic: any *.md.tmpl claim marks the file as generated
-# (gating write safety); whether the claimed template exists and declares the
-# file is check 2's job, so a stale claim is ORPHAN/MISLABELED, not REFUSED.
+# Deliberately path-agnostic: any *.md.tmpl claim marks the file as generated,
+# which is the whole question write safety and the install's prune ask of it.
+# Whether the claimed template still exists is nobody's question here — a
+# definition no template declares is retired by the prune, not by a verdict.
 BANNER_CLAIM = re.compile(r"^# !GENERATED! from (\S+\.md\.tmpl)\b", re.MULTILINE)
 # The banner's hash line and the line that closes the block around it: the
 # hash of everything after it, and the marker for where "everything after it"
@@ -824,10 +799,10 @@ BANNER_CLAIM = re.compile(r"^# !GENERATED! from (\S+\.md\.tmpl)\b", re.MULTILINE
 # HTML comment closes with "-->" where the others close with "#".
 BODY_HASH_CLAIM = re.compile(r"^# !BODY-SHA256! ([0-9a-f]{64})\n(?:#|-->)\n", re.MULTILINE)
 # The banner's tuning claim: the whole triple this definition was rendered
-# under, plus its own seat and member. A MACHINE claim — check parses it back
-# and compares it field for field, so it is bracket-free, one token per field,
-# and must stay stable across versions or every rendered definition reports
-# MISTUNED. The run-report echo (report_tuning) is the display form and is
+# under, plus its own seat and member. A MACHINE claim — read back and compared
+# field for field, so it is bracket-free, one token per field, and must stay
+# stable across versions or a definition rendered by an older build stops
+# reading. The run-report echo (report_tuning) is the display form and is
 # deliberately a separate serialization.
 TUNING_CLAIM = re.compile(
     r"^# !TUNING! family=(\S+) seat=(\S+) member=(\S+) tier=(\S+) pin=(\S+) stock=(\S+)$",
@@ -1512,13 +1487,6 @@ def body_untouched(text: str) -> bool:
     return match is not None and match.group(1) == sha256_text(text[match.end() :])
 
 
-def comparable_body(text: str) -> str:
-    """What check diffs: the post-banner bytes when the banner stamps them,
-    else the whole file (a bannerless or pre-hash file stamps nothing)."""
-    body = banner_body(text)
-    return text if body is None else body
-
-
 def frontmatter_of(text: str) -> str | None:
     """Return the YAML frontmatter block, or None if the file has none."""
     lines = text.split("\n")
@@ -1588,13 +1556,6 @@ def tuning_claim(text: str) -> TuningClaim | None:
     return TuningClaim(*match.groups()) if match else None
 
 
-def describe_tuning(claim: TuningClaim | None) -> str:
-    """A tuning claim as MISTUNED prints it."""
-    if claim is None:
-        return "no tuning claim"
-    return f"family {claim.family}, seat {claim.seat}, member {claim.member}, " f"tier[{claim.tier}] pin[{claim.pin}]"
-
-
 def split_outputs(path: Path) -> tuple[dict[str, dict[str, str]], str]:
     """Split a template into its output declarations and its body.
 
@@ -1662,7 +1623,7 @@ def assert_tiered(text: str, tier: str | None, *, path: Path, name: str) -> None
     A pin site declares its tier with one of the five tier tokens, and every
     pin site does: the alternative — a literal pin — renders exactly the bytes
     the token would have, so it costs the definition its model scope and
-    nothing else, which is a loss no diff and no check can show. Refusing here
+    nothing else, which is a loss no diff of the output can show. Refusing here
     is what keeps that from being how a new template arrives.
 
     An output with NO pin site is untouched by this. It carries no `model:` key
@@ -1785,53 +1746,6 @@ def templates(smap: dict[str, tuple[Path, Path]]) -> list[Path]:
     return [template for _, template, _ in template_targets(smap)]
 
 
-def declared_outputs(smap: dict[str, tuple[Path, Path]]) -> dict[str, set[str]]:
-    """Map template path (repo-relative) -> the output paths it declares."""
-    outputs = {}
-    for _, template, out_dir in template_targets(smap):
-        outputs[rel(template)] = {rel(out_dir / f"{name}.md") for name in split_outputs(template)[0]}
-    return outputs
-
-
-def check_banner_claims(smap: dict[str, tuple[Path, Path]], globs: GlobMap | None = None) -> list[str]:
-    """Verify every definition carrying a banner has the template it names.
-
-    Enrollment runs template -> definition, so iterating templates cannot see a
-    definition whose banner points at a template that no longer exists — a
-    stale output left by a deleted or renamed template, outside every other
-    check and drifting silently. This walks the claims the other way, across
-    both deployed surfaces (agents/ and commands/) and recursively through
-    their subdirectories, since outputs mirror nested template paths.
-
-    `globs` narrows the WALK, never the claim map: a selected file's banner is
-    still checked against everything every template declares.
-    """
-    errors = []
-    outputs = declared_outputs(smap)
-    for surface, (_, out_dir) in smap.items():
-        for path in sorted(out_dir.rglob("*.md")):
-            if not selected(surface, output_key(path, out_dir), globs):
-                continue
-            claimed = banner_claim(path.read_text(encoding="utf-8"))
-            if claimed is None:
-                continue
-            if claimed not in outputs:
-                errors.append(
-                    f"ORPHAN      {rel(path)} is banner-marked as generated from "
-                    f"{claimed}, but that template does not exist"
-                )
-            elif rel(path) not in outputs[claimed]:
-                # A multi-render template names several definitions, so the
-                # claim is checked against what the template declares, not
-                # against its stem.
-                owner = next((t for t, outs in outputs.items() if rel(path) in outs), None)
-                errors.append(
-                    f"MISLABELED  {rel(path)} is banner-marked as generated from "
-                    f"{claimed}, which does not declare it" + (f" — its template is {owner}" if owner else "")
-                )
-    return errors
-
-
 # ─── Modes ───────────────────────────────────────────────────────────────────
 
 REFUSAL = (
@@ -1915,13 +1829,13 @@ def report_overlays(entries: dict[str, dict], overlays: OverlayMap, tuning: Tuni
 
 
 def report_tuning(tuning: Tuning) -> None:
-    """The run's triple, echoed once in generate, check and install alike.
+    """The run's triple, echoed once in generate and install alike.
 
     A DISPLAY serialization, deliberately not the banner's: the banner is a
-    machine claim check parses back and must stay stable across versions, while
+    machine claim, read back field for field and stable across versions, while
     this brackets each map for a human scanning a terminal and is free to
     change. One shared serializer would couple a display choice to a parsed
-    contract — a tree-wide MISTUNED sweep caused by adding a space.
+    contract — every banner in the tree reading differently for an added space.
     """
     print(f"tuning: family={rel(tuning.family)} " f"tier[{map_spec(tuning.tier_map)}] pin[{map_spec(tuning.pin_map)}]")
 
@@ -2029,98 +1943,6 @@ def generate(
     print(f"  {'unchanged':<10} {unchanged} definition(s)")
     where = ", ".join(f"{d}/ ({n})" for d, n in sorted(landed.items()))
     print(f"{len(pairs)} definition(s) from {len(found)} template(s), in: {where}")
-    return clean
-
-
-def check(
-    binding: TierBinding,
-    smap: dict[str, tuple[Path, Path]],
-    *,
-    overlays: OverlaySource = None,
-    globs: GlobMap | None = None,
-    verbose: bool = False,
-    show_diff: bool = True,
-    tuning: Tuning,
-) -> bool:
-    clean = True
-    print()
-    print("Generated definitions vs templates")
-    print("=" * 60)
-
-    found = templates(smap)
-    if not found:
-        print(f"  ERROR    no templates found under {rel(TEMPLATES_DIR)}/")
-        clean = False
-
-    for target, rendered in all_renders(binding, smap, overlays, globs, tuning=tuning):
-        if not target.exists():
-            print(f"  {'MISSING':<8} {rel(target)} — run: just render")
-            clean = False
-            continue
-
-        actual = target.read_text(encoding="utf-8")
-        if banner_claim(actual) is None:
-            print(f"  {'REFUSED':<8} {rel(target)} {REFUSAL}")
-            clean = False
-            continue
-
-        if actual == rendered:
-            if verbose:
-                print(f"  {'OK':<8} {rel(target)}")
-            continue
-
-        clean = False
-        # The expected claim is this output's OWN render, not the run's triple:
-        # `seat` and `member` are per-output, so only the render knows them.
-        claimed = tuning_claim(actual)
-        expected = tuning_claim(rendered)
-        if claimed != expected:
-            # A tuning mismatch would also show as a byte diff (the banner is
-            # part of the render); name the mismatch instead of dumping it.
-            print(
-                f"  {'MISTUNED':<8} {rel(target)} — banner claims "
-                f"{describe_tuning(claimed)}, but check ran with "
-                f"{describe_tuning(expected)}"
-            )
-            continue
-        print(f"  {'DRIFT':<8} {rel(target)} — differs from rendered template")
-        if show_diff:
-            # Over the post-banner bytes: a body change carries its own hash
-            # line with it, and diffing that too would only add noise.
-            diff = difflib.unified_diff(
-                comparable_body(rendered).splitlines(keepends=True),
-                comparable_body(actual).splitlines(keepends=True),
-                fromfile=f"rendered/{rel(target)}",
-                tofile=rel(target),
-            )
-            for line in diff:
-                print(f"      {line.rstrip()}")
-
-    print()
-    print("Banner claims vs templates")
-    print("=" * 60)
-    claim_errors = check_banner_claims(smap, globs)
-    if claim_errors:
-        clean = False
-        for err in claim_errors:
-            print(f"  {err}")
-    elif verbose:
-        print("  OK")
-
-    print()
-    if clean:
-        print("All generated definitions match their templates. No drift detected.")
-    else:
-        print(
-            f"Drift detected. Edit the definition's template under "
-            f"{rel(TEMPLATES_DIR)}/ or {rel(SHARED_CHUNKS)},\n"
-            f"then run: just render"
-        )
-        if claim_errors:
-            print(
-                "ORPHAN/MISLABELED is not fixed by regenerating: restore the named "
-                "template, or delete the stale definition."
-            )
     return clean
 
 
@@ -2494,7 +2316,7 @@ def prune_verdict(extant: bytes) -> str:
     reasons and reported differently.
 
     A file whose banner predates the hash line reads PRUNE_FOREIGN, not
-    PRUNE_EDITED: it carries no claim to check, which is the same nothing a
+    PRUNE_EDITED: it carries no claim to read back, which is the same nothing a
     consuming project's own file carries. Both are kept, so only the bucket
     differs — and the conservative bucket is the right one for a claim that
     cannot be read.
@@ -2552,9 +2374,8 @@ def prune_stale(smap: dict[str, tuple[Path, Path]], *, written: set[Path]) -> Pr
         our banner, body hashes to it -> unmodified output of an earlier
                                          install whose templates no longer
                                          declare it. DELETED: nothing will ever
-                                         rewrite it, `check` reports it ORPHAN
-                                         forever, and a diff between two render
-                                         slots carries it as a permanent
+                                         rewrite it, and a diff between two
+                                         render slots carries it as a permanent
                                          `Only in` line
         our banner, body does not     -> hand-edited. KEPT, always. This is the
                                          content the numbered-.bak branch
@@ -3310,7 +3131,7 @@ def integrate_claude_md(*, source: Path, dest: Path) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The four verbs, each declaring only the flags it can act on.
+    """The three verbs, each declaring only the flags it can act on.
 
     A flag a verb does not declare is unrepresentable there rather than
     refused by hand: `install` takes neither `--surfaces` nor a selection glob,
@@ -3364,7 +3185,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("agents", "commands", "both"),
         # No default: the selection globs imply their surfaces, so combining
         # the two flags has to be distinguishable from not passing this one.
-        help="which surface to render or check (default: both). Not combinable "
+        help="which surface to render (default: both). Not combinable "
         "with --agent-glob/--command-glob, which imply their surfaces",
     )
     selection.add_argument(
@@ -3384,7 +3205,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser = argparse.ArgumentParser(
-        description="Generate, check and install the generated agent/command definitions, and "
+        description="Generate and install the generated agent/command definitions, and "
         "integrate the published operator baseline into an operator's own CLAUDE.md.",
         allow_abbrev=False,
     )
@@ -3401,23 +3222,6 @@ def build_parser() -> argparse.ArgumentParser:
         "directories, and the mirrored subdirectories beneath them, are created "
         "as needed; the per-target write-safety table decides what may be "
         "overwritten.",
-    )
-
-    check = verbs.add_parser(
-        "check",
-        parents=[common, selection],
-        allow_abbrev=False,
-        help="check the definitions under ROOT against what the templates render",
-        description="Check the tree under ROOT: every target byte-identical to what its "
-        "template currently renders under this invocation's tuning triple, and "
-        "every banner naming a template that exists and declares it. A target "
-        "whose banner claims a different triple is reported MISTUNED, so "
-        "validating a tuned set means checking it with that set's own flags.",
-    )
-    check.add_argument(
-        "--no-diff",
-        action="store_true",
-        help="report drift without printing the diff",
     )
 
     verbs.add_parser(
@@ -3525,20 +3329,9 @@ def main() -> None:
 
         if args.verb == "install":
             ok = install(binding, smap, root=args.root, overlays=overlays, tuning=tuning, verbose=args.verbose)
-            report_overlays(family.entries, overlays(None), tuning)
-        elif args.verb == "generate":
-            ok = generate(binding, smap, overlays=overlays, tuning=tuning, globs=globs, verbose=args.verbose)
-            report_overlays(family.entries, overlays(None), tuning)
         else:
-            ok = check(
-                binding,
-                smap,
-                overlays=overlays,
-                tuning=tuning,
-                globs=globs,
-                verbose=args.verbose,
-                show_diff=not args.no_diff,
-            )
+            ok = generate(binding, smap, overlays=overlays, tuning=tuning, globs=globs, verbose=args.verbose)
+        report_overlays(family.entries, overlays(None), tuning)
         if globs:
             report_selection(output_keys(smap), globs)
     except TemplateError as exc:

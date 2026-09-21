@@ -14,6 +14,24 @@ directory's copies; the repository-root documents are named as root.
   Reaching an op these tools already expose is running them, read-only or
   not. Write the script read-only; nothing checks that. The report a
   measurement lands in cites the script by path.
+- **A rendered sheet is measured by `measure-sheet`, which imports nothing
+  from `kb_tools`.** `kb-testing/tools/measure-sheet.py`, through the
+  `measure-sheet` recipe (`kb-testing/justfile`), is the channel for every
+  figure a row reads off a claim-graph SVG — `measure-kb-roots` holds
+  kb-roots in memory and never sees one. **It takes no constant from the
+  renderer, not even `BOX_WIDTH`**: an instrument holding a sheet to the
+  generator's own geometry has adopted that geometry as the definition of
+  correct, and can then detect staleness and nothing else. Box size and
+  column pitch are read off the document. A figure that cannot be is not
+  imported — the column goes.
+- **A sheet is reported by its `.svg` path, never by a PNG.** The sheet is
+  vector: the reader sets their own zoom, and the `title` tooltips and the
+  hyperlinks into the KB are live there and gone the moment it is rasterised.
+  `render-png` (`kb-testing/justfile`) exists because a model cannot open an
+  SVG and must rasterise to look at one at all — that image is the instrument,
+  the same way `measure-sheet` is, and neither is the deliverable. A report
+  hands over the sheets and may name the crops it read; it does not substitute
+  them for it.
 - **`pandoc.py` is the only module that names the `pandoc` binary.** It is
   the single enumerated stdlib-only exception (SPEC.md, Corpus Invariants),
   and the property that makes it enumerable is that nothing else in the
@@ -120,10 +138,11 @@ directory's copies; the repository-root documents are named as root.
 - **A test's placement is decided by what it drives, not by convenience.**
   A test that exercises a `kb_tools` function or module in isolation belongs
   in `kb_tools/tests/` and runs under `test` (`just test`). A test that
-  drives a corpus through the pipeline — a `kb-driver` build, a staged
-  multi-document corpus, anything reaching a `kb-testing/` runner target —
-  is an integration test and belongs in `kb-testing/`, never in
-  `kb_tools/tests/`. Two written forms coexist there: the justfile recipes
+  drives a corpus through the pipeline — a `kb-driver` build over staged
+  corpus material, a staged multi-document corpus, anything reaching a
+  `kb-testing/` runner target — is an integration test and belongs in
+  `kb-testing/`, never in `kb_tools/tests/`. A build over a tracked
+  single-document fixture is not that: it drives the driver, not a corpus. Two written forms coexist there: the justfile recipes
   that already drive staged corpora end to end, and a pytest tree at
   `kb-testing/tests/` for integration tests better expressed that way — the
   choice between the two is only how the test is written, never what kind

@@ -51,7 +51,7 @@ You are a senior Go engineer. You write idiomatic, minimal Go. You know the lang
 
 **CGo**: understand the cost — every CGo call crosses the Go/C boundary, which is expensive. Batch CGo calls, never call CGo in tight loops. CGo types do not escape to Go GC; manage C memory explicitly (`C.free`). Use `//export` carefully — it disables dead-code elimination for those symbols. Build tag `cgo` is implicit when CGo is in use.
 
-**Build system**: all build, test, and integration operations go through the project's Makefile or justfile targets — use whichever runner the project has chosen; never invoke the compiler directly (`go build`, `clang`, CGo compilation, etc.). Integration targets may dispatch to shell scripts for complex procedures. `bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
+@!build-system-lead ops="build, test, and integration" direct="the compiler (`go build`, `clang`, CGo compilation, etc.)"!@ Integration targets may dispatch to shell scripts for complex procedures. `bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
 
 @!new-project-setup!@
 

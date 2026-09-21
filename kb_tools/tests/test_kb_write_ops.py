@@ -53,7 +53,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from kb_tools import kb_index_lib, kb_schema, kb_util, verify_citations
+from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, verify_citations
 from kb_tools.kb_write import ops, render, store, values
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -1678,10 +1678,10 @@ class TestAWorkEntrysRationaleIsEditable(_KbCase):
 class TestStagedFanOut(_KbCase):
     """``insert-support-entry`` can author the pre-leaf home of a fan-out.
 
-    A ``sup-`` id is minted at phase-2.6 and the document that will host it is
-    not written until phase-3, so for one whole stage the register entry is the
-    only place its beneficiaries can be recorded — and phase-2.6's own
-    postcondition reads them there.
+    A ``sup-`` id can be minted before the document that will host it exists,
+    so until that document is written the register entry is the only place its
+    beneficiaries can be recorded — and ``scan_authored_support_edges`` reads
+    them there.
     """
 
     def _staged(self) -> ops.Result:
@@ -1803,9 +1803,9 @@ class TestOnPointFractionFindsItsHome(_KbCase):
         self.assertEqual(dict(node.supports)["clm-bb2222"], 0.0)
 
     def test_an_unhosted_support_is_updated_in_the_register(self):
-        # Without this, phase-2.6's own obligation, "no fraction left
-        # *pending*", would be unsatisfiable: the pairs it had to score were
-        # all in the home the op would not write.
+        # Without this, a staged support's fractions could never be cleared
+        # from *pending*: its pairs live only in the home the op would not
+        # write.
         sup_id = self._stage_a_support()
         result = self.run_op(
             "set-on-point-fraction",
@@ -2582,7 +2582,7 @@ class TestOpsAreSurfaceIndependent(unittest.TestCase):
         # The same prohibition `kb_survey` carries, and the same one the
         # brief lint enforces on templates.
         emitted = " ".join(_emitted_strings(_module_ast()))
-        for token in ("advance-step", "start-build", "phase-0", "phase-1", "phase-2", "phase-3", "phase-4"):
+        for token in ("advance-step", "start-build", *kb_pipeline.STAGE_IDS):
             self.assertNotIn(token, emitted, f"{token} reached the op-semantics module's output")
 
     def test_no_op_hands_a_caller_a_literal_kb_util_command_line(self):

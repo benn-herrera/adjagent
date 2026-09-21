@@ -106,13 +106,6 @@ install-claude-md:
 # not a privileged tree.
 RENDERED_DIR := "rendered"
 
-# The project's scratch space, gitignored: throwaway trees nobody inspects
-# twice. The tuning rungs render there rather than under rendered/, which
-# holds the slots `render` and `render-diff` work with — a rung landing there
-# would leave a slot tuned to something else until the next render.
-SCRATCH := ".claude-temp"
-
-
 # render / render-diff: a slot is rebuilt on demand and never read back as
 # input to itself, so no slot is ever mistaken for a baseline. The working
 # sequence is `just render reference` to capture a known-good state, do the
@@ -125,10 +118,11 @@ SCRATCH := ".claude-temp"
 # fixed ahead of the forwarded flags, so the render always lands directly
 # under the slot with no .claude nest.
 #
-# The flags that produced a slot are recorded in it as RENDER-FLAGS.txt — the
-# record RULED 3 of ROADMAP_PLANS/RENDER_VERIFICATION_PLAN.md requires, so a
+# The flags that produced a slot are recorded in it as RENDER-FLAGS.txt, so a
 # `render-diff` between two slots rendered under different tunings shows why
-# they differ instead of reading as unexplained drift.
+# they differ instead of reading as unexplained drift. A comparison's flag sets
+# belong to the invocations that produced each side, never to what an operator
+# recalls between them.
 [doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) — every other --* flag forwards verbatim to gen-defs.py via install (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
 render *args:
     #!/usr/bin/env bash
@@ -177,50 +171,6 @@ render-diff a="reference" b="latest":
         exit 1
     fi
 
-# The two tuning rungs share one shape, and each is a pair of recipes rather
-# than a command line so neither rung is ever run from correctly-recalled
-# flags. `_render-rung` installs the full product into its own scratch tree
-# under the rung's fixed tuning; `_check-rung` diffs that tree against what
-# the templates render right now, under the IDENTICAL flags — a tree rendered
-# under one triple and checked under another reports MISTUNED by
-# construction, which is the one thing a rung must not be measuring. The pair
-# mirrors the top-level generate/check split for the same reason: folding the
-# render into the check would overwrite the very baseline the diff runs
-# against, so the report would always read clean. Re-running `_render-rung`
-# renders over its own prior output, which is provably this tool's own, so
-# nothing is backed up and nothing here is ever deleted.
-_render-rung name *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    out="{{PROJECT_ROOT / SCRATCH / name}}"
-    mkdir -p "${out}"
-    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= {{args}}
-
-_check-rung name render_recipe *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    out="{{PROJECT_ROOT / SCRATCH / name}}"
-    if [[ ! -d "${out}" ]]; then
-        printf '%s\n' "error: ${out}/ does not exist — run 'just {{render_recipe}}' first, then 'just {{name}}'" >&2
-        exit 1
-    fi
-    python3 "{{PROJECT_ROOT / GEN}}" check "${out}" {{args}}
-
-# The floor: every tier mapped onto the smallest model, tuning and pin alike.
-# What it exercises is the `all=` merge reaching every tier a real definition
-# sits at — not the `lowest` tier, which no pin site carries.
-[doc("[dev] install the floor rung (both maps all=haiku) into .claude-temp/check-floor")]
-generate-floor: (_render-rung "check-floor" "--model-tier-map=all=haiku" "--model-pin-map=all=haiku")
-[doc("[dev] diff the floor rung against what the templates render now — run `just generate-floor` first")]
-check-floor: (_check-rung "check-floor" "generate-floor" "--model-tier-map=all=haiku" "--model-pin-map=all=haiku")
-
-# The stock rung: a family whose five tiers name real members that the family
-# declares no overlay overrides for, so every tier renders stock and says so.
-[doc("[dev] install the stock rung (family gemma-4) into .claude-temp/check-stock")]
-generate-stock: (_render-rung "check-stock" "--family=gemma-4")
-[doc("[dev] diff the stock rung against what the templates render now — run `just generate-stock` first")]
-check-stock: (_check-rung "check-stock" "generate-stock" "--family=gemma-4")
-
 # The shipped packages are imported as top-level packages (`kb_tools`,
 # `liaison_tools`), and their sources sit at the repository root — so the
 # repository root IS the import path. The consumer-side invocation is
@@ -239,6 +189,16 @@ test surface="" *pytest_args: _venv
       else if surface == "gen-defs" { "tests" } \
       else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen-defs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }} "${@:2}"
+
+# The one writer of kb_tools/tests/fixtures/graph/mini-kb.svg is
+# `write_mini_kb_golden` itself, so
+# this recipe calls it rather than re-deriving the render — the golden and the
+# suite that checks it are built the same way by construction. Same interpreter
+# and PYTHONPATH as `test`, because the function lives in a test module that
+# imports pytest at module scope.
+[doc("[dev] regenerate kb_tools/tests/fixtures/graph/mini-kb.svg via write_mini_kb_golden")]
+regenerate-mini-kb-golden: _venv
+    PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -c "from kb_tools.tests.test_kb_graph_svg import write_mini_kb_golden; print(write_mini_kb_golden())"
 
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"

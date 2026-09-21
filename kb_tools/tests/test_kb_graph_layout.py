@@ -30,6 +30,14 @@ no place in the sweep at all; it is drawn in the grid block below the baseline,
 where its coordinates are its row and column times the pitches and nothing
 computes them. The fixtures for that are their own section, and the ones above
 that used an unattached node as a ruler now attach it.
+
+**Every fixture states the arrangement it is about.** The sheet ships
+concentric (``layout.DEFAULT_PLACEMENT``); the sections up to the concentric one
+are about the layered arrangement — the priority method's coordinates, the
+box-edge anchors, the grid the ordering draws on — so a module-wide fixture
+names ``linear`` for them rather than letting them read whatever the default
+happens to be. The concentric section names its own, and what holds under every
+arrangement is parametrised over all of them.
 """
 
 import ast
@@ -37,6 +45,7 @@ import random
 from collections import Counter
 from collections.abc import Iterable
 from fractions import Fraction
+from itertools import combinations
 from pathlib import Path
 
 import pytest
@@ -47,6 +56,17 @@ from kb_tools.kb_graph import layout, model, style
 # ---------------------------------------------------------------------------
 # Record builders and shape helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def layered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The layered arrangement, which is what every section but the concentric one is about.
+
+    A test about another one sets the variable again over this, which is what
+    keeps any fixture here from reading whichever arrangement the sheet happens
+    to ship with.
+    """
+    monkeypatch.setenv(layout.PLACEMENT_ENV, "linear")
 
 
 def _claim(cid: str, *, canonical_path: str = "vol1/topic/leaf.md") -> kb_index.Claim:
@@ -134,12 +154,68 @@ def test_a_fan_in_layers_the_dependent_above_every_premise() -> None:
     assert _layers(sheet) == {dependent: 1, **{premise: 0 for premise in premises}}
 
 
-def test_a_diamond_layers_by_the_longest_path_not_the_shortest() -> None:
-    """``layer(n) = 1 + max(layer(p) for p in premises(n))`` — the longest path."""
+def test_a_diamond_layers_by_the_long_side_and_not_the_short_one() -> None:
+    """A dependent stands above every premise, so the deepest one decides.
+
+    Two routes run from ``a`` up to ``d`` — three steps one way and two the
+    other — which is what a diamond has to be for the sheet to draw it whole:
+    a route of one step beside a route of three is a premise the long way
+    round already carries, and the model draws the route rather than the
+    stroke.
+    """
     a, b, c, d = (_cid("a", n) for n in range(4))
-    sheet = layout.place(_graph([a, b, c, d], [(b, a), (c, b), (d, c), (d, a)]))
-    # d leans on both c (layer 2) and a (layer 0); the max decides.
-    assert _layers(sheet) == {a: 0, b: 1, c: 2, d: 3}
+    short = _cid("s", 0)
+    sheet = layout.place(_graph([a, b, c, d, short], [(b, a), (c, b), (d, c), (short, a), (d, short)]))
+    # d leans on both c and short; the three-step side is what it has to clear.
+    assert _layers(sheet)[d] == 3
+    assert _layers(sheet)[a] == 0
+
+
+def test_a_premise_rises_to_meet_the_one_dependent_it_has() -> None:
+    """The layering's whole mechanism: total edge length, not depth from bedrock.
+
+    ``lifted`` rests on nothing, so the longest path stands it on bedrock and
+    its edge to the top of the chain is routed through two placeholders. Nothing
+    holds it there — lifting it shortens that edge and lengthens none — so it
+    comes to rest one layer below the claim that needs it, and the chain draws
+    as one segment.
+    """
+    chain = [_cid("a", n) for n in range(4)]
+    lifted = _cid("z", 0)
+    sheet = layout.place(_graph([*chain, lifted], [*zip(chain[1:], chain[:-1], strict=True), (chain[-1], lifted)]))
+
+    assert _layers(sheet) == {chain[0]: 0, chain[1]: 1, chain[2]: 2, chain[3]: 3, lifted: 2}
+    assert {edge.key: len(edge.points) for edge in sheet.edges}[(chain[-1], lifted)] == 2
+
+
+def test_a_premise_rises_no_further_than_its_nearest_dependent() -> None:
+    """The counter-case, and the bound on the lift above: ``bedrock`` carries two
+    dependents, and the nearer one holds it down where it is, so its stroke to
+    the far one keeps both placeholders.
+
+    ``near`` stands one layer up because it rests on the corpus's own bedrock as
+    well, and ``far`` stands three up because its own chain puts it there. No
+    route runs from ``bedrock`` to ``far`` but the stroke itself — the two
+    dependents are the only claims it reaches, and neither leads on — so the
+    reduction leaves it, and what is measured here is the layering.
+    """
+    chain = [_cid("a", n) for n in range(3)]  # the corpus's bedrock and the two steps above it
+    far, near, bedrock = _cid("f", 0), _cid("n", 0), _cid("z", 0)
+    sheet = layout.place(
+        _graph(
+            [*chain, far, near, bedrock],
+            [
+                *zip(chain[1:], chain[:-1], strict=True),
+                (far, chain[-1]),
+                (near, chain[0]),
+                (near, bedrock),
+                (far, bedrock),
+            ],
+        )
+    )
+
+    assert _layers(sheet) == {chain[0]: 0, bedrock: 0, chain[1]: 1, near: 1, chain[2]: 2, far: 3}
+    assert {edge.key: len(edge.points) for edge in sheet.edges}[(far, bedrock)] == 4
 
 
 def test_a_dense_diamond_layers_every_rank_together() -> None:
@@ -178,29 +254,6 @@ def test_only_depends_inverts_the_premise_direction(relation: str) -> None:
     sheet = layout.place(_graph([source, target], [(source, target)], relation))
     assert _layers(sheet) == {source: 0, target: 1}
     assert layout.place(_graph([source, target], [(source, target)], "depends")) != sheet
-
-
-def test_a_reference_orders_no_layer_and_joins_no_cycle() -> None:
-    """A reference states no premise, so it constrains the layering not at all.
-
-    Both endpoints are still attached — a referenced claim is no orphan — and a
-    mutual pair is no cycle, which is the drawn form of the class carrying no
-    acyclicity constraint. The counterfactual is the same pair as ``depends``.
-    """
-    a, b = _cid("a", 0), _cid("b", 0)
-    mutual = [(a, b), (b, a)]
-
-    sheet = layout.place(
-        model.build_graph(nodes=[_claim(a), _claim(b)], edges=[_edge(*p, "references") for p in mutual])
-    )
-    assert [placed.cycle_member for placed in sheet.nodes] == [False, False]
-    assert [placed.back_edge for placed in sheet.edges] == [False, False]
-    assert all(placed.layer >= 0 for placed in sheet.nodes), "a referenced node is attached, not an orphan"
-
-    depending = layout.place(
-        model.build_graph(nodes=[_claim(a), _claim(b)], edges=[_edge(*p, "depends") for p in mutual])
-    )
-    assert [placed.cycle_member for placed in depending.nodes] == [True, True]
 
 
 def test_the_same_premise_recorded_twice_does_not_strand_a_node() -> None:
@@ -376,19 +429,22 @@ def test_a_dummy_outranks_the_real_nodes_of_its_layer() -> None:
     want the same place the chain gets it and the node gives way — the rule
     stated from the side that costs something.
 
-    ``middle`` and the placeholder of ``top → lower`` are layer 1's only two
-    occupants and they are pulled toward the same two positions — ``lower``
-    beneath them and ``top`` above. The placeholder takes one of them and pushes
-    ``middle`` clear; ``middle`` ends on neither.
+    ``middle`` and the placeholder of ``top → side`` are the only two occupants
+    of their layer, and both are pulled toward ``top`` above them. The
+    placeholder takes that position and pushes ``middle`` clear; ``middle`` ends
+    on neither of the positions its own neighbours pull it toward.
     """
-    lower, middle, top = _cid("b", 0), _cid("m", 0), _cid("z", 0)
-    sheet = layout.place(_graph([lower, middle, top], [(middle, lower), (top, middle), (top, lower)]))
+    top, middle, graph = _spanning_shape()
+    sheet = layout.place(graph)
     centres = {node.id: node.x + node.width // 2 for node in sheet.nodes}
-    bend = {edge.key: edge.points for edge in sheet.edges}[(top, lower)][1]
+    bend = {edge.key: edge.points for edge in sheet.edges}[(top, _SIDE_LEFT)][1]
 
-    assert bend.x == centres[top]
-    assert centres[middle] < bend.x
-    assert centres[middle] not in (centres[lower], centres[top])
+    assert bend.x == centres[top] == centres[_SIDE_LEFT]  # the chain got its own barycentre
+    assert centres[middle] > bend.x
+    # And the node did not get its own: it is pulled toward the mean of the two
+    # occupants it joins across its bands, and the placeholder holds the column
+    # it would have to cross to reach it.
+    assert centres[middle] != (centres[_cid("m", 0)] + centres[top]) // 2
 
 
 def test_no_two_occupants_of_a_layer_come_closer_than_the_column_pitch() -> None:
@@ -427,28 +483,32 @@ def test_the_leftmost_occupant_stands_where_column_zero_stood() -> None:
 
 
 def _long_chain_shape() -> tuple[tuple[str, str], model.ClaimGraph]:
-    """Five layers, a bedrock node the top leans on directly, and one edge skipping a layer.
+    """Six layers, and one stroke from the second of them to the top.
 
-    The long edge draws through three placeholders, and the layers it passes
-    through are of different widths and already occupied — which is what makes
-    the column grid put its placeholders in different columns and bend the chain
-    at each of them.
+    ``side`` rests on the corpus's bedrock and the top of a four-step chain
+    rests on ``side``, so the stroke between them crosses three layers and draws
+    through three placeholders. Those layers are already occupied — a dependent
+    of each chain step stands beside it — which is what makes the column grid
+    put the placeholders in different columns and bend the chain at each of
+    them.
+
+    Nothing from ``side`` leads anywhere but the top, so no route carries that
+    premise and the reduction leaves the stroke: a chain to measure has to be a
+    stroke the sheet still draws.
     """
-    bed = [_cid("b", n) for n in range(4)]
-    first, second = ([_cid(letter, n) for n in range(3)] for letter in "cd")
-    third = [_cid("e", n) for n in range(2)]
-    top = _cid("f", 0)
+    bedrock = _cid("b", 0)
+    chain = [_cid("c", n) for n in range(4)]
+    beside = [_cid("d", n) for n in range(3)]
+    top, side = _cid("a", 0), _cid("s", 0)
     pairs = [
-        *((first[n], bed[n]) for n in range(3)),
-        *((second[n], first[n]) for n in range(3)),
-        (third[0], second[0]),
-        (third[1], second[2]),
-        (third[1], first[0]),
-        (top, third[0]),
-        (top, third[1]),
-        (top, bed[3]),
+        (chain[0], bedrock),
+        *zip(chain[1:], chain[:-1], strict=True),
+        (top, chain[-1]),
+        (side, bedrock),
+        (top, side),
+        *((beside[n], chain[n]) for n in range(3)),
     ]
-    return (top, bed[3]), _graph([*bed, *first, *second, *third, top], pairs)
+    return (top, side), _graph([bedrock, *chain, *beside, top, side], pairs)
 
 
 def _bends(chain: layout.PlacedEdge) -> int:
@@ -481,63 +541,101 @@ def test_a_dummy_chain_comes_out_straighter_than_the_column_grid_draws_it(
 # ---------------------------------------------------------------------------
 
 
-def _spanning_graph() -> tuple[str, str, str, model.ClaimGraph]:
-    """Bottom, middle and top, plus the long edge that skips the middle.
+#: The two ``side`` ids :func:`_spanning_shape` is built with. Both rest on the
+#: same bedrock; what differs is where the sweep's start key puts the side node
+#: among the occupants of its own layer, and with it where its chain starts.
+_SIDE_LEFT, _SIDE_RIGHT = _cid("b", 1), _cid("s", 0)
 
-    The top's id sorts **before** the middle's, so the long edge's dummy key
-    ``(top, bottom)`` sorts before the middle node's own key and the dummy takes
-    the left column of layer 1 — which is what makes the "a dummy takes a real
-    column" claim visible rather than assumed.
+
+def _spanning_shape(side: str = _SIDE_LEFT) -> tuple[str, str, model.ClaimGraph]:
+    """A three-step chain, and a claim beside it that the chain's top rests on.
+
+    ``side`` rests on the chain's own bedrock and ``top`` rests on ``side``, so
+    ``side`` stands one layer up and its stroke to ``top`` skips the layer
+    ``middle`` occupies. **The reduction leaves that stroke alone**: the only
+    way from ``side`` to ``top`` is the stroke itself, ``side`` reaching no
+    other claim — which is what a spanning stroke has to look like now that a
+    premise a drawn route already carries is not drawn. The old shape here was
+    the triangle ``top → middle → bottom`` plus ``top → bottom``, and that
+    stroke is exactly the one the route replaces.
+
+    ``top``'s id sorts **before** ``middle``'s, so the chain's dummy key
+    ``(top, side)`` sorts before the middle node's own key and starts in the
+    left column of the layer they share — which is what makes the "a dummy takes
+    a real column" claim visible rather than assumed.
     """
-    top, middle, bottom = _cid("a", 0), _cid("m", 0), _cid("b", 0)
-    return top, middle, bottom, _graph([top, middle, bottom], [(middle, bottom), (top, middle), (top, bottom)])
+    bedrock, first, middle, top = _cid("b", 0), _cid("m", 0), _cid("m", 1), _cid("a", 0)
+    pairs = [(first, bedrock), (middle, first), (top, middle), (side, bedrock), (top, side)]
+    return top, middle, _graph([bedrock, first, middle, top, side], pairs)
 
 
 def test_an_edge_skipping_a_layer_draws_as_two_segments_through_one_dummy() -> None:
-    top, middle, bottom, graph = _spanning_graph()
+    top, middle, graph = _spanning_shape()
     sheet = layout.place(graph)
-    assert _layers(sheet) == {bottom: 0, middle: 1, top: 2}
+    assert _layers(sheet)[middle] + 1 == _layers(sheet)[top]
 
     chains = {edge.key: edge.points for edge in sheet.edges}
     # The layer-adjacent edges are two points each; the spanning one bends once.
-    assert [len(chains[key]) for key in ((middle, bottom), (top, middle))] == [2, 2]
-    assert len(chains[(top, bottom)]) == 3
-    bend = chains[(top, bottom)][1]
-    assert bend == layout.Point(style.BOX_WIDTH // 2, -style.LAYER_PITCH + style.BOX_HEIGHT // 2)
+    assert [len(points) for key, points in chains.items() if key != (top, _SIDE_LEFT)] == [2, 2, 2, 2]
+    bends = chains[(top, _SIDE_LEFT)]
+    assert len(bends) == 3
+    # The bend sits on the middle node's own layer, at that layer's own height.
+    assert bends[1].y == -_layers(sheet)[middle] * style.LAYER_PITCH + style.BOX_HEIGHT // 2
 
 
 def test_a_dummy_takes_a_real_column_and_shifts_the_node_beside_it() -> None:
-    """The claim the whole row turns on. Without the spanning edge the middle
-    node is layer 1's only occupant; with it the dummy sorts first and the node
-    is the second column — a placeholder interpolated along the old straight
-    line would leave it where it was."""
-    top, middle, bottom, graph = _spanning_graph()
-    without = _graph([top, middle, bottom], [(middle, bottom), (top, middle)])
+    """The claim the whole row turns on. Without the spanning stroke the middle
+    node is the only occupant of its layer; with it the dummy sorts first, takes
+    column 0 and the node is the second column — a placeholder interpolated
+    along the old straight line would leave it where it was."""
+    top, middle, graph = _spanning_shape()
+    bedrock, first = _cid("b", 0), _cid("m", 0)
+    without = _graph(
+        [bedrock, first, middle, top, _SIDE_LEFT],
+        [(first, bedrock), (middle, first), (top, middle), (_SIDE_LEFT, bedrock)],
+    )
 
     assert _columns(layout.place(without))[middle] == 0
-    placed = {node.id: node for node in layout.place(graph).nodes}
+    sheet = layout.place(graph)
+    placed = {node.id: node for node in sheet.nodes}
+    bend = {edge.key: edge.points for edge in sheet.edges}[(top, _SIDE_LEFT)][1]
+
     assert placed[middle].column == 1
-    assert placed[middle].x == style.COLUMN_PITCH
+    # The column the node gave up is the one the placeholder is standing in.
+    assert bend.x == style.BOX_WIDTH // 2 < placed[middle].x
 
 
 def test_an_edge_spanning_three_layers_draws_as_three_segments_through_two_dummies() -> None:
-    a, b, c, d = (_cid("a", n) for n in range(4))
-    sheet = layout.place(_graph([a, b, c, d], [(b, a), (c, b), (d, c), (d, a)]))
-    chain = {edge.key: edge.points for edge in sheet.edges}[(d, a)]
+    """One more layer in the chain beneath it, so the same stroke spans two."""
+    bedrock, top, side = _cid("b", 0), _cid("a", 0), _cid("s", 0)
+    chain = [_cid("m", n) for n in range(3)]
+    sheet = layout.place(
+        _graph(
+            [bedrock, *chain, top, side],
+            [
+                (chain[0], bedrock),
+                *zip(chain[1:], chain[:-1], strict=True),
+                (top, chain[-1]),
+                (side, bedrock),
+                (top, side),
+            ],
+        )
+    )
+    points = {edge.key: edge.points for edge in sheet.edges}[(top, side)]
 
-    assert len(chain) == 4
+    assert len(points) == 4
     # The bends ascend one layer at a time, between the two anchors.
-    assert [point.y for point in chain] == sorted((point.y for point in chain), reverse=True)
-    assert [point.y for point in chain[1:3]] == [
-        -style.LAYER_PITCH + style.BOX_HEIGHT // 2,
+    assert [point.y for point in points] == sorted((point.y for point in points), reverse=True)
+    assert [point.y for point in points[1:3]] == [
         -2 * style.LAYER_PITCH + style.BOX_HEIGHT // 2,
+        -3 * style.LAYER_PITCH + style.BOX_HEIGHT // 2,
     ]
 
 
 def test_a_dummy_is_placed_over_the_corpus_and_not_over_the_sheets_own_edges() -> None:
     """A domain sheet that draws neither end of the spanning edge still carries
     the column its dummy took, or a node would move between views."""
-    top, middle, bottom, graph = _spanning_graph()
+    _, middle, graph = _spanning_shape()
     full = {node.id: node for node in layout.place(graph).nodes}
     selected = layout.place(graph, include={middle})
 
@@ -606,17 +704,24 @@ def test_an_occupant_with_no_neighbour_across_a_band_holds_its_place() -> None:
 def test_a_dummy_is_swept_like_any_other_occupant_of_its_layer() -> None:
     """A dummy takes a column, so it takes a place in the ordering too: here the
     start key puts it left of the real node sharing its layer and the sweep
-    moves it right, which is the crossing the routing would otherwise draw."""
-    lower, other = _cid("b", 0), _cid("b", 1)
-    middle, top = _cid("m", 0), _cid("a", 0)
-    sheet = layout.place(_graph([lower, other, middle, top], [(middle, lower), (top, middle), (top, other)]))
+    moves it right, which is the crossing the routing would otherwise draw.
 
-    assert _layers(sheet) == {lower: 0, other: 0, middle: 1, top: 2}
+    The spanning shape is taken with the side node whose id sorts *after* the
+    chain's, so the layer the placeholder lands in starts with the placeholder
+    on the left and the sweep is what puts it on the right.
+    """
+    top, middle, graph = _spanning_shape(_SIDE_RIGHT)
+    sheet = layout.place(graph)
+
+    assert _layers(sheet)[middle] == 2
     # The dummy's key starts left of the middle node's; after the sweep the
     # middle node holds column 0 and the chain bends in column 1.
     assert _columns(sheet)[middle] == 0
-    bend = {edge.key: edge.points for edge in sheet.edges}[(top, other)][1]
-    assert bend == layout.Point(style.COLUMN_PITCH + style.BOX_WIDTH // 2, -style.LAYER_PITCH + style.BOX_HEIGHT // 2)
+    bend = {edge.key: edge.points for edge in sheet.edges}[(top, _SIDE_RIGHT)][1]
+    assert bend == layout.Point(
+        style.COLUMN_PITCH + style.BOX_WIDTH // 2,
+        -2 * style.LAYER_PITCH + style.BOX_HEIGHT // 2,
+    )
     assert sheet.hops == ()
 
 
@@ -756,18 +861,6 @@ def test_two_crossing_edges_yield_exactly_one_glyph_on_the_higher_key_edge() -> 
         Fraction(style.COLUMN_PITCH + style.BOX_WIDTH, 2),
         Fraction(style.BOX_HEIGHT - style.LAYER_PITCH, 2),
     )
-
-
-def test_a_hop_carries_the_direction_of_the_segment_it_sits_on() -> None:
-    """The line the arc's endpoints sit on, and nothing about which side it
-    bulges toward: that is the emitter's, which orders the two endpoints by
-    screen x before rotating, and a second statement of it here is how the two
-    would come to disagree
-    (``test_every_hop_arc_bridges_toward_screen_up``)."""
-    sheet = layout.place(_complete_bipartite(2))
-    hop = sheet.hops[0]
-    segment = {edge.key: edge.segments for edge in sheet.edges}[hop.hopping][hop.hopping_segment]
-    assert hop.direction == (segment.end.x - segment.start.x, segment.end.y - segment.start.y)
 
 
 @pytest.mark.parametrize("shape", ["fan-in", "fan-out"])
@@ -930,6 +1023,169 @@ def test_a_selected_sheet_draws_only_edges_whose_both_ends_it_draws() -> None:
     sheet = layout.place(_graph([a, b, c], [(b, a), (c, b)]), include={b, c})
     assert [edge.key for edge in sheet.edges] == [(c, b)]
     assert sheet.hops == ()
+
+
+# ---------------------------------------------------------------------------
+# The concentric arrangement — one ring per layer
+# ---------------------------------------------------------------------------
+
+_RING_FORMS = ["ring-rectangle", "ring-ellipse"]
+_PLACEMENTS = ["linear", *_RING_FORMS]
+
+
+def _chain(length: int) -> tuple[list[str], model.ClaimGraph]:
+    """A chain of ``length`` claims, bedrock first — one occupant per layer and no placeholder anywhere."""
+    ids = [_cid("a", n) for n in range(length)]
+    return ids, _graph(ids, [(ids[n + 1], ids[n]) for n in range(length - 1)])
+
+
+def _overlaps(first: layout.PlacedNode, second: layout.PlacedNode) -> bool:
+    return (
+        first.x < second.x + second.width
+        and second.x < first.x + first.width
+        and first.y < second.y + second.height
+        and second.y < first.y + first.height
+    )
+
+
+def test_the_ring_index_is_the_layer_counting_inward_from_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The conclusions are the centre and the corpus's bedrock is the outermost ring.
+
+    One occupant per layer, so each ring seats it at the 3 o'clock ray its
+    candidates start from and the whole arrangement is one hand-computed row:
+    the deepest claim at the origin, and every layer below it one
+    :data:`style.RING_STEP` further out.
+    """
+    monkeypatch.setenv(layout.PLACEMENT_ENV, "ring-rectangle")
+    ids, graph = _chain(4)
+    placed = {node.id: node for node in layout.place(graph).nodes}
+
+    for layer, node_id in enumerate(ids):
+        ring = len(ids) - 1 - layer
+        assert placed[node_id].centre == layout.Point(ring * style.RING_STEP * style.COLUMN_PITCH, 0)
+
+
+def test_a_ring_steps_a_whole_ring_step_outside_the_one_within_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What separates one ring from the next is :data:`style.RING_STEP` and
+    nothing else — the constant that exists so that the spacing at which the
+    nested rectangles stop tiling a lattice is one edit to find."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, "ring-rectangle")
+    ids, graph = _chain(3)
+    placed = {node.id: node for node in layout.place(graph).nodes}
+    radii = [placed[node_id].centre.x for node_id in reversed(ids)]
+
+    gaps = [second - first for first, second in zip(radii, radii[1:])]
+    assert gaps == [style.RING_STEP * style.COLUMN_PITCH] * len(gaps)
+
+
+@pytest.mark.parametrize("placement", _PLACEMENTS)
+def test_no_two_boxes_of_a_sheet_are_drawn_over_each_other(monkeypatch: pytest.MonkeyPatch, placement: str) -> None:
+    """The separation rule, which is a property of two placed rectangles and of
+    no arrangement: two occupants stand a column pitch apart horizontally or a
+    layer pitch apart vertically, so no box is ever drawn over another, orphan
+    block included."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, placement)
+    nodes, edges = _rich_records()
+    sheet = layout.place(model.build_graph(nodes=nodes, edges=edges))
+
+    assert len(sheet.nodes) > 1
+    for first, second in combinations(sheet.nodes, 2):
+        assert not _overlaps(first, second), (placement, first.id, second.id)
+
+
+@pytest.mark.parametrize("placement", _PLACEMENTS)
+def test_every_coordinate_is_an_integer_under_every_arrangement(
+    monkeypatch: pytest.MonkeyPatch, placement: str
+) -> None:
+    """``layout``'s no-float rule is the arrangement's too: the concentric placer
+    walks its ellipse by :func:`math.isqrt` rather than by ``libm``, which is not
+    byte-reproducible across hosts."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, placement)
+    nodes, edges = _rich_records()
+    sheet = layout.place(model.build_graph(nodes=nodes, edges=edges))
+
+    for node in sheet.nodes:
+        assert (type(node.x), type(node.y)) == (int, int)
+    for edge in sheet.edges:
+        for point in edge.points:
+            assert (type(point.x), type(point.y)) == (int, int)
+
+
+@pytest.mark.parametrize("placement", _RING_FORMS)
+def test_a_ring_sheet_anchors_every_stroke_at_the_box_centres(monkeypatch: pytest.MonkeyPatch, placement: str) -> None:
+    """A ring has no up, so the top-edge-to-bottom-edge anchors the layered sheet
+    uses would put a stroke on the wrong side of half the boxes. The emitter
+    draws the boxes opaque and last, so a centre-anchored stroke still leaves
+    from under its own box edge."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, placement)
+    premise = _cid("a", 0)
+    dependents = [_cid("b", n) for n in range(3)]
+    sheet = layout.place(_graph([premise, *dependents], [(dep, premise) for dep in dependents]))
+    placed = {node.id: node for node in sheet.nodes}
+
+    assert sheet.edges
+    for edge in sheet.edges:
+        assert {edge.start, edge.end} == {placed[end].centre for end in edge.key}
+
+
+@pytest.mark.parametrize("placement", _RING_FORMS)
+def test_the_block_stands_below_a_ring_sheet_and_flush_with_its_left_edge(
+    monkeypatch: pytest.MonkeyPatch, placement: str
+) -> None:
+    """The one thing a ring sheet changes about the block: the disc surrounds the
+    origin, so ``below the baseline`` is no longer below anything — the floor is
+    read off the occupants instead."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, placement)
+    _, graph = _orphan_graph(style.ORPHAN_ROW + 1)
+    sheet = layout.place(graph)
+    disc = [node for node in sheet.nodes if node.layer >= 0]
+    block = _block(sheet)
+
+    assert min(node.x for node in block) == min(node.x for node in disc)
+    assert min(node.y for node in block) == max(node.y + node.height for node in disc) + style.LAYER_GAP
+    assert [node.y for node in block] == sorted((node.y for node in block), reverse=True)
+
+
+@pytest.mark.parametrize("placement", _RING_FORMS)
+def test_a_ring_sheet_is_a_function_of_the_records_and_not_of_their_order(
+    monkeypatch: pytest.MonkeyPatch, placement: str
+) -> None:
+    """The shuffle test again, against the arrangement rather than the phases
+    above it: a placer that walked a set would pass every geometry fixture here
+    and fail this."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, placement)
+    nodes, edges = _rich_records()
+    reference = layout.place(model.build_graph(nodes=nodes, edges=edges))
+
+    rng = random.Random(20260919)
+    for _ in range(10):
+        rng.shuffle(nodes)
+        rng.shuffle(edges)
+        assert layout.place(model.build_graph(nodes=nodes, edges=edges)) == reference
+
+
+def test_an_unrecognised_arrangement_is_refused_rather_than_drawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The variable arrives from a developer's shell, and the vocabulary it is
+    read against is closed. A sheet silently drawn by an arrangement nobody asked
+    for is indistinguishable from one that was — and the freshness gate would
+    report it as a change to the graph."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, "concentric")
+    _, graph = _chain(2)
+
+    with pytest.raises(ValueError, match=layout.PLACEMENT_ENV):
+        layout.place(graph)
+
+
+def test_the_layered_arrangement_is_still_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """It is the comparison baseline every ring form is judged against, so it is
+    selectable rather than deleted — and it still draws the frame it always drew,
+    layer 0 on the baseline and the sheet growing upward."""
+    monkeypatch.setenv(layout.PLACEMENT_ENV, "linear")
+    ids, graph = _chain(3)
+    placed = {node.id: node for node in layout.place(graph).nodes}
+
+    assert [placed[node_id].y for node_id in ids] == [-layer * style.LAYER_PITCH for layer in range(len(ids))]
+    assert layout.DEFAULT_PLACEMENT != "linear"
 
 
 # ---------------------------------------------------------------------------

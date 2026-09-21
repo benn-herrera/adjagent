@@ -1,100 +1,169 @@
-# Driver burndown: what the step table stopped needing
+# CLAIM_GRAPH_LEGIBILITY_PLAN.md — the sheet can be read; this is what it still gets wrong
 
-Two independent architect surveys of `kb_driver/` and `kb_pipeline.py` — one asking *does this serve
-the end the thesis describes*, one asking *where has a narrow concern been elaborated past its
-weight*. They converged on seven findings and each found more the other did not. This is the union.
+**Paths** are repository-root-relative. The renderer lives at `kb_tools/kb_graph/`.
 
-**The shape of it.** The driver is roughly six thousand lines sequencing nine stages. Seven invoke a
-tool and read an exit code; two dispatch a seat to write and review one document. Around those two
-stands an apparatus built for a dispatch model that no longer exists — a coordinator agent driving
-the ledger by hand, and a seat fanning out to member sub-seats. Both are gone from the step table.
-Neither is gone from the code, the templates, or the contract documents.
+**Seat.** **PC** python-coder. Nothing here is a contract-doc change unless a row says so.
 
-**The suite has been documenting the vacancy rather than catching anything.**
-`tests/test_kb_driver_steps.py` asserts `envelope_rows == waves` (both empty), `scope_rows ==
-set()`, and the worker-writer set `== set()`. Those are tests of emptiness.
+**Bold marks a decision the row itself must make and record.** It is not emphasis.
 
-## What is established, and how
+**What travels with a dispatched row**: this header, the Standing rules, the Where the
+sheet is section, the row, and the rows it is blocked on. The Order section does not
+travel.
 
-```
-$ grep -n "WAVE\|ENVELOPE\|WORKER" kb_tools/kb_driver/steps.py
-39,45,46,54,55,62:   enum definitions only — no Step(...) in STEPS sets any of them
+## What produced this
 
-$ grep -rn "_wave(\|_refresh(" kb_tools/kb_driver/
-run.py:1068, run.py:1152:   definitions; no _HANDLERS entry, no call site
+The plan this replaces was a width-reduction burndown. Its rows are done and its subject
+is closed: `references` left the layered sheet, network simplex replaced longest-path,
+and the transitive reduction of the drawn premise set landed. What it graded on no longer
+exists — it required a layer-0 box count in every row's evidence, and `measure-sheet` has
+since dropped that column because a layer is a ring index under the concentric placer and
+`y == 0` is the bedrock row only under a linear one.
 
-$ grep -rn "undeclared(" kb_tools/ | grep -v "def undeclared"
-(no output)
+**The change that mattered was not a layout lever.** The sheet drew 851 of 949 strokes as
+`references`; removing them took crossings from 64,907 to 94 and the file from 8.6 MB to
+148 KB. Every width lever the old plan ranked was rearranging the 10% of strokes that are
+the argument.
 
-$ grep -n "kb_driver run" .claude/commands/kb-build.md
-21:  ...kb_driver run --source <path> [--source <path> ...]      — no --decide start.proceed=yes
+**The instrument changed too, and that is why this plan reads differently.** Nothing in
+the toolchain could look at a sheet until rasterisation arrived. Every legibility number
+taken before that has since disagreed with a human reading of the same picture — a 690×
+crossing reduction that still read as illegible, a coordinate method whose figures moved
+while the picture did not. **Measurement here is reliable for content questions — what is
+drawn, how much, of what kind, whether a stroke passes through a box it does not end on —
+and has been unreliable for "can a person read this."** Rows below grade legibility by
+rendering and looking, and reserve figures for the content questions.
 
-$ grep -rn "watch" kb-testing/justfile
-(no output)                     — cli.py:170 says watch is "Required in the kb-testing recipes"
-```
+## Where the sheet is
 
-## Rules
+Geometry constants are in `style.py` and are not transcribed here; read them there.
+`LABEL_CHARS` × `TITLE_LINES` is the width lever and is settled — it is the narrowest
+setting with no label collision on any measured corpus, and its curve is recorded at the
+constant.
 
-1. **A row states what its deleted thing caught and where that coverage now comes from** — or that
-   it is accepted as lost, stated rather than omitted.
-2. A row deletes the tests asserting the behaviour it removes, and says so. **Several here assert
-   only that a set is empty**; those go with their subject and are not coverage.
-3. **The contract moves with the row.** Several of these are recorded in `SPEC.md` or
-   `ARCHITECTURE.md`; a row that leaves a document describing what it removed is not done. State
-   the design, carry no magnitude.
-4. Where a thing carries recorded evidence — a scar naming an observed failure — **say so in the
-   commit**, even when the row does not touch it. A reader meeting a diff near `PHASE_5_FIX_CAP`
-   must not read it as cap erosion.
-5. Code citations by symbol, never by line. Do not commit.
-6. **Green at handoff means no failure this row introduced that this row could have fixed.** These
-   rows run concurrently over one package, and a deletion's last consumer often sits in a file
-   another row owns — so a row can be correct and the tree still red. Where that happens, name the
-   failure and hand over the patch that fixes it; a row is not entitled to reach into another's
-   file, and is not excused from saying exactly what needs to happen there.
+**Arrangement is selectable.** `layout.PLACEMENT_ENV` (`KB_GRAPH_PLACEMENT`) chooses
+between `linear`, `ring-rectangle` and `ring-ellipse`; `layout.DEFAULT_PLACEMENT` is the
+shipped default. Layering and in-layer ordering are shared — only where an occupant stands
+differs. This is a development control and is not a consumer-facing surface.
+
+**A hop is a jump.** The hopping stroke is emitted open between the arc's feet; the crossed
+stroke runs through unbroken. A hop whose gap would not leave drawn stroke on both sides
+within its own run is not drawn at all, because a stub with no glyph reads as a stroke
+stopping in mid-air. The census states how many crossings carry a glyph so the suppression
+is never silent.
+
+Figures a row cites come from `measure-sheet` (`kb-testing/justfile`), which imports
+nothing from `kb_tools`. Note `hop_glyphs` counts *drawn glyphs*, not geometric crossings —
+the geometric count is not derivable from a document whose strokes carry no node identity,
+and the instrument says so rather than approximating it.
+
+## Standing rules — on every row, not restated per row
+
+1. **Geometry is a pure function of the graph, never of record order.**
+   `test_shuffling_the_loaded_records_changes_no_geometry` passes, and it is not
+   "byte-identical across runs" — a sweep iterating a dict built in record order also
+   passes that. Every tie is broken by a stated rule, never by a container's iteration.
+2. **Layout lives in `layout.py` and nowhere else.** A swap, a barycentre or a
+   try-both-and-keep-the-better found in `model.py`, `style.py`, `svg.py` or `ops.py` is a
+   crossed boundary rather than an optimisation. `svg.py` computes no coordinate.
+3. **`layout.py` knows no colour, no font, no tag name, no URL.** If it imports `xml`, the
+   boundary has been crossed.
+4. **Stdlib only.** No third-party runtime dependency, no vendored layout library, no DOT,
+   no Graphviz.
+5. **The golden is regenerated through `just regenerate-mini-kb-golden`, never hand-edited.**
+   A row's evidence names the target, never a bare interpreter invocation.
+6. **A row that changes how the sheet looks delivers sheets, not only numbers.** SVG paths,
+   because the reader sets their own zoom and the tooltips and hyperlinks are live there
+   (`kb_tools/CONVENTIONS.md`). Rasterise to read it yourself and say which crops you read.
+   Both arrangements, at least two corpora, before and after.
+7. **Figures accompany the command that produced them**, before and after. From
+   `measure-sheet`: `viewBox`, `hop_glyphs`, `edge_len`, the widest layer's occupants split
+   into boxes and placeholders, and file size. **Strokes drawn through a claim box that is
+   not one of their endpoints** is a sixth figure and is layout-neutral — a false edge is
+   bad in any arrangement. `measure-sheet` does not report it yet; **L0 is what makes this
+   clause satisfiable**, and until it lands a row says the figure is unavailable rather than
+   substituting one of its own.
+8. **An option under evaluation is rendered at every value under test, not at the one
+   expected to win.** The comparison is the deliverable. Where the pictures separate the
+   options, land the winner and say what separated them; where they do not, keep the
+   current value and say the evidence did not separate them.
+9. **An accepted approximation records the condition that makes it acceptable.** The arc
+   feet sitting off the drawn cubic was accepted and documented as accepted — with no note
+   that what made it invisible was the stroke running continuous underneath. Gapping the
+   stroke removed that condition and turned it into a visible defect nothing flagged.
+10. **The method, its parameters, its round cap and its convergence condition are recorded
+    in `layout.py`'s own docstring**, not here.
+11. `just test` green at handoff, and `integration-test` (`kb-testing/justfile`) too when a
+    row touches the instrument. Scratch under `.claude-temp/`. Never `/tmp`.
+    `kb-testing/test-data/transient/` is read-only — render a copy.
 
 ## Rows
 
-| Row | What | Who | Blocked on | Done when |
-|---|---|---|---|---|
-| **D1** | **The wave and scope apparatus.** `Unit.WAVE`/`WAVE_STAR`/`REFRESH`, `Writer.WAVE_SESSION`/`WORKER`, `Parse.ENVELOPE`/`SCOPE`; `run._wave`, `Member`, `pending_members`, `_refresh`, and `_call`'s deviation-append; `call`'s `is_wave` and the `WORKER` branches; `envelope`'s envelope and scope halves — `Envelope`, `Deviation`, `parse_envelope`, `envelope_block`, `append_deviations`, `Scope`, `parse_scope`, `SCOPE_LINE_CONTRACT`; `prompt_templates.WAVE_INFIX` and `RESERVED_WAVE_SLOTS`; `replay.envelope`; four fragments no template names. **`run.py`'s own docstring states the position: "No row in the current table is a wave."** `DECIDE:` what survives in `envelope.py` — `kb_claimgraph.ask` calls `parse_record` and `check_exhausted`, so the record parser and a minimal `ProseBlocks` stay; establish which of `prose_field`, `prose_array` and `ProseBlocks.take` have a caller outside `parse_envelope` before cutting. `ROADMAP.md` item 6 ("the envelope contract is one definition, not two") **retires rather than being done** | PC | — | The surviving `envelope.py` surface named by symbol with its caller. The four fragments named in the commit, since deleting reviewed prose is recoverable only from git. `ARCHITECTURE.md`'s envelope rows corrected |
-| **D2** | **The self-graded-work guard.** `Step.writes_register`; `run`'s `_authored_ids`, `_registers_on_disk`, `_register_path`, `_minted_grades`, `_check_minted_grades`, `_mint_remedy` and the two-branch dispatch in `_run_step`. No row declares the field, and `ARCHITECTURE.md` already calls it "dormant, not removed". **This is a recorded decision to keep, not a scar** — nothing was learned from a failed build; a stage set was deleted and the guard was left standing. Say which in the commit. **`SPEC.md`'s driver contract carries the sentence this implements** — *"a seat that grades its own minted work stops the stage"* — and it goes or is re-attributed to `kb_claimgraph`, whose minting is mechanical and undispatched | PC, then **TW** for SPEC | — | `_run_step` collapsed to the handler dispatch. The SPEC sentence disposed of, not left describing a guard that is gone |
-| **D3** | **`CoverageReport.undeclared`** — the `reason` field, its two `__post_init__` invariants, the constructor, and the five branches reading it (`_named_missing`, `_coverage_refusal`, `_excused`, `stage_status`, the `UNDECLARED` status word). Nothing constructs one, not even a test; its docstring says "three shapes reach here" and none does. **The exact case `kb_tools/AGENTS.md` rules on** — name the producer before you write the refusal. A future check that cannot read its declaring artifact is one unsatisfied unit with a `detail`, which the existing machinery renders | PC | — | `CoverageReport` reduced to `units` + `degenerate` + `unit_class`. Where the state would now surface instead, stated |
-| **D4** | **`start.proceed`.** The row, `barriers.START_PROCEED` and its spec, `run._pre_proceed`. It asks whether to proceed with a build the operator launched by typing the command, and `/kb-build` prints that command **without** the flag that answers it — so the documented human path is run, get stopped, re-run. **It fires before `pre.kb-root`**, so the one fact that would change the answer — a populated `kb-root/` that refuses the build — is not read until after the confirmation. `DECIDE:` remove it, or move `pre.kb-root` ahead of it. The step table's TOCTOU reasoning for placing `pre.kb-root` last does not conflict: a barrier is an exit, and the next process re-reads everything | PC | — | The decision with its reason. If removed, `kb-testing`'s note that it "fires unconditionally on every live run" goes with it |
-| **D5** | **Watch mode.** `watch.py`, `cli`'s `p_watch` parser, `baton.MODE_WATCH`, `_MODE_BATONS`, `WATCH_MODE_EXIT_CODES`, `EXIT_WATCH_*`. Its premise is in its own first paragraph — that `/kb-build` backgrounds the driver and holds no pipe — and `/kb-build` does neither. `SPEC.md`'s Project Scoping settles it: *"Agent-assisted launch and management of a run is later work."* **`cli.py` claims watch is required in the kb-testing recipes and it is not.** `watch.recorded_stages` has a live caller in `run._recorded_stages` and moves rather than dies. `DECIDE:` delete, or keep and fix the two false statements — if agent-assisted run management is returning, that belongs in `ROADMAP.md` and the module says so. Deleting also retires `no_writes`, which replaces `builtins.open` process-wide to guard a read loop | PC | — | The decision with its reason. `recorded_stages` relocated with its caller. `ARCHITECTURE.md`'s module-table and CLI rows corrected |
-| **D6** | **The action-card apparatus.** `kb_pipeline`'s `RecordStep`, `StageStatusStep`, `GateStep`, `CappedLine`, `CardItem`, `_kb_util_command`, `_front_end_command`, `_cap_values`, `card_lines`, `CARD_PREFIX`, `CONTRACT_LINE`, the `card=` tuples in `STAGES`, and `show_confirmation` with its five helpers and `Stage.user_gate`. Every card instructs a reader to run a command the driver runs itself; `StageStatusStep` tells that reader to *"dispatch against those and compose no path of your own"*. **`SPEC.md` abolished the reader**: *"there is no coordinator seat… no artifact this toolchain produces admits a second controller."* The surveys split on whether a descriptive line per stage must survive, one of them holding that the card is the only place a stopped build says what the stage it stopped in was *for*. **That is false and the row is a deletion.** `Stage` carries `display` beside `card`, and its values are the purpose labels — "document tree derived", "claim-graph spine seeded", "dependency attribution", "validation gate". It reaches the reader in three places already: the checklist line (`[marker] id  display`), the stage-status `FACT` line (`id (display) — detail`), and the ledger commit subject (`id | display`). What the card adds beyond that is the instruction half, and its reader does not exist. `show-confirmation` goes with it — the second door `ARCHITECTURE.md`'s own opening-gate section says must not exist, which the driver never invokes | PC + **TW** | D1-D5 | A stopped build demonstrated still naming its stage and what that stage does, from `display` alone. `ARCHITECTURE.md`'s opening-gate and card paragraphs disposed of with it |
-| **D7** | **`ledger`'s latent ops and their retry apparatus** — `write_op`, `validate_build`, `_VALIDATE_EXITS`, `_WRITE_OP_EXITS`, `WRITE_OP_RETRY_LIMIT`, `_outcome`'s `retry_rc` loop and contended-write warning, `Outcome.barrier`, `RunPaths.values`. Both docstrings say no row calls them. **Removing the driver-side adapter does not touch the recorded keep-decision for `kb_survey.validate`** — `kb_util validate-build` remains, and a three-line adapter is re-derivable. Say so in the commit; `ARCHITECTURE.md` cites that decision | PC | — | `_outcome` reduced to one `_run` and the rc map. The `kb_survey.validate` decision explicitly untouched |
-| **D8** | **The brief-constants pool.** `steps.WRITE_OP_SLOTS`, `VALUES_FLAG_SLOT`, `CONSTANT_SLOTS`, `SCRATCH_LAYOUT`, `_layout_paths` — a pool of slots no dispatched template names. **Keep the mechanism**: `prompt_templates.render`'s `constants` parameter is live, filled by `kb_claimgraph.ask`'s own marker slots. **Keep `TEMPLATE_PROHIBITIONS`** — a lint is meant to guard templates that do not exist yet. *Its other half — `replay.py`'s assignment-table reader — is subsumed by D11, which deletes the module.* | PC | D1 | The `constants` mechanism demonstrated still reached |
-| **D9** | **The small-dead sweep**, one commit. `config.brief_transport` / `BRIEF_TRANSPORTS` / `DEFAULT_BRIEF_TRANSPORT` — validated, stored, read by nothing, so an operator setting it gets no change and no complaint. `BarrierSpec.payload`. `steps.SERIES_GATE` and `run.revisions_spent`'s gate branch — one series exists, and with one series the body is `round_number - 1`. `prompt_templates.SEAT_SLOT` and `RowSlots.seat`. `TimeoutSection.wave_seconds`. Plus three stale references: `run._only_series`'s docstring names a row that does not exist, `baton._ARTIFACT_NOTE` cites a rule the current `kb-build.md` does not contain, and `replay.write_assigned`'s docstring references a function that is not in the module | PC | D1 | Each named with what read it. Nothing reported as removed that a caller still reaches |
-| **D10** | **`SPEC.md`'s entry-point size budget** — an eight-line contract paragraph about word counts and a runaway threshold. `ARCHITECTURE.md` already reports the mechanism gone and says SPEC *"names a document nothing in the toolchain sizes."* Both paragraphs go. If the budget returns when a seat writes that document again, it is a `ROADMAP.md` item and not a standing clause with no mechanism | **TW** | — | Both paragraphs gone. No magnitude introduced anywhere |
+| Row | What | Blocked on | Done when |
+|---|---|---|---|
+| **L0** | **`measure-sheet` gains a `through_box` column** — strokes drawn through a claim box that is not one of their endpoints. Standing rule 7 already calls this the figure that matters and no instrument produces it, so every ring comparison run so far is missing the column that would settle it. It is readable straight off the document from box rectangles and edge path vertices, so it meets `kb_tools/CONVENTIONS.md`'s own test and imports nothing from `kb_tools`. Note a stroke is now emitted open across its hop gaps: the pieces of one `path` element are one stroke, and a gap is not an exit from a box | — | The column reports on every sheet in both arrangements; a hand-built sheet with a known count verifies it; every other figure unmoved |
+| **L1** | **Linear is the shipped default again; rings stay reachable for R&D.** `layout.DEFAULT_PLACEMENT` back to `linear`. Nothing else about the concentric placer changes — it keeps its forms, its constant and its tests, and stays selectable through `KB_GRAPH_PLACEMENT`. **`SPEC.md` is the larger half of this row, not a footnote to it**: it currently opens the sheet's description with the concentric arrangement as a consumer-facing outcome, and carries a paragraph conceding that a stroke may cross a claim box that is neither of its ends — a loss the linear arrangement does not have, since every stroke there runs between adjacent layers through a placeholder holding a space of its own. Both go back. The census clause stating how many crossings carry a glyph stays: it is true of any arrangement. `ARCHITECTURE.md`'s statement of the default follows | — | Default renders linear; each of the three names still renders its own arrangement; `SPEC.md` describes the arrangement that ships and concedes no loss the shipped arrangement does not have |
+| **L2** | **Vertical spacing sweep.** `style.LAYER_GAP` is 44px between one row's boxes and the next, and every stroke travelling between two layers fans through that band — on a rendered sheet it carries six or seven near-parallel strokes with hop glyphs wedged among them. Sweep it upward. Height is the axis these sheets have slack on; width is the scarce one and this does not touch it | L1 | Sheets at every value tried, per rule 8. Whether the inter-layer band separates its strokes is judged by looking. `edge_len` and `viewBox` reported because they move; `hop_glyphs` because a wider band may admit glyphs the suppression rule was refusing |
+| **L3** | **Ordering objective becomes per-arrangement.** In-layer ordering is barycentre + transpose, minimising crossings, and the ring placer wraps that order around a perimeter — so once the order turns a corner, adjacent-in-order stops meaning adjacent-in-space and a short edge becomes a diameter. On the same 43-node graph, `edge_len` is 12144 linear against 35552 ring-rectangle. **Make the objective a property of the arrangement** rather than of the module: `_exchange_gain` is already the one function the transpose loop asks "does swapping this adjacent pair improve things", and `_Placement` is already the per-arrangement policy object. **Median edge length, not mean** — a few unavoidable long edges must not drag the objective. **Measure the index-space approximation first**: scoring in placed coordinates makes ordering depend on placement, which consumes ordering, and resolving that needs a bounded order-place-rescore loop. If approximating length by index distance gets most of the gain, the loop is not bought | L1 | `edge_len` and the through-a-box count on both ring forms, before and after. Linear must not regress on crossings. Sheets per rule 8. **Records whether the bounded loop was bought and what the cheap version measured** |
+| **L4** | **The orphan block.** On `2609.09855v1` the unattached claims are roughly 60% of the sheet's height — four columns of boxes carrying no strokes, and the largest single object on the page. 73 of 156 claims participate in no dependency edge. `style.py` says the block exists so its height reads as how much of the KB is unattached, which is a real job it is doing at a cost nothing has weighed against it. **Decide what it is for and size it to that** | L2 | A rendered sheet where the hierarchy is the dominant object, or a recorded finding that the block's current size is the honest reading and the cost is accepted |
 
-| **D11** | **`--dry-run` and its fake-model invoker leave the deliverable.** `kb_driver/replay.py`, the flag through `cli.py` and `config.py`, `test_kb_driver_dryrun.py`, `test_kb_driver_replay.py`, `kb-testing`'s rung-1 recipe, the `SPEC.md` sentence, and `ARCHITECTURE.md`'s 387-396/406/424/648. **The consumer named in its own docstring does not exist** — `.claude/commands/kb-build.md` never offers the flag and the only caller anywhere is the dev harness, so this is test functionality in shipped surface. The `ask.SeatAsk` fact carried by the ARCHITECTURE paragraph is true for `--no-inference` and survives the flag's removal. `--no-inference` is untouched; the `Invoker` protocol and its `invoker=None` default stay, being ordinary injection | PC | — | Flag gone from code and contract. `just test` green. `Step.spends_own_inference`'s comment stating what is true without the flag |
-| **D12** | **The driver's end-to-end integration test, built from scratch in the test tree.** D11 deletes the only walk that exercised the real ledger subprocess, the consuming repo's `kb-refresh`/`kb-verify`, the postconditions and the barriers together. It is rebuilt as a test that injects a fake `Invoker` at the `inference.invoke` seam — no production flag, no shipped scenario module, no step-table knowledge outside the suite. **Not a transplant**: the deleted files are not a starting point | PC | D11 | One test walking the stage table against a real fixture repo with the model injected from the suite |
-| **D13** | **`phase-5` collapses to a fixed sequence: one review round, one fix round, no failure.** No re-review after the fix, no counting, and review findings never fail the stage. That is a structure rather than a bounded loop, so the loop machinery goes: `ReviewCycle`, `REVIEW_CYCLES`, `RoundsSpent`, `LoopSeries`, `_review_loop`, `_review_round`, `_spend_or_escalate`, `_only_series`, the two-letter series vocabulary and the `review/{stage}-{series}{round}-{author}.md` grammar it feeds, the cap barrier, `kb_pipeline.PHASE_5_FIX_CAP` and its `phase_5_fix_cap` slot, and the exit-17 no-op-fix detector (`CappedLine` names that cap but is card machinery — **D6 owns it**) — **about a third of `run.py`**. `_report_round` survives in whatever form records the two calls. **`PHASE_5_FIX_CAP` is not eroded, it is made structural**: `CONVENTIONS.md` records a pipeline that looped until a reviewer stopped finding problems, against instructions that made problems inexhaustible. A fixed two-call sequence cannot reintroduce that, because nothing loops on a model's opinion. The document under review is `README.md`, composed from the index except for one drafted passage. **Minimum viable collapse** — this stage is up for redesign, so nothing here is re-architected on the way out | PC | `run.py` ownership — D2 and D6 also edit it | The two calls run in sequence and the stage records both. No counter, no cap, no series. `just test` green |
+## Out of scope
 
+**Anything that changes what `.index/` records.** The claim graph is never reduced in
+service of a rendering limitation — a reference the corpus states is true whether or not a
+picture can hold it. Render-only suppression is the renderer's business and is how both the
+reference class and the transitive reduction already work; no row here touches
+`kb_claimgraph/`.
 
-## Not buildup — established as proportionate, do not touch
+**A replacement rendering for references** — a tooltip listing, an adjacency matrix, a
+second sheet. Its own row when someone wants it. Omission was the change under test and it
+measured well.
 
-`steps.PATH_SLOTS` and `call._path_complaints` (a precondition standing in for an instruction to a
-model, with the live failure recorded — a review that read a different repository's KB);
-`runlog`'s lock; `baton`'s card table, every row reachable; `ledger._failure_detail` (recorded: a
-sweep of builds relaying `exited 1` and nothing else); `run.RUNNER_ATTRIBUTES` (fixes a named
-defect, and `ROADMAP.md` names it as a landed prerequisite); `envelope`'s prose-block transport (a
-corpus of mathematics makes `\sigma` inside JSON the ordinary case);
-`prompt_templates`' two-direction fill and the `dyn.` namespace; `run._assemble_overview`'s byte
-comparison; `CoverageUnit.asserts_own_work`; `ov.docent-check`, whose docstring gives the wrong
-reason for the right check — a resume skips `pre.preflight`, so on a resume this is the only one.
+**Dummy-column pricing** — charging a dummy less than a full `COLUMN_PITCH`. Real headroom,
+but it moves width while L2 and L3 are moving other things, and it wants their sheets first.
 
 ## Order
 
-**D1 first.** Largest, and D8's and D9's last entries fall out of it.
+**L0 first**, and it is independent of everything else. Standing rule 7 names a figure no
+instrument reports, so every row after it is graded with that column blank.
 
-**D2, D3, D4, D5, D7, D10 in any order** — independent of each other. D3 is the smallest and the
-doctrine case is exact. D10 is TW-only.
+**L1 next** — it is one constant and every other row is graded on sheets whose default
+arrangement should already be settled.
 
-**D6 after the rest**, because it is the largest surface and touches two contract sections — not
-because it is unsettled. Its reader question is closed: `Stage.display` already carries what the
-card was thought to be the only source of.
+**L2 next**, because the owner's reading is that a little more vertical spacing may be
+enough for a usable v0.5, and that is the cheapest way to find out.
 
-**D11 has landed.** **D12 follows it** and is the only row here that adds code rather than removing it.
+**L3 and L4 are independent of each other.** L3 is the larger change and the one whose
+cheap version should be measured before its expensive version is built.
 
-**D2, D6 and D13 all edit `run.py`** and cannot run concurrently. D13 is the largest of the three.
+**L3 decides the ring family's fate; no ring row does.** Rings stay selectable
+until a layout that reads well exists. If the per-arrangement ordering objective
+makes the linear sheet read well, they go. Having rings was never the goal — a
+ring arrangement is worth keeping because it could be strongly communicative for
+data shaped to suit it, and nothing has established that this corpus is or is
+not that data.
+
+**Retired, kept only so nobody re-proposes them.** Brandes–Köpf coordinate assignment was
+implemented, measured and reverted — it widened `ModernCorpPristine` 68%, lengthened its
+edges 27% and raised crossings, having been asked to close a spread that measurement showed
+was 0px on most sheets. Concentric layout was rejected twice on arithmetic before being
+built and measured; built, it costs area and draws far more strokes through claim boxes
+than linear, which is structural rather than incidental — on a ring, the space between ring
+k and ring k+1 is ring k's own boxes. It survives as an R&D option because the owner wants
+to keep exploring it, not because those figures improved.
+
+**`style.RING_STEP` is a closed lever, and only that.** Every candidate position
+a ring form offers is the step times its step-1 position, so the step is a
+uniform scale and changes no relationship between occupants. That is arithmetic
+about the placer and holds for any corpus, which is why sweeping it further is
+not worth a run.
+
+**It settles nothing about whether a ring arrangement can read.** Whether
+boundaries form depends on how a corpus's layer sizes meet its rings, and no
+corpus rendered here was chosen to test that. The ring forms stay selectable.
+
+Two untried levers, neither tested and neither ruled out: **marking the rings**
+rather than spacing them, and **bounding a ring's occupancy** so a layer
+overflows outward instead of stretching around its own circumference. The second
+changes what a ring means and is the larger call. Whether this corpus's layer
+sizes leave any gap against ring circumference is arithmetic over the layer
+profile, answerable without a render.

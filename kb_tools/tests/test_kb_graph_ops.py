@@ -19,6 +19,7 @@ raises, because carrying them unaltered is the contract.
 
 import json
 import os
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -121,6 +122,22 @@ def _detail(result: ops.Result, name: str) -> str:
     return matching[0].detail
 
 
+def _figures(detail: str) -> list[int]:
+    """The integers one reported detail states, in order, without the prose around them.
+
+    ``ReportItem`` reserves detail wording to the prompt engineer, so a census
+    figure is read as a figure. Unpacking the result is what asserts how many
+    figures the line carries.
+    """
+    return [int(token) for token in re.findall(r"\d+", detail)]
+
+
+def _hop_arcs(document: str) -> int:
+    """How many bridge glyphs the sheet draws."""
+    root = ET.fromstring(document)
+    return sum(1 for element in root.iter("{http://www.w3.org/2000/svg}path") if element.get("class") == "hop")
+
+
 def _drawn_ids(document: str) -> set[str]:
     """Every node id the sheet draws, read off its first label line."""
     root = ET.fromstring(document)
@@ -164,6 +181,39 @@ def test_the_census_reports_every_family(kb: Path) -> None:
     assert "claim 6" in _detail(result, "nodes")
     assert _detail(result, "edges").startswith("4 drawn")
     assert "depends 4" in _detail(result, "edges")
+
+
+def test_the_crossing_census_states_the_glyphs_beside_the_crossings(tmp_path: Path) -> None:
+    """Two figures, and the second one is the glyphs the sheet actually draws.
+
+    The headline is the geometric crossing count and stays whole; a crossing
+    whose glyph the geometry does not admit is drawn plain, so a single figure
+    would say every crossing is marked. The glyph figure is counted off the
+    emitted markup rather than asked of the renderer a second time — *which*
+    crossings earn one is ``test_kb_graph_svg.py``'s question, and on a corpus
+    this small every crossing does.
+
+    Complete bipartite, because that is the shape whose crossings no in-layer
+    ordering can remove: a corpus drawing none would let a census stating
+    nothing pass. Neither figure is asserted against a constant — both are the
+    ring placement's, which moves.
+    """
+    lower = [f"clm-ll000{n}" for n in range(3)]
+    upper = [f"clm-uu000{n}" for n in range(3)]
+    kb_root = tmp_path / "consumer" / kb_util.KB_DIRNAME
+    _write_index(
+        kb_root / kb_util.INDEX_DIRNAME,
+        claims=[_claim(node_id, path=f"volume-a/{node_id}.md") for node_id in (*lower, *upper)],
+        depends_on=[_edge(up, down) for up in upper for down in lower],
+    )
+
+    result = ops.render(kb_root=kb_root)
+
+    crossings, glyphs = _figures(_detail(result, "crossings"))
+    drawn = _hop_arcs(result.written.read_text(encoding="utf-8"))
+    assert drawn, "the fixture must draw crossings for the glyph figure to say anything"
+    assert glyphs == drawn
+    assert crossings >= glyphs
 
 
 # ---------------------------------------------------------------------------

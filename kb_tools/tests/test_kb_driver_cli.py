@@ -159,7 +159,7 @@ def test_an_inadmissible_decision_is_refused_at_load(tmp_path: Path, capsys: pyt
 def test_malformed_decide_exits_13_before_the_run_directory_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = cli.main(_run_args(tmp_path, "--decide", "phase-1b-design-gate"))
+    code = cli.main(_run_args(tmp_path, "--decide", "example-stage-example-kind"))
 
     assert code == baton.EXIT_CONFIG
     assert "malformed" in capsys.readouterr().out
@@ -282,6 +282,19 @@ def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
 
+def _repository(path: Path) -> Path:
+    """An initialized repository with nothing committed in it yet."""
+    path.mkdir(parents=True)
+    _git(path, "init", "-q")
+    for key, value in (
+        ("user.email", "fixture@example.invalid"),
+        ("user.name", "fixture"),
+        ("commit.gpgsign", "false"),
+    ):
+        _git(path, "config", key, value)
+    return path
+
+
 @pytest.fixture
 def consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A repository a run really starts in, with a KB under it.
@@ -292,15 +305,7 @@ def consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     driver's own process, which is where each case below substitutes the ending
     it means to test.
     """
-    repo = tmp_path / "consumer"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    for key, value in (
-        ("user.email", "fixture@example.invalid"),
-        ("user.name", "fixture"),
-        ("commit.gpgsign", "false"),
-    ):
-        _git(repo, "config", key, value)
+    repo = _repository(tmp_path / "consumer")
     shutil.copytree(_MINI_KB, kb_util.kb_root(repo))
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "the KB this run is over")
@@ -387,6 +392,77 @@ def test_a_boundary_error_mid_run_still_leaves_its_report(
     assert _report(runs)["exit_code"] == baton.EXIT_INTERNAL
     assert "the run directory is the bug report" in out
     assert "rc outside its own vocabulary" in out
+
+
+# ---------------------------------------------------------------------------
+# The invocation a card hands back, from the flags the run was launched with
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def launchable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A repository a launch really opens a build in: preflight's items met, and no KB.
+
+    Everything ``kb_util.preflight_report`` gates on and nothing else — the
+    docent commands, the scratch ignore rule, a runner file, a clean worktree —
+    so the walk below reaches the ledger through the real environment check
+    rather than past a substituted one. No ``kb-root/``, because the launch
+    guard refuses to open a build over a populated tree.
+    """
+    repo = _repository(tmp_path / "launchable")
+    commands = repo / kb_util.CLAUDE_DIRNAME / kb_util.COMMANDS_DIRNAME
+    commands.mkdir(parents=True)
+    for name in kb_util.DOCENT_COMMAND_FILENAMES:
+        (commands / name).write_text(f"# {name}\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(f"{kb_util.SCRATCH_DIRNAME}/\n", encoding="utf-8")
+    (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "the repository this build is opened in")
+    monkeypatch.chdir(repo)
+    return repo
+
+
+def test_the_card_a_real_run_hands_back_carries_the_flags_it_was_launched_with(
+    launchable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One argv, through ``main``, to the resume line the relay prints.
+
+    The bound is what makes this cheap: the run walks ``start`` for real —
+    preflight, the launch guard, a boundary commit — and stops at the next
+    stage, which is a planned ending whose card offers a resume. What the
+    assertions read is the wiring behind that line: ``--source`` and
+    ``--run-dir`` travel from argv through ``config.load`` into
+    ``DriverConfig.invocation``, into the ``BatonContext`` the sequencer returns,
+    and into the rendered card. A flag dropped anywhere along that path leaves
+    the card offering a command that launches a different run — with
+    ``--run-dir`` gone, one whose evidence lands under the default parent while
+    this run's sits here, unreferenced by anything.
+
+    ``--through`` is the half that must NOT be there: it bounds this
+    invocation rather than saying what the build is made of, and a resume
+    carrying it back stops in the same place forever.
+    """
+    runs = launchable.parent / "runs"
+
+    code = cli.main(
+        [
+            "run",
+            config.SOURCE_FLAG,
+            "AcmeWidgets.tex",
+            config.RUN_DIR_FLAG,
+            str(runs),
+            config.THROUGH_FLAG,
+            "start",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == baton.EXIT_BOUNDED, out
+    offered = [line for line in out.splitlines() if kb_util.DRIVER_INVOCATION in line]
+    assert len(offered) == 1, out
+    assert f"{config.SOURCE_FLAG} AcmeWidgets.tex" in offered[0]
+    assert f"{config.RUN_DIR_FLAG} {runs}" in offered[0]
+    assert config.THROUGH_FLAG not in offered[0], "a resume carrying the bound stops where this one did, forever"
 
 
 def test_every_command_a_card_offers_names_the_run_directory(tmp_path: Path) -> None:

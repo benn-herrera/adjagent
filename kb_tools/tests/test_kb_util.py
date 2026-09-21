@@ -1892,9 +1892,9 @@ def test_the_read_and_the_refusal_name_one_set_of_missing_units(
     something plausible, and would still fail here.
 
     Compared as id sets and not as text: the details legitimately differ, and
-    ``start`` and ``phase-1b`` are why. Their units are argument-derived, so a
-    read says the argument is not available to it while a refusal says what the
-    record was missing. Which unit is unsatisfied is the same answer either way.
+    ``start`` is why. Its charter unit is argument-derived, so a read says the
+    argument is not available to it while a refusal says what the record was
+    missing. Which unit is unsatisfied is the same answer either way.
     """
     if stage_id == kb_pipeline.FIRST_STAGE_ID:
         repo = _pipeline_repo(tmp_path / "unstarted")

@@ -662,6 +662,29 @@ def test_edges_containment_settles_are_never_also_asked_about(declared: Path):
     assert ids["Gamma one"] not in {question.source.id for question in narrowed.questions}
 
 
+def test_the_evidence_is_the_anchor_s_paragraph_and_not_the_wrap_it_landed_in(declared: Path):
+    """``Question.evidence`` carries the words around the anchor, not one hard-wrapped line.
+
+    Alpha's closing paragraph is four physical lines and each anchor sits alone on
+    one of them, so the words stating what the reference is doing — *Alpha is
+    argued from* — are on the line above it. Reading the anchor's own line drops
+    them: over the built ModernCorp tree that left 0 of 22 evidence values
+    carrying any dependency cue, against 15 of 19 read a paragraph at a time.
+
+    The blank line above the paragraph is the other half of the unit. The claim,
+    definition and remark blockquotes above it are not the sentence the anchor
+    sits in, and a run that reached them would be a second way of showing the
+    seat something the candidate lines already say.
+    """
+    ids, narrowed = _narrowed(declared)
+    asked = {question.source.id: question for question in narrowed.questions}
+    assert asked[ids["Alpha result"]].evidence == (
+        'Alpha is argued from <a href="beta.md#thm:beta" data-reference-type="ref" '
+        'data-reference="thm:beta">Lemma 2</a>, and it reads a term settled in '
+        '<a href="gamma.md#def:gamma" data-reference-type="ref" data-reference="def:gamma">Definition 2</a>.',
+    )
+
+
 def test_a_marker_on_a_reference_line_is_not_shown_to_the_seat_that_picks_a_direction(declared: Path):
     """``Question.evidence`` is authored prose, and a marker is not prose.
 

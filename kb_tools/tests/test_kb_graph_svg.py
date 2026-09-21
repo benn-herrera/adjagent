@@ -10,7 +10,7 @@ with no freshness gate — the drift surface the canonical-direction rule exists
 to prevent — and it could go stale against the fixture it derives from. Built
 this way it cannot, and a change to an emitter's record shape surfaces as a
 golden diff instead of hiding behind a frozen copy. :func:`render_mini_kb_golden`
-and :func:`write_mini_kb_golden` are that helper, and the regeneration recipe
+and :func:`write_mini_kb_golden` are that helper, and ``just regenerate-mini-kb-golden``
 runs through them so the recipe and this suite build the index the same way.
 
 **The copy must carry the fixture's ``CLAUDE.md``** or the framework nodes it
@@ -23,6 +23,7 @@ The synthetic fixtures cover what ``mini-kb`` cannot: it carries no empty
 """
 
 import ast
+import math
 import os
 import re
 import shutil
@@ -33,6 +34,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 import pytest
 
@@ -195,6 +197,19 @@ def _render(nodes, edges=(), *, link_base: str = "kb-root", foreign: Iterable[st
     return svg.render(_sheet(nodes, edges), link_base=link_base, foreign=tuple(foreign))
 
 
+@pytest.fixture
+def layered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The layered arrangement, for the fixtures built so that exactly one stroke crosses another.
+
+    The glyph is what those tests are about and the arrangement is not — but a
+    shape hand-built to cross once, with a crossing point that can be computed by
+    hand, is a shape drawn against the layered sheet, and the sheet ships
+    concentric (``layout.DEFAULT_PLACEMENT``). Everything else here draws the
+    same under either.
+    """
+    monkeypatch.setenv(layout.PLACEMENT_ENV, "linear")
+
+
 # ---------------------------------------------------------------------------
 # Reading a rendered document back
 # ---------------------------------------------------------------------------
@@ -215,15 +230,19 @@ def _node_groups(root: ET.Element) -> dict[str, ET.Element]:
     return {_by_local(group, "text")[0].text.split(" ")[0]: group for group in groups}
 
 
+def _by_class(root: ET.Element, name: str, css: str) -> list[ET.Element]:
+    return [element for element in _by_local(root, name) if element.get("class") == css]
+
+
 def _edge_lines(root: ET.Element) -> dict[tuple[str, str], ET.Element]:
     """Every stroke, keyed by the pair its tooltip head names.
 
-    One ``polyline`` per edge however many layers it spans: an edge crossing
-    layers is routed through a dummy in each, and the whole chain is one
-    element.
+    One ``path`` per edge however many layers it spans: an edge crossing layers
+    is routed through a dummy in each, and the whole chain is one element. The
+    class is what tells a stroke from a hop glyph — both are ``path`` elements.
     """
     out = {}
-    for line in _by_local(root, "polyline"):
+    for line in _by_class(root, "path", "edge"):
         head = _by_local(line, "title")[0].text.split(" — ")[0]
         source, _, target = head.partition(" → ")
         out[(source, target)] = line
@@ -258,7 +277,16 @@ def test_the_golden_is_the_document_and_not_an_empty_one() -> None:
     """A golden regenerated from a renderer that drew nothing would compare against
     itself forever and assert nothing at all. The fixture's own shape is the guard:
     all four node types, the two edge classes the real corpus does not exercise, and
-    the framework nodes that only arrive if the copy carried ``CLAUDE.md``."""
+    the framework nodes that only arrive if the copy carried ``CLAUDE.md``.
+
+    **The fixture no longer crosses, and that is itself pinned here.** Its two
+    crossings were the barycentre sweep's residue and the transpose refinement
+    takes them to none (``layout``'s module docstring), so an arc reappearing in
+    this document is the ordering phase regressing rather than the fixture
+    growing. What the arc's own markup must look like is pinned by
+    :func:`test_every_hop_arc_bridges_toward_screen_up`, over a complete
+    bipartite shape no ordering can uncross.
+    """
     root = ET.fromstring(MINI_KB_GOLDEN.read_text(encoding="utf-8"))
     groups = _node_groups(root)
 
@@ -268,7 +296,8 @@ def test_the_golden_is_the_document_and_not_an_empty_one() -> None:
     assert any(node_id.startswith("axiom-") for node_id in groups)
     assert any(node_id.startswith("sup-") for node_id in groups)
     assert any(node_id.startswith("exp-") for node_id in groups)
-    assert _by_local(root, "path"), "the fixture crosses; the arcs are part of what the golden pins"
+    # Strokes are paths too now, so the glyphs are told from them by class.
+    assert not _by_class(root, "path", "hop"), "the ordering phase uncrosses this fixture entirely"
 
 
 def test_the_golden_ends_in_exactly_one_newline_and_opens_with_the_pinned_declaration() -> None:
@@ -305,13 +334,88 @@ def test_a_hostile_title_round_trips_through_the_document(tmp_path: Path) -> Non
     assert tooltip.endswith(_HOSTILE_TITLE)
 
 
-def test_a_hostile_title_is_truncated_on_the_label_line_but_whole_in_the_tooltip() -> None:
+def test_a_hostile_title_wraps_across_the_label_lines_and_loses_no_word() -> None:
+    """The hostile title is 48 characters against a
+    :data:`style.LABEL_CHARS` × :data:`style.TITLE_LINES` allowance, so it is
+    drawn whole — across several lines, none wider than the box. Rejoining the
+    lines reproduces the title's own words, which is what says the wrap relocated
+    them rather than dropping one at a break.
+    """
     root = ET.fromstring(_render([_claim("clm-hh1111", title=_HOSTILE_TITLE)]))
-    label = _by_local(_node_groups(root)["clm-hh1111"], "text")[1].text
+    lines = [text.text for text in _by_local(_node_groups(root)["clm-hh1111"], "text")][1:]
 
-    assert len(label) == style.LABEL_CHARS
-    assert label.endswith(style.TRUNCATION_ELLIPSIS)
-    assert _HOSTILE_TITLE.startswith(label[:-1])
+    assert 1 < len(lines) <= style.TITLE_LINES
+    assert max(len(line) for line in lines) <= style.LABEL_CHARS
+    assert " ".join(lines).split() == _HOSTILE_TITLE.split()
+
+
+def test_a_title_past_the_allowance_is_cut_on_the_last_line_but_whole_in_the_tooltip() -> None:
+    """Truncation still exists — it moved to the end of the last line.
+
+    The title is one character past ``LABEL_CHARS × TITLE_LINES``, so no
+    arrangement of it fits and the tail is what the ellipsis stands for. The
+    tooltip is where the whole of it is read, at no layout cost.
+    """
+    title = "word " * (style.LABEL_CHARS * style.TITLE_LINES // 5 + 2)
+    root = ET.fromstring(_render([_claim("clm-cc2222", title=title)]))
+    group = _node_groups(root)["clm-cc2222"]
+    lines = [text.text for text in _by_local(group, "text")][1:]
+
+    assert len(lines) == style.TITLE_LINES
+    assert lines[-1].endswith(style.TRUNCATION_ELLIPSIS)
+    assert max(len(line) for line in lines) <= style.LABEL_CHARS
+    assert _by_local(group, "title")[0].text.endswith(title)
+
+
+def test_a_word_longer_than_the_line_is_cut_at_the_cap_and_continues_beneath() -> None:
+    """The stated rule for the one case whitespace cannot answer.
+
+    A single token wider than the box has no break to take, so it is cut at the
+    cap and its tail continues on the next line — the alternative being a line
+    wider than the box it sits in, which is the one thing
+    :data:`style.BOX_WIDTH` promises cannot happen.
+    """
+    token = "A" * (style.LABEL_CHARS + 4)
+    lines = svg._wrapped(token)
+
+    assert lines[0] == "A" * style.LABEL_CHARS
+    assert lines[1] == "A" * 4
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["", "short", _HOSTILE_TITLE, "word " * 40, "A" * 200],
+    ids=["empty", "short", "hostile", "overlong", "one-token"],
+)
+def test_the_wrap_is_deterministic_and_never_exceeds_its_own_allowance(title: str) -> None:
+    """The two properties the geometry rests on, over every shape of title.
+
+    Same title, same lines — :data:`style.BOX_HEIGHT` and :data:`style.BOX_WIDTH`
+    are functions of the caps and not of the title drawn, so a title that
+    produced a different count or a wider line on a second call would move a
+    neighbour that had already been placed.
+    """
+    lines = svg._wrapped(title)
+
+    assert lines == svg._wrapped(title)
+    assert len(lines) <= style.TITLE_LINES
+    assert all(len(line) <= style.LABEL_CHARS for line in lines)
+
+
+def test_a_short_title_and_a_cut_one_are_drawn_in_boxes_of_one_size() -> None:
+    """Wrapping bought lines without making the box a function of the label.
+
+    ``BOX_HEIGHT`` is ``(1 + TITLE_LINES)`` line heights whatever a given title
+    wraps to, so the node that uses one line and the node whose tail was cut
+    stand in identically sized boxes — which is what keeps a long title from
+    moving a neighbour.
+    """
+    root = ET.fromstring(_render([_claim("clm-aa1111", title="Short"), _claim("clm-bb2222", title="word " * 40)]))
+    boxes = [_by_local(group, "rect")[0] for group in _node_groups(root).values()]
+
+    assert {box.get("height") for box in boxes} == {str(style.BOX_HEIGHT)}
+    assert {box.get("width") for box in boxes} == {str(style.BOX_WIDTH)}
+    assert style.BOX_HEIGHT == (1 + style.TITLE_LINES) * style.LINE_HEIGHT + 2 * style.BOX_PADDING_Y
 
 
 def test_no_label_line_anywhere_in_the_golden_is_wider_than_the_box_it_sits_in() -> None:
@@ -429,14 +533,19 @@ def test_the_guard_fails_on_a_planted_literal(tmp_path: Path) -> None:
 # The numeric contract
 # ---------------------------------------------------------------------------
 
-#: Every attribute whose value is geometry. ``viewBox`` carries four tokens and
-#: ``points`` two per vertex, so the check splits on both separators the two use
-#: and holds each token to the same rule. ``points`` is the one that would go
-#: vacuous if it were left out: an edge's coordinates live nowhere else now that
-#: a stroke is a chain rather than an ``x1``/``y1``/``x2``/``y2`` line.
-_INTEGER_ATTRIBUTES = ("viewBox", "points", "width", "height", "x", "y", "stroke-width", "font-size")
+#: Every attribute whose value is geometry. ``viewBox`` carries four tokens, so
+#: the check splits on both separators the document uses and holds each token to
+#: the same rule.
+_INTEGER_ATTRIBUTES = ("viewBox", "width", "height", "x", "y", "stroke-width", "font-size")
 _INTEGER = re.compile(r"^-?(0|[1-9][0-9]*)$")
 _GEOMETRY_SEPARATOR = re.compile(r"[\s,]+")
+
+#: A stroke's path commands, dropped before its numbers are checked. An edge's
+#: coordinates live nowhere but its ``d`` now that a stroke is a curved chain,
+#: so leaving ``d`` out of the check above would take every edge coordinate in
+#: the document out with it — and the hop arc, the one non-integral geometry,
+#: is why the check is per class rather than over every ``d`` on the sheet.
+_PATH_COMMAND = re.compile(r"^[A-Za-z]$")
 
 #: The hop arc, the single non-integral geometry: every value three decimals,
 #: and the sweep flag a constant because the bulge rule has no cases.
@@ -456,15 +565,17 @@ def test_every_emitted_coordinate_in_the_golden_is_an_integer() -> None:
                 checked += 1
     assert checked > 0
 
-
-def test_every_arc_value_in_the_golden_carries_exactly_three_decimals() -> None:
-    arcs = [
-        element.get("d") for element in _by_local(ET.fromstring(MINI_KB_GOLDEN.read_text(encoding="utf-8")), "path")
-    ]
-
-    assert arcs
-    for data in arcs:
-        assert _ARC.match(data), data
+    # Every control point a curve is drawn through rounds to an integer where it
+    # is computed, so a stroke's own path data holds to the same rule.
+    strokes = 0
+    for stroke in _by_class(root, "path", "edge"):
+        data = stroke.get("d")
+        for token in _GEOMETRY_SEPARATOR.split(data):
+            if _PATH_COMMAND.match(token):
+                continue
+            assert _INTEGER.match(token), f"edge/d is {data!r}"
+        strokes += 1
+    assert strokes > 0
 
 
 def test_the_number_formatter_rounds_once_and_never_emits_a_signed_zero() -> None:
@@ -504,7 +615,7 @@ def test_every_hop_arc_bridges_toward_screen_up() -> None:
     ], "the fixture must carry the case the ordering exists for"
 
     root = ET.fromstring(svg.render(sheet, link_base="."))
-    arcs = [_ARC.match(element.get("d")) for element in _by_local(root, "path")]
+    arcs = [_ARC.match(element.get("d")) for element in _by_class(root, "path", "hop")]
     assert arcs and all(arcs)
     for arc in arcs:
         start_x, start_y, _, _, end_x, end_y = (float(group) for group in arc.groups())
@@ -513,7 +624,7 @@ def test_every_hop_arc_bridges_toward_screen_up() -> None:
         assert (start_x, start_y) < (end_x, end_y)
 
 
-def test_a_crossing_draws_one_arc_on_the_higher_key_edge() -> None:
+def test_a_crossing_draws_one_arc_on_the_higher_key_edge(layered) -> None:
     """Two edges built to cross, at the markup level: the glyph is centred on the
     crossing point and its endpoints sit one hop radius either side along the
     hopping edge. Which way it bulges from there is the test above.
@@ -530,7 +641,7 @@ def test_a_crossing_draws_one_arc_on_the_higher_key_edge() -> None:
     assert len(sheet.hops) == 1
 
     root = ET.fromstring(svg.render(sheet, link_base="kb-root"))
-    arcs = _by_local(root, "path")
+    arcs = _by_class(root, "path", "hop")
     assert len(arcs) == 1
 
     hop = sheet.hops[0]
@@ -546,6 +657,464 @@ def test_a_crossing_draws_one_arc_on_the_higher_key_edge() -> None:
     assert ((end_x - start_x) ** 2 + (end_y - start_y) ** 2) ** 0.5 == pytest.approx(2 * style.HOP_RADIUS, abs=0.002)
     # The arc is drawn on the hopping edge, in the hopping edge's own colour.
     assert arcs[0].get("stroke") == _edge_lines(root)[hop.hopping].get("stroke")
+
+
+#: Half a unit in the last emitted place, per endpoint: the arc's two endpoints
+#: are what the document carries, and each is rounded once at emission
+#: (:func:`svg.format_number`), so their midpoint stands that far off the centre
+#: the exact arithmetic put it at. It is the formatter's rounding and the whole
+#: of it — there is no tolerance anywhere in the geometry these tests read.
+_EMISSION_ROUNDING = Fraction(1, 1000)
+
+
+class _Glyph(NamedTuple):
+    """One emitted arc read back out of the document, with the stroke under it.
+
+    ``run`` is the run of the hopping stroke the glyph belongs to, as the points
+    it is drawn through — two for a line and four for a cubic. ``feet`` are the
+    arc's two endpoints as the document carries them, ``centre`` their midpoint,
+    and ``on_stroke`` where that run is at the parameter the crossing sits at
+    along its chord.
+    """
+
+    hop: layout.Hop
+    run: tuple[tuple[int, int], ...]
+    feet: tuple[tuple[Fraction, Fraction], tuple[Fraction, Fraction]]
+    centre: tuple[Fraction, Fraction]
+    on_stroke: tuple[Fraction, Fraction]
+
+
+class _Piece(NamedTuple):
+    """One drawn command of an emitted stroke, with the points a viewer traces it through.
+
+    ``lifted`` marks a piece the pen was *moved* to rather than arrived at,
+    which is the document's own tell that the stroke is open in front of it.
+    """
+
+    lifted: bool
+    points: tuple[tuple[Fraction, Fraction], ...]
+
+
+def _read_point(token: str) -> tuple[Fraction, Fraction]:
+    x, _, y = token.partition(",")
+    return (Fraction(x), Fraction(y))
+
+
+def _pieces(data: str) -> list[_Piece]:
+    """One emitted stroke, command by command, each as the points it is actually drawn through.
+
+    A ``C`` piece carries its four Bezier points and an ``L`` piece its two ends,
+    counting in both cases the point the command starts from — which is the
+    distinction the checks care about: a two-point chain is drawn as a line and
+    everything longer as cubics. A stroke lifted over its own hops carries
+    several subpaths, so ``M`` is read wherever it appears and not at the head
+    alone.
+    """
+    tokens = data.split(" ")
+    pieces: list[_Piece] = []
+    index, point, lifted = 0, None, True
+    while index < len(tokens):
+        command = tokens[index]
+        if command == "M":
+            point, lifted, index = _read_point(tokens[index + 1]), True, index + 2
+            continue
+        assert command in ("L", "C"), data
+        width = 1 if command == "L" else 3
+        following = tuple(_read_point(token) for token in tokens[index + 1 : index + 1 + width])
+        assert point is not None, data
+        pieces.append(_Piece(lifted=lifted, points=(point, *following)))
+        point, lifted, index = following[-1], False, index + 1 + width
+    return pieces
+
+
+def _openings(data: str) -> list[tuple[tuple[Fraction, Fraction], tuple[Fraction, Fraction]]]:
+    """Every gap in one emitted stroke: where it breaks off, and where it resumes."""
+    pieces = _pieces(data)
+    return [(before.points[-1], after.points[0]) for before, after in zip(pieces, pieces[1:]) if after.lifted]
+
+
+def _run_points(points: tuple[layout.Point, ...], index: int) -> tuple[tuple[int, int], ...]:
+    """The points one run of a chain is drawn through: its two vertices, and the
+    parametrisation's two control points between them where the chain has any.
+
+    Taken from the chain rather than read back out of the markup, because the
+    markup no longer carries a hopped run whole: it is emitted as the two slices
+    a glyph leaves, and the document does not state the parameters they were cut
+    at. What the run is drawn through is still the document's to check — the
+    two tests that ask a glyph to sit on it also render the sheet.
+    """
+    ends = ((points[index].x, points[index].y), (points[index + 1].x, points[index + 1].y))
+    if len(points) == 2:
+        return ends
+    first, second = svg._control_points(points)[index]
+    return (ends[0], (first.x, first.y), (second.x, second.y), ends[1])
+
+
+def _along(point: tuple[Fraction, Fraction], run: tuple[tuple[int, int], ...]) -> Fraction:
+    """Where a point sits along the run's chord — the projection, in exact rationals."""
+    (start_x, start_y), (end_x, end_y) = run[0], run[-1]
+    across = (end_x - start_x, end_y - start_y)
+    offset = (point[0] - start_x, point[1] - start_y)
+    return (offset[0] * across[0] + offset[1] * across[1]) / (across[0] ** 2 + across[1] ** 2)
+
+
+def _point_at(run: tuple[tuple[int, int], ...], parameter: Fraction) -> tuple[Fraction, Fraction]:
+    """The drawn stroke's own point at ``parameter``, exactly.
+
+    The Bernstein form for a cubic run and the chord for a line — each the
+    geometry the SVG viewer will trace, written out here rather than taken from
+    the module under test.
+    """
+    rest = 1 - parameter
+    if len(run) == 2:
+        return tuple(start + parameter * (end - start) for start, end in zip(*run))
+    weights = (rest**3, 3 * rest**2 * parameter, 3 * rest * parameter**2, parameter**3)
+    return tuple(sum(weight * point[axis] for weight, point in zip(weights, run)) for axis in (0, 1))
+
+
+def _glyphs(sheet: layout.Sheet) -> list[_Glyph]:
+    """Every hop glyph of a rendered sheet, beside the stroke run it sits on."""
+    root = ET.fromstring(svg.render(sheet, link_base="kb-root"))
+    arcs = _by_class(root, "path", "hop")
+    # The denoted hops and not the sheet's whole crossing set: a crossing whose
+    # gap could not be punched carries no arc to pair with.
+    denoted = svg.denoted_hops(sheet)
+    assert len(arcs) == len(denoted) and arcs
+    chains = {edge.key: edge.points for edge in sheet.edges}
+
+    out = []
+    for hop, arc in zip(denoted, arcs):
+        match = _ARC.match(arc.get("d"))
+        assert match, arc.get("d")
+        start_x, start_y, _, _, end_x, end_y = (Fraction(group) for group in match.groups())
+        run = _run_points(chains[hop.hopping], hop.hopping_segment)
+        centre = ((start_x + end_x) / 2, (start_y + end_y) / 2)
+        out.append(
+            _Glyph(
+                hop=hop,
+                run=run,
+                feet=((start_x, start_y), (end_x, end_y)),
+                centre=centre,
+                on_stroke=_point_at(run, _along((hop.x, hop.y), run)),
+            )
+        )
+    return out
+
+
+def _long_span_sheet() -> layout.Sheet:
+    """Three two-step derivations, each claim also resting on the *others'* bedrock.
+
+    ``step`` rests on its own ``base``, ``claim`` rests on that step — and on
+    each of the two bases it did not grow out of. Those cross-strokes skip the
+    step layer, so they route through a dummy apiece and draw as cubics, and
+    they cross one another wherever the sweep cannot unpick them.
+
+    **The strokes that skip a layer are the ones no route carries**, which is
+    what a spanning stroke must be for the sheet to draw it at all: a base leads
+    only to its own step and a step only to its own claim (``model.build_graph``
+    draws no premise a drawn route already carries).
+    """
+    bases = [f"clm-bb000{index}" for index in range(3)]
+    steps = [f"clm-xx000{index}" for index in range(3)]
+    claims = [f"clm-tt000{index}" for index in range(3)]
+    edges = []
+    for index, (base, step, claim) in enumerate(zip(bases, steps, claims, strict=True)):
+        edges += [_edge(step, base), _edge(claim, step)]
+        edges += [_edge(claim, other) for position, other in enumerate(bases) if position != index]
+    return _sheet([_claim(cid) for cid in (*bases, *steps, *claims)], edges)
+
+
+def test_two_renders_of_a_sheet_that_carries_glyphs_are_byte_identical() -> None:
+    """The arc is the sheet's one non-integral emission and it is now *derived* —
+    a cubic evaluated at an exact rational parameter, normalised by an integer
+    square root. The committed golden carries no glyph at all, so a sheet built
+    to cross is where that arithmetic's determinism is read.
+    """
+    assert svg.render(_long_span_sheet(), link_base="kb-root") == svg.render(_long_span_sheet(), link_base="kb-root")
+
+
+def test_a_glyph_on_a_curved_chain_sits_on_the_drawn_cubic(layered) -> None:
+    """The glyph rides the stroke it marks, not the chord the crossing was found on.
+
+    ``layout`` answers which strokes cross and where, over the straight chords
+    between a chain's vertices; the stroke drawn through those vertices is a
+    cubic. What the document must show is the arc standing **on** that cubic:
+    the two points a glyph's feet sit at and the two its own stroke breaks off
+    and resumes at are one pair, read back out of the markup, so no gap between
+    the glyph and the stroke is representable at all.
+
+    **The arc's midpoint cannot carry this claim and is not asked to.** A
+    chord's midpoint stands off the curve it spans wherever that curve bends, so
+    an arc whose feet are on the stroke has its centre off it by exactly the
+    curve's sag. Asking for a centred arc is asking for feet on a straight line
+    through the crossing, which is the tangent the feet used to be stepped along
+    — and is how they came to leave the stroke.
+    """
+    sheet = _long_span_sheet()
+    strokes = _edge_lines(ET.fromstring(svg.render(sheet, link_base="kb-root")))
+    glyphs = [glyph for glyph in _glyphs(sheet) if len(glyph.run) == 4]
+    assert glyphs, "the fixture must carry a crossing on a multi-run chain"
+
+    for glyph in glyphs:
+        openings = [set(opening) for opening in _openings(strokes[glyph.hop.hopping].get("d"))]
+        assert set(glyph.feet) in openings, (glyph.feet, openings)
+
+    # And the curve is where the chord is not: on this fixture the drawn stroke
+    # stands off its own chord at the crossing by more than the formatter's
+    # rounding could account for, so the assertion above is a claim about the
+    # cubic rather than one the chord would also satisfy.
+    off_chord = [
+        glyph
+        for glyph in glyphs
+        if max(abs(glyph.on_stroke[0] - glyph.hop.x), abs(glyph.on_stroke[1] - glyph.hop.y)) > _EMISSION_ROUNDING
+    ]
+    assert off_chord, "the fixture must carry a curve that departs from its chord at the crossing"
+
+
+def test_every_arc_is_a_semicircle_on_the_chord_its_own_feet_span(layered) -> None:
+    """The radius is half the chord and not a constant, which is what lets the
+    feet be the stroke's own points and the arc still close on both of them.
+
+    A circle of some other radius through two fixed points is a different arc or
+    no arc at all — an SVG viewer handed radii too small for the chord scales
+    them up silently, so a glyph derived from the wrong length would still draw
+    and would simply stop being the semicircle this sheet's vocabulary says a
+    bridge is. Both quantities are read back out of the markup and compared
+    there; the fixture bends its strokes, so this is a claim about the derived
+    radius rather than one the fixed constant would also satisfy.
+    """
+    sheet = _long_span_sheet()
+    arcs = _by_class(ET.fromstring(svg.render(sheet, link_base="kb-root")), "path", "hop")
+    assert arcs
+
+    off_constant = 0
+    for arc in arcs:
+        match = _ARC.match(arc.get("d"))
+        assert match, arc.get("d")
+        start_x, start_y, radius, again, end_x, end_y = (Fraction(group) for group in match.groups())
+        assert radius == again
+        half = svg._half_chord(end_x - start_x, end_y - start_y)
+        # Two emitted endpoints and one emitted radius, each rounded once: the
+        # radius can stand a whole place from half the chord the rounded
+        # endpoints state, and nothing wider than that is rounding.
+        assert abs(radius - half) <= 2 * _EMISSION_ROUNDING, (radius, half)
+        off_constant += abs(radius - style.HOP_RADIUS) > 2 * _EMISSION_ROUNDING
+    assert off_constant, "the fixture must bend a stroke enough to move the radius off the constant"
+
+
+def test_a_glyph_on_a_two_point_chain_sits_on_the_straight_stroke(layered) -> None:
+    """A two-point chain is emitted as a line and has no control points to read;
+    the glyph still sits on it, and there the stroke and the chord are the same
+    geometry — so the point the arc is centred on is the crossing point itself,
+    exactly, and not a rounded approach to it.
+    """
+    low = ("clm-aa0001", "clm-aa0002")
+    high = ("clm-bb0001", "clm-bb0002")
+    glyphs = _glyphs(
+        _sheet([_claim(cid) for cid in (*low, *high)], [_edge(upper, lower) for upper in high for lower in low])
+    )
+
+    assert glyphs and all(len(glyph.run) == 2 for glyph in glyphs)
+    for glyph in glyphs:
+        assert glyph.on_stroke == (glyph.hop.x, glyph.hop.y)
+        for centre, on_stroke in zip(glyph.centre, glyph.on_stroke):
+            assert abs(centre - on_stroke) <= _EMISSION_ROUNDING
+
+
+def test_the_hopping_stroke_breaks_off_at_the_arcs_feet_and_resumes_at_them(layered) -> None:
+    """The defect the gap exists for: an arc over a stroke still drawn beneath it
+    closes into a lens, which says nothing about which line passes over which.
+
+    A two-point chain is where the claim can be made *exactly*. The stroke there
+    is its own chord and the arc's feet sit on the tangent, which is that same
+    chord — so the points the stroke breaks off and resumes at are the arc's two
+    feet themselves, with no curve-against-chord departure between them and no
+    tolerance in the comparison.
+    """
+    low = ("clm-aa0001", "clm-aa0002")
+    high = ("clm-bb0001", "clm-bb0002")
+    edges = [_edge(upper, lower) for upper in high for lower in low]
+    sheet = _sheet([_claim(cid) for cid in (*low, *high)], edges)
+    assert len(sheet.hops) == 1
+    hop = sheet.hops[0]
+
+    root = ET.fromstring(svg.render(sheet, link_base="kb-root"))
+    strokes = _edge_lines(root)
+    (glyph,) = _glyphs(sheet)
+
+    openings = _openings(strokes[hop.hopping].get("d"))
+    assert len(openings) == 1, strokes[hop.hopping].get("d")
+    assert set(openings[0]) == set(glyph.feet)
+    # And nothing was taken out of the stroke that passes under: which of the two
+    # is lifted is `hop.hopping`'s answer, and cutting the other would invert it.
+    assert _openings(strokes[hop.crossed].get("d")) == []
+
+
+def test_every_stroke_that_carries_a_hop_is_opened_and_every_stroke_that_does_not_is_whole(layered) -> None:
+    """The same claim over curved, multi-run chains, where the fixture carries
+    strokes of both kinds: a stroke is cut for the glyphs drawn *on* it and for
+    nothing else, however many strokes pass under it.
+    """
+    sheet = _long_span_sheet()
+    denoted = svg.denoted_hops(sheet)
+    hopping = {hop.hopping for hop in denoted}
+    crossed_only = {hop.crossed for hop in denoted} - hopping
+    assert hopping and crossed_only, "the fixture must carry a stroke of each kind"
+
+    strokes = _edge_lines(ET.fromstring(svg.render(sheet, link_base="kb-root")))
+    for key, stroke in strokes.items():
+        openings = _openings(stroke.get("d"))
+        if key in hopping:
+            assert openings, f"{key} carries a glyph and was drawn straight through it"
+        else:
+            assert openings == [], f"{key} carries no glyph and was cut anyway"
+
+
+@pytest.mark.parametrize(
+    ("gaps", "expected"),
+    [
+        ([], ()),
+        ([(Fraction(1, 4), Fraction(1, 2))], ((Fraction(1, 4), Fraction(1, 2)),)),
+        # Disjoint stays two; touching at a point and properly overlapping both
+        # become one, and a gap swallowed whole by its predecessor leaves the
+        # predecessor's end alone rather than pulling it back.
+        (
+            [(Fraction(0), Fraction(1, 5)), (Fraction(2, 5), Fraction(3, 5))],
+            ((Fraction(0), Fraction(1, 5)), (Fraction(2, 5), Fraction(3, 5))),
+        ),
+        ([(Fraction(0), Fraction(1, 5)), (Fraction(1, 5), Fraction(2, 5))], ((Fraction(0), Fraction(2, 5)),)),
+        ([(Fraction(0), Fraction(1, 2)), (Fraction(1, 4), Fraction(3, 4))], ((Fraction(0), Fraction(3, 4)),)),
+        ([(Fraction(0), Fraction(3, 4)), (Fraction(1, 4), Fraction(1, 2))], ((Fraction(0), Fraction(3, 4)),)),
+    ],
+)
+def test_gaps_on_one_run_merge_where_they_meet(gaps, expected) -> None:
+    """A run carrying several hops gets several gaps, and two that touch are one
+    opening — the alternative is a sliver of stroke drawn inside its own arcs."""
+    assert svg._merged(gaps) == expected
+
+
+@pytest.mark.parametrize(
+    ("gaps", "expected"),
+    [
+        ({}, ((0, (Fraction(0), Fraction(1))), (1, (Fraction(0), Fraction(1))))),
+        # A gap in the middle leaves a span either side; one that reaches a run's
+        # own end leaves no empty span there; one that covers a run leaves none
+        # at all, and the run after it still starts with a move because the span
+        # before it did not end at that run's start.
+        (
+            {0: ((Fraction(1, 4), Fraction(1, 2)),)},
+            (
+                (0, (Fraction(0), Fraction(1, 4))),
+                (0, (Fraction(1, 2), Fraction(1))),
+                (1, (Fraction(0), Fraction(1))),
+            ),
+        ),
+        (
+            {1: ((Fraction(0), Fraction(1, 2)),)},
+            ((0, (Fraction(0), Fraction(1))), (1, (Fraction(1, 2), Fraction(1)))),
+        ),
+        ({0: ((Fraction(0), Fraction(1)),)}, ((1, (Fraction(0), Fraction(1))),)),
+    ],
+)
+def test_the_drawn_spans_of_a_run_are_what_its_gaps_leave(gaps, expected) -> None:
+    assert svg._drawn_spans(2, gaps) == expected
+
+
+#: A 100px vertical run, straight, so every parameter below is read off the page
+#: by hand: a hop's two feet sit :data:`style.HOP_RADIUS` either side of the
+#: crossing along a tangent that *is* this chord, so a crossing at height ``h``
+#: opens the run over ``(h - HOP_RADIUS) / 100`` to ``(h + HOP_RADIUS) / 100``.
+#: Chosen over a run of :data:`style.LAYER_GAP` because the question is what
+#: happens where a run is short against the glyph, and the grid constant is
+#: exactly the clearance that reasoning wrongly assumed every run had.
+_STRAIGHT_CHAIN = (layout.Point(x=0, y=0), layout.Point(x=0, y=100))
+
+
+def _hop_at(height: int) -> layout.Hop:
+    """One crossing on :data:`_STRAIGHT_CHAIN`, ``height`` pixels along it."""
+    return layout.Hop(
+        hopping=("clm-aa0001", "clm-aa0002"),
+        hopping_segment=0,
+        crossed=("clm-cc0001", "clm-cc0002"),
+        crossed_segment=0,
+        x=Fraction(0),
+        y=Fraction(height),
+    )
+
+
+@pytest.mark.parametrize(
+    ("heights", "punched", "denoted"),
+    [
+        # Clear of both ends: the gap goes in and the crossing is marked.
+        ((50,), ((Fraction(19, 50), Fraction(31, 50)),), (50,)),
+        # A foot past a vertex reaches no stroke, so `_hop_gap` clamps it to the
+        # run's own end — and the hole then has stroke on one side only. Either
+        # end, and the exact-landing case, which is the boundary the rule sits on.
+        ((6,), (), ()),
+        ((94,), (), ()),
+        ((12,), (), ()),
+        ((100 - style.HOP_RADIUS,), (), ()),
+        # One pixel of surviving stroke is stroke: the rule is what the gap
+        # leaves, not how much, and no length threshold is introduced here.
+        ((13,), ((Fraction(1, 100), Fraction(1, 4)),), (13,)),
+        # Two hops whose gaps overlap are one opening, and it clears both ends.
+        ((40, 60), ((Fraction(7, 25), Fraction(18, 25)),), (40, 60)),
+        # The merged hole is the unit. Taken alone the lower hop's gap would be
+        # punched; merged with the upper one it runs to the vertex, so neither
+        # hop is denoted and the whole run is drawn.
+        ((80, 94), (), ()),
+    ],
+)
+def test_a_gap_is_punched_only_where_it_leaves_stroke_on_both_sides(heights, punched, denoted) -> None:
+    """The defect: a hole reaching a run's end leaves the stroke stopping in mid-air.
+
+    A stub with nothing resuming after it reads as a line that simply stops,
+    which is worse than a crossing drawn with no glyph over it — so where the
+    hole cannot be punched, no hop that formed it is denoted either and the
+    stroke runs through the crossing whole.
+    """
+    gaps, marked = svg._edge_gaps(_STRAIGHT_CHAIN, [_hop_at(height) for height in heights])
+
+    assert gaps == ({0: punched} if punched else {})
+    assert {hop.y for hop in marked} == {Fraction(height) for height in denoted}
+
+
+def test_a_suppressed_hop_leaves_the_stroke_the_bytes_it_would_carry_with_no_hop_at_all() -> None:
+    """Suppression is not a smaller gap — it is no gap, down to the emitted path."""
+    gaps, marked = svg._edge_gaps(_STRAIGHT_CHAIN, [_hop_at(94)])
+
+    assert not marked
+    assert svg._edge_path(_STRAIGHT_CHAIN, gaps=gaps) == svg._edge_path(_STRAIGHT_CHAIN, gaps={})
+
+
+def test_the_document_draws_one_arc_per_denoted_hop_in_the_sheets_own_order(layered) -> None:
+    """``sheet.hops`` is the geometric crossing count and stays whole;
+    :func:`svg.denoted_hops` is how many of those the picture marks, and it is
+    what the document carries arcs for."""
+    sheet = _long_span_sheet()
+    denoted = svg.denoted_hops(sheet)
+
+    root = ET.fromstring(svg.render(sheet, link_base="kb-root"))
+    assert len(_by_class(root, "path", "hop")) == len(denoted)
+    assert list(denoted) == [hop for hop in sheet.hops if hop in frozenset(denoted)]
+
+
+def test_no_stroke_begins_or_ends_anywhere_but_on_its_own_chains_ends(layered) -> None:
+    """The defect read off the document rather than off the parameters.
+
+    Every vertex :mod:`layout` places is an integer and every coordinate a gap
+    cuts is not, so a stroke whose first or last point is not its chain's own
+    end is one a hole ran off the end of — the ``M 3805,-136 C ... -160.267``
+    that opened this, a stroke stopping 20px short of the box it runs to.
+    """
+    sheet = _long_span_sheet()
+    assert sheet.hops, "the fixture must carry crossings for there to be a gap to run off an end"
+
+    strokes = _edge_lines(ET.fromstring(svg.render(sheet, link_base="kb-root")))
+    for edge in sheet.edges:
+        pieces = _pieces(strokes[edge.key].get("d"))
+        assert pieces[0].points[0] == (Fraction(edge.start.x), Fraction(edge.start.y)), edge.key
+        assert pieces[-1].points[-1] == (Fraction(edge.end.x), Fraction(edge.end.y)), edge.key
 
 
 # ---------------------------------------------------------------------------
@@ -697,40 +1266,14 @@ def test_a_pending_fraction_is_a_colour_and_never_a_dash() -> None:
     assert line.get("stroke-dasharray") is None
 
 
-def test_a_reference_is_drawn_off_the_ramp_and_at_half_weight() -> None:
-    """A reference asserts nothing about strength, so it takes no rung — and not
-    the neutral either, which is what a *pending* dependency already takes."""
-    root = ET.fromstring(
-        _render(
-            [_claim("clm-aa1111"), _claim("clm-bb2222")],
-            [_edge("clm-aa1111", "clm-bb2222", relation="references")],
-        )
-    )
-    line = _edge_lines(root)[("clm-aa1111", "clm-bb2222")]
-
-    assert line.get("stroke") == style.REFERENCE_EDGE_COLOUR
-    assert line.get("stroke") not in {*style.BAND_PALETTE.values(), style.PENDING_FILL}
-    assert line.get("stroke-width") == str(style.REFERENCE_STROKE_WIDTH) != str(style.EDGE_STROKE_WIDTH)
-    # Dash stays the defect channel.
-    assert line.get("stroke-dasharray") is None
-
-
-def test_two_claims_naming_each_other_draw_as_two_ordinary_strokes() -> None:
-    """A mutual reference is the author's argument, not a cycle: no back edge.
-
-    The counterfactual is the assertion's other half — the same pair read as
-    ``depends`` is a cycle, and both strokes take the back-edge dash.
-    """
+def test_a_back_edge_takes_the_back_edge_dash() -> None:
+    """Dash is the defect channel, and an intra-cycle stroke is the defect: a
+    mutual ``depends`` pair is a cycle, so both of its strokes take it."""
     nodes = [_claim("clm-aa1111"), _claim("clm-bb2222")]
     mutual = [("clm-aa1111", "clm-bb2222"), ("clm-bb2222", "clm-aa1111")]
 
-    root = ET.fromstring(_render(nodes, [_edge(*pair, relation="references") for pair in mutual]))
-    lines = _edge_lines(root)
-    assert set(lines) == set(mutual)
-    assert {line.get("stroke-dasharray") for line in lines.values()} == {None}
-
-    depending = ET.fromstring(_render(nodes, [_edge(*pair) for pair in mutual]))
-    assert {line.get("stroke-dasharray") for line in _edge_lines(depending).values()} == {style.DASH_BACK_EDGE}
+    root = ET.fromstring(_render(nodes, [_edge(*pair) for pair in mutual]))
+    assert {line.get("stroke-dasharray") for line in _edge_lines(root).values()} == {style.DASH_BACK_EDGE}
 
 
 def test_an_edge_to_a_ghost_id_takes_the_stub_style_and_no_band() -> None:
@@ -814,30 +1357,121 @@ def test_the_draw_order_is_edges_then_hops_then_boxes() -> None:
     assert groups == ["edges", "hops", "nodes"]
 
 
-def test_an_edge_across_layers_is_one_polyline_and_its_dummy_is_never_drawn() -> None:
+def test_an_edge_across_layers_is_one_curved_path_and_its_dummy_is_never_drawn() -> None:
     """The chain is one element carrying every vertex, and the placeholders it
     bends at have no box, no label and no link — they are columns, not nodes.
 
-    ``fill`` is none because a polyline's default fill closes the path: a
-    three-point chain would otherwise paint the triangle under itself.
+    **A two-point chain is a line and a longer one is one cubic per run.** The
+    line is not an exception to the parametrisation: with the reflected phantom
+    at both ends the curve through two points *is* the chord, so ``L`` and the
+    cubic it stands for are the same geometry.
+
+    ``fill`` is none because a path's default fill closes it: a chain would
+    otherwise paint the region under itself.
     """
-    top, middle, bottom = "clm-aa0001", "clm-mm0001", "clm-bb0001"
+    top, middle, first, bottom, side = "clm-aa0001", "clm-mm0001", "clm-cc0001", "clm-bb0001", "clm-bb0002"
+    ids = (top, middle, first, bottom, side)
     root = ET.fromstring(
         _render(
-            [_claim(cid) for cid in (top, middle, bottom)],
-            [_edge(middle, bottom), _edge(top, middle), _edge(top, bottom)],
+            [_claim(cid) for cid in ids],
+            # `side` rests on the bedrock and `top` rests on `side`, so the
+            # stroke between them skips `middle`'s layer — and no route carries
+            # it, `side` leading nowhere else.
+            [_edge(first, bottom), _edge(middle, first), _edge(top, middle), _edge(side, bottom), _edge(top, side)],
         )
     )
     strokes = _edge_lines(root)
 
-    assert len(strokes) == 3
-    vertices = {pair: len(stroke.get("points").split()) for pair, stroke in strokes.items()}
-    assert vertices == {(middle, bottom): 2, (top, middle): 2, (top, bottom): 3}
-    assert strokes[(top, bottom)].get("fill") == "none"
-    # Three boxes, three labels' worth of groups, three links: nothing was drawn
+    assert len(strokes) == 5
+    commands = {
+        pair: [token for token in stroke.get("d").split(" ") if _PATH_COMMAND.match(token)]
+        for pair, stroke in strokes.items()
+    }
+    assert commands == {
+        (first, bottom): ["M", "L"],
+        (middle, first): ["M", "L"],
+        (top, middle): ["M", "L"],
+        (side, bottom): ["M", "L"],
+        # One layer crossed, so one dummy and two runs.
+        (top, side): ["M", "C", "C"],
+    }
+    assert strokes[(top, side)].get("fill") == "none"
+    # Five boxes, five labels' worth of groups, five links: nothing was drawn
     # for the dummy the spanning stroke bends at.
-    assert set(_node_groups(root)) == {top, middle, bottom}
-    assert set(_hrefs(root)) == {top, middle, bottom}
+    assert set(_node_groups(root)) == set(ids)
+    assert set(_hrefs(root)) == set(ids)
+
+
+def test_a_two_point_chain_draws_the_chord_the_parametrisation_returns() -> None:
+    """``L`` is the shorthand and not the special case.
+
+    The control points the parametrisation returns for a two-point chain lie on
+    the chord at its thirds, so the cubic it would emit is the straight line the
+    ``L`` draws. This is what makes "an adjacent-layer stroke stays straight" a
+    property of the curve rather than a branch taken around it.
+    """
+    start, end = layout.Point(x=0, y=0), layout.Point(x=300, y=-120)
+    ((first, second),) = svg._control_points((start, end))
+
+    assert (first.x, first.y) == (100, -40)
+    assert (second.x, second.y) == (200, -80)
+
+
+def test_no_curve_leaves_the_corridor_its_own_chain_points_define() -> None:
+    """The clamp, which is what makes a stroke escaping the ``viewBox`` impossible.
+
+    A cubic lies inside the convex hull of its four points, so control points
+    confined to the bounding box of the chain's vertices confine the curve to
+    it — and ``layout._view_box`` unions every one of those vertices, so a
+    stroke inside that box is inside the sheet. Asserted over the control points
+    because the hull property is what carries it to every point of the curve;
+    sampling the curve would test the same thing less.
+
+    The shape is a four-step chain with four claims standing beside its foot,
+    each of them carrying the chain's top — so four strokes run from the second
+    layer to the sixth through two placeholders apiece, which is what produces
+    long chains whose interior runs pull hardest against their own extent. Each
+    of those strokes is the only way from its own claim to the top, so the
+    reduction leaves all four on the sheet.
+    """
+    bedrock, top = "clm-bb0000", "clm-aa0000"
+    chain = [f"clm-cc000{n}" for n in range(3)]
+    beside = [f"clm-ss000{n}" for n in range(4)]
+    records = [_edge(chain[0], bedrock), _edge(chain[1], chain[0]), _edge(chain[2], chain[1]), _edge(top, chain[2])]
+    records += [_edge(node, bedrock) for node in beside] + [_edge(top, node) for node in beside]
+    sheet = _sheet([_claim(cid) for cid in (bedrock, *chain, top, *beside)], records)
+    chains = [edge for edge in sheet.edges if len(edge.points) > 2]
+    assert chains, "the fixture must carry a chain for the clamp to bite on"
+
+    for edge in chains:
+        low_x = min(point.x for point in edge.points)
+        high_x = max(point.x for point in edge.points)
+        low_y = min(point.y for point in edge.points)
+        high_y = max(point.y for point in edge.points)
+        for pair in svg._control_points(edge.points):
+            for control in pair:
+                assert low_x <= control.x <= high_x, f"{edge.key} control {control} left its own extent"
+                assert low_y <= control.y <= high_y, f"{edge.key} control {control} left its own extent"
+
+
+def test_the_chord_roots_are_integer_arithmetic_and_not_a_libm_call() -> None:
+    """The parametrisation's one irrational quantity, computed so it is the same
+    number on every host.
+
+    ``isqrt`` is total over the integers and exact; ``math.sqrt`` of the same
+    value is a libm call, and the golden's byte identity is a gate. The two
+    agree to well inside the one-pixel rounding every control point takes, which
+    is what says the fixed point is a spelling of the value rather than an
+    approximation of it.
+    """
+    for first, second in (
+        (layout.Point(x=0, y=0), layout.Point(x=3, y=4)),
+        (layout.Point(x=-17, y=200), layout.Point(x=931, y=-44)),
+        (layout.Point(x=5, y=5), layout.Point(x=5, y=-1331)),
+    ):
+        root = svg._chord_root(first, second)
+        assert isinstance(root, Fraction)
+        assert float(root) == pytest.approx(math.dist((first.x, first.y), (second.x, second.y)) ** 0.5, abs=1e-5)
 
 
 def test_the_view_box_is_the_only_global_quantity_and_the_root_pins_no_size() -> None:

@@ -5,7 +5,7 @@ gemma-tier runs alike). Every evaluation MUST use the prompt body below
 unchanged, so reports compare row for row across runs — edits to the
 instrument are edits to the comparison baseline and get owner sign-off.
 
-Dispatch contract: fresh `general-purpose` agent, `model: fable`, cold
+Dispatch contract: fresh `general-purpose` agent, `model: sonnet`, cold
 context, background. Substitute exactly three parameters, nothing else:
 
 - `{kb-root-path}` — absolute path to the built KB's kb-root/
@@ -63,6 +63,18 @@ A question whose subject this build does not contain is itself a result: report 
 
 ## Changelog
 
+- **v4 — 2026-09-18.** Dispatch contract's model changes from `fable` to
+  `sonnet`. The instrument's own quality criterion is "high likelihood that
+  even a low-parameter model can find and synthesize answers," and its
+  method directs the evaluator to walk "as a small model would — following
+  summaries, not your own shortcuts"; asking a frontier model to simulate a
+  weak one measures the simulation, not the substrate, so sonnet is the
+  ceiling this instrument should judge from. Every run to date was in fact
+  dispatched with `--model opus` regardless of what this line said, so the
+  judgment columns (findings, severity, verdict) of v4 reports do not
+  compare row for row with any prior report; the corpus-facing columns
+  (walk set, provenance table) are unaffected. Model change only — no other
+  pending revision to this instrument is folded in.
 - **v3 — 2026-09-14.** The per-finding attribution step retires. It directed
   the evaluator to classify each finding against the pipeline's worker
   definitions — `kb-taxonomy-architect.md`, `kb-content-distiller.md`,

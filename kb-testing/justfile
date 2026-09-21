@@ -1,4 +1,5 @@
 set shell := ["bash", "-cuo", "pipefail"]
+set positional-arguments := true
 
 # consumed in python.just
 PROJECT_ROOT := justfile_directory() / ".."
@@ -246,8 +247,6 @@ KB_EVAL_BRIEF := justfile_directory() / "test-data" / "fixtures" / "kb-quality-e
 KB_EVAL_EXTRACT_SCRIPT := justfile_directory() / "test-data" / "fixtures" / "extract-kb-eval-prompt.py"
 
 # Claude executable to use. Can be overridden to
-# ```./test-data/fixtures/claude-gemma.sh``` which export envars for having
-# claude use locally hosted gemma-4 models instead of Antrhopic-hosted
 CLAUDE := "claude"
 
 # No runaway-cost guard, deliberately: subscription
@@ -285,20 +284,25 @@ kb-headless-eval run_tag kb_dir corpus_note:
     # value) exits nonzero, which -e turns into this recipe refusing too.
     substituted_body="$(python3 "{{KB_EVAL_EXTRACT_SCRIPT}}" "{{KB_EVAL_BRIEF}}" "${kb_root_abs}" "${report_path}" "{{corpus_note}}")"
 
+    # The model is read from KB_EVAL_BRIEF's own dispatch contract, never
+    # stated here, so the two cannot again say different things — see
+    # KB_EVAL_EXTRACT_SCRIPT's own docstring for the --field mode's
+    # contract. A refusal there (missing/malformed dispatch line) exits
+    # nonzero, which -e turns into this recipe refusing too.
+    eval_model="$(python3 "{{KB_EVAL_EXTRACT_SCRIPT}}" --field model "{{KB_EVAL_BRIEF}}")"
+
     # bypassPermissions again — sanctioned here too even though the report
     # write lands in the real adjagent repo, not a throwaway fixture: the
     # eval is read-only against kb-root/ plus exactly one bounded write
     # (report_path, fully specified above, not a pattern the model
     # chooses), and headless mode has no TTY to answer a permission prompt
-    # regardless. --model fable checked against `claude --help` above,
-    # matching KB_EVAL_BRIEF's own dispatch contract ("model: fable").
-    # Blocking, not detached: the eval is a bounded
+    # regardless. Blocking, not detached: the eval is a bounded
     # single pass over an already-built KB, and its own last step ("on
     # completion, report the deliverable") wants to run in the same
     # invocation, not a separate status/harvest round trip.
     set +e
     ( cd "{{kb_dir}}" && {{CLAUDE}} -p "${substituted_body}" \
-        --model fable \
+        --model "${eval_model}" \
         --output-format stream-json --verbose \
         --permission-mode bypassPermissions \
         > "${log_file}" 2>&1 )
@@ -818,8 +822,9 @@ measure-kb-roots script *args: _venv
 # PYTHONPATH pointed at THIS tree rather than the consumer's installed
 # .claude/agents: the renderer under test is the working copy.
 #
-# `"${@:2}"` and not `"$@"`: with positional-arguments set, $1 is `repo` itself,
-# so passing the whole list would hand the op its own target as a flag.
+# `"${@:2}"` and not `"$@"`: this file's own `set positional-arguments :=
+# true` (line 2) makes $1 `repo` itself, so passing the whole list would hand
+# the op its own target as a flag.
 [doc("render one built KB's claim graph to <repo>/kb-root/claim-graph.svg (repo is a consuming repository root); trailing args forward verbatim to the op (--out, --domain)")]
 render-claim-graph repo *args:
     #!/usr/bin/env bash
@@ -832,3 +837,80 @@ render-claim-graph repo *args:
     cd "${root}"
     PYTHONPATH="{{PROJECT_ROOT}}" \
         python3 -m kb_tools.kb_util render-claim-graph "${@:2}"
+
+# Rasterise a rendered sheet so a person — or an agent with image input — can
+# look at it. An SVG is the artefact; a PNG is how anyone checks whether it
+# reads, and until this existed every legibility judgement was either a human
+# opening a file by hand or an inference off the numbers. `rsvg-convert` is
+# librsvg, which is also what `magick` delegates SVG to, so this is the same
+# rasteriser either way and one fewer indirection.
+#
+# `width` is the rendered pixel width, not a zoom: a caller asking to read
+# labels wants a fixed width it knows its viewer can take, and the sheet's own
+# aspect decides the height. `crop` is WxH+X+Y in that rendered space, empty
+# for the whole sheet — a big sheet has to be examined in parts, and cropping
+# after rasterising at a readable width is what makes the labels legible
+# rather than scaling the whole thing down until nothing is.
+[doc("rasterise a rendered claim-graph sheet to PNG for inspection: `sheet out [width] [crop]`")]
+render-png sheet out width="2000" crop="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v rsvg-convert >/dev/null 2>&1; then
+        printf '%s\n' "error: rsvg-convert not on PATH — brew install librsvg" >&2
+        exit 1
+    fi
+
+    sheet="{{sheet}}"; out="{{out}}"
+    # just runs a recipe from the justfile's directory, so a relative path a
+    # caller typed is relative to where they typed it, not to here.
+    [[ "${sheet}" = /* ]] || sheet="{{invocation_directory()}}/${sheet}"
+    [[ "${out}" = /* ]] || out="{{invocation_directory()}}/${out}"
+    if [[ ! -f "${sheet}" ]]; then
+        printf '%s\n' "error: no such sheet: ${sheet}" >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "${out}")"
+    rsvg-convert -w "{{width}}" "${sheet}" -o "${out}"
+    if [[ -n "{{crop}}" ]]; then
+        if ! command -v magick >/dev/null 2>&1; then
+            printf '%s\n' "error: crop needs magick — brew install imagemagick" >&2
+            exit 1
+        fi
+        magick "${out}" -crop "{{crop}}" +repage "${out}"
+    fi
+    printf '%s\n' "$(magick identify -format '%wx%h' "${out}" 2>/dev/null || echo '?') ${out}"
+
+# Every figure a measurement row runs on, read out of rendered sheets: the
+# viewBox, the file size, the boxes, the strokes and how many of them are
+# routed, the placeholders that cost, the layers, the crossings, the horizontal
+# edge length, and the width-setting layer's occupants against the floor its own
+# grid implies. `render-png` is how a sheet is looked at; this is how it is
+# counted, and until it existed every row improvised an interpreter invocation.
+#
+# The script imports nothing from kb_tools — not a constant. It reads the box
+# size and the column pitch off the document itself, so a sheet that disagrees
+# with the geometry it was meant to have is something this can report rather
+# than something it has defined away. Stdlib only under the system python3, so
+# no venv and no PYTHONPATH.
+[doc("measure rendered claim-graph sheets: `measure-sheet <label>=<sheet.svg> ...`; reads the SVG only, importing nothing from kb_tools")]
+measure-sheet +pairs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    resolved=()
+    for pair in {{pairs}}; do
+        label="${pair%%=*}"
+        sheet="${pair#*=}"
+        if [[ "${label}" == "${pair}" || -z "${label}" || -z "${sheet}" ]]; then
+            printf '%s\n' "error: not a <label>=<sheet.svg> pair: ${pair}" >&2
+            exit 1
+        fi
+        # just runs a recipe from the justfile's directory, so a relative path a
+        # caller typed is relative to where they typed it, not to here.
+        [[ "${sheet}" = /* ]] || sheet="{{invocation_directory()}}/${sheet}"
+        if [[ ! -f "${sheet}" ]]; then
+            printf '%s\n' "error: no such sheet: ${sheet}" >&2
+            exit 1
+        fi
+        resolved+=("${label}=${sheet}")
+    done
+    python3 "{{justfile_directory()}}/tools/measure-sheet.py" "${resolved[@]}"

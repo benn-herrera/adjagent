@@ -132,19 +132,25 @@ def test_two_relation_group_is_one_stroke_carrying_depends_and_the_conflict_mark
         (("conjectures", "zzz"), "conjectures"),
         # `references` asserts nothing about strength, so any other class on the
         # same pair is the one worth drawing — it sorts last of the declared set
-        # and still ahead of an undeclared one.
+        # and still ahead of an undeclared one. Where it does survive, the
+        # narrowing takes the pair off the sheet.
         (("references", "rests-on"), "rests-on"),
         (("references", "conjectures"), "references"),
     ],
 )
 def test_relation_precedence_is_the_declared_constant(present: tuple[str, ...], expected: str) -> None:
     """Precedence is ``RELATION_PRECEDENCE``, not the order records arrived in;
-    a relation outside it sorts after all of them, by name."""
+    a relation outside it sorts after all of them, by name. The survivor is what
+    decides whether the pair is a stroke, so a group whose survivor is
+    ``references`` is not drawn."""
     graph = model.build_graph(
         nodes=[_claim("clm-aaaaaa"), _claim("clm-bbbbbb")],
         edges=[_edge("clm-aaaaaa", "clm-bbbbbb", relation) for relation in reversed(present)],
     )
-    assert graph.edges[0].relation == expected
+    if expected == model.REFERENCE_RELATION:
+        assert graph.edges == ()
+    else:
+        assert graph.edges[0].relation == expected
     assert model.RELATION_PRECEDENCE == ("depends", "supports", "strengthens", "rests-on", "references")
 
 
@@ -181,7 +187,7 @@ def test_opposite_directions_are_two_edges() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The reference reduction — a reference a path already implies is not drawn
+# The drawn set is the premise set — `references` is not among it
 # ---------------------------------------------------------------------------
 
 _A, _B, _C, _D = "clm-aaaaaa", "clm-bbbbbb", "clm-cccccc", "clm-dddddd"
@@ -192,128 +198,187 @@ def _drawn(edges: list[kb_index.DependsOnEdge], *, ids: tuple[str, ...] = (_A, _
     return [(e.source, e.target) for e in graph.edges]
 
 
-def _walkable(drawn: list[tuple[str, str]], source: str, target: str) -> bool:
-    """Whether one or more drawn edges lead from ``source`` to ``target``."""
-    frontier, seen = [t for s, t in drawn if s == source], set()
-    while frontier:
-        current = frontier.pop()
-        if current == target:
-            return True
-        if current not in seen:
-            seen.add(current)
-            frontier.extend(t for s, t in drawn if s == current)
-    return False
-
-
-def test_a_reference_a_dependency_path_implies_is_not_drawn() -> None:
-    """The reduction is over the union of the classes: a reader walking the two
-    ``depends`` edges reaches C from A, so the reference over the top adds no
-    relationship to the picture."""
-    drawn = _drawn(
-        [
-            _edge(_A, _B, "depends"),
-            _edge(_B, _C, "depends"),
-            _edge(_A, _C, model.REFERENCE_RELATION),
-        ],
-        ids=(_A, _B, _C),
-    )
-    assert drawn == [(_A, _B), (_B, _C)]
-
-
-def test_a_reference_a_reference_path_implies_is_not_drawn() -> None:
-    """One class or two makes no difference — the union is what is walked."""
-    drawn = _drawn(
-        [_edge(*pair, model.REFERENCE_RELATION) for pair in ((_A, _B), (_B, _C), (_C, _D), (_A, _D))],
-    )
-    assert drawn == [(_A, _B), (_B, _C), (_C, _D)]
-
-
-def test_a_reference_with_no_other_path_is_drawn_whatever_its_length() -> None:
-    """No alternate route, no suppression: the reference is the only thing
-    saying these two claims are related at all."""
-    drawn = _drawn(
-        [
-            _edge(_B, _A, "depends"),
-            _edge(_C, _B, "depends"),
-            _edge(_A, _D, model.REFERENCE_RELATION),
-        ]
-    )
-    assert drawn == [(_A, _D), (_B, _A), (_C, _B)]
-
-
 @pytest.mark.parametrize("relation", ["depends", "rests-on", "supports", "strengthens"])
-def test_no_class_but_references_is_ever_suppressed(relation: str) -> None:
-    """Only the class that computes nothing may go: every other one states a
-    premise, a lift or a standing, and a path implying it does not make it
-    redundant."""
-    drawn = _drawn(
-        [_edge(*pair, relation) for pair in ((_A, _B), (_B, _C), (_A, _C))],
+def test_every_premise_relation_is_drawn(relation: str) -> None:
+    """Each of the four states a premise, a lift or a standing, and each is a
+    stroke — none is narrowed out by the class the sheet does not draw."""
+    drawn = _drawn([_edge(*pair, relation) for pair in ((_A, _B), (_C, _D))])
+    assert drawn == [(_A, _B), (_C, _D)]
+
+
+def test_a_references_stroke_is_not_drawn() -> None:
+    """The sheet draws what a claim rests on, and this class asserts no such
+    thing — so no path, no length and no endpoint makes it a stroke."""
+    assert _drawn(
+        [_edge(_A, _B, "depends"), _edge(_B, _C, model.REFERENCE_RELATION), _edge(_C, _C, model.REFERENCE_RELATION)],
         ids=(_A, _B, _C),
-    )
-    assert drawn == [(_A, _B), (_A, _C), (_B, _C)]
+    ) == [(_A, _B)]
 
 
 def test_a_pair_recorded_as_both_a_dependency_and_a_reference_is_drawn() -> None:
-    """Dedupe leaves the pair carrying ``depends``, and a ``depends`` stroke is
-    never a candidate — the reference riding with it cannot take it off the
-    sheet."""
-    drawn = _drawn(
-        [
-            _edge(_A, _B, "depends"),
-            _edge(_B, _C, "depends"),
-            _edge(_A, _C, model.REFERENCE_RELATION),
-            _edge(_A, _C, "depends"),
-        ],
-        ids=(_A, _B, _C),
-    )
-    assert drawn == [(_A, _B), (_A, _C), (_B, _C)]
-
-
-def test_every_suppressed_reference_is_still_walkable_through_the_drawn_edges() -> None:
-    """The property the ruling rests on: dropping a reference hides no
-    relationship, because its source still reaches its target on the sheet."""
-    pairs = [(a, b) for a in (_A, _B, _C, _D) for b in (_A, _B, _C, _D) if a != b]
-    edges = [_edge(*pair, model.REFERENCE_RELATION) for pair in pairs] + [_edge(_D, _A, "depends")]
-    drawn = _drawn(edges)
-
-    assert len(drawn) < len(pairs), "a fully connected graph has references to spare"
-    for source, target in pairs:
-        assert _walkable(drawn, source, target), f"{source} no longer reaches {target}"
-
-
-def test_a_reference_cycle_keeps_every_member_attached() -> None:
-    """Every edge of a mutual pair has an alternate path in the *unreduced*
-    graph, so a snapshot-based reduction drops both and strands two claims. The
-    reduction reads the edges still standing, so the last one holding the pair
-    together finds no path and stays."""
+    """The narrowing reads the *surviving* relation, which dedupe has already
+    resolved to ``depends`` — so the reference riding with it cannot take the
+    dependency off the sheet, and the stroke still names both."""
     graph = model.build_graph(
         nodes=[_claim(_A), _claim(_B)],
-        edges=[_edge(_A, _B, model.REFERENCE_RELATION), _edge(_B, _A, model.REFERENCE_RELATION)],
+        edges=[_edge(_A, _B, model.REFERENCE_RELATION), _edge(_A, _B, "depends")],
     )
-    assert [(e.source, e.target) for e in graph.edges] == [(_A, _B), (_B, _A)]
-    assert [node.id for node in graph.nodes if node.isolated] == []
+    assert [(e.source, e.target, e.relation) for e in graph.edges] == [(_A, _B, "depends")]
+    assert graph.edges[0].relations == ("depends", model.REFERENCE_RELATION)
 
 
-def test_a_suppression_never_makes_an_orphan_or_a_component() -> None:
-    """Degree is measured over the drawn set, and that is safe rather than
-    lucky: a suppressed edge's endpoints each keep an incident stroke, so no
-    claim drops into the orphan block and no component splits."""
-    pairs = [(_A, _B), (_B, _C), (_A, _C), (_C, _D), (_B, _D), (_A, _D)]
+def test_a_claim_only_references_reach_is_unattached() -> None:
+    """Orphan-ness is measured over the premise set, so a claim that rests on
+    nothing and carries nothing is unattached however many claims name it — and
+    it is its own component for the same reason."""
     graph = model.build_graph(
-        nodes=[_claim(cid) for cid in (_A, _B, _C, _D)],
-        edges=[_edge(*pair, model.REFERENCE_RELATION) for pair in pairs],
+        nodes=[_claim(cid) for cid in (_A, _B, _C)],
+        edges=[_edge(_A, _B, "depends"), _edge(_A, _C, model.REFERENCE_RELATION)],
     )
-    assert len(graph.edges) < len(pairs)
+    assert [node.id for node in graph.nodes if node.isolated] == [_C]
+    assert graph.components == ((_A, _B), (_C,))
+
+
+# ---------------------------------------------------------------------------
+# The reduction — a premise another drawn route already carries is not drawn
+# ---------------------------------------------------------------------------
+
+
+def _routes(graph: model.ClaimGraph) -> list[tuple[str, str]]:
+    """Every drawn stroke as ``(premise, dependent)`` — the direction a reader walks."""
+    return [model.premise_pair(edge) for edge in graph.edges]
+
+
+def _walkable(routes: list[tuple[str, str]], premise: str, dependent: str) -> bool:
+    """Whether one or more drawn strokes lead from ``premise`` up to ``dependent``."""
+    frontier, seen = [d for p, d in routes if p == premise], set()
+    while frontier:
+        current = frontier.pop()
+        if current == dependent:
+            return True
+        if current not in seen:
+            seen.add(current)
+            frontier.extend(d for p, d in routes if p == current)
+    return False
+
+
+def test_a_premise_a_longer_route_already_carries_is_not_drawn() -> None:
+    """The owner's own case: ``C`` rests on ``B``, ``B`` on ``A``, and ``C``
+    cites ``A`` as well. The route is drawn and the direct stroke is not — a
+    reader walks from ``C`` to ``A`` either way, and the stroke that goes is the
+    one that would have spanned the layer between."""
+    drawn = _drawn(
+        [_edge(_B, _A, "depends"), _edge(_C, _B, "depends"), _edge(_C, _A, "depends")],
+        ids=(_A, _B, _C),
+    )
+    assert drawn == [(_B, _A), (_C, _B)]
+
+
+@pytest.mark.parametrize("relation", ["depends", "rests-on", "supports", "strengthens"])
+def test_the_reduction_reads_every_premise_class_alike(relation: str) -> None:
+    """The reduction is over the premise relation and not over one class of it:
+    a route of ``supports`` implies a ``supports`` the same way a route of
+    ``depends`` implies a ``depends``."""
+    drawn = _drawn([_edge(*pair, relation) for pair in ((_A, _B), (_B, _C), (_A, _C))], ids=(_A, _B, _C))
+    assert drawn == [(_A, _B), (_B, _C)]
+
+
+def test_a_premise_no_route_carries_is_drawn_whatever_it_spans() -> None:
+    """No alternate route, no elision: the stroke is the only thing saying these
+    two claims stand in a premise relation at all."""
+    drawn = _drawn(
+        [_edge(_B, _A, "depends"), _edge(_C, _B, "depends"), _edge(_D, _A, "depends")],
+    )
+    assert drawn == [(_B, _A), (_C, _B), (_D, _A)]
+
+
+def test_the_route_is_walked_in_the_premise_direction_and_not_the_records() -> None:
+    """A ``supports`` record reads premise-first and a ``depends`` record reads
+    the other way, so one set of records spells two different graphs.
+
+    ``S supports C``, ``C depends B``, ``S supports B``: in record order that is
+    the chain ``S → C → B`` with ``S → B`` over the top, and a reduction reading
+    it would elide the support of B — a lift no route replaces, B being a
+    *premise* of C rather than a dependent of it. In premise order the chain is
+    ``S → B → C``, and what the route carries is the support of C. The premise
+    order is what the sheet lays out and what a reader walks, so it is what the
+    reduction reads: the stroke that goes is the second one.
+    """
+    support = "sup-aaaaaa"
+    graph = model.build_graph(
+        nodes=[_support(support), _claim(_B), _claim(_C)],
+        edges=[
+            _edge(support, _C, "supports"),
+            _edge(_C, _B, "depends"),
+            _edge(support, _B, "supports"),
+        ],
+    )
+    assert [(e.source, e.target) for e in graph.edges] == [(_C, _B), (support, _B)]
+    assert [(e.source, e.target) for e in graph.implied] == [(support, _C)]
+
+
+def test_every_elided_premise_is_still_walkable_through_the_drawn_edges() -> None:
+    """The property the ruling rests on, and the whole of what is preserved:
+    reachability. Every premise relation the records state is still walkable on
+    the sheet — what a reader can no longer tell is whether the claim stated it
+    directly."""
+    ids = (_A, _B, _C, _D)
+    records = [_edge(a, b, "depends") for a in ids for b in ids if a != b]
+    graph = model.build_graph(nodes=[_claim(cid) for cid in ids], edges=records)
+    routes = _routes(graph)
+
+    assert graph.implied, "a fully connected graph has premises to spare"
+    # A ``depends`` record reads dependent-first, so its premise is its target.
+    for record in records:
+        assert _walkable(routes, record.target, record.source), f"{record.target} no longer reaches {record.source}"
+
+
+def test_a_premise_cycle_keeps_every_member_attached() -> None:
+    """Nothing about the sheet is gated on acyclicity, so the premise relation
+    may hold a ring — and every member of one has an alternate route in the
+    *unreduced* graph, so a snapshot-based reduction drops the whole ring and
+    strands its claims. The reduction reads the edges still standing, so the
+    last stroke holding the ring together finds no route and stays."""
+    ring = [_edge(_A, _B, "depends"), _edge(_B, _C, "depends"), _edge(_C, _A, "depends")]
+    graph = model.build_graph(nodes=[_claim(cid) for cid in (_A, _B, _C)], edges=ring)
+
+    assert [(e.source, e.target) for e in graph.edges] == [(_A, _B), (_B, _C), (_C, _A)]
+    assert graph.implied == ()
     assert [node.id for node in graph.nodes if node.isolated] == []
-    assert graph.components == ((_A, _B, _C, _D),)
 
 
-def test_a_self_reference_survives_where_nothing_returns_to_the_claim() -> None:
-    """Reaching a claim from itself takes an edge; a reflexive reading would
-    drop every self-reference, and one whose claim has no other stroke would
-    take the claim out of the hierarchy with it."""
-    drawn = _drawn([_edge(_A, _A, model.REFERENCE_RELATION)], ids=(_A,))
-    assert drawn == [(_A, _A)]
+def test_an_elision_never_makes_an_orphan_or_a_component() -> None:
+    """The hard invariant. Degree and connectivity are measured over the drawn
+    set, and that is safe rather than lucky: an elided stroke's premise still
+    reaches its dependent, so both ends keep an incident stroke, no claim drops
+    into the orphan block and no component splits."""
+    ids = (_A, _B, _C, _D)
+    graph = model.build_graph(
+        nodes=[_claim(cid) for cid in ids],
+        edges=[_edge(a, b, "depends") for a in ids for b in ids if a < b],
+    )
+
+    assert graph.implied
+    assert [node.id for node in graph.nodes if node.isolated] == []
+    assert graph.components == (ids,)
+
+
+def test_a_claim_standing_as_its_own_premise_survives_where_nothing_returns_to_it() -> None:
+    """Reaching a claim from itself takes a stroke; a reflexive reading would
+    elide every self-premise, and one whose claim has no other stroke would take
+    the claim out of the hierarchy with it."""
+    assert _drawn([_edge(_A, _A, "depends")], ids=(_A,)) == [(_A, _A)]
+
+
+def test_the_elided_strokes_are_carried_so_the_census_can_count_them() -> None:
+    """The sheet says nothing about what it elided, so the count is reported
+    instead — and the graph carries the strokes it left out for the op to
+    count, never for a second drawing of them."""
+    graph = model.build_graph(
+        nodes=[_claim(cid) for cid in (_A, _B, _C)],
+        edges=[_edge(_B, _A, "depends"), _edge(_C, _B, "depends"), _edge(_C, _A, "depends")],
+    )
+    assert [(e.source, e.target) for e in graph.implied] == [(_C, _A)]
 
 
 # ---------------------------------------------------------------------------
@@ -519,9 +584,9 @@ def test_shuffling_the_records_changes_nothing() -> None:
         _edge("sup-aaaaaa", "clm-aaaaaa", "supports", fraction=0.5),
         _edge("sup-aaaaaa", "clm-aaaaaa", "strengthens", strength=0.2),
         _edge("clm-cccccc", "clm-ghostx"),
-        # Reducible references: which of them survives is decided by the
-        # declared candidate order, so a reduction reading the record order
-        # would come back with a different edge set on a shuffled list.
+        # `references` records, narrowed out of the drawn set: a narrowing that
+        # read the record order rather than the surviving relation would come
+        # back with a different edge set on a shuffled list.
         _edge("clm-bbbbbb", "clm-cccccc", model.REFERENCE_RELATION),
         _edge("clm-cccccc", "clm-dddddd", model.REFERENCE_RELATION),
         _edge("clm-bbbbbb", "clm-dddddd", model.REFERENCE_RELATION),

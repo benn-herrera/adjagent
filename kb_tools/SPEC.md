@@ -748,14 +748,72 @@ enforces mechanically (ARCHITECTURE.md, The Derived Index).
 
 **A KB carries a picture of its claim graph at `<kb-root>/claim-graph.svg`, and
 a stale one is a tool failure rather than a user error.** The sheet is derived
-from `.index/` alone and authored by nobody: it draws every node and every
-edge, with one exception — a `references` edge whose source already reaches
-its target through the edges the sheet draws is left undrawn, because a reader
-loses nothing a picture cannot show by walking the rest of it instead. That
-exception is a boundary on the drawing and nowhere else: the claim graph
-itself is never reduced to fit a rendering, `.index/` carries every
-`references` record regardless of what the sheet does with it, and no
-consumer of the index sees fewer edges than it always has. So the sheet is
+from `.index/` alone and authored by nobody: it draws every node, and it draws
+the **premise relations** — `depends`, `supports`, `strengthens`, `rests-on`.
+**`references` are not among them.** The sheet is a picture of what one claim
+rests on, and that class asserts no such thing (Edge classes, above): it enters
+no solidity computation, gates nothing, and is under no acyclicity constraint,
+which is why the index already carries it on a field of its own rather than
+among the edges that compute. The drawing reads the same separation the index
+is built on rather than re-deciding it edge by edge, and a claim no premise
+relation touches is drawn as unattached, which is what it is.
+
+**The sheet is drawn as concentric rings, one per layer of the argument, and
+the conclusions are at the centre.** How far out a claim stands is how much of
+the corpus stands under it: the deepest claims take the innermost ring and the
+corpus's bedrock is the outermost one, so the picture reads as an argument
+closing in on what it concludes rather than as a stack to be scrolled. A claim
+no premise relation touches is outside the rings altogether, in a grid block
+below them, whose height is still the measure of how much of the KB the
+argument does not attach.
+
+**A stroke may cross a claim box that is neither of its ends, and that is a
+real loss.** The arrangement the sheet was drawn with before this one could
+promise it did not — every stroke there ran between adjacent layers and through
+a placeholder that held a space of its own — and no ring arrangement can, the
+space between two rings being the same space every stroke crossing them has to
+use. What is preserved is what a crossing means, as far as the sheet has room to
+say it: two strokes that cross carry the bridge glyph saying which passes over
+which wherever the geometry admits a glyph, and where it does not the crossing is
+drawn plain — an ordinary crossing of two whole strokes, never a stroke left
+broken, so the reader loses which of the two passes over and never the stroke
+itself. **How often that happened is never silent**: the render op's own census
+states the crossing count and how many of those crossings carry a glyph, so a
+reader of the build is told what the picture is not saying rather than left to
+take every crossing for a marked one. And a stroke passing under a box is drawn
+under it rather than over, so no box is ever obscured by one.
+
+**A premise another drawn route already carries is drawn as that route and not
+as a second stroke.** Where a claim rests directly on a premise *and* reaches it
+through a third claim, the sheet draws the route: the drawn edge set is the
+premise relations reduced transitively, so every premise relation the index
+records is still walkable on the page and none of them is drawn twice over. What
+that buys is the long strokes, which are what a reader loses a sheet to — a
+stroke crossing N layers takes a placeholder of its own in each of the N−1
+between it, and a stroke a route implies is overwhelmingly one that crosses.
+
+**Reachability is preserved and directness is not, and the second half is a real
+loss.** A reader of the sheet can still walk from a claim to everything it rests
+on, however far down; what the picture no longer says is whether the claim cites
+a given premise *itself* or only through the claims between. That question is
+answered by `.index/` and by the claim's own register entry, and by nothing on
+the sheet — **and the sheet signals nothing about it**: there is no second
+stroke, no mark on a node, no listing in a `<title>`, the elision being general
+enough that a mark for it would land on most of the picture. What is said
+instead is a count, in the render op's own census, so that no reader of a build
+takes the drawn strokes for the whole premise set.
+
+**A node is never cut off by this.** A stroke is elided only where the route
+that replaces it stays, so no claim loses its last stroke, no claim falls into
+the unattached block and no component of the graph splits in two. Where the
+premise relation holds a cycle, the reduction leaves the ring standing rather
+than eliding it whole — each member of a ring has a route to itself, and reading
+that as redundancy would strand every claim on it.
+
+That boundary is on the drawing and nowhere else: the claim graph itself is
+never reduced to fit a rendering, `.index/` carries every record — `references`
+and premise alike — regardless of what the sheet does with it, and no consumer
+of the index sees fewer edges than it always has. So the sheet is
 kept fresh by the pair that already owns that index: **`refresh` mints it and
 `verify` checks it**, an absent sheet and a hand-edited one being the one
 refresh-fixable failure. The picture is how a reader understands the graph at

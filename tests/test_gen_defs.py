@@ -4,10 +4,10 @@ the member-reachability rule), family selection, scope resolution (model wins
 over family), tier resolution (each output's model scope comes from the tier
 its own pin site declares, through the effective tier map), the two map flags'
 parse-and-merge semantics, surface-map construction, definition-selection globs
-(matching, validation, accounting, and the filtered generate/check paths),
+(matching, validation, accounting, and the filtered generate path),
 the banner's !TUNING! line, the two body-hash banners
 (!GENERATED! and !INSTALLED!) and the backup branches they gate, the
-render-to-order generate/check round trip, and full-product install (copy set,
+render-to-order generate round trip, and full-product install (copy set,
 per-filetype banner placement, per-target write safety, the content-only write
 path — in-place update, inode and mode preserved, exec bit on creation, backups
 as plain content copies — and end-to-end installs of this repository — default,
@@ -17,8 +17,8 @@ is one summary line).
 The script lives at the repo root under a hyphenated name, so it is loaded
 here via importlib rather than imported. Filesystem-shaped cases build
 scratch template/output trees with tempfile and drive the refactored
-functions (surface_map / all_renders / generate / check) against them — the
-real templates/ and deployed surfaces are never touched or written.
+functions (surface_map / all_renders / generate) against them — the real
+templates/ and deployed surfaces are never touched or written.
 """
 
 import contextlib
@@ -858,8 +858,8 @@ class TestSelectionValidationAndAccounting(unittest.TestCase):
 
 class TestSelectedGeneration(unittest.TestCase):
     """Selection over a scratch tree: per-output filtering of a multi-output
-    template, nested-path selection, unselected outputs left untouched, a
-    narrowed check, and composition with tier tuning."""
+    template, nested-path selection, unselected outputs left untouched, and
+    composition with tier tuning."""
 
     CHUNKS = {"shared": {"text": "shared text"}}
     PINNED = "---\nname: @!arg.name!@\nmodel: @!dyn.tier-high!@\n---\nbody @!shared!@\n@!fam.probe!@\n"
@@ -944,28 +944,22 @@ class TestSelectedGeneration(unittest.TestCase):
             self.assertEqual((self.out / name).read_bytes(), content, name)
             self.assertEqual((self.out / name).stat().st_mtime_ns, stamps[name], name)
 
-    def test_check_under_a_selection_ignores_everything_else(self):
+    def test_a_selection_writes_its_matches_byte_for_byte_and_no_others(self):
+        # Both halves of what a selection promises, stated against the render
+        # each target came from: a selected output lands as exactly those
+        # bytes, and an unselected one is not written at all.
         tuning = _tuning(self.family)
-        self.assertTrue(self._generate({"agents": ["*-coder"]}))
-        self.assertTrue(
-            _quiet(
-                gen_defs.check,
-                _binding(self.CHUNKS),
-                self.smap,
-                tuning=tuning,
-                globs={"agents": ["*-coder"]},
-            )
-        )
-        # The same tree unselected: the outputs never rendered are MISSING.
-        self.assertFalse(_quiet(gen_defs.check, _binding(self.CHUNKS), self.smap, tuning=tuning))
-
-    def test_check_two_walk_is_narrowed_by_the_selection(self):
-        self._generate()
-        self.nested_template.unlink()
-        orphans = gen_defs.check_banner_claims(self.smap)
-        self.assertEqual(len(orphans), 1)
-        self.assertIn("ORPHAN", orphans[0])
-        self.assertEqual(gen_defs.check_banner_claims(self.smap, {"agents": ["*-coder"]}), [])
+        globs = {"agents": ["*-coder"]}
+        self.assertTrue(self._generate(globs))
+        selected = gen_defs.all_renders(_binding(self.CHUNKS), self.smap, globs=globs, tuning=tuning)
+        self.assertTrue(selected)
+        for target, rendered in selected:
+            self.assertEqual(target.read_text(encoding="utf-8"), rendered, gen_defs.rel(target))
+        every = gen_defs.all_renders(_binding(self.CHUNKS), self.smap, tuning=tuning)
+        unselected = {target for target, _ in every} - {target for target, _ in selected}
+        self.assertTrue(unselected)
+        for target in unselected:
+            self.assertFalse(target.exists(), gen_defs.rel(target))
 
     def test_selection_composes_with_tier_tuning(self):
         entries = gen_defs.load_family(self.family).entries
@@ -988,33 +982,30 @@ class TestSelectedGeneration(unittest.TestCase):
         self.assertEqual(gen_defs.tuning_claim(untiered).seat, "none")
         self.assertEqual(gen_defs.tuning_claim(untiered).member, "none")
         self.assertTrue(gen_defs.body_untouched(tiered))
-        self.assertTrue(
-            _quiet(gen_defs.check, _binding(self.CHUNKS), self.smap, overlays=resolve, tuning=tuning, globs=globs)
-        )
+        for target, rendered in gen_defs.all_renders(_binding(self.CHUNKS), self.smap, resolve, globs, tuning=tuning):
+            self.assertEqual(target.read_text(encoding="utf-8"), rendered, gen_defs.rel(target))
 
-    def test_a_seat_mismatch_is_mistuned_and_not_drift(self):
-        # The banner's seat/member are part of the tuning claim, so a tree
-        # rendered under one tier map and checked under another is named
-        # rather than dumped as a byte diff.
+    def test_the_banner_records_the_member_the_run_tuned_against(self):
+        # Two renders of one template under two tier maps. The seat is the
+        # template's own declaration and does not move; the member follows the
+        # map that produced the render, which is what makes a definition's
+        # tuning readable from the definition alone.
         entries = gen_defs.load_family(self.family).entries
         globs = {"agents": ["go-coder"]}
+        target = self.out / "agents" / "go-coder.md"
         self._generate(globs, overlays=gen_defs.tier_resolver(entries, dict(gen_defs.DEFAULT_PIN_MAP)))
+        default = gen_defs.tuning_claim(target.read_text(encoding="utf-8"))
         retargeted = {**gen_defs.DEFAULT_PIN_MAP, "high": "haiku"}
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ok = gen_defs.check(
-                _binding(self.CHUNKS),
-                self.smap,
-                overlays=gen_defs.tier_resolver(entries, retargeted),
-                tuning=_tuning(self.family, tier_map=retargeted, entries=entries),
-                globs=globs,
-            )
-        report = buf.getvalue()
-        self.assertFalse(ok)
-        self.assertIn("MISTUNED", report)
-        self.assertNotIn("DRIFT", report)
-        self.assertIn("member opus", report)
-        self.assertIn("member haiku", report)
+        self._generate(
+            globs,
+            overlays=gen_defs.tier_resolver(entries, retargeted),
+            tuning=_tuning(self.family, tier_map=retargeted, entries=entries),
+        )
+        moved = gen_defs.tuning_claim(target.read_text(encoding="utf-8"))
+        self.assertEqual((default.seat, default.member), ("high", "opus"))
+        self.assertEqual((moved.seat, moved.member), ("high", "haiku"))
+        # …and the overlay text followed it, so the claim is not decorative.
+        self.assertIn("haiku text", target.read_text(encoding="utf-8"))
 
 
 class TestSelectionCLI(unittest.TestCase):
@@ -1049,7 +1040,7 @@ class TestSelectionCLI(unittest.TestCase):
         bare = self._run()
         self.assertEqual(bare.returncode, 2, bare.stderr)
         self.assertIn("the following arguments are required", bare.stderr)
-        for verb in ("generate", "check", "install"):
+        for verb in ("generate", "install"):
             done = self._run(verb)
             self.assertEqual(done.returncode, 2, f"{verb}: {done.stderr}")
             self.assertIn("the following arguments are required: ROOT", done.stderr, verb)
@@ -1076,6 +1067,8 @@ class TestSelectionCLI(unittest.TestCase):
         self.assertEqual(
             self._rendered(),
             [
+                "agents/c-coder.md",
+                "agents/cpp-coder.md",
                 "agents/generalist-coder.md",
                 "agents/go-coder.md",
                 "agents/python-coder.md",
@@ -1107,13 +1100,11 @@ class TestSelectionCLI(unittest.TestCase):
         self.assertRegex(done.stdout, r"commands: \d+ of \d+ outputs selected by --command-glob")
 
     def test_surfaces_is_subsumed_and_refused(self):
-        # The one exclusion that survives as logic: both flags live on both
-        # selecting verbs, so nothing structural separates them.
-        for verb in ("generate", "check"):
-            with self.subTest(verb=verb):
-                done = self._run(verb, str(self.out), "--agent-glob", "*", "--surfaces", "agents")
-                self.assertEqual(done.returncode, 2)
-                self.assertIn("drop --surfaces", done.stderr)
+        # The one exclusion that survives as logic: both flags live on the one
+        # selecting verb, so nothing structural separates them.
+        done = self._run("generate", str(self.out), "--agent-glob", "*", "--surfaces", "agents")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("drop --surfaces", done.stderr)
 
     def test_install_cannot_be_narrowed_by_a_glob(self):
         # Not refused by a check inside the install path: `install` declares no
@@ -1129,20 +1120,11 @@ class TestSelectionCLI(unittest.TestCase):
         self.assertIn("unrecognized arguments: --surfaces", done.stderr)
         self.assertEqual(self._rendered(), [])
 
-    def test_surfaces_still_narrows_generate_and_check(self):
+    def test_surfaces_still_narrows_generate(self):
         generated = self._run("generate", str(self.out), "--surfaces", "commands")
         self.assertEqual(generated.returncode, 0, generated.stderr)
         self.assertTrue(self._rendered())
         self.assertFalse((self.out / "agents").exists())
-        checked = self._run("check", str(self.out), "--surfaces", "commands")
-        self.assertEqual(checked.returncode, 0, checked.stderr)
-
-    def test_no_diff_is_a_check_flag_alone(self):
-        # Nothing to suppress in a render: generate prints no diff.
-        done = self._run("generate", str(self.out), "--no-diff")
-        self.assertEqual(done.returncode, 2)
-        self.assertIn("unrecognized arguments: --no-diff", done.stderr)
-        self.assertEqual(self._rendered(), [])
 
     def test_zero_match_is_a_hard_error_listing_the_surface(self):
         done = self._run("generate", str(self.out), "--agent-glob", "*-codr*")
@@ -1304,16 +1286,21 @@ class TestTuningCLI(unittest.TestCase):
         fixed = self._generate("--family", "typo", "--model-tier-map", "lowest=oppus")
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
 
-    def test_check_holds_a_tuned_set_to_the_triple_that_rendered_it(self):
+    def test_a_tuned_render_reproduces_itself_and_a_retuned_one_does_not(self):
+        # Two independently produced renders of the same templates: under the
+        # identical triple they are byte-equal, and under another family they
+        # differ and each banner names the family that produced it. That is
+        # what makes a set's tuning answerable from the set itself.
         self.assertEqual(self._generate("--family", "probe").returncode, 0)
-        same = self._run("check", str(self.out), *self.SELECT, "--family", "probe")
-        self.assertEqual(same.returncode, 0, same.stdout)
-        # The same directory checked under the default family: MISTUNED, named
-        # rather than dumped as a byte diff.
-        other = self._run("check", str(self.out), *self.SELECT, "--no-diff")
-        self.assertEqual(other.returncode, 1)
-        self.assertIn("MISTUNED", other.stdout)
-        self.assertIn("templates/family/probe.toml", other.stdout)
+        probe = self._bodies()
+        self.assertEqual(self._claim().family, "templates/family/probe.toml")
+
+        self.assertEqual(self._generate("--family", "probe").returncode, 0)
+        self.assertEqual(self._bodies(), probe)
+
+        self.assertEqual(self._generate().returncode, 0)
+        self.assertNotEqual(self._bodies(), probe)
+        self.assertEqual(self._claim().family, "templates/family/claude.toml")
 
     def test_the_run_echoes_its_triple_and_neither_notice_fires(self):
         stock = self._generate()
@@ -1342,7 +1329,7 @@ class TestTuningCLI(unittest.TestCase):
         self.assertTrue(self._bodies())
 
     def test_the_floor_rung_prints_no_notice_at_all(self):
-        # `just check-floor`'s flags. Two maps collapsed onto one value cannot
+        # The floor's flags. Two maps collapsed onto one value cannot
         # diverge, and haiku is a member the claude family declares nothing
         # for, so the rung renders stock at every tier and stays silent.
         done = self._generate("--model-tier-map", "all=haiku", "--model-pin-map", "all=haiku")
@@ -1448,17 +1435,14 @@ class TestTunedBanner(unittest.TestCase):
         self.assertTrue(claim.tier.startswith("highest="))
         self.assertTrue(claim.tier.endswith("lowest=haiku"))
 
-    def test_describe_tuning(self):
-        self.assertEqual(gen_defs.describe_tuning(None), "no tuning claim")
-        described = gen_defs.describe_tuning(gen_defs.tuning_claim(self._stamped(seat="medium")))
-        self.assertIn("family templates/family/fam.toml", described)
-        self.assertIn("seat medium, member sonnet", described)
+    def test_a_file_with_no_tuning_line_has_no_claim_to_read(self):
+        self.assertIsNone(gen_defs.tuning_claim("---\nname: x\n---\nbody\n"))
 
 
-class TestGenerateCheckRoundTrip(unittest.TestCase):
+class TestGenerateRoundTrip(unittest.TestCase):
     """End-to-end over a scratch template tree: a family with no entry fills
-    nothing, a family with one fills the anchor, and check enforces the
-    tuning claim."""
+    nothing, a family with one fills the anchor, and the banner records which
+    family produced the bytes on disk."""
 
     CHUNKS = {"shared": {"text": "shared text"}}
     BODY = "---\nname: @!arg.name!@\n---\n" "body @!shared!@\n@!fam.probe!@\ntail\n"
@@ -1510,27 +1494,21 @@ class TestGenerateCheckRoundTrip(unittest.TestCase):
         self.assertEqual(claim.family, gen_defs.rel(self.family))
         self.assertEqual(claim.stock, "highest,high,low,lowest")
 
-    def test_check_passes_only_under_the_triple_that_rendered_it(self):
+    def test_the_written_file_is_the_render_and_names_the_family_behind_it(self):
         overlays = gen_defs.tier_resolver(self.ENTRIES, dict(gen_defs.DEFAULT_PIN_MAP))
         tuning = _tuning(self.family, entries=self.ENTRIES)
         self._generate(overlays=overlays, tuning=tuning)
-        self.assertTrue(_quiet(gen_defs.check, _binding(self.CHUNKS), self.smap, overlays=overlays, tuning=tuning))
-        # The same directory checked under another family: MISTUNED, nonzero.
-        self.assertFalse(_quiet(gen_defs.check, _binding(self.CHUNKS), self.smap, tuning=_tuning(self.other)))
+        tuned = self._target().read_text(encoding="utf-8")
+        self.assertEqual(gen_defs.tuning_claim(tuned).family, gen_defs.rel(self.family))
 
-    def test_mistuned_is_named_not_dumped(self):
-        self._generate()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ok = gen_defs.check(
-                _binding(self.CHUNKS),
-                self.smap,
-                overlays=gen_defs.tier_resolver(self.ENTRIES, dict(gen_defs.DEFAULT_PIN_MAP)),
-                tuning=_tuning(self.other, entries=self.ENTRIES),
-            )
-        self.assertFalse(ok)
-        self.assertIn("MISTUNED", buf.getvalue())
-        self.assertIn(gen_defs.rel(self.other), buf.getvalue())
+        # The same templates under a family that fills nothing: different
+        # bytes, and a banner naming the file that produced them. Two renders,
+        # each answering for itself.
+        self._generate(tuning=_tuning(self.other))
+        untuned = self._target().read_text(encoding="utf-8")
+        self.assertNotEqual(untuned, tuned)
+        self.assertEqual(gen_defs.tuning_claim(untuned).family, gen_defs.rel(self.other))
+        self.assertNotIn("family fill", untuned)
 
     def test_bannerless_target_refused_out_of_repo_too(self):
         target = self._target()
@@ -1558,16 +1536,13 @@ class TestGenerateCheckRoundTrip(unittest.TestCase):
         self.assertTrue(target.with_name("probe.md.00.bak").exists())
 
 
-class TestCheckReportsRefactorBlastRadius(unittest.TestCase):
-    """The canonical use `check` exists for: extracting text duplicated across
-    several definitions into a shared chunk, then reading back exactly what
-    the extraction changed. `check` renders nothing of its own — it diffs a
-    PRESERVED baseline (a prior `generate`) against what the templates render
-    now, which is what makes the diff show the refactor's real blast radius
-    rather than an always-empty report. Passing (exit 0) is not the point
-    here; a refactor meant to touch two definitions that quietly reflows a
-    third is the failure, so the assertions are about WHICH definitions the
-    report names and WHAT it says changed, not merely that it went nonzero.
+class TestRefactorBlastRadius(unittest.TestCase):
+    """The question a chunk extraction has to answer: which definitions did it
+    move, and how. Two render sets — the templates before the extraction and
+    the templates after — compared output by output, with the expected answer
+    written out rather than taken from a verdict. A refactor meant to touch
+    two definitions that quietly reflows a third is the failure this catches,
+    so the assertions are about WHICH outputs moved and WHAT changed in them.
     """
 
     OLD_PHRASE = "Recieve the input and process it."
@@ -1590,10 +1565,17 @@ class TestCheckReportsRefactorBlastRadius(unittest.TestCase):
         self.family = root / "fam.toml"
         self.family.write_text(_tiers_toml(), encoding="utf-8")
         self.tuning = _tuning(self.family)
-        # The baseline: alpha and beta still carry the duplicated (typo'd)
-        # phrase inline — the pre-refactor state a render would have produced,
-        # and that `check` must diff against rather than overwrite.
-        self.assertTrue(_quiet(gen_defs.generate, _binding({}), self.smap, tuning=self.tuning))
+        # The before side: alpha and beta still carry the duplicated (typo'd)
+        # phrase inline. Held in memory — nothing needs to be on disk for two
+        # render sets to be compared.
+        self.before = self._render(_binding({}))
+
+    def _render(self, binding):
+        """{output key: rendered text} for the templates as they stand now."""
+        return {
+            target.relative_to(self.out).as_posix(): text
+            for target, text in gen_defs.all_renders(binding, self.smap, tuning=self.tuning)
+        }
 
     def _refactor(self):
         """Lift the duplicated phrase into a chunk, correcting its typo once,
@@ -1608,43 +1590,30 @@ class TestCheckReportsRefactorBlastRadius(unittest.TestCase):
         )
         return _binding({"shared-receive": {"text": self.NEW_PHRASE}})
 
-    def _check_report(self, binding):
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ok = gen_defs.check(binding, self.smap, tuning=self.tuning)
-        return ok, buf.getvalue()
+    def _moved(self):
+        after = self._render(self._refactor())
+        self.assertEqual(set(after), set(self.before))
+        return after, {key for key, text in after.items() if text != self.before[key]}
 
-    def test_the_report_names_exactly_the_two_refactored_targets(self):
-        ok, report = self._check_report(self._refactor())
-        self.assertFalse(ok)
-        alpha, beta, gamma = (gen_defs.rel(self.out / "agents" / f"{n}.md") for n in ("alpha", "beta", "gamma"))
-        drift_lines = [line for line in report.splitlines() if "DRIFT" in line]
-        self.assertEqual(len(drift_lines), 2)
-        self.assertTrue(any(alpha in line for line in drift_lines))
-        self.assertTrue(any(beta in line for line in drift_lines))
-        # gamma never had the phrase and its template was never touched — its
-        # path must not appear anywhere in the report, not even in a diff.
-        self.assertNotIn(gamma, report)
+    def test_exactly_the_two_refactored_outputs_move(self):
+        _, moved = self._moved()
+        self.assertEqual(moved, {"agents/alpha.md", "agents/beta.md"})
 
-    def test_the_diff_shows_the_intended_change_at_each_target_and_nothing_else(self):
-        _, report = self._check_report(self._refactor())
-        # check diffs the fresh (post-refactor) render against the preserved
-        # baseline, so the corrected wording is the '-' side and the baseline
-        # typo is the '+' side, at both — and only both — targets.
-        self.assertIn(f"-Alpha body. {self.NEW_PHRASE}", report)
-        self.assertIn(f"+Alpha body. {self.OLD_PHRASE}", report)
-        self.assertIn(f"-Beta body. {self.NEW_PHRASE}", report)
-        self.assertIn(f"+Beta body. {self.OLD_PHRASE}", report)
+    def test_each_moved_output_gains_the_corrected_wording_and_loses_the_typo(self):
+        after, _ = self._moved()
+        for key, lead in (("agents/alpha.md", "Alpha body."), ("agents/beta.md", "Beta body.")):
+            with self.subTest(output=key):
+                self.assertIn(f"{lead} {self.OLD_PHRASE}", self.before[key])
+                self.assertIn(f"{lead} {self.NEW_PHRASE}", after[key])
+                self.assertNotIn(self.OLD_PHRASE, after[key])
 
-    def test_a_correctly_scoped_refactor_with_no_baseline_left_behind_is_clean(self):
-        # The negative control: re-generating the baseline after the same
-        # refactor leaves nothing for check to report — the tool the fix
-        # protects, not the mutation it is supposed to catch.
-        binding = self._refactor()
-        self.assertTrue(_quiet(gen_defs.generate, binding, self.smap, tuning=self.tuning))
-        ok, report = self._check_report(binding)
-        self.assertTrue(ok)
-        self.assertNotIn("DRIFT", report)
+    def test_the_untouched_output_is_byte_identical_hash_line_included(self):
+        # The negative control, and the reason the whole render is compared
+        # rather than the two templates the refactor names: a chunk landing in
+        # a third definition would show up here as a changed gamma.
+        after, _ = self._moved()
+        self.assertEqual(after["agents/gamma.md"], self.before["agents/gamma.md"])
+        self.assertNotIn(self.NEW_PHRASE, after["agents/gamma.md"])
 
 
 class TestMixedTierRender(unittest.TestCase):
@@ -1706,9 +1675,16 @@ class TestMixedTierRender(unittest.TestCase):
         self.assertEqual(gen_defs.frontmatter_pin(text), "opus")
         self.assertIn("\nhaiku text\n", text)
 
-    def test_mixed_render_round_trips_through_check(self):
-        _, resolve, tuning = self._generate()
-        self.assertTrue(_quiet(gen_defs.check, _binding(self.CHUNKS), self.smap, overlays=resolve, tuning=tuning))
+    def test_the_mixed_render_is_deterministic_across_runs(self):
+        # What a "round trip" is worth asserting for: the same templates under
+        # the same triple produce the same bytes, on a tree where the two
+        # surfaces resolve differently (one output has a tier, the other has
+        # no pin site at all). A per-run value anywhere in the banner, or an
+        # ordering that depended on iteration, breaks here.
+        self._generate()
+        first = self._bodies()
+        self._generate()
+        self.assertEqual(self._bodies(), first)
 
     def test_no_rendered_output_carries_the_sentinel(self):
         self._generate()
@@ -1792,25 +1768,17 @@ class TestNestedTemplateMirroring(unittest.TestCase):
         self.assertIn("name: flat\n", flat.read_text(encoding="utf-8"))
         self.assertFalse((self.out / "agents" / "mad" / "flat.md").exists())
 
-    def test_generate_check_round_trip_over_nested_tree(self):
+    def test_the_nested_output_is_provably_the_tools_own_and_reproduces(self):
+        # Every mechanism applies unchanged at a nested path, and these are the
+        # two that a mirrored subdirectory could plausibly break: the banner's
+        # hash covers the body it was stamped over, and a second render of the
+        # same templates lands the same bytes.
         self._generate()
-        self.assertTrue(_quiet(gen_defs.check, _binding(self.CHUNKS), self.smap, tuning=self.TUNING))
-
-    def test_check_two_reports_orphan_for_nested_banner(self):
+        nested = self.out / "agents" / "mad" / "participant-contract.md"
+        first = nested.read_text(encoding="utf-8")
+        self.assertTrue(gen_defs.body_untouched(first))
         self._generate()
-        self.nested_template.unlink()
-        errors = gen_defs.check_banner_claims(self.smap)
-        self.assertEqual(len(errors), 1)
-        self.assertIn("ORPHAN", errors[0])
-        self.assertIn("mad/participant-contract.md", errors[0])
-
-    def test_bannerless_nested_md_is_ignored_by_check_two(self):
-        # The recursive walk crosses supporting material (methodology topics,
-        # tool docs). Anything without a banner is not this tool's business.
-        self._generate()
-        (self.out / "agents" / "topics").mkdir()
-        (self.out / "agents" / "topics" / "note.md").write_text("# a topic, not a definition\n", encoding="utf-8")
-        self.assertEqual(gen_defs.check_banner_claims(self.smap), [])
+        self.assertEqual(nested.read_text(encoding="utf-8"), first)
 
 
 class TestBodyHashBanner(unittest.TestCase):
@@ -1845,8 +1813,6 @@ class TestBodyHashBanner(unittest.TestCase):
         self.assertIsNotNone(gen_defs.banner_claim(old))  # still a banner
         self.assertIsNone(gen_defs.banner_body(old))
         self.assertFalse(gen_defs.body_untouched(old))
-        # Nothing to strip: check falls back to the whole file.
-        self.assertEqual(gen_defs.comparable_body(old), old)
 
     def test_rendered_definitions_carry_a_true_hash(self):
         # In memory only — nothing is written under the root named here.
@@ -3142,13 +3108,129 @@ class TestShippedFamilyFiles(unittest.TestCase):
         )
 
 
-class TestFloorRung(unittest.TestCase):
-    """`just check-floor`, over the real definition set: both maps collapsed
-    onto one member with `all=`.
+#: A pin site as a TEMPLATE spells it, in either of the two spellings a
+#: template has: a literal frontmatter line (`model: @!dyn.tier-high!@`) and an
+#: outputs-fence parameter (`model = "@!dyn.tier-high!@"`). Deliberately this
+#: module's own regex over the template SOURCE rather than a call into the
+#: generator: the value it yields has to reach the comparison below without
+#: having passed through the render whose answer it is there to hold to
+#: account.
+_DECLARED_PIN_SITE = re.compile(r'^\s*model\s*[:=]\s*"?@!dyn\.tier-([a-z]+)!@"?\s*$', re.MULTILINE)
 
-    What the rung proves is the `all=` merge reaching every tier a real
-    definition sits at. Nothing is asserted about `lowest`: no pin site carries
-    that token, so the assertion would pass vacuously whatever the merge did.
+
+def declared_pins(templates_root: Path, pin_map: dict) -> dict[str, list[str]]:
+    """``{template path: the pins its declared tier tokens resolve to, sorted}``.
+
+    The template side of the comparison, read straight out of the sources.
+    """
+    return {
+        gen_defs.rel(path): sorted(
+            pin_map[tier] for tier in _DECLARED_PIN_SITE.findall(path.read_text(encoding="utf-8"))
+        )
+        for path in sorted(templates_root.rglob("*.md.tmpl"))
+    }
+
+
+def rendered_pins(renders: dict, known: dict) -> dict[str, list[str]]:
+    """``{template path: the pins its outputs actually rendered, sorted}``.
+
+    The rendered side, grouped by each output's own banner claim to the
+    template it came from — so the two sides are joined by what the output says
+    about itself rather than by a name this module derives.
+
+    Both this and :func:`declared_pins` take their corpus as a parameter so the
+    same comparison runs over the shipped tree and over a planted one, which is
+    what makes its teeth testable rather than assumed.
+    """
+    grouped: dict[str, list[str]] = {key: [] for key in known}
+    for text in renders.values():
+        pin = gen_defs.frontmatter_pin(text)
+        if pin is not None:
+            grouped.setdefault(gen_defs.banner_claim(text), []).append(pin)
+    return {key: sorted(pins) for key, pins in grouped.items()}
+
+
+class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
+    """The tier a template DECLARES against the pin its render carries — two
+    independently produced values, joined only by the run's pin map.
+
+    A definition whose pin site stopped resolving, a fence parameter that
+    stopped being a tier token, a tier token bound to the wrong map entry, or
+    an output that lost its `model:` line altogether all land here as an
+    inequality naming the template.
+
+    Run at three tunings, because a pin map that is a constant function hides a
+    misrouted tier: the shipped default (five tiers, four distinct pins), the
+    floor (`all=haiku`, what a map collapsed with `all=` has to survive), and a
+    non-claude family, whose tier map names members that must never reach a
+    pin.
+    """
+
+    TUNINGS = (
+        ("default", "claude", None, None),
+        ("floor", "claude", "all=haiku", "all=haiku"),
+        ("gemma-4", "gemma-4", None, None),
+    )
+
+    def test_every_template_renders_the_pins_its_tier_tokens_declare(self):
+        for label, family, tier_spec, pin_spec in self.TUNINGS:
+            with self.subTest(tuning=label):
+                tuning, _, renders = _shipped_renders(family, tier_spec=tier_spec, pin_spec=pin_spec)
+                declared = declared_pins(gen_defs.TEMPLATES_DIR, tuning.pin_map)
+                self.assertEqual(rendered_pins(renders, declared), declared)
+
+    def test_the_comparison_is_not_vacuous(self):
+        # Floors rather than fixtures: a fortieth template and a sixth tier
+        # must not require editing these, only a sweep that has quietly stopped
+        # reaching the tree.
+        declared = declared_pins(gen_defs.TEMPLATES_DIR, gen_defs.DEFAULT_PIN_MAP)
+        pinned = {key: pins for key, pins in declared.items() if pins}
+        self.assertGreaterEqual(len(pinned), 30)
+        # More than one distinct pin under the default map, or the comparison
+        # would hold whatever the render did with a tier.
+        self.assertGreater(len({pin for pins in pinned.values() for pin in pins}), 1)
+        # mad-participant.md.tmpl is the one template declaring its pins in an
+        # outputs fence, so the second spelling is reached rather than assumed.
+        self.assertEqual(len(declared["templates/agents/mad-participant.md.tmpl"]), 4)
+
+    def test_a_render_that_ignores_the_declared_tier_is_caught(self):
+        # The teeth, over a planted tree: one template declaring `tier-high`,
+        # and a render of it carrying the `medium` pin instead. This is the
+        # class a re-render-and-compare verb was structurally unable to see —
+        # it would have produced the same wrong pin on both sides.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template = root / "probe.md.tmpl"
+            template.write_text("---\nname: probe\nmodel: @!dyn.tier-high!@\n---\nbody\n", encoding="utf-8")
+            declared = declared_pins(root, gen_defs.DEFAULT_PIN_MAP)
+            self.assertEqual(list(declared.values()), [[gen_defs.DEFAULT_PIN_MAP["high"]]])
+
+            banner = f"# !GENERATED! from {gen_defs.rel(template)} and x\n"
+            honest = {"probe.md": f"---\n{banner}model: {gen_defs.DEFAULT_PIN_MAP['high']}\n---\nbody\n"}
+            wrong = {"probe.md": f"---\n{banner}model: {gen_defs.DEFAULT_PIN_MAP['medium']}\n---\nbody\n"}
+
+            self.assertEqual(rendered_pins(honest, declared), declared)
+            self.assertNotEqual(rendered_pins(wrong, declared), declared)
+
+    def test_an_output_that_loses_its_pin_line_is_caught_too(self):
+        # The other direction: the template still declares a tier and the
+        # render carries no `model:` key at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template = root / "probe.md.tmpl"
+            template.write_text("---\nname: probe\nmodel: @!dyn.tier-low!@\n---\nbody\n", encoding="utf-8")
+            declared = declared_pins(root, gen_defs.DEFAULT_PIN_MAP)
+            unpinned = {"probe.md": f"---\n# !GENERATED! from {gen_defs.rel(template)} and x\n---\nbody\n"}
+            self.assertNotEqual(rendered_pins(unpinned, declared), declared)
+
+
+class TestFloorRung(unittest.TestCase):
+    """The floor, over the real definition set: both maps collapsed onto one
+    member with `all=`.
+
+    What it proves is the `all=` merge reaching every tier a real definition
+    sits at. Nothing is asserted about `lowest`: no pin site carries that
+    token, so the assertion would pass vacuously whatever the merge did.
     """
 
     FLOOR = "haiku"
@@ -3193,14 +3275,14 @@ class TestFloorRung(unittest.TestCase):
                 claim = gen_defs.tuning_claim(text)
                 self.assertEqual((claim.seat, claim.member), ("none", "none"))
 
-    def test_the_census_is_thirty_six_pin_sites_and_thirteen_without(self):
+    def test_the_census_of_pinned_and_unpinned_templates_is_the_recorded_one(self):
         # A census, and it moves: adding a template moves one of these numbers,
         # and that is a deliberate edit here. Losing a pin site moves them too.
-        self.assertEqual((len(self.pinned), len(self.unpinned)), (36, 13))
+        self.assertEqual((len(self.pinned), len(self.unpinned)), (39, 13))
 
 
 class TestStockRung(unittest.TestCase):
-    """`just check-stock`, over the real definition set: the gemma-4 family,
+    """The stock state, over the real definition set: the gemma-4 family,
     whose five tiers name real members the family declares no overrides for —
     the stock state, which every banner records and the run's notice, having
     nothing member-scoped to name, says nothing about."""
@@ -3284,9 +3366,6 @@ class TestResidualMarkerGuard(unittest.TestCase):
     def _generate(self):
         return _quiet(gen_defs.generate, _binding({}), self.smap, tuning=_tuning(self.family))
 
-    def _check(self):
-        return _quiet(gen_defs.check, _binding({}), self.smap, tuning=_tuning(self.family))
-
     def test_a_clean_render_is_unaffected(self):
         self._write(self.CLEAN)
         self.assertTrue(self._generate())
@@ -3302,15 +3381,19 @@ class TestResidualMarkerGuard(unittest.TestCase):
         # Nothing lands: the guard fires before generate writes its target.
         self.assertFalse((self.out / "agents" / "probe.md").exists())
 
-    def test_check_is_refused_too_not_only_generate(self):
-        # check re-renders through the identical render_template path, so a
-        # template that regresses to a malformed marker after a clean
-        # baseline fails check exactly as it fails generate — never silently.
+    def test_a_regression_after_a_clean_baseline_is_refused_too(self):
+        # The guard is on the render, not on the absence of a target: a
+        # template that regresses to a malformed marker once a good definition
+        # already exists is refused exactly as a fresh one is, and the good
+        # definition on disk is left as it was rather than overwritten.
         self._write(self.CLEAN)
         self.assertTrue(self._generate())
+        target = self.out / "agents" / "probe.md"
+        clean = target.read_text(encoding="utf-8")
         self._write(self.RESIDUAL)
         with self.assertRaises(gen_defs.TemplateError):
-            self._check()
+            self._generate()
+        self.assertEqual(target.read_text(encoding="utf-8"), clean)
 
 
 class TestArgumentKeyIdentifierClass(unittest.TestCase):

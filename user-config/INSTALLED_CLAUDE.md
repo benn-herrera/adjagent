@@ -45,6 +45,15 @@
   unmarked means adopted: it is yours, and you verified it. A judgment you find
   plausible is still one you did not check.
 
+### Shared working tree
+- **Never run a git command that rewrites the working tree** — `stash`,
+  `checkout`, `restore`, `reset`, `clean`. They reach every file in the tree,
+  including the ones another agent is editing right now, and the damage is
+  silent from where you sit: the other agent's next write either fails against
+  content it did not author or succeeds on top of your revert. To establish a
+  baseline, read the committed side with `git show HEAD:<path>`, or work in a
+  separate worktree — never by reverting the tree everyone shares.
+
 ## No Quotable Go, No Action
 - A message containing any question is a read-only turn: answer it, change
   nothing — unless the same message also contains an explicit go. Never
@@ -59,6 +68,13 @@
   invalidates a working document you already have in hand — a plan, a handoff,
   a progress or status file — update that document in the same turn, under the
   same authorization quote.
+- **Keeping those documents current needs no quote at all.** A plan that has
+  gone stale gets corrected, rewritten or retired on your own initiative, and
+  asking permission to do it wastes a turn on something nobody was going to
+  refuse. This is maintenance of your own working surface, not a change to the
+  product: it covers the plan, the handoff and the status file, and it does not
+  reach SPEC, ARCHITECTURE, CONVENTIONS or any other contract document, whose
+  changes ride with the work that motivates them.
 - Every acting message (file change, dispatch, commit) STATES the
   authorization quote it acts under. No stated quote in the message — no
   action; ambiguity is not a go: present ready-to-execute and wait.
@@ -75,9 +91,17 @@ Every project defines runner targets (justfile, Makefile, package scripts) for i
 A behavior change — yours or a dispatched agent's — is a first-class work
 item: surfaced, proposed, and landed like any other change, never a private
 adjustment made in passing. Such a change has one destination: proposed
-wording for the file that owns the behavior — `~/.claude/CLAUDE.md` for every
-project, the project's own `CLAUDE.md` for one project, the agent's definition
-for one agent. There is no second destination.
+wording for the file that owns the behavior — the adjagent repo's
+`user-config/INSTALLED_CLAUDE.md` for every project, the project's own
+`CLAUDE.md` for one project, the agent's definition for one agent. There is no
+second destination.
+
+`~/.claude/CLAUDE.md` is not that file. It is the install target, written from
+`INSTALLED_CLAUDE.md` by `just install-claude-md`, and the reverse flow is a
+manual diff-and-adopt that nothing runs on a schedule — so a rule edited there
+is a rule no install carries anywhere. Edit it directly only for a rule about
+the sandbox the session runs in, which is specific to the live host and is
+deliberately not published.
 
 **INVARIANT**: Never create or update a cross-session memory store — a memory
 directory, its index, or any equivalent an agent definition, a skill, or the
@@ -93,6 +117,7 @@ it changes cannot be seen at its source or corrected there.
   - ARCHITECTURE.md - describes how this particular implementation meets SPEC.md
   - CONVENTIONS.md - project-specific additions to house rules and practices
 - Each project document states what the others do not; where one needs another's content it cites rather than restates.
+- **A problem you record for later states the fact, not its surroundings.** Line counts, today's file layout, how you found it and the fix you had in mind all rot, and a later reader cannot tell which parts have. Name it and where it lives, nothing more; evidence belongs where it is dated — the commit, the report.
 - **The contract moves with the work.** Deliberate change updates SPEC.md, ARCHITECTURE.md and CONVENTIONS.md as part of the change that motivates it. This is the normal path.
   - **A mismatch between docs or code and doc you did not create is evidence that something moved — establish what.** Check `git log` on both sides; whichever moved last is the candidate for current. If the code is newer and holds the project's principles, the document is stale: update it and state what you established. Disagreement with SPEC.md or ARCHITECTURE.md is not the tell for code being wrong — the tell is code that is newer *and* violates a principle.
 

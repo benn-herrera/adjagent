@@ -1,4 +1,4 @@
-You are attributing dependency direction in a claim graph built from one corpus.
+You are deciding what one claim rests on, in a claim graph built from one corpus.
 
 ## The claim
 
@@ -12,14 +12,26 @@ lemma it rests on is a dependency; a lemma citing the theorem it motivates is no
 
 @!dyn.candidate-lines!@
 
-## The lines the references were read off
+## The passages the references sit in
+
+Each is one paragraph of a source document, and every candidate's is among
+them. Nothing pairs a passage with a candidate, and a paragraph holding two
+appears once, so find the reference inside the paragraph and read the sentence
+it is in. What the author says there about it is the evidence: "as we did in
+Lemma 2 we exponentiate the terms and divide by the sum…" borrows a technique,
+a mention rather than a dependency, while "building on the identity established
+in Lemma 2 we can further state…" rests on Lemma 2's result. Where a paragraph
+says nothing about what its reference is doing, decide from the claim and the
+candidate themselves; silence is not a mention.
 
 @!dyn.reference-lines!@
 
 ## What to return
 
-For each candidate, one question: **does the claim above rest on it** — is the
-candidate prior standing the claim is derived from? Return the ids of the
+For each candidate, one question: **does the claim above rest on it?** What
+decides is whether the candidate being **true** is what the claim needs: a claim
+that borrows a method, a precedent or a piece of exposition, and would stand
+whether or not the candidate holds, does not rest on it. Return the ids of the
 candidates for which the answer is yes, and nothing else. Returning none of them
 is a complete answer: a claim that rests on nothing in this list is the ordinary
 case, not a failure to find something.

@@ -1718,11 +1718,9 @@ def insert_support_entry(*, kb_root: Path, values_file: Path, create: bool = Fal
 
     ``supports`` stages the beneficiary fan-out **in the register entry**. The
     canonical home is the hosting document's ``sup-id:`` block, but a ``sup-``
-    id is minted a full stage before that document exists, and the
-    warrant-attribution postcondition — which reads both homes through
-    ``scan_authored_support_edges`` — is checked at the end of that earlier
-    stage. Without this value the surface could mint a support it had no way to
-    attach to anything, and the stage that mints it could not pass.
+    id can be minted before that document exists, and
+    ``scan_authored_support_edges`` reads both homes. Without this value the
+    surface could mint a support it had no way to attach to anything.
     """
     return _execute(
         "insert-support-entry",
@@ -2566,10 +2564,7 @@ def _plan_set_on_point_fraction(ctx: _Context, entries: Sequence[values.Entry]) 
     A fan-out has two legitimate homes and which one a given pair lives in is a
     fact about the build's position, not a choice the caller makes: the hosting
     document's ``sup-id:`` block is canonical, and the ``sup-`` register entry
-    stages the pairs while that document does not exist yet. The scoring wave
-    that sets these fractions runs at phase-2.6, a full stage before the
-    documents are written, so the staged home is the ordinary one at the moment
-    this op is called.
+    stages the pairs while that document does not exist yet.
 
     **The hosted home wins where it exists.** A support whose document has been
     written carries the canonical pairs there, and that is what the claim graph

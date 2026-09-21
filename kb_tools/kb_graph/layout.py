@@ -1,27 +1,88 @@
 """Placed geometry for the claim-graph sheet: model in, coordinates out.
 
 Layering, in-layer ordering and coordinates, edge routing through dummy nodes,
-and hop detection with hop-side selection. Pure — it opens no file, and it knows
-no colour, no font, no tag name and no URL. It reads
+and hop detection with hop-side selection. It opens no file, and it knows no
+colour, no font, no tag name and no URL. It reads
 :mod:`kb_tools.kb_graph.style` for magnitudes and nothing else from it; if this
-module ever imports ``xml``, the boundary has been crossed.
+module ever imports ``xml``, the boundary has been crossed. The one thing it
+reads from outside the graph is :data:`PLACEMENT_ENV`, a development control
+with a shipped default, and the sheet is a pure function of the graph at any one
+setting of it.
 
 **An edge spanning more than one layer is a chain, not a segment.** Every layer
 it crosses holds a **dummy** — a placeholder that takes a real column in that
 layer, ordered among the real nodes by the sweep below — and the edge draws as
-one polyline through them. Two consequences, and the second is why the dummies
+one stroke through them. How those points are joined is the emitter's and not
+this module's (:func:`kb_tools.kb_graph.svg._control_points`). Two consequences, and the second is why the dummies
 exist: a real node is no longer drawn under an edge path, and every segment is
 layer-adjacent, so an ordering pass has something in the middle to reorder. A
 dummy is never drawn and carries no label; it is mechanical, with no heuristic
 and nothing to tune.
 
+**A claim stands as far above bedrock as the argument needs and no further.**
+Sugiyama's layer-assignment phase runs here, by the **network simplex** (Gansner,
+Koutsofios, North & Vo 1993, *A Technique for Drawing Directed Graphs*, §2.3),
+with every premise relation weighted alike and a minimum separation of one
+layer. What it minimises is the **total number of layers the premise relations
+span**, which is the dummy count plus the relation count — so it is the
+placeholder columns of the paragraph above that it is spending, and the chain
+that draws as one segment is the one it bought.
+
+The longest-path ranking is where it starts: Kahn order out from the
+premise-less nodes, every claim as high as its deepest premise pushes it
+(:func:`_longest_path`). That ranking is feasible, and pointwise the lowest
+feasible one there is — which is also what stands every premise-less claim on
+bedrock whether the argument puts it there or not — a claim whose one dependent sits eight layers up
+is drawn eight layers below it and routed through seven placeholders, and
+nothing about the corpus asked for that.
+
+The parameters, and what the phase is worth — measured over the committed
+``mini-kb`` golden and every built KB in the tree, the count being the
+placeholders the premise strokes are routed through:
+
+* **One connected component at a time, each floored at layer 0.** A spanning
+  tree spans one component, and two arguments with no premise path between them
+  constrain each other not at all.
+* **Convergence is the method's own: no tree edge left with a negative cut
+  value**, at which point no exchange can shorten the sheet.
+  :data:`LAYERING_PIVOTS` caps the exchanges; every intermediate ranking is
+  feasible and the total never rises, so a run the cap cuts short returns a
+  ranking no worse than the longest path's. The cap is headroom rather than a
+  tuned number — the deepest corpus here converges in **two** pivots, most in
+  none at all, the tight-tree construction having done the work.
+* **Every tie is a stated key**: the component's lowest id roots the tree, the
+  most negative cut value leaves and its own pair breaks that tie, and the
+  tightest edge crossing the cut the other way enters, with the same tie-break.
+* **The count of placeholders falls, and the sheet narrows with it**: on the
+  corpus's largest sheet 58 placeholder hops become 39 and 31 routed strokes
+  become 23, taking it from 7928px to 5576px and its crossings from 144 to 126;
+  on the next, 9 hops become 5 and the sheet 1328px to 896px, crossings 4 to 2.
+  ``mini-kb`` does not move at all — every one of its strokes is already
+  layer-adjacent, so the longest-path ranking is the minimum and no pivot runs.
+* **It is not free on a dense sheet, and the one regression measured is stated
+  rather than averaged away.** On ``ModernCorpPristine`` — 71 strokes over 42
+  claims — the placeholders fall 51 to 43 and the crossings *rise* 67 to 76,
+  because the placeholders were what spread those strokes over bands the
+  ordering sweep could unpick, and a shorter edge set piles into fewer of them.
+  That sheet is 16% wider for it. The trade is taken because the rest of the
+  corpus is where the width is.
+* **The balance step is not adopted.** Gansner's own ``balance`` — moving a
+  claim whose premises and dependents are equal in number to the least crowded
+  rank its window admits — was measured here: it takes the regression above from
+  76 crossings to 70, still above the 67 it started from, and widens that sheet
+  further (2704px to 2848px). Pressing such a claim to the bottom of its window
+  instead is what the simplex already returns, and to the top is the balance's
+  own result. None of the three recovers the sheet, so the freedom is spent on
+  the simplest rule.
+
 **A node with no edges at all leaves the hierarchy.** Layering answers "what
 does this rest on", and a node that rests on nothing and carries nothing has no
-answer to give: put through the longest-path rule it lands on layer 0 beside the
-corpus's real bedrock, where it says nothing and makes that layer as wide as the
-count of unattached nodes. So an **orphan** — degree zero over the whole corpus
+answer to give: put through the layering it lands on layer 0 beside the corpus's
+real bedrock, where it says nothing and makes that layer as wide as the count of
+unattached nodes. So an **orphan** — degree zero over the whole corpus
 graph, which is :attr:`kb_tools.kb_graph.model.Node.isolated` — is taken out of
-layer assignment entirely and drawn in a grid block below the baseline,
+layer assignment entirely and drawn in a grid block below everything the
+hierarchy occupies and flush with its left edge (:func:`_orphan_origin`),
 :data:`style.ORPHAN_ROW` to a row, in the same stable key order every other
 occupant starts from. Degree is the corpus's and never the drawn sheet's, for
 the reason layers are (:func:`place`): otherwise a node would move between the
@@ -29,17 +90,22 @@ grid and the hierarchy depending on which domain was being rendered. Nothing an
 orphan does can reach a crossing or a hop, there being no stroke to cross.
 
 **In-layer order is computed, not looked up.** Sugiyama's crossing-reduction
-phase runs here. Each layer's occupants — real nodes and dummies alike — start
-in the stable key order :func:`_occupants` states, and an iterated
+phase runs here, as the pair of steps Gansner, Koutsofios, North & Vo (1993)
+§3.1–3.2 run together. Each layer's occupants — real nodes and dummies alike —
+start in the stable key order :func:`_occupants` states, and an iterated
 **barycentre** sweep reorders them from there: one round is a pass up the
 layers, each reordered against the one beneath it, then a pass back down, each
 reordered against the one above, an occupant's rank being the mean position of
-the occupants it is joined to across that band. Crossings that survive are
-still denoted by the hop glyph; the sweep only makes fewer of them.
+the occupants it is joined to across that band. Each round's order is then
+refined by **transpose** (:func:`_transpose`), which exchanges *adjacent*
+occupants of a layer wherever the exchange removes more crossings from the two
+bands that layer touches than it plants, repeating until no exchange does.
+Crossings that survive are still denoted by the hop glyph; the phase only makes
+fewer of them.
 
 The parameters, measured rather than assumed — over ``mini-kb`` plus 25
 synthetic shapes, flat and wide two-layer graphs and multi-layer DAGs carrying
-dummies:
+dummies, and over every built KB in the tree:
 
 * **Barycentre, not median.** The barycentre sweep left 3251 crossings across
   that sample against the median sweep's 3706, and was best-or-equal on 18 of
@@ -48,18 +114,89 @@ dummies:
   did not cash out.
 * **At most :data:`SWEEP_ROUNDS` rounds, stopping on the first that does not
   improve**, and the best-scoring order any round reached is what is returned
-  — so the sweep never hands back a picture worse than the order it started
+  — so the phase never hands back a picture worse than the order it started
   from. Two rounds leaves about 15% of the crossings eight remove; thirty-two
   buys under 1% over eight.
-* **Ties hold their ground.** Occupants with equal barycentres, and an
-  occupant with no neighbour across the band at all, keep the position they
-  already had — which at the first pass is the start key's.
+* **Ties hold their ground**, in both steps. Occupants with equal barycentres,
+  and an occupant with no neighbour across the band at all, keep the position
+  they already had — which at the first pass is the start key's; and an
+  exchange is made only where it *strictly* reduces, which is also what makes
+  transpose's local minimum a fixed point rather than a cycle of equal-scoring
+  exchanges. A transpose pass takes the layers ascending and each layer's pairs
+  left to right, both stated orders rather than a container's.
+* **The refinement runs on each round's candidate, not on the sweep's own
+  state.** The next round's barycentre pass starts from the order the two
+  passes left, never from the exchanged one — the departure from the published
+  loop, and it is measured rather than preferred. A local minimum is the wrong
+  place to restart a barycentre pass from: feeding the exchanged order back
+  costs 22 glyphs on the corpus's largest sheet (116 against 94), while
+  refining only once the sweep has converged costs 2 on its densest (66 against
+  64). Refining each round's candidate takes the better of the two on every
+  sheet in the tree — 162 glyphs against 184 fed back and 164 refined at the
+  end. On the synthetic sample the three arrangements are within 1.5% of one
+  another (1891, 1912, 1920 against the sweep's own 2177), so it is the corpus
+  that decides.
+* **What the refinement is worth**: across every built KB the drawn glyphs fall
+  from 210 to 162, 23%; across the synthetic sample the crossings fall from
+  2177 to 1920, 12%. It is the two dense sheets that carry the corpus figure —
+  ``2609.09855v1``'s 131 become 94 and ``ModernCorpPristine``'s 75 become 64 —
+  but the smallest sheet in the tree moves too: ``mini-kb``'s 2 crossings go to
+  **0**, which no barycentre round reached, and the sheet narrows by one column
+  with them. A crossing an exchange of two adjacent occupants removes is not a
+  crossing a mean position finds.
+* **Transpose is not free in width, and the trade is stated rather than
+  averaged away.** Exchanging a pair to uncross it can leave the coordinate
+  phase two occupants further apart: ``2609.09855v1``'s width-setting layer
+  keeps its 36 occupants and gains two columns of slack, and the sheet grows
+  5%. ``ModernCorpPristine`` goes the other way and loses 3%. The trade is
+  taken because crossings are what makes a dense sheet unreadable and 5% of
+  width is not — and the occupant count, which is what the width is really
+  made of, does not move on either sheet.
+* **Convergence is the refinement's own: the first pass that exchanges
+  nothing.** :data:`TRANSPOSE_PASSES` caps the passes within one round. No pass
+  can raise the crossing count, every exchange strictly lowering it, so a run
+  the cap cuts short returns an order no worse than the one it was given. The
+  cap is headroom rather than a tuned number — over the corpus and the
+  synthetic sample the deepest refinement converged in **ten** passes and half
+  of them in two or fewer.
 
-That start key and that tie rule are the whole of what keeps the result
-independent of the order the records were loaded in. **Locality is not a
-constraint**: the sweep may relocate any node it likes, and one added edge may
+That start key, those tie rules and that stated walk are the whole of what keeps
+the result independent of the order the records were loaded in. **Locality is
+not a constraint**: the phase may relocate any node it likes, and one added edge may
 rearrange the sheet. Determinism is the constraint, and
 ``test_shuffling_the_loaded_records_changes_no_geometry`` is what holds it.
+
+**The sheet is a set of concentric rings, one per layer.** Ring 0 is the
+**deepest** layer, so the conclusions stand at the centre and the corpus's
+bedrock is the outermost ring. The orientation is measured rather than assumed:
+bedrock-centred leaves a 448×362 empty half-side on the arXiv corpus and costs
+area on every corpus. Layering and in-layer order are untouched by this — the
+two phases above run exactly as they are described, and a ring's occupants are
+its layer's occupants in the order the sweep chose — so the arrangement changes
+only where an occupant stands.
+
+Two **forms** offer the rings their candidate positions and differ in nothing
+else. ``rectangle`` offers an axis-aligned rectangle, its candidates one column
+pitch apart along the horizontal sides and one layer pitch apart along the
+vertical ones, which clears by construction and never grows. ``ellipse`` offers
+a true ellipse walked in integers by :func:`math.isqrt`, whose diagonal sector
+brings two consecutive rings closer than the pitch — caught by the placer's own
+separation check rather than by a guessed multiplier, and paid for by the ring
+growing. The separation rule is a property of two placed rectangles and never of
+any ring, so it lives in :func:`_place_ring` and a form states positions alone.
+One ring stands :data:`style.RING_STEP` pitches outside the ring within it; at
+one pitch the rings tile a lattice and no boundary is visible, which is what
+that constant exists to make a single edit.
+
+A ring has no up, so its strokes run box centre to box centre rather than top
+edge to bottom edge — the emitter draws the boxes opaque and last, so a stroke
+still leaves from under its own box edge.
+
+**The layered arrangement stays reachable and is the comparison baseline.**
+:data:`PLACEMENT_ENV` selects between the three, :data:`DEFAULT_PLACEMENT` is
+what ships, and neither is a consumer-facing control: nothing a user runs sets
+the variable and no runner target passes it. What follows describes the layered
+arrangement, which is the one those phases belong to.
 
 **A column index is not an x coordinate.** Sugiyama's coordinate-assignment
 phase runs here too, by the **priority method** (Sugiyama, Tagawa & Toda 1981).
@@ -134,23 +271,40 @@ binary fraction.
 Stdlib only.
 """
 
+import os
 from collections import defaultdict, deque
-from collections.abc import Collection, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import partial
 from itertools import combinations
+from math import isqrt
 
 from kb_tools.kb_graph import style
-from kb_tools.kb_graph.model import ClaimGraph, Edge, Node
+from kb_tools.kb_graph.model import ClaimGraph, Edge, Node, premise_pair
 
 #: One layer occupant's identity and its start-order key: a real node's id
 #: alone, or the ``(source, target)`` pair of the edge a dummy stands in for.
 _Key = tuple[str, ...]
 
-#: The crossing-reduction sweep's round cap. A round is a pass up the layers
-#: and a pass back down; the sweep stops earlier on the first round that fails
-#: to improve. Measured, not guessed — the module docstring carries the numbers.
+#: The layering's pivot cap. One pivot swaps one tree edge for one non-tree
+#: edge; the method stops earlier on its own convergence condition — no tree
+#: edge left with a negative cut value — and a run cut short by this cap returns
+#: a feasible ranking no longer than the one it started from. Measured, not
+#: guessed — the module docstring carries the numbers.
+LAYERING_PIVOTS = 512
+
+#: The crossing-reduction sweep's round cap. A round is a pass up the layers, a
+#: pass back down, and the transpose refinement; the sweep stops earlier on the
+#: first round that fails to improve. Measured, not guessed — the module
+#: docstring carries the numbers.
 SWEEP_ROUNDS = 8
+
+#: The transpose refinement's pass cap within one sweep round. A pass walks
+#: every layer's adjacent pairs once; the refinement stops earlier at its own
+#: local minimum — the first pass that exchanges nothing. Measured, not guessed
+#: — the module docstring carries the numbers.
+TRANSPOSE_PASSES = 16
 
 #: The coordinate phase's round cap. A round is a pass up the layers and a pass
 #: back down; the phase stops earlier at a fixed point — the first round that
@@ -158,25 +312,14 @@ SWEEP_ROUNDS = 8
 #: guessed — the module docstring carries the numbers.
 COORDINATE_ROUNDS = 8
 
-#: The one relation whose record direction is the reverse of the premise
-#: direction. A ``depends`` record ``(source=A, target=B)`` says A leans on
-#: B, so B is the premise and A the dependent; a ``supports`` or ``strengthens``
-#: record ``(source=S, target=C)`` says S lifts C, so the source is the premise
-#: and the record already reads premise-first. Any relation this module does not
-#: know is read the same way as those two — the record's own direction — rather
-#: than being dropped from the layering.
-PREMISE_INVERTING_RELATION = "depends"
-
-#: The relations that are no premise relation at all, and so constrain the
-#: layering not at all. A ``references`` record says one claim's text names
-#: another and asserts nothing about which stands on which — so reading it as a
-#: premise pair would order two layers on a fact that does not order them, and a
-#: mutual pair would fall into the residual set and draw as a cycle with two back
-#: edges. Two claims naming each other is the author's argument, not the defect a
-#: dependency cycle is, so the class enters neither the layering nor the cycle
-#: membership derived from it. It is still drawn, and both its endpoints still
-#: count as attached: only the ordering is silent.
-NON_PREMISE_RELATIONS: frozenset[str] = frozenset({"references"})
+#: How far one ring may grow past its own first size looking for room. A ring
+#: grows because a form's candidates crowd, never because the graph is large:
+#: the rectangle form's candidates are pairwise clear and clear of the ring
+#: within it, so it seats at its first size always, and it is the ellipse's
+#: diagonal sector that spends any of this. A ring that reaches the cap is drawn
+#: on the largest ring it reached rather than refused (:func:`_rings`), so the
+#: cap is headroom and never a gate.
+RING_GROWTH = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,25 +332,26 @@ class Point:
 
 @dataclass(frozen=True, slots=True)
 class PlacedNode:
-    """One node's box, placed on the column grid.
+    """One node's box, placed by the sheet's arrangement.
 
-    ``x``/``y`` are the box's left and **top** edges. Layer 0 sits on the
-    baseline and the sheet grows upward into negative ``y``, so a new deepest
-    layer changes the ``viewBox`` and moves nothing already placed.
+    ``x``/``y`` are the box's left and **top** edges, and the box's own centre
+    is what the arrangement placed (:func:`place`): the sheet's frame is
+    y-down, and where the origin sits inside it is the arrangement's to say.
 
-    ``column`` is the box's place in its layer's left-to-right order and ``x``
-    is where it stands, and the two are no longer one quantity twice: the
-    coordinate phase pulls a box toward its neighbours and away from its index's
-    own multiple of the pitch. What still holds between them is the order — ``x``
-    ascends with ``column`` within a layer, by at least one column pitch.
+    ``column`` is the box's place in its layer's left-to-right order, and it is
+    no longer a coordinate under any arrangement: the layered one pulls a box
+    toward its neighbours and away from its index's own multiple of the pitch,
+    and the concentric one seats it on a ring where left-to-right is not a
+    direction at all. What ``column`` still is, everywhere, is the sweep's
+    stated order and half of the emission key.
 
     **A negative ``layer`` is a row of the orphan block**, not a layer: an
     orphan is outside the hierarchy (this module's docstring), and row ``r`` of
-    the block takes ``layer = -(r + 1)`` so that the one rule ``y = -layer ×
-    LAYER_PITCH`` still places it — one pitch below the baseline for the first
-    row, and downward from there. Its ``column`` is its place in its own row,
-    and ``x`` is that column's own multiple of the pitch: the block is a grid,
-    with no coordinate phase over it and nothing to pull it toward.
+    the block takes ``layer = -(r + 1)``, which is what emits the block's lowest
+    row first. Its ``column`` is its place in its own row, and the two together
+    index it off the block's origin — one row pitch and one column pitch apiece,
+    below everything the hierarchy occupies (:func:`_orphan_origin`). The block
+    is a grid, with no coordinate phase over it and nothing to pull it toward.
 
     ``cycle_member`` is the residual set: a node the Kahn order never resolved.
     Cycle membership is defined as exactly that, which also sweeps in the nodes
@@ -230,13 +374,18 @@ class PlacedNode:
         return self.node.id
 
     @property
+    def centre(self) -> Point:
+        """The box's middle — where the arrangement placed it, and the anchor a sheet with no up uses."""
+        return Point(self.x + self.width // 2, self.y + self.height // 2)
+
+    @property
     def top_centre(self) -> Point:
-        """The single anchor every edge leaving this box uses."""
+        """The single anchor every edge leaving this box uses, on a sheet that has an up."""
         return Point(self.x + self.width // 2, self.y)
 
     @property
     def bottom_centre(self) -> Point:
-        """The single anchor every edge arriving at this box uses."""
+        """The single anchor every edge arriving at this box uses, on a sheet that has an up."""
         return Point(self.x + self.width // 2, self.y + self.height)
 
 
@@ -250,7 +399,7 @@ class Segment:
 
 @dataclass(frozen=True, slots=True)
 class PlacedEdge:
-    """One stroke: the polyline chaining an edge's two box anchors.
+    """One stroke: the chain joining an edge's two box anchors.
 
     ``points`` runs from the lower node's top-centre, through one dummy per
     layer the edge crosses in ascending layer order, to the upper node's
@@ -299,13 +448,14 @@ class Hop:
     each edge's own :attr:`PlacedEdge.segments`, which is what keeps the
     emission key total now that two chains can cross more than once.
 
-    ``x``/``y`` are the exact crossing point and ``direction`` is the hopping
-    **segment's** own vector, from its lower end to its upper one — an
-    unnormalized integer vector naming the line the arc's endpoints sit on. It
-    is the line and not the bulge: which side the arc bulges toward is the
-    emitter's, which orders the two endpoints by screen x before rotating
-    (:func:`kb_tools.kb_graph.svg.draw_hop_over`), and stating it twice is how
-    the two would come to disagree.
+    ``x``/``y`` are the exact crossing point, on the straight chord between that
+    run's two ends. **No line through it is stated here.** The stroke is a curve
+    through the chain's vertices, so where the glyph's centre lands on it, which
+    line its two endpoints sit on and which side the arc bulges toward are all
+    read off the drawn stroke by the emitter
+    (:func:`kb_tools.kb_graph.svg.draw_hop_over`); this module answers which
+    strokes cross and where, and stating any of the rest twice is how the two
+    would come to disagree.
     """
 
     hopping: tuple[str, str]
@@ -314,7 +464,6 @@ class Hop:
     crossed_segment: int
     x: Fraction
     y: Fraction
-    direction: tuple[int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,26 +532,30 @@ def place(graph: ClaimGraph, *, include: Collection[str] | None = None) -> Sheet
     glyph marks what a reader can see.
 
     The result is a function of ``graph`` alone: shuffling the records it was
-    assembled from cannot change a byte of it.
+    assembled from cannot change a byte of it — and of the arrangement, which is
+    a development control with a shipped default (:data:`DEFAULT_PLACEMENT`).
     """
     hierarchy, orphans = _partition(graph)
     layers, cycle_members = _assign_layers(hierarchy, graph.edges)
     bands = _bands(graph.edges, layers)
     order = _sweep(_occupants(hierarchy, graph.edges, layers), bands)
     columns = {layer: _positions(keys) for layer, keys in order.items()}
-    centres = _centres(order, bands)
+    placement = _selected_placement()
+    centres = placement.centres(order, bands)
+    origin = _orphan_origin(centres)
 
     placed: dict[str, PlacedNode] = {}
     for node in hierarchy:
         if include is not None and node.id not in include:
             continue
         layer = layers[node.id]
+        centre = centres[layer][(node.id,)]
         placed[node.id] = PlacedNode(
             node=node,
             layer=layer,
             column=columns[layer][(node.id,)],
-            x=centres[layer][(node.id,)] - style.BOX_WIDTH // 2,
-            y=-layer * style.LAYER_PITCH,
+            x=centre.x - style.BOX_WIDTH // 2,
+            y=centre.y - style.BOX_HEIGHT // 2,
             width=style.BOX_WIDTH,
             height=style.BOX_HEIGHT,
             cycle_member=node.id in cycle_members,
@@ -410,11 +563,18 @@ def place(graph: ClaimGraph, *, include: Collection[str] | None = None) -> Sheet
     for index, node in enumerate(orphans):
         if include is not None and node.id not in include:
             continue
-        placed[node.id] = _place_orphan(node, index)
+        placed[node.id] = _place_orphan(node, index, origin)
 
     nodes = tuple(sorted(placed.values(), key=lambda p: (p.layer, p.column)))
     edges = tuple(
-        _place_edge(edge, placed[edge.source], placed[edge.target], centres=centres, cycle_members=cycle_members)
+        _place_edge(
+            edge,
+            placed[edge.source],
+            placed[edge.target],
+            centres=centres,
+            cycle_members=cycle_members,
+            centre_anchored=placement.centre_anchored,
+        )
         for edge in graph.edges
         if edge.source in placed and edge.target in placed
     )
@@ -440,27 +600,44 @@ def _partition(graph: ClaimGraph) -> tuple[tuple[Node, ...], tuple[Node, ...]]:
     )
 
 
-def _place_orphan(node: Node, index: int) -> PlacedNode:
+def _place_orphan(node: Node, index: int, origin: Point) -> PlacedNode:
     """One orphan's box in the grid block, at its own place in the corpus's orphan order.
 
     ``index`` is that order — the same ascending-id key every other occupant
     starts from — so the block is a function of the graph and of nothing a
-    particular sheet selected. The row is below the baseline and the column is
-    the grid's, with no coordinate phase over either: an orphan has no
+    particular sheet selected. The row and the column are the grid's own, off
+    ``origin``, with no coordinate phase over either: an orphan has no
     neighbours to be pulled toward.
     """
     row, column = divmod(index, style.ORPHAN_ROW)
-    layer = -(row + 1)
     return PlacedNode(
         node=node,
-        layer=layer,
+        layer=-(row + 1),
         column=column,
-        x=column * style.COLUMN_PITCH,
-        y=-layer * style.LAYER_PITCH,
+        x=origin.x + column * style.COLUMN_PITCH,
+        y=origin.y + row * style.LAYER_PITCH,
         width=style.BOX_WIDTH,
         height=style.BOX_HEIGHT,
         cycle_member=False,
     )
+
+
+def _orphan_origin(centres: dict[int, dict[_Key, Point]]) -> Point:
+    """The block's first box: below everything the hierarchy occupies, flush with its left edge.
+
+    Read off the placed occupants rather than off layer 0, because no
+    arrangement owes the sheet a lowest layer at the bottom of it — a concentric
+    sheet's bedrock is its outermost ring and surrounds everything else. On the
+    layered arrangement this resolves to one layer pitch below the baseline,
+    which is where the block has always stood.
+
+    Taken over the whole hierarchy and never over the part of it a sheet
+    selected, for the reason every other coordinate is (:func:`place`).
+    """
+    points = [point for row in centres.values() for point in row.values()]
+    left = min((point.x for point in points), default=style.BOX_WIDTH // 2) - style.BOX_WIDTH // 2
+    bottom = max((point.y for point in points), default=style.BOX_HEIGHT // 2) + style.BOX_HEIGHT // 2
+    return Point(left, bottom + style.LAYER_GAP)
 
 
 # ---------------------------------------------------------------------------
@@ -476,21 +653,21 @@ def _premise_pairs(edges: Iterable[Edge]) -> set[tuple[str, str]]:
     an input to A — and counting that premise twice would leave A's in-degree
     permanently above zero and strand it in the residual set.
 
-    A stroke of a :data:`NON_PREMISE_RELATIONS` class contributes no pair: it
-    states no premise, so it orders no layer and joins no cycle.
+    Every stroke contributes one: the drawn set is the premise set, narrowed to
+    it and reduced within it before geometry by
+    :mod:`kb_tools.kb_graph.model`, so there is no class here to exempt and no
+    pair here that a route through the others already carries.
     """
-    return {_premise_pair(edge) for edge in edges if edge.relation not in NON_PREMISE_RELATIONS}
-
-
-def _premise_pair(edge: Edge) -> tuple[str, str]:
-    """``(premise, dependent)`` for one stroke, per :data:`PREMISE_INVERTING_RELATION`."""
-    if edge.relation == PREMISE_INVERTING_RELATION:
-        return (edge.target, edge.source)
-    return (edge.source, edge.target)
+    return {premise_pair(edge) for edge in edges}
 
 
 def _assign_layers(nodes: tuple[Node, ...], edges: Iterable[Edge]) -> tuple[dict[str, int], frozenset[str]]:
-    """Longest path from the premise-less nodes, in Kahn order, plus the residual pass.
+    """The shortest total layering the premises admit, plus the residual pass.
+
+    Two stages over the acyclic core: the longest-path ranking, which is the
+    feasible starting point, and then the network simplex that minimises total
+    edge length from there (:func:`_network_simplex`). Cycle members are what
+    the first stage could not resolve, and the residual pass places them.
 
     Iterative throughout: a recursive descent is a stack overflow on the first
     cyclic input, and this renderer's whole value on a defective graph is that it
@@ -503,12 +680,47 @@ def _assign_layers(nodes: tuple[Node, ...], edges: Iterable[Edge]) -> tuple[dict
     nodes the Kahn order never resolved, which are the cycle members.
     """
     ids = [node.id for node in nodes]  # model orders these ascending
+    pairs = sorted(_premise_pairs(edges))
     premises: dict[str, list[str]] = {node_id: [] for node_id in ids}
     dependents: dict[str, list[str]] = {node_id: [] for node_id in ids}
-    for premise, dependent in sorted(_premise_pairs(edges)):
+    for premise, dependent in pairs:
         premises[dependent].append(premise)
         dependents[premise].append(dependent)
 
+    resolved = _longest_path(ids, premises, dependents)
+    cycle_members = frozenset(node_id for node_id in ids if node_id not in resolved)
+    # The simplex runs over the acyclic core alone: a pair with an end in the
+    # residual set has no feasible rank difference to minimise, that end's own
+    # layer being the residual pass's rather than a constraint's.
+    core = tuple(pair for pair in pairs if pair[0] in resolved and pair[1] in resolved)
+    layers = _network_simplex(resolved, core)
+
+    # The residual pass reads this snapshot, so a layer assigned during the pass
+    # never feeds a later member's max() and the residual set is
+    # order-independent — a coder who walks it as a set gets the same picture.
+    snapshot = dict(layers)
+    for node_id in sorted(cycle_members):
+        placed = [snapshot[premise] for premise in premises[node_id] if premise in snapshot]
+        # Never layer 0: bedrock is where the reader looks for the corpus's most
+        # basic premises, and a broken cycle drawn there misreads the instrument
+        # at exactly the moment the instrument matters.
+        layers[node_id] = max(1, 1 + max(placed, default=-1))
+    return layers, cycle_members
+
+
+def _longest_path(
+    ids: list[str],
+    premises: dict[str, list[str]],
+    dependents: dict[str, list[str]],
+) -> dict[str, int]:
+    """Longest path from the premise-less nodes, in Kahn order.
+
+    Every node it returns is one the Kahn order resolved; the rest are the
+    residual set, and the layering that consumes this says what becomes of them.
+    The ranking is *feasible* — every premise sits at least one layer below its
+    dependent — which is what :func:`_network_simplex` needs to start from, and
+    it is the pointwise lowest such ranking.
+    """
     unresolved = {node_id: len(premises[node_id]) for node_id in ids}
     layers: dict[str, int] = {node_id: 0 for node_id in ids if not premises[node_id]}
     longest: dict[str, int] = {}
@@ -521,19 +733,205 @@ def _assign_layers(nodes: tuple[Node, ...], edges: Iterable[Edge]) -> tuple[dict
             if unresolved[dependent] == 0:
                 layers[dependent] = longest[dependent]
                 queue.append(dependent)
+    return layers
 
-    # The residual pass reads this snapshot, so a layer assigned during the pass
-    # never feeds a later member's max() and the residual set is
-    # order-independent — a coder who walks it as a set gets the same picture.
-    snapshot = dict(layers)
-    cycle_members = frozenset(node_id for node_id in ids if node_id not in snapshot)
-    for node_id in sorted(cycle_members):
-        resolved = [snapshot[premise] for premise in premises[node_id] if premise in snapshot]
-        # Never layer 0: bedrock is where the reader looks for the corpus's most
-        # basic premises, and a broken cycle drawn there misreads the instrument
-        # at exactly the moment the instrument matters.
-        layers[node_id] = max(1, 1 + max(resolved, default=-1))
-    return layers, cycle_members
+
+def _slack(pair: tuple[str, str], ranks: dict[str, int]) -> int:
+    """How many layers above its floor this pair's dependent sits — never negative on a feasible ranking."""
+    premise, dependent = pair
+    return ranks[dependent] - ranks[premise] - 1
+
+
+def _network_simplex(ranks: dict[str, int], pairs: tuple[tuple[str, str], ...]) -> dict[str, int]:
+    """The feasible ranking of least total length, one connected component at a time.
+
+    ``ranks`` is a feasible ranking to start from and ``pairs`` the premise
+    relation over the same nodes; the result ranks every node ``ranks`` did.
+    Each component is minimised on its own and then floored at layer 0, exactly
+    as the longest-path ranking left it: a component's ranks say how its own
+    claims stand relative to one another, and the sheet has nothing to say about
+    how two unconnected arguments line up.
+    """
+    incident: dict[str, list[tuple[str, str]]] = {}
+    for pair in pairs:
+        incident.setdefault(pair[0], []).append(pair)
+        incident.setdefault(pair[1], []).append(pair)
+
+    out = dict(ranks)
+    for members in _components(sorted(ranks), incident):
+        _pivot(members, sorted({pair for node_id in members for pair in incident.get(node_id, ())}), out)
+        # The component's own bedrock, wherever the pivots left it.
+        floor = min(out[node_id] for node_id in members)
+        for node_id in members:
+            out[node_id] -= floor
+    return out
+
+
+def _components(ids: list[str], incident: dict[str, list[tuple[str, str]]]) -> list[list[str]]:
+    """The connected components of the premise relation read undirected, each ascending by id.
+
+    Two claims with no premise path between them constrain each other not at
+    all, and a spanning tree spans one component — so the simplex runs once per
+    component rather than over a graph it would have to join artificially.
+    """
+    seen: set[str] = set()
+    out: list[list[str]] = []
+    for start in ids:
+        if start in seen:
+            continue
+        seen.add(start)
+        members, queue = [start], deque([start])
+        while queue:
+            for node_id in (end for pair in incident.get(queue.popleft(), ()) for end in pair):
+                if node_id not in seen:
+                    seen.add(node_id)
+                    members.append(node_id)
+                    queue.append(node_id)
+        out.append(sorted(members))
+    return out
+
+
+def _pivot(members: list[str], edges: list[tuple[str, str]], ranks: dict[str, int]) -> None:
+    """Exchange tree edges until no cut value is negative, moving ``ranks`` in place.
+
+    The loop is Gansner, Koutsofios, North & Vo (1993) §2.3 with unit weights and
+    a minimum separation of one layer. Each pivot drops a tree edge whose cut
+    value is negative — the cut value being what the sheet's total length would
+    change by if the two sides of that edge were pulled one layer apart — and
+    replaces it with the tightest edge crossing the same cut the other way,
+    which is the largest move the remaining premises leave room for. Every
+    intermediate ranking is feasible, and the total length falls or holds at
+    every pivot, so a run cut short by the cap returns a ranking no worse than
+    the one it was given.
+    """
+    if not edges:
+        return
+    tree = _tight_tree(members, edges, ranks)
+    # A node's own contribution to any cut it sits behind: every premise
+    # relation leaving it counts up, every one arriving counts down, so one
+    # subtree sum is the whole cut value (:func:`_cut_values`).
+    net = {node_id: 0 for node_id in members}
+    for premise, dependent in edges:
+        net[premise] += 1
+        net[dependent] -= 1
+
+    for _ in range(LAYERING_PIVOTS):
+        order, parent = _rooted(tree, members[0])
+        negative = [(value, pair) for pair, value in _cut_values(tree, order, parent, net).items() if value < 0]
+        if not negative:
+            return
+        # The most negative cut leaves — the move that buys the most — and its
+        # own pair breaks a tie, which is a stated key rather than the order a
+        # dict happened to hand its items over in.
+        leaving = min(negative)[1]
+        premise_side = _premise_side(leaving, order, parent, members)
+        # A negative cut value *is* one or more premise relations crossing back
+        # into the premise side, and no tree edge but the leaving one crosses
+        # the cut at all — so this minimum is over a non-empty set.
+        distance, entering = min(
+            (_slack(pair, ranks), pair)
+            for pair in edges
+            if pair not in tree and pair[0] not in premise_side and pair[1] in premise_side
+        )
+        for node_id in premise_side:
+            ranks[node_id] -= distance
+        tree.discard(leaving)
+        tree.add(entering)
+
+
+def _tight_tree(members: list[str], edges: list[tuple[str, str]], ranks: dict[str, int]) -> set[tuple[str, str]]:
+    """A spanning tree of tight edges over one component, shifting ``ranks`` until one exists.
+
+    Grown from the component's lowest id outward: a tight edge joins the tree
+    for free, and where none reaches the tree the whole of what has been grown
+    so far slides by the least slack any edge leaving it carries — which makes
+    that edge tight and leaves every ranking along the way feasible, a uniform
+    shift changing no distance inside the tree.
+    """
+    incident: dict[str, list[tuple[str, str]]] = {}
+    for pair in edges:
+        incident.setdefault(pair[0], []).append(pair)
+        incident.setdefault(pair[1], []).append(pair)
+
+    inside = {members[0]}
+    tree: set[tuple[str, str]] = set()
+    frontier = set(incident.get(members[0], ()))
+    while len(inside) < len(members):
+        frontier = {pair for pair in frontier if (pair[0] in inside) != (pair[1] in inside)}
+        crossing = sorted(frontier)
+        tight = [pair for pair in crossing if _slack(pair, ranks) == 0]
+        if not tight:
+            distance, pair = min((_slack(pair, ranks), pair) for pair in crossing)
+            # Sliding the tree up closes the slack of an edge it holds the
+            # premise end of; sliding it down closes the slack of one it holds
+            # the dependent end of.
+            step = -distance if pair[1] in inside else distance
+            for node_id in inside:
+                ranks[node_id] += step
+            continue
+        joined = tight[0]
+        tree.add(joined)
+        arrival = joined[1] if joined[0] in inside else joined[0]
+        inside.add(arrival)
+        frontier.update(incident.get(arrival, ()))
+    return tree
+
+
+def _rooted(tree: set[tuple[str, str]], root: str) -> tuple[list[str], dict[str, str]]:
+    """The spanning tree read from ``root``: every node before its children, and each node's parent."""
+    adjacency: dict[str, list[str]] = {}
+    for premise, dependent in tree:
+        adjacency.setdefault(premise, []).append(dependent)
+        adjacency.setdefault(dependent, []).append(premise)
+
+    order, queue, seen = [root], deque([root]), {root}
+    parent: dict[str, str] = {}
+    while queue:
+        current = queue.popleft()
+        for neighbour in sorted(adjacency.get(current, ())):
+            if neighbour not in seen:
+                seen.add(neighbour)
+                parent[neighbour] = current
+                order.append(neighbour)
+                queue.append(neighbour)
+    return order, parent
+
+
+def _cut_values(
+    tree: set[tuple[str, str]],
+    order: list[str],
+    parent: dict[str, str],
+    net: dict[str, int],
+) -> dict[tuple[str, str], int]:
+    """Each tree edge's cut value: the premise relations crossing it one way, less those crossing the other.
+
+    Cutting a tree edge splits the component in two, and an edge's cut value is
+    the number of premise relations running from its premise side to its
+    dependent side less the number running back. Summing ``net`` over one side
+    is the whole of that count — every relation with both ends on one side
+    contributes ``+1`` and ``−1`` and cancels — so one post-order pass prices
+    every tree edge at once, rather than a traversal apiece.
+    """
+    sums = {node_id: net[node_id] for node_id in order}
+    for node_id in reversed(order[1:]):
+        sums[parent[node_id]] += sums[node_id]
+    below = {pair: pair[0] if parent.get(pair[0]) == pair[1] else pair[1] for pair in tree}
+    return {pair: sums[child] if child == pair[0] else -sums[child] for pair, child in below.items()}
+
+
+def _premise_side(
+    leaving: tuple[str, str],
+    order: list[str],
+    parent: dict[str, str],
+    members: list[str],
+) -> set[str]:
+    """The half of the component standing on ``leaving``'s premise end, once that edge is cut."""
+    child = leaving[0] if parent.get(leaving[0]) == leaving[1] else leaving[1]
+    subtree = {child}
+    for node_id in order:  # a parent precedes its children, so one pass closes the set
+        if parent.get(node_id) in subtree:
+            subtree.add(node_id)
+    return subtree if child == leaving[0] else {node_id for node_id in members if node_id not in subtree}
 
 
 def _intervening_layers(first: int, second: int) -> range:
@@ -685,27 +1083,119 @@ def _pass(order: dict[int, list[_Key]], bands: dict[int, _Band], *, upward: bool
         order[moving] = _reordered(order[moving], neighbours, _positions(order[fixed]))
 
 
+def _pair_crossings(neighbours: dict[_Key, list[_Key]], positions: dict[_Key, int], *, left: _Key, right: _Key) -> int:
+    """How many of two occupants' segments cross across one band, with ``left`` standing left of ``right``.
+
+    One term per pair of their segments: the left occupant's crosses the right
+    occupant's exactly when the right one's far end stands left of the left
+    one's. Two segments reaching the same occupant tie and cross under neither
+    reading, which is the exclusion :func:`_band_crossings` makes from the other
+    side. Only these two occupants' own segments are counted, because no other
+    segment's crossing status can change when the two of them exchange.
+    """
+    ends = [positions[other] for other in neighbours.get(left, ())]
+    return sum(1 for other in neighbours.get(right, ()) for end in ends if positions[other] < end)
+
+
+def _side_gain(neighbours: dict[_Key, list[_Key]], positions: dict[_Key, int], *, left: _Key, right: _Key) -> int:
+    """What exchanging two adjacent occupants would cost across one band alone — negative is a gain."""
+    return _pair_crossings(neighbours, positions, left=right, right=left) - _pair_crossings(
+        neighbours, positions, left=left, right=right
+    )
+
+
+def _exchange_gain(
+    bands: dict[int, _Band],
+    positions: dict[int, dict[_Key, int]],
+    *,
+    layer: int,
+    left: _Key,
+    right: _Key,
+) -> int:
+    """What exchanging two adjacent occupants of ``layer`` would cost — negative is a gain.
+
+    Both of the layer's bands are priced, the one beneath it and the one above:
+    an exchange that unpicks a crossing below can plant one above, and the pair
+    only moves when the two together come out ahead.
+    """
+    gain = 0
+    beneath, above = bands.get(layer - 1), bands.get(layer)
+    if beneath is not None:  # this layer is that band's upper side
+        gain += _side_gain(beneath.below, positions[layer - 1], left=left, right=right)
+    if above is not None:  # and this band's lower one
+        gain += _side_gain(above.above, positions[layer + 1], left=left, right=right)
+    return gain
+
+
+def _transpose_pass(order: dict[int, list[_Key]], bands: dict[int, _Band]) -> bool:
+    """One walk over every layer's adjacent pairs, exchanging in place; ``True`` when any pair moved.
+
+    Layers ascend and each layer's pairs run left to right, so the walk is a
+    stated order rather than a container's. **A pair that gains nothing holds
+    its ground** — the exchange is made only on a strict reduction, the same tie
+    rule the barycentre pass keeps — which is also what makes the local minimum
+    a fixed point rather than a cycle of equal-scoring exchanges.
+
+    Each layer is priced against its neighbours' positions as they stand, so a
+    layer the walk has already been through is read in the order it left it.
+    """
+    moved = False
+    positions = {layer: _positions(keys) for layer, keys in order.items()}
+    for layer in sorted(order):
+        keys, row = order[layer], positions[layer]
+        for index in range(len(keys) - 1):
+            left, right = keys[index], keys[index + 1]
+            if _exchange_gain(bands, positions, layer=layer, left=left, right=right) < 0:
+                keys[index], keys[index + 1] = right, left
+                row[left], row[right] = row[right], row[left]
+                moved = True
+    return moved
+
+
+def _transpose(order: dict[int, list[_Key]], bands: dict[int, _Band]) -> None:
+    """The transpose refinement, in place: exchange adjacent occupants to a local minimum.
+
+    Gansner, Koutsofios, North & Vo (1993) §3.2 — the barycentre pass's
+    companion. It runs to its own convergence, the first pass that exchanges
+    nothing, and :data:`TRANSPOSE_PASSES` caps it. No pass can raise the
+    crossing count, every exchange strictly lowering it, so a run the cap cuts
+    short returns an order no worse than the one it was given.
+    """
+    for _ in range(TRANSPOSE_PASSES):
+        if not _transpose_pass(order, bands):
+            return
+
+
 def _snapshot(order: dict[int, list[_Key]]) -> dict[int, list[_Key]]:
     """A copy the passes cannot reach into — each layer's list is rewritten in place."""
     return {layer: list(keys) for layer, keys in order.items()}
 
 
 def _sweep(occupants: dict[int, list[_Key]], bands: dict[int, _Band]) -> dict[int, list[_Key]]:
-    """The iterated barycentre sweep, returning the best-scoring order it reached.
+    """The iterated barycentre sweep with the transpose refinement, returning the best order it reached.
 
     Best-scoring rather than last-reached: a round can trade one band's
     crossings for another's, and the start order is in the running, so the sweep
     cannot return a worse picture than the one it was handed.
+
+    **The refinement runs on each round's candidate and never on the sweep's own
+    state**: the next round's barycentre pass starts from the order the two
+    passes left, not from the exchanged one. Transpose descends to a local
+    minimum, and an order sitting in one is the wrong place to restart a
+    barycentre pass from — measured, and the module docstring carries the
+    numbers.
     """
     order = _snapshot(occupants)
     best, best_score = _snapshot(order), _crossings(order, bands)
     for _ in range(SWEEP_ROUNDS):
         _pass(order, bands, upward=True)
         _pass(order, bands, upward=False)
-        score = _crossings(order, bands)
+        candidate = _snapshot(order)
+        _transpose(candidate, bands)
+        score = _crossings(candidate, bands)
         if score >= best_score:
             break
-        best, best_score = _snapshot(order), score
+        best, best_score = candidate, score
     return best
 
 
@@ -861,8 +1351,8 @@ def _anchored(xs: dict[int, dict[_Key, int]]) -> dict[int, dict[_Key, int]]:
     return {layer: {key: position + offset for key, position in row.items()} for layer, row in xs.items()}
 
 
-def _centres(order: dict[int, list[_Key]], bands: dict[int, _Band]) -> dict[int, dict[_Key, int]]:
-    """Each occupant's centre x, by the priority method — the module docstring's phase 5.
+def _priority_xs(order: dict[int, list[_Key]], bands: dict[int, _Band]) -> dict[int, dict[_Key, int]]:
+    """Each occupant's centre **x**, by the priority method — the module docstring's phase 5.
 
     Starts from the column grid the ordering alone used to draw and returns the
     best-scoring round it reached: that grid is in the running, so the phase
@@ -889,18 +1379,255 @@ def _centres(order: dict[int, list[_Key]], bands: dict[int, _Band]) -> dict[int,
 
 
 # ---------------------------------------------------------------------------
-# Edges and the sheet extent
+# Concentric placement — one ring per layer
 # ---------------------------------------------------------------------------
 
 
-def _dummy_point(layer: int, centre: int) -> Point:
-    """Where a chain bends in one layer: its dummy's own centre, at the layer's middle.
+def _clears(first: tuple[int, int], second: tuple[int, int]) -> bool:
+    """Do two occupant centres leave their boxes the blank space the grid always gave them?
 
-    The same x a real box placed there would put its anchors on, and the layer's
-    own vertical middle — so the bend sits between the anchors it joins and a
-    chain reads as one line rather than as a stack of hinges.
+    The whole separation rule, and a property of the two placed rectangles
+    rather than of any ring: one column pitch apart horizontally **or** one
+    layer pitch apart vertically — the box plus its gutter one way, the box plus
+    the layer gap the other, which are the two magnitudes the layered
+    arrangement holds its occupants apart by.
     """
-    return Point(centre, -layer * style.LAYER_PITCH + style.BOX_HEIGHT // 2)
+    return abs(first[0] - second[0]) >= style.COLUMN_PITCH or abs(first[1] - second[1]) >= style.LAYER_PITCH
+
+
+def _rectangle(ring: int) -> list[tuple[int, int]]:
+    """Ring ``ring``'s candidate centres on an axis-aligned rectangle, counter-clockwise from the 3 o'clock ray.
+
+    Candidates sit one column pitch apart along the horizontal sides and one
+    layer pitch apart along the vertical ones, so every pair of them clears by
+    construction, and so does every pair across two consecutive rings — a ring's
+    vertical side stands a whole :data:`style.RING_STEP` of column pitch outside
+    the ring within it and its horizontal side a whole one of layer pitch. So
+    this form grows only where a layer has more occupants than the ring has
+    seats, and never because two of them crowd.
+    """
+    seats = ring * style.RING_STEP
+    if seats <= 0:
+        return [(0, 0)]
+    pitch_x, pitch_y = style.COLUMN_PITCH, style.LAYER_PITCH
+    right, top = seats * pitch_x, seats * pitch_y
+    return (
+        [(right, y * pitch_y) for y in range(0, seats + 1)]
+        + [(x * pitch_x, top) for x in range(seats - 1, -seats - 1, -1)]
+        + [(-right, y * pitch_y) for y in range(seats - 1, -seats - 1, -1)]
+        + [(x * pitch_x, -top) for x in range(-seats + 1, seats)]
+        + [(right, y * pitch_y) for y in range(-seats, 0)]
+    )
+
+
+def _ellipse(ring: int) -> list[tuple[int, int]]:
+    """Ring ``ring``'s candidate centres on a true ellipse, walked in integers.
+
+    ``y = isqrt(b²(a² − x²)) // a``, the precedent being
+    :func:`kb_tools.kb_graph.svg._fixed_length`'s use of :func:`math.isqrt` for
+    the same reason: libm is not byte-reproducible across hosts and this must
+    be.
+
+    Both axes are walked and the results unioned, because stepping x alone
+    leaves the curve coarse where it is steep and stepping y alone leaves it
+    coarse where it is flat. Within the first quadrant the walk runs from
+    ``(a, 0)`` to ``(0, b)``, along which x descends and y ascends
+    monotonically, so ordering by ``(y, -x)`` *is* the counter-clockwise order
+    and no angle is taken. The other three quadrants are that one mirrored, with
+    the shared axis points dropped.
+
+    Two similar ellipses come closer than the pitch in a diagonal sector, which
+    :func:`_place_ring` catches rather than a guessed pitch multiplier: a ring
+    that cannot seat its occupants grows, which is this form paying for itself
+    deterministically.
+    """
+    seats = ring * style.RING_STEP
+    if seats <= 0:
+        return [(0, 0)]
+    a, b = seats * style.COLUMN_PITCH, seats * style.LAYER_PITCH
+    quarter = {(a, 0), (0, b)}
+    for x in range(0, a + 1):
+        quarter.add((x, isqrt(b * b * (a * a - x * x)) // a))
+    for y in range(0, b + 1):
+        quarter.add((isqrt(a * a * (b * b - y * y)) // b, y))
+    first = sorted(quarter, key=lambda point: (point[1], -point[0]))
+    second = [(-x, y) for x, y in reversed(first)][1:]
+    third = [(-x, -y) for x, y in first][1:]
+    fourth = [(x, -y) for x, y in reversed(first)][1:-1]
+    return first + second + third + fourth
+
+
+#: The ring forms, by the name the placement is selected under. A form states
+#: the candidate positions it offers and nothing else — the separation rule is
+#: :func:`_clears`' and the seating is :func:`_place_ring`'s — so a form is one
+#: entry here and one function, and switching between them is one edit to
+#: :data:`DEFAULT_PLACEMENT`.
+RING_FORMS: dict[str, Callable[[int], list[tuple[int, int]]]] = {
+    "rectangle": _rectangle,
+    "ellipse": _ellipse,
+}
+
+
+def _place_ring(
+    candidates: list[tuple[int, int]],
+    count: int,
+    inner: list[tuple[int, int]],
+) -> tuple[list[tuple[int, int]], bool]:
+    """Seat ``count`` occupants on one ring, and say whether every one of them cleared.
+
+    Occupant ``i`` is aimed at its own fraction of the ring — an even spread,
+    and that is measured rather than preferred: packing them consecutively from
+    the cut puts *more* strokes through boxes, not fewer, because it bunches the
+    occupants where two rings are already closest together. From its aim each is
+    advanced along the candidates to the first position whose box clears
+    everything already placed on this ring and everything on the ring within it.
+
+    An occupant the advance cannot clear takes its aimed position, and the ring
+    reports itself crowded — which is what :func:`_rings` grows on. It reports a
+    seating either way, so no ring refuses to draw.
+    """
+    total = len(candidates)
+    chosen: list[tuple[int, int]] = []
+    cleared = count <= total
+    pointer = 0
+    for index in range(count):
+        aim = (index * total) // count
+        position = max(pointer, aim)
+        while position < total and not all(_clears(candidates[position], other) for other in (*chosen, *inner)):
+            position += 1
+        if position >= total:
+            position, cleared = aim, False
+        chosen.append(candidates[position])
+        pointer = position + 1
+    if len(chosen) > 1 and not _clears(chosen[0], chosen[-1]):
+        cleared = False
+    return chosen, cleared
+
+
+def _rings(counts: list[int], form: str) -> list[list[tuple[int, int]]]:
+    """Every ring's seated centres, innermost first, in the ring frame.
+
+    A ring starts one :data:`style.RING_STEP` outside the one within it — which
+    is why the radii add rather than max — and grows until the placer seats its
+    occupants clear of each other. Growth is the only way a form pays for
+    needing more room, and it is what the ellipse's diagonal sector spends;
+    :data:`RING_GROWTH` caps it, and a ring that reaches the cap draws on the
+    largest ring it reached, a crowded picture being a true one where a refused
+    picture is not.
+    """
+    shape = RING_FORMS[form]
+    seated: list[list[tuple[int, int]]] = []
+    ring = 0
+    for index, count in enumerate(counts):
+        ring = ring + 1 if index else 0
+        inner = seated[-1] if seated else []
+        limit = ring + RING_GROWTH
+        placed, cleared = _place_ring(shape(ring), count, inner)
+        while not cleared and ring < limit:
+            ring += 1
+            placed, cleared = _place_ring(shape(ring), count, inner)
+        seated.append(placed)
+    return seated
+
+
+# ---------------------------------------------------------------------------
+# Arrangements — how the swept order is stood up on the page
+# ---------------------------------------------------------------------------
+
+
+def _linear_centres(order: dict[int, list[_Key]], bands: dict[int, _Band]) -> dict[int, dict[_Key, Point]]:
+    """Every occupant's centre on the layered grid: the priority method's x, at its layer's own height.
+
+    Layer 0 sits on the baseline and the sheet grows upward into negative ``y``,
+    so a new deepest layer changes the ``viewBox`` and moves nothing already
+    placed.
+    """
+    middle = style.BOX_HEIGHT // 2
+    return {
+        layer: {key: Point(x, middle - layer * style.LAYER_PITCH) for key, x in row.items()}
+        for layer, row in _priority_xs(order, bands).items()
+    }
+
+
+def _ring_centres(
+    order: dict[int, list[_Key]],
+    bands: dict[int, _Band],
+    *,
+    form: str,
+) -> dict[int, dict[_Key, Point]]:
+    """Every occupant's centre on concentric rings — one ring per layer, in the sheet's y-down frame.
+
+    **The ring index is the layer, counting inward from bedrock**, so the
+    deepest layer — the conclusions — is the centre. That orientation is
+    measured rather than assumed: bedrock-centred leaves a 448×362 empty
+    half-side on the arXiv corpus and costs area on every corpus.
+
+    ``bands`` goes unread. Nothing pulls an occupant along a ring: the even
+    spread :func:`_place_ring` aims at is what stands in this arrangement for
+    the priority method's barycentre, and a ring has no room to give an occupant
+    that another occupant is not standing in.
+    """
+    inward = sorted(order, reverse=True)
+    seated = _rings([len(order[layer]) for layer in inward], form)
+    return {
+        # The ring frame is y-up; the sheet's is y-down.
+        layer: {key: Point(x, -y) for key, (x, y) in zip(order[layer], seated[ring], strict=True)}
+        for ring, layer in enumerate(inward)
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class _Placement:
+    """One arrangement: where its occupants stand, and where a stroke meets a box.
+
+    A layered sheet has an up, so its strokes leave a box's top edge and arrive
+    at its bottom one. A ring has none, so its strokes run centre to centre —
+    and the emitter draws the boxes opaque and last, so a stroke still leaves
+    from under its own box edge.
+    """
+
+    centres: Callable[[dict[int, list[_Key]], dict[int, _Band]], dict[int, dict[_Key, Point]]]
+    centre_anchored: bool
+
+
+#: Every arrangement :data:`PLACEMENT_ENV` will select, by name.
+PLACEMENTS: dict[str, _Placement] = {
+    "linear": _Placement(centres=_linear_centres, centre_anchored=False),
+    **{
+        f"ring-{form}": _Placement(centres=partial(_ring_centres, form=form), centre_anchored=True)
+        for form in RING_FORMS
+    },
+}
+
+#: The arrangement the sheet ships with. Changing it is this one edit, which is
+#: what keeps a form switch from being a patch.
+DEFAULT_PLACEMENT = "ring-rectangle"
+
+#: The environment variable that overrides it. **A development control**: no
+#: consumer sets it, no runner target passes it, and nothing in the toolchain
+#: reads the sheet differently for it — it exists so that two arrangements can
+#: be drawn from one build and looked at side by side.
+PLACEMENT_ENV = "KB_GRAPH_PLACEMENT"
+
+
+def _selected_placement() -> _Placement:
+    """The arrangement this render draws with: the environment's, or the shipped default.
+
+    An unrecognised name raises rather than falling back. The value arrived from
+    outside this toolchain — a developer's shell — and the vocabulary it is
+    checked against is closed and stated here; a sheet silently drawn by an
+    arrangement nobody asked for is indistinguishable from one that was, and the
+    freshness gate would report it as a graph change.
+    """
+    name = os.environ.get(PLACEMENT_ENV) or DEFAULT_PLACEMENT
+    if name not in PLACEMENTS:
+        raise ValueError(f"{PLACEMENT_ENV}={name!r} is not one of {sorted(PLACEMENTS)}")
+    return PLACEMENTS[name]
+
+
+# ---------------------------------------------------------------------------
+# Edges and the sheet extent
+# ---------------------------------------------------------------------------
 
 
 def _place_edge(
@@ -908,16 +1635,26 @@ def _place_edge(
     source: PlacedNode,
     target: PlacedNode,
     *,
-    centres: dict[int, dict[_Key, int]],
+    centres: dict[int, dict[_Key, Point]],
     cycle_members: frozenset[str],
+    centre_anchored: bool,
 ) -> PlacedEdge:
-    """The edge's chain: the lower anchor, a dummy per layer crossed, the upper anchor."""
+    """The edge's chain: the lower anchor, a bend at each occupant crossed, the upper anchor.
+
+    A bend is the dummy's own centre, which is the point a real box placed there
+    would stand on — so the bend sits between the anchors it joins and a chain
+    reads as one line rather than as a stack of hinges.
+    """
     lower, upper = sorted((source, target), key=lambda p: (p.layer, p.column))
     pair = (edge.source, edge.target)
-    bends = tuple(_dummy_point(layer, centres[layer][pair]) for layer in _intervening_layers(lower.layer, upper.layer))
+    bends = tuple(centres[layer][pair] for layer in _intervening_layers(lower.layer, upper.layer))
     return PlacedEdge(
         edge=edge,
-        points=(lower.top_centre, *bends, upper.bottom_centre),
+        points=(
+            lower.centre if centre_anchored else lower.top_centre,
+            *bends,
+            upper.centre if centre_anchored else upper.bottom_centre,
+        ),
         # Every intra-cycle edge is a back-edge defect.
         back_edge=edge.source in cycle_members and edge.target in cycle_members,
     )
@@ -995,7 +1732,6 @@ def _segment_hops(
                 crossed_segment=crossed_index,
                 x=crossing[0],
                 y=crossing[1],
-                direction=_delta(hopping_segment),
             )
 
 
@@ -1051,8 +1787,6 @@ def _delta(segment: Segment) -> tuple[int, int]:
 
 
 __all__ = [
-    "NON_PREMISE_RELATIONS",
-    "PREMISE_INVERTING_RELATION",
     "Hop",
     "PlacedEdge",
     "PlacedNode",
