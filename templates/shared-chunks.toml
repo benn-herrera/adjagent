@@ -141,9 +141,9 @@ text = '''Run the suite under ASan and UBSan; a suite that passes only without s
 [chunks.integration-artifact]
 text = '''**Integration tests exercise the delivered artifact** through its public surface (the binary/API as shipped), never in-process calls to internals — those are unit/component tests, whatever the file is named. Never create dev-only entry points or test-only verbs to make testing easier; test the real surface, and if the real surface is untestable, that is a design defect to surface, not scaffold around. Dev-only switches (e.g. expensive validation such as heap checking under custom allocators) are a last resort and live behind a config-file setting, never an environment variable.'''
 
-# Both arguments exist for architect, which has only Read/Grep/Glob: the default
-# where= would send it to write an evidence artifact its own never-modify-files
-# paragraph forbids. Every other consumer takes both defaults.
+# Both arguments exist for architect, which has no Bash: it runs nothing, so
+# neither the default forms nor the default evidence location is reachable for
+# it. Every other consumer takes both defaults.
 [chunks.verification-evidence]
 defaults.forms = '''a test, a runner-recipe invocation, or a preserved command with its captured output'''
 defaults.where = '''Where the project defines an evidence location, put it there (integration logs/artifacts included).'''
