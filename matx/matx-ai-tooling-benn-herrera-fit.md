@@ -1,6 +1,6 @@
 # MatX AI Tooling / Benn Herrera Fit
 
-[Benn Herrera](https://bennherrera.me)'s self-assessment of experience applicability to the problem space and requirements for the role of [Software Engineer, AI Tooling](https://jobs.ashbyhq.com/matx/4d6a4a63-2430-4ada-86b7-4c17cecad6b5)/[Infrastructure Engineer, AI Tooling](https://jobs.ashbyhq.com/matx/f63c692f-297c-4bf1-955d-cc0e808289bf).
+[Benn Herrera](https://bennherrera.me)'s self-assessment of experience applicability to the problem space and requirements for the role of [Infrastructure Engineer, AI Tooling](https://jobs.ashbyhq.com/matx/f63c692f-297c-4bf1-955d-cc0e808289bf).
 
 Authorship note: This document was hand-authored. AI was used for review, but the content is mine. -bph
 
