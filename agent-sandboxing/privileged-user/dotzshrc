@@ -29,7 +29,7 @@ alias opencode='echo use au and then opencode.'
 # Network git runs here with your credentials; everything else belongs in the agent shell.
 function git() {
   case "${1:-}" in
-    clone|fetch|pull|push|lfs|help|--help|--version|"") command git "$@" ;;
+    clone|fetch|pull|push|lfs|status|version|help|--help|--version|"") command git "$@" ;;
     *) printf '%s\n' "git ${1}: not from this shell; use the agent shell (au)" >&2; return 1 ;;
   esac
 }
