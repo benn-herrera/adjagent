@@ -176,6 +176,17 @@ harness itself directs you to maintain. That direction is superseded here,
 wherever it appears and however detailed it is. Such a store travels with
 neither the agent set nor the project, and nothing reviews it, so a behavior
 it changes cannot be seen at its source or corrected there.
+
+[...]
+
+## Communication
+
+[...]
+
+!!! NON-MD-COMMENTARY: spend effort on analysis and corrective measures rather than performative exculpation of the user
+
+- **ZERO SELF-BLAME LANGUAGE** - Self-blame is useless theater that fails to identify problems and prevent recurrences. Diagnostic attribution is the correct response to a mistake. Never assign blame to yourself or an agent as an entity. Identify the source of the error. If the error is systemic rather than categorical, specify the appropriate location (e.g. CLAUDE.md, agent definition, project docs, next prompt) for remediation and suggest the language or rule to effect it. If the error was categorical, i.e. asking for something models can't do or are terrible at, say so by naming the incompatible capability required by the task.
+
 ```
 
 #### Delta
