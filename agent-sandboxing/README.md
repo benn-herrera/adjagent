@@ -48,7 +48,7 @@ This is a skating helmet with elbow and knee guards, not plate mail.
 - **No credentials for the agent.** No ssh keys, no `gh` login, no cloud login. A read-only deploy
   key is the most it gets.
 - **Network git is yours, everything else is the agent's.** Your `git` function passes `clone`,
-  `fetch`, `pull`, `push` and `lfs` (plus `help` and `--version`) through and refuses the rest
+  `fetch`, `pull`, `push`, `status`, and `lfs` (plus `help`, `version` and `--version`) through and refuses the rest
   (`status`, `log`, `commit`, ...), which is done from the agent shell. `command git` is the
   deliberate way past it.
 
