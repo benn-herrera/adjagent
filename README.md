@@ -6,6 +6,10 @@ This repository generates agents rather than collecting them — a single-source
 
 This section is for installing the product into your own project and using what it delivers. For working on this repository itself, see Development, below.
 
+### Agent sandboxing (recommended, not required)
+
+Running a coding agent under your own account hands it your privileges, keys and remote credentials. [agent-sandboxing/README.md](agent-sandboxing/README.md) presents one sandboxing approach. It is a checklist with file and snippets for running an agent harness as a separate, unprivileged local user. It's accident protection, not hack-proofing, but can prevent painful mishaps.
+
 ### Install
 
 Clone this repo anywhere, then install both deployed surfaces into the consuming project — from **this** repo's root:

@@ -1,0 +1,59 @@
+function pre-path() {
+  # if dir exists and is not already in path, prepend to path
+  [[ -d "${1}" && "${PATH}" != "${1}:"* && "${PATH}" != *":${1}:"* && "${PATH}" != *":${1}" ]] && export PATH="${1}:${PATH}"
+}
+
+function safe-source() {
+  [[ -s "${1}" ]] && source "${1}"
+}
+
+function init-brew() {
+  pre-path /opt/homebrew/sbin
+  pre-path /opt/homebrew/bin
+  unset -f init-brew
+}
+
+function init-cargo() {
+  safe-source "${HOME}/.cargo/env"
+  unset -f init-cargo
+}
+
+function init-pyenv() {
+  export PYENV_ROOT="${HOME}/.pyenv"
+  pre-path "${PYENV_ROOT}/bin"
+  pre-path "${PYENV_ROOT}/shims"
+  unset -f init-pyenv
+}
+
+function init-nvm() {
+  export NVM_DIR="${HOME}/.nvm"
+  safe-source "/opt/homebrew/opt/nvm/nvm.sh"
+  safe-source "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
+  unset -f init-nvm
+}
+
+function setup-env() {
+  # the privileged user this sandbox serves: home holds the owner's utility
+  # scripts (.local/bin), PROJECTS_DIR is the tree the agent may write.
+  # toolchains live under the agent's own home, installed by the agent; the
+  # init-* functions above wire up cargo, pyenv and nvm where present.
+  export SB_OWNER_HOME="/Users/<you>"
+  export PROJECTS_DIR="${SB_OWNER_HOME}/projects"
+  init-brew
+  init-nvm
+  init-cargo
+  init-pyenv
+  pre-path "${SB_OWNER_HOME}/.local/bin"
+
+  # allow group writability. primary user of agent has agent-group membership and should not have to
+  # resort to sudo to modify or execute agent-created files.
+  umask 002
+
+  unset -f pre-path
+  unset -f safe-source
+  unset -f setup-env
+}
+
+# do not run env setup in an interactive shell.
+# setup-env will be called from .zshrc after pathhelper has done its thing.
+[[ $- != *i* ]] && setup-env

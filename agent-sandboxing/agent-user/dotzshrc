@@ -1,0 +1,23 @@
+# basic system aliases
+alias ls="/bin/ls --color -CF"
+alias cp="/bin/cp -i"
+alias mv="/bin/mv -i"
+alias rm="/bin/rm -i"
+
+# rando utility aliases
+alias activate="source ./.venv/bin/activate"
+alias reshell='exec $SHELL --login'
+alias ipaddr="ifconfig -a | grep inet | grep -v inet6 | grep -v 127 | awk '{print \$2}'"
+alias noidle="caffeinate -i taskpolicy -t 0 -l 0"
+alias cdp='cd "${PROJECTS_DIR}"'
+
+# defined in .zshenv, self-undefines
+setup-env
+
+function init-comp() {
+  autoload -Uz compinit
+  compinit -u -d "${HOME}/.zcompdump"
+  unset -f init-comp
+}
+init-comp
+cd "${AU_DIR:-${PROJECTS_DIR}}"; unset AU_DIR

@@ -1,0 +1,35 @@
+# agent utilities
+function au() { sudo su - agent-user -c "AU_DIR=$(printf %q "$PWD") exec \"\${SHELL}\" -l"; }
+alias audo='sudo -n -H -u agent-user'
+
+# shares directory and files recursively with agent-user via group ownership and write permission
+# --give|-g: transfer ownership to agent-user as well
+function aushare() {
+  local owner="${USER}"
+  local group="agent-group"
+
+  [[ "${1}" == "-g" || "${1}" == "--give" ]] && { owner="agent-user"; shift; } || true
+  case "${1}" in
+  -*) echo "bad option ${1}" 1>&2; return 1;;
+  "") echo "usage: aushare [--give] <dir-or-file1> [dir-or-file2]..." 1>&2; return 1;;
+  esac
+
+  local p paths=()
+  for p in "$@"; do [[ -L "${p}" ]] && echo "aushare: skipping symlink ${p}" 1>&2 || paths+=("${p}"); done
+  (( ${#paths} )) || return 1
+  sudo chown -hR ${owner}:agent-group "${paths[@]}"
+  sudo chmod -R g+w "${paths[@]}"
+  echo "${paths[@]}" "and any children are now owned by ${owner}:agent-group and group writable"
+}
+
+alias claude='echo use au and then claude.'
+alias claude-reaper='echo use au and then claude-reaper.'
+alias opencode='echo use au and then opencode.'
+
+# Network git runs here with your credentials; everything else belongs in the agent shell.
+function git() {
+  case "${1:-}" in
+    clone|fetch|pull|push|lfs|help|--help|--version|"") command git "$@" ;;
+    *) printf '%s\n' "git ${1}: not from this shell; use the agent shell (au)" >&2; return 1 ;;
+  esac
+}
