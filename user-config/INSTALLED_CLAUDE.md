@@ -1,4 +1,4 @@
-# Cross-project working preferences
+# Global info and directives
 
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch — throwaway builds, probe harnesses, captured output — goes in `.claude-temp/` under the active project root (a sibling of `.claude/`, not inside it — writes under `.claude/` trip the permission system's own-settings protections). If it doesn't exist, stop and say so; don't improvise a location.
