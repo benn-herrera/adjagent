@@ -32,7 +32,15 @@ Upshot: learning about new things by doing them (all out) is a standard MO with 
 Extensive, recent. 
 
 - Heavy use and development of agent-coding workflows, including constraints and verification
-  - One core aspect of what splits agent high/low competence is tasks that require multi-level balancing while writing
+  - Tasks with the pattern "repeat often, exact output required" are error-prone (agents are subsets of smart humans, not supersets of computers)
+    - Split workloads into mechanical and inference workloads
+    - At the seams provide deterministic tools to the model
+    - More error prone: model reviews input and drafts schema-correct response to push to database
+    - Less error prone: model reviews input, uses tools to create schema-correct response to push result to database. Tool gets format right, provides misuse error messages for model to self-correct
+  - Tasks where agents have external, objective validation are more reliable than those where AI is used to check AI (self or peer agent)
+    - Agents produce programs that compile/run because they have an objective feedback tool (the interpreter/compiler) for syntactic correctness
+    - Agents can produce programs and test suites that appear to be correct but miss on key points due to consistent misapprehensions in local-scope self-assessment or peer-agent-assessment
+  - Another core aspect of what splits agent high/low competence is tasks that require multi-level balancing while writing
     - Coding agents consider questions in terms of what is immediately visible but frequently fail to consider the level above them. This results in over-engineering where they don't know it is not necessary and under-engineering where they don't know it is.
     - This pattern repeats for architecture & design agents and results in inflexible choices made due to unconsidered assumptions about the larger context or risky choices for the same reason
     - Contrast: when not writing, but examining an existing artifact, AI is outstanding with multi-tier considerations. This is why a develop/review cycle using agents driven by a human can keep projects on course
