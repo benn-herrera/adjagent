@@ -31,6 +31,7 @@ Upshot: learning about new things by doing them (all out) is a standard MO with 
 #### Overlap
 Extensive, recent. 
 
+- Strong opinion: AI writing is not for personal communication, nor for topics being learned or evaluated. Writing is thinking. When a human writes something they reach the end with more fully formed and deeper knowledge. When they direct an AI to write they don't
 - Heavy use and development of agent-coding workflows, including constraints and verification
   - Tasks with the pattern "repeat often, exact output required" are error-prone (agents are subsets of smart humans, not supersets of computers)
     - Split workloads into mechanical and inference workloads
