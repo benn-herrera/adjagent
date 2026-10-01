@@ -174,11 +174,15 @@ WORK_ID_RE = re.compile(kb_schema.WORK_ID_RE)
 # is broken.
 _fmt = kb_index_lib.format_solidity
 
-# The sanctioned call that stamps a frontmatter block into a document that has
-# none, built from the CLI's own constants like every other rendered invocation
-# in this toolchain — a hand-written command line here would advertise a
-# spelling the parser need not have.
-SET_FRONTMATTER_CMD = f"{kb_util.INVOCATION} {kb_util.OP_SET_FRONTMATTER} {kb_util.VALUES_FLAG} <path.toml>"
+
+def set_frontmatter_cmd() -> str:
+    """The sanctioned call that stamps a frontmatter block into a document that has none.
+
+    Built from the CLI's own constants like every other rendered invocation in
+    this toolchain — a hand-written command line here would advertise a
+    spelling the parser need not have.
+    """
+    return f"{kb_util.invocation()} {kb_util.OP_SET_FRONTMATTER} {kb_util.VALUES_FLAG} <path.toml>"
 
 
 def strip_code_fences(text: str) -> str:
@@ -1437,6 +1441,10 @@ def main(argv: list[str] | None = None) -> int:
     if not KB.is_dir():
         print(f"FAIL: KB directory {KB} not found.", file=sys.stderr)
         return 2
+    unmigrated = kb_index_lib.unmigrated_agents_file(KB)
+    if unmigrated is not None:
+        print(f"FAIL: {unmigrated}", file=sys.stderr)
+        return 2
 
     files = collect_files()
     canonical = collect_canonical_ids()
@@ -1570,7 +1578,7 @@ def main(argv: list[str] | None = None) -> int:
             f"  -> Not refresh-fixable, for an index no less than for a leaf: "
             f"refresh splices a derived field into an existing block and leaves "
             f"a document carrying no block untouched. Stamp one on each "
-            f"document above with `{SET_FRONTMATTER_CMD}`."
+            f"document above with `{set_frontmatter_cmd()}`."
         )
 
     if confidence_failures:
@@ -1674,7 +1682,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {cid} (in {path})")
         print(
             "  -> Either back-link from a leaf's claims, or remove the entry. "
-            "Meta-claims and reading-hazards belong in CLAUDE.md / "
+            "Meta-claims and reading-hazards belong in AGENTS.md / "
             "CONVENTIONS.md / LIVING_REFERENCE.md, not here."
         )
 

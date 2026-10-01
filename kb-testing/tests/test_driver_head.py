@@ -9,7 +9,7 @@ every boundary is a real commit in a real repository — so a green here says th
 head's stages actually produce what the tail assumes it was handed.
 
 **The walk stops before ``claims-discovered``.** That stage spends one inference
-per awaiting document, and the model it spends is ``kb_claimgraph``'s own — no
+per leaf, and the model it spends is ``kb_claimgraph``'s own — no
 flag of this driver replaces it, so a suite that walked into it would spend
 inference on every run. ``stages`` is the seam ``run.execute`` already declares
 for exercising part of the table.
@@ -30,19 +30,30 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 
-from kb_tools import kb_pipeline, kb_util
-from kb_tools.kb_claimgraph import conform, tree
+from kb_tools import install_location, kb_pipeline, kb_util
+from kb_tools.kb_claimgraph import tree
 from kb_tools.kb_driver import barriers, baton, config, run, runlog, steps
 from kb_tools.kb_write.render import FRONTMATTER_OPENER
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_INSTALLER = _REPO_ROOT / "gen-defs.py"
+
+#: The in-process driver is imported from the source tree, which sits under no
+#: harness directory, so it is pointed at the consumer's installed copy — the
+#: location that copy finds for itself, and the one its subprocesses run from.
+_LOCATED = pytest.MonkeyPatch()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_install_location() -> Iterator[None]:
+    yield
+    _LOCATED.undo()
+
 
 #: How many volume roots one walk drives. Two is enough to prove the driver
 #: passes a multi-source launch through; more only lengthens the run.
@@ -79,18 +90,21 @@ def _make_fresh_consumer(root: Path, *, corpus: Path, files: Sequence[str]) -> P
     ):
         _git(root, "config", key, value)
 
-    claude = root / kb_util.CLAUDE_DIRNAME
+    claude = root / ".claude"
     claude.mkdir()
     installed = subprocess.run(
-        [sys.executable, str(_INSTALLER), "install", str(claude)],
+        [sys.executable, "-m", "gen_defs", "install", str(claude)],
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
+        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT)},
     )
     assert installed.returncode == 0, f"stdout:\n{installed.stdout}\nstderr:\n{installed.stderr}"
+    location = install_location.locate(claude / "agents" / "kb_tools" / "install_location.py")
+    _LOCATED.setattr(install_location, "current", lambda: location)
 
-    (root / ".gitignore").write_text(f"{kb_util.SCRATCH_DIRNAME}/\n", encoding="utf-8")
+    (root / ".gitignore").write_text(f"{kb_util.scratch_dirname()}/\n", encoding="utf-8")
     (root / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
     for name in files:
         shutil.copy(corpus / name, root / name)
@@ -268,8 +282,8 @@ def test_a_fresh_build_spending_no_inference_runs_to_completion(
 def test_every_stage_that_lost_rows_records_which_ones(walked_without_inference: tuple[Path, run.Result]) -> None:
     """The build record states what it did without, because the KB cannot.
 
-    A document discovery never read carries the same awaiting reason as one it
-    read and found nothing in, and a corpus whose author cross-referenced
+    A leaf the node pass never read looks exactly like one it read and found
+    nothing in, and a corpus whose author cross-referenced
     nothing leaves a tree indistinguishable from one attribution never ran over.
     Counting anything in the KB answers neither, so the ledger is where a build
     says what it spent.
@@ -299,20 +313,24 @@ def test_every_stage_that_lost_rows_records_which_ones(walked_without_inference:
             assert step_id in bodies[stage], stage
 
 
-def test_the_documents_the_dropped_rows_would_have_read_are_left_for_a_later_pass(
+def test_the_leaves_the_dropped_row_would_have_read_are_recorded_unread(
     walked_without_inference: tuple[Path, run.Result],
 ) -> None:
-    """Enrichment's entry condition, over the tree this build actually shipped.
+    """What the build did without, in the node pass's own record rather than in the KB.
 
-    ``AWAITING`` is discovery's admission ticket and nothing here consumed it:
-    every document the declared pass left awaiting still reads awaiting, so a
-    later discovery run's scope is exactly those and nothing else.
+    The record is tracked and committed, so it stands after the last boundary;
+    every leaf it lists is unread, because the one row that reads them spent a
+    model call this build did not.
     """
     consumer, _ = walked_without_inference
-    state = conform.pass_two_gate(tree.read(kb_util.kb_root(consumer)))
+    record = kb_pipeline.read_node_pass(consumer)
 
-    assert state.awaiting, "a corpus with nothing awaiting would make this vacuous"
-    assert not state.determined, "no document carries an authored reason: nothing here authored one"
+    assert record is not None and record.leaves, "a corpus with no leaf would make this vacuous"
+    assert {entry.state for entry in record.leaves.values()} == {kb_pipeline.ReadState.UNREAD}
+    tracked = subprocess.run(
+        ["git", "ls-files", kb_pipeline.NODE_PASS_RELPATH], cwd=consumer, capture_output=True, text=True, check=True
+    )
+    assert tracked.stdout.strip() == kb_pipeline.NODE_PASS_RELPATH
 
 
 def test_the_validity_gates_ran_at_both_boundaries_that_declare_one(

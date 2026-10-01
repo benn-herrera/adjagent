@@ -2,6 +2,17 @@
 
 Integration testing harness and fixtures for kb- commands, agents, and kb_tools.
 
+## Pointing a build at your own endpoint
+
+`kb_driver run --config <path.toml>` takes a `[claude]` section with two keys:
+`command`, the argv the driver spawns, and `env`, a table of variables set for it.
+That is where a local endpoint and any model routing go — there is no model key,
+and one is refused at load rather than ignored. A command-line flag wins over the
+file for the field it names, so a config can carry the endpoint while `--source`,
+`--no-inference` and `--through` stay on the line. Unrecognised keys are refused
+with their section named. Keep the file outside the repository: it is yours, not
+the project's.
+
 ## Papers this corpus does not contain
 
 The arXiv survey corpus is declared per category in `justfile` (`ARXIV_*`). Some

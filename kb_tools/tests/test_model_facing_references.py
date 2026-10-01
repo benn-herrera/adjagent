@@ -28,7 +28,6 @@ today's references would be the same hand-maintained text one layer down.
 
 import argparse
 import re
-from importlib import util as importlib_util
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -42,7 +41,6 @@ pytestmark = pytest.mark.skip(
 
 _AGENTS_SURFACE = Path(__file__).resolve().parent.parent.parent
 _AGENT_TEMPLATES = _AGENTS_SURFACE / "templates" / "agents"
-_GEN_DEFS = _AGENTS_SURFACE / "gen-defs.py"
 
 # A package resource, so ``__file__`` is the right anchor: the fragment ships
 # beside the modules it wraps, wherever kb_tools was installed.
@@ -135,7 +133,7 @@ def _consumer_targets() -> frozenset[str]:
 # The extractors
 # ---------------------------------------------------------------------------
 
-_SCRATCH_PATH = re.compile(rf"{re.escape(steps.SCRATCH_ROOT)}/(\S*)")
+_SCRATCH_PATH = re.compile(rf"{re.escape(kb_pipeline.scratch_relroot())}/(\S*)")
 _TRAILING_PUNCTUATION = re.compile(r"[.,;:)\]}`\"']+$")
 _PLACEHOLDER = re.compile(r"<[^<>]*>")
 _DOCUMENT = re.compile(r"(?<![\w.<-])([A-Za-z0-9][\w.-]*\.md)(?![\w-])")
@@ -157,7 +155,7 @@ def _documents(text: str) -> list[str]:
 
 def _ops(text: str) -> list[str]:
     """Every token the sanctioned invocation is followed by."""
-    return re.findall(rf"{re.escape(kb_util.INVOCATION)}\s+(\S+)", text)
+    return re.findall(rf"{re.escape(kb_util.invocation())}\s+(\S+)", text)
 
 
 def _layout_pattern(entry: str) -> re.Pattern[str]:
@@ -252,12 +250,9 @@ def test_every_seat_the_step_table_holds_is_a_shipped_definition() -> None:
     declare several outputs and none of them has to be its stem.
     """
     assert _AGENT_TEMPLATES.is_dir(), f"no agent template tree at {_AGENT_TEMPLATES}"
-    spec = importlib_util.spec_from_file_location("gen_defs", _GEN_DEFS)
-    assert spec is not None and spec.loader is not None
-    gen_defs = importlib_util.module_from_spec(spec)
-    spec.loader.exec_module(gen_defs)
+    from gen_defs.discovery import split_outputs
 
-    shipped = {name for template in _AGENT_TEMPLATES.rglob("*.md.tmpl") for name in gen_defs.split_outputs(template)[0]}
+    shipped = {name for template in _AGENT_TEMPLATES.rglob("*.md.tmpl") for name in split_outputs(template)[0]}
 
     missing = sorted(_declared_seats() - shipped)
 

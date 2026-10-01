@@ -1,4 +1,4 @@
-@.claude/agents/guest-liaison.md
+@@!hrn.project-harness-dir!@/agents/guest-liaison.md
 
 You are starting a new guest-model session via the `guest-liaison` subagent.
 
@@ -31,7 +31,7 @@ Parse `$ARGUMENTS` as follows:
    - `READ_ROOT` — optional; the directory every file request from the guest model is bounded to. Offer the project root as the default, or a narrower corpus directory if the user names one.
 
 4. **New session only** — collect the system-prompt source:
-   - **Agent identity**: a path under `.claude/agents/` (e.g. `.claude/agents/applied-mathematician.md`). The liaison will extract the definition's body, frontmatter stripped.
+   - **Agent identity**: a path under `@!hrn.project-harness-dir!@/agents/` (e.g. `@!hrn.project-harness-dir!@/agents/applied-mathematician.md`). The liaison will extract the definition's body, frontmatter stripped.
    - **Default**: if the user declines to pick an agent, the liaison will use the literal string `You are a helpful assistant.`
 
 5. **New session only** — collect the **initial message** to send to the guest model.

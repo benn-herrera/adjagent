@@ -9,13 +9,24 @@ The first two come off the same span, which is why it is worth naming — a
 block's title and the anchor that locates it cannot disagree, so the affordance
 does not reduce inference here, it eliminates it.
 
-**C-inf — documents the author marked nothing in. Inferential.** One ask per
-document, for the results that document states — each as a self-contained block
-carrying the **quote** the result begins at, in the document's own words, the
-**label** of that sentence in the render (:mod:`label`) the ask shows, and a
-**title** the seat authors — or for a reason it states none. The ask is put
-through :mod:`ask`'s injected seam; everything below the ask in this module is
-comparison against the document itself.
+**C-inf — the node pass over every leaf's readable prose. Inferential.** One ask
+per leaf, over the prose outside its headings and its claim-bearing, proof and definition blocks
+(:mod:`prose`), for two things at once. The results that prose states, each as a
+self-contained block carrying the **quote** the result begins at, in the
+document's own words, the **label** of that sentence in the render (:mod:`label`)
+the ask shows, and a **title** the seat authors. And **one verdict per obligated
+paragraph** — each paragraph holding a resolving cross-reference is a claim, with
+a title, or not a claim. A leaf hosting no claim block may instead give a reason
+it states none. The ask is put through :mod:`ask`'s injected seam; everything
+below the ask in this module is comparison against the document itself.
+
+**Verdict completeness is the one strong check.** The verdicts an answer
+carries are compared against the obligated paragraphs the render yields:
+a verdict naming anything else, or a second one for the same paragraph, is
+refused, and a paragraph left without one is a failure of the whole answer. It
+earns a whole-document re-ask of its own (:data:`VERDICT_RETRY_BUDGET`) naming
+the paragraphs missed, and a second miss stops the stage naming them. Whether a
+paragraph *is* a claim is never checked.
 
 **The model quotes; the tool addresses.** A quote is a lookup key and never
 content: it is resolved against the document by
@@ -60,7 +71,7 @@ title that is not one line, two blocks resolving to one sentence, a slice no
 widening makes unique — costs that block and is not re-asked, there being no
 menu that would answer it. The document keeps every other claim either way.
 
-**The whole-document re-ask is what is left, and it has one allowance**
+**The whole-document re-ask has one allowance besides the verdicts' own**
 (:data:`ANSWER_RETRY_BUDGET`): an answer carrying no readable block at all, and
 an answer whose *reason* is the whole answer and fails its checks. A second
 failure of the first kind stops the stage naming the document; a second failure
@@ -69,32 +80,36 @@ continues, because a missing sentence loses prose nobody had. Only a call that
 did not *complete* escapes both, there being no answer to ask again about
 (:mod:`ask`).
 
-**A document whose blocks all fail is not a document that states nothing.** It
-takes :data:`UNANCHORED_REASON` — the fifth :class:`~.conform.Determination` —
-which records that the anchoring failed and never that there was nothing to
-anchor. Recording the latter on the strength of a model failing to point into a
-document writes a falsehood into the graph, and that ruling is preserved rather
-than overturned.
+**A document whose records all fail is not a document that states nothing.**
+Its outcome is *unanchored*, recorded in the node-pass record and nowhere in the
+KB: the leaf keeps whatever it already carried. Recording that it states
+nothing, on the strength of a model failing to point into it, would write a
+falsehood into the graph.
 """
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol, TypeAlias
 
-from .. import kb_index_lib
+from .. import kb_index_lib, kb_pipeline
 from ..kb_write import ops, render, store
-from . import label
+from . import label, prose
 from .inventory import Block, Inventory, MathFence
 from .report import AnswerFormatError, ClaimGraphError
 from .tree import DECLARING_KINDS, Document, Tree, document_kind, strip_markers
 
-#: How many times one **document** is asked again. Spent on the two failures
-#: that are the whole answer's rather than one claim's: an answer carrying no
-#: readable block at all, and an answer whose reason is the answer and fails its
-#: checks. Nothing else reaches it — a claim that will not anchor has a re-ask of
-#: its own, and a claim that anchors and cannot be written has none.
+#: How many times one **document** is asked again for an answer that could not
+#: be read, or whose reason is the answer and fails its checks. Nothing else
+#: reaches it — missing verdicts hold an allowance of their own, a claim that
+#: will not anchor has a re-ask of its own, and a claim that anchors and cannot
+#: be written has none.
 ANSWER_RETRY_BUDGET = 1
+
+#: How many times one document is asked again because its answer left an
+#: obligated paragraph without a verdict. Held apart from
+#: :data:`ANSWER_RETRY_BUDGET` so that no other failure can have spent it first.
+VERDICT_RETRY_BUDGET = 1
 
 #: The most **per-claim** re-asks one document costs. One re-ask per unresolved
 #: claim, under this ceiling; when it trips, every still-unresolved claim is
@@ -109,34 +124,14 @@ REASK_CEILING = 4
 
 #: The most calls one document costs: the first ask, plus each allowance once.
 #: Derived rather than declared, so no arrangement of failures walks past it.
-CALL_BUDGET = 1 + ANSWER_RETRY_BUDGET + REASK_CEILING
+CALL_BUDGET = 1 + ANSWER_RETRY_BUDGET + VERDICT_RETRY_BUDGET + REASK_CEILING
 
 #: What a document takes when the ask returned no record and no reason this
 #: stage could carry. It states what happened rather than a finding about the
-#: document, and it is deliberately not the reason an awaiting document already
-#: carries: a document handed its own standing reason back still reads
-#: ``AWAITING``, and every re-run would reopen it forever.
+#: document.
 SUBSTITUTED_NO_CLAIM_REASON = (
     "Claim identification read this document's prose and recorded no result; the reason it returned could "
     "not be carried, so this sentence stands in its place."
-)
-
-#: What a document takes when identification named results and **none of them
-#: could be anchored**. It is the fifth :class:`~.conform.Determination`, and it
-#: is not :attr:`~.conform.Determination.AUTHORED_NO_CLAIM`: this records that
-#: we could not anchor what the document stated, never that it stated nothing.
-#:
-#: **Compared by identity, and that literal is load-bearing**, on
-#: :data:`assemble.UNSCANNED_REASON`'s terms and for its reasons — reword it
-#: without moving :func:`conform.determination` with it and a failed document
-#: reads as somebody's finding. It lives here rather than beside that one
-#: because :mod:`assemble` imports from this module and the reverse would close
-#: a cycle; it has no consumer outside this package, which is the property that
-#: kept the other literal in ``kb_index_lib``.
-UNANCHORED_REASON = (
-    "Claim identification read this document's prose, named results in it, and could not anchor any of them "
-    "in the document's own words. This records that the anchoring failed and not that the document states "
-    "no result; it is a finding about this run, and nobody has ruled on what this document states."
 )
 
 #: The bytes a Tier-2 marker occupies while C4 asks what placing one would do to
@@ -231,8 +226,8 @@ def unmarked_documents(tree: Tree, inventory: Inventory) -> tuple[str, ...]:
     Mechanical: the complement of stage B's hosting set, narrowed to the one
     kind a claim declaration is asked of. An index is asked for no declaration
     by anything, so a stage reading one for claims would have nowhere to put
-    them. This is a report line and not C-inf's ask surface, which is
-    :func:`conform.pass_two_gate`.
+    them. This is a report line and not C-inf's ask surface, which is the
+    node-pass record's leaves.
     """
     hosting = inventory.hosting_documents()
     return tuple(
@@ -247,7 +242,7 @@ def unmarked_documents(tree: Tree, inventory: Inventory) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Reading:
-    """One awaiting document, as C-inf reads it.
+    """One leaf, as C-inf reads it.
 
     ``text`` is the document as it sits on disk — the bytes
     ``mark-claim-in-leaf`` will match a locator against — so the pre-check and
@@ -268,17 +263,29 @@ class Reading:
     document: str
     text: str
     body: str
-    #: The ``no-claim:`` reason this document carries right now — the sentence
-    #: that makes it awaiting. It is read off the document rather than compared
-    #: against a constant because the question C4 asks is whether the answer
-    #: says anything the document does not already say, and handing this
-    #: sentence back would leave the document awaiting forever.
+    #: The ``no-claim:`` reason this document carries right now. The answer may
+    #: not hand it back: the question asked is what the document states, and
+    #: this sentence says only that it carries no author-marked block.
     standing_reason: str = ""
     fences: tuple[MathFence, ...] = ()
-    #: The claim-bearing blocks in this document. Empty for every document in
-    #: C-inf's scope, and carried so that the exclusion is asserted rather than
-    #: assumed.
+    #: The claim-bearing blocks in this document. Their titles are this
+    #: document's already, and no claim the answer names may share one.
     blocks: tuple[Block, ...] = ()
+    #: The lines the render shows unlabelled: every heading, and every line of a
+    #: claim-bearing, proof or definition block (:func:`prose.excluded_lines`).
+    excluded: frozenset[int] = frozenset()
+    #: The paragraphs owed a verdict (:func:`prose.obligated`).
+    obligated: tuple[label.Paragraph, ...] = ()
+
+    @property
+    def may_decline(self) -> bool:
+        """Whether the answer may be a sentence saying this document states nothing.
+
+        Only a leaf hosting no claim block may: a leaf hosting one states that
+        block's result whatever its prose does, and ``claims:`` and
+        ``no-claim:`` are mutually exclusive in its frontmatter.
+        """
+        return not self.blocks
 
     @property
     def render(self) -> label.Render:
@@ -289,7 +296,12 @@ class Reading:
         through are the same computation over the same bytes, and neither can go
         stale against the other.
         """
-        return label.render(self.body, fences=self.fences)
+        return label.render(self.body, fences=self.fences, excluded=self.excluded)
+
+    def paragraph_ids(self) -> dict[str, label.Paragraph]:
+        """Every obligated paragraph by the identifier an answer names it by: its label range."""
+        rendered = self.render
+        return {rendered.span_of(paragraph).locator: paragraph for paragraph in self.obligated}
 
 
 @dataclass(frozen=True)
@@ -310,8 +322,18 @@ class Record:
 
 
 @dataclass(frozen=True)
+class Verdict:
+    """One obligated paragraph as the answer judged it: a claim, with its title, or not a claim."""
+
+    #: The paragraph's identifier as the answer wrote it (:meth:`Reading.paragraph_ids`).
+    paragraph: str
+    #: The claim's title where the verdict is a claim, and ``None`` where it is not.
+    title: str | None
+
+
+@dataclass(frozen=True)
 class Answer:
-    """What one ask returned. Exactly one of claims and a reason is an answer — a check, not a grammar.
+    """What one ask returned: records, verdicts, and a reason — a check, not a grammar, says which combine.
 
     ``refusals`` are the blocks the parse could not read. They are carried
     rather than raised because a malformed block costs that block and nothing
@@ -319,8 +341,17 @@ class Answer:
     """
 
     claims: tuple[Record, ...] = ()
+    verdicts: tuple[Verdict, ...] = ()
     no_claim: str = ""
+    #: The answer says the leaf's prose states nothing beyond the claims its
+    #: blocks already carry — the one positive "none" a leaf that may not
+    #: decline can give.
+    nothing_further: bool = False
     refusals: tuple[str, ...] = ()
+
+    @property
+    def mints(self) -> bool:
+        return bool(self.claims) or any(verdict.title is not None for verdict in self.verdicts)
 
 
 class Trigger(StrEnum):
@@ -377,29 +408,32 @@ class Telemetry:
     reasked: int = 0
     resolved_on_reask: int = 0
     unresolved: int = 0
+    verdicts: int = 0
 
     def line(self) -> str:
         return (
             f"{self.returned} block(s) returned, {self.resolved} anchored on the first ask ({self.folded} of "
             f"them by folded match), {self.reasked} re-asked and {self.resolved_on_reask} anchored, "
-            f"{self.unresolved} recorded unresolved"
+            f"{self.unresolved} recorded unresolved; {self.verdicts} paragraph verdict(s)"
         )
 
 
 class Identifier(Protocol):
     """How C-inf reaches inference. The seam every check over this stage replaces."""
 
-    def identify(self, reading: Reading, *, report: str | None) -> Answer:
-        """The results ``reading`` states, or the reason it states none.
+    def identify(self, reading: Reading, *, report: str | None, missing: tuple[str, ...] = ()) -> Answer:
+        """The results ``reading`` states and its obligated paragraphs' verdicts, or the reason it states none.
 
         ``report`` is ``None`` on the first ask and carries the mechanical
         failure the previous answer produced on the re-ask — never a critique,
-        never a request to try harder.
+        never a request to try harder. ``missing`` is the verdicts' own re-ask:
+        the identifiers of the paragraphs the previous answer left unjudged. At
+        most one of the two is given.
 
         Raises :class:`~.report.AnswerFormatError` where an answer arrived and
         could not be read at all: a block left unclosed, or a returned text
-        carrying no block of either kind. A block that is merely malformed
-        arrives in :attr:`Answer.refusals`.
+        carrying no block of any kind.
+        A block that is merely malformed arrives in :attr:`Answer.refusals`.
         """
 
     def re_ask(self, reading: Reading, unresolved: Unresolved) -> Record | None:
@@ -424,11 +458,11 @@ class ProseClaim:
     ``excerpt`` is both the evidence and the Tier-2 locator: it is the **tool's
     own slice** of the document, cut at the resolved extent and widened where it
     had to be to appear exactly once, and it is what ``mark-claim-in-leaf``
-    anchors the marker at. ``line`` is where it located, carried for the report
-    and for the exclusions checked against it, and ``locator`` is the label range
-    of the **semantic extent** — the span before any widening, which is what the
-    claim actually covers. The two differ exactly where findability demanded
-    more bytes than meaning did.
+    anchors the marker at. ``line`` is where it located, carried for the report,
+    and ``locator`` is the label range of the **semantic extent** — the span
+    before any widening, which is what the claim actually covers. The two differ
+    exactly where findability demanded more bytes than meaning did. A
+    yes-verdict's claim is its whole paragraph, so for it the two agree.
     """
 
     document: str
@@ -440,22 +474,15 @@ class ProseClaim:
 
 @dataclass(frozen=True)
 class Identification:
-    """One document's outcome: the claims it states, or the reason it states none."""
+    """One leaf's outcome: the claims it states and its paragraphs' verdicts, or the reason it states none."""
 
     document: str
     claims: tuple[ProseClaim, ...] = ()
     no_claim: str | None = None
+    verdicts: tuple[kb_pipeline.ParagraphVerdict, ...] = ()
+    #: Results were named and none of them anchored. Recorded, never written into the KB.
+    unanchored: bool = False
     telemetry: Telemetry = Telemetry()
-
-    @property
-    def anchored_nothing(self) -> bool:
-        """This document named results and none of them could be anchored.
-
-        Read off the reserved literal rather than off a flag beside it, on
-        :func:`conform.determination`'s terms: one statement of the state, and
-        the frontmatter the run writes is that statement.
-        """
-        return self.no_claim == UNANCHORED_REASON
 
 
 @dataclass(frozen=True)
@@ -469,23 +496,34 @@ class Checked:
 
     claims: tuple[ProseClaim, ...] = ()
     no_claim: str = ""
+    verdicts: tuple[kb_pipeline.ParagraphVerdict, ...] = ()
     #: Blocks that would not anchor. Each costs one re-ask of its own, under
     #: :data:`REASK_CEILING`, carrying the sentences the tool found.
     unresolved: tuple[Unresolved, ...] = ()
     #: Blocks that cost their claim and are not re-asked: one the parse could
-    #: not read, a start lying inside an author-marked block, a title that is
-    #: not one line or is a second record's too, two blocks resolving to one
-    #: sentence, a slice still repeated across its whole paragraph, a span an
-    #: earlier claim's marker would make unfindable, or an answer returning
-    #: claim blocks *and* a reason. No menu would answer any of them.
+    #: not read, a record starting in a paragraph owed a verdict, a verdict
+    #: naming no such paragraph or naming one twice, a title that is not one
+    #: line or is a second claim's too, two blocks resolving to one sentence, a
+    #: slice still repeated across its whole paragraph, a span an earlier
+    #: claim's marker would make unfindable, a no-claim sentence from a leaf
+    #: hosting claims, or an answer returning claims *and* a reason. No menu
+    #: would answer any of them.
     refusals: tuple[str, ...] = ()
     #: Failed checks over the no-claim sentence alone.
     reason_failures: tuple[str, ...] = ()
+    #: Obligated paragraphs no accepted verdict covers, by identifier.
+    missing: tuple[str, ...] = ()
+    #: Yes-verdict paragraphs the write path could not mark: each stops the stage.
+    unplaceable: tuple[str, ...] = ()
 
     @property
     def failures(self) -> tuple[str, ...]:
-        return tuple(f"{missed.record.quote[:60]!r} ({missed.trigger})" for missed in self.unresolved) + (
-            self.refusals + self.reason_failures
+        return (
+            tuple(f"{missed.record.quote[:60]!r} ({missed.trigger})" for missed in self.unresolved)
+            + self.refusals
+            + self.reason_failures
+            + tuple(f"{paragraph} carries no verdict" for paragraph in self.missing)
+            + self.unplaceable
         )
 
 
@@ -494,16 +532,20 @@ class IdentificationError(ClaimGraphError):
 
 
 def reading_of(document: Document, inventory: Inventory) -> Reading:
-    """One document's :class:`Reading`, off stage B's inventory."""
+    """One leaf's :class:`Reading`, off stage B's inventory."""
     fields = kb_index_lib.parse_frontmatter(document.text) or {}
     reason = fields.get("no-claim")
+    leaf = prose.readable(document, inventory)
+    body = strip_markers(document.text)
     return Reading(
         document=document.path,
         text=document.text,
-        body=strip_markers(document.text),
+        body=body,
         standing_reason=reason if isinstance(reason, str) else "",
         fences=tuple(fence for fence in inventory.fences if fence.document == document.path),
         blocks=tuple(block for block in inventory.claim_blocks() if block.document == document.path),
+        excluded=prose.excluded_lines(body, (block for block in inventory.blocks if block.document == document.path)),
+        obligated=prose.obligated(leaf, inventory),
     )
 
 
@@ -629,6 +671,7 @@ def _resolve(record: Record, reading: Reading, rendered: label.Render) -> _Ancho
     The exclusion (:func:`_opens_a_claim`) is a **filter over the hits**, taken
     before the count is: it is policy about what a claim opening may be, and it
     lives here rather than in the matcher, which stays a search over a string.
+    A hit inside an excluded block has no label, so it is never a start.
     """
     resolution = ops.resolve_excerpt(reading.body, record.quote)
     starts: list[label.Sentence] = []
@@ -669,14 +712,132 @@ def _extent(start: label.Sentence, rendered: label.Render, starts: frozenset[str
     return label.Span(sentences=tuple(family[first:last]))
 
 
-def _place(anchors: Sequence[_Anchor], reading: Reading, rendered: label.Render) -> tuple[list[ProseClaim], list[str]]:
-    """The anchored blocks as claims the write path can land, and the ones that cost their claim.
+def _one_line(title: str) -> str | None:
+    stripped = title.strip()
+    return stripped if stripped and "\n" not in stripped else None
 
-    Runs over the anchors **together**, because three of the four checks here
-    are about the set: the extents partition their paragraph, no two claims may
-    share a title, and marking one claim changes the document the next claim's
-    slice is findable in.
+
+def _judged(answer: Answer, reading: Reading) -> tuple[dict[int, Verdict], list[str], set[str]]:
+    """The verdicts that stand, by the line their paragraph begins on, and the ones refused.
+
+    Refused: a verdict naming a paragraph not owed one, a second verdict for
+    one paragraph, and a claim verdict whose title is not one line or is a
+    title this document already has. Also the titles the accepted claim
+    verdicts take, which no record may take after them.
     """
+    ids = reading.paragraph_ids()
+    titles = {block.title for block in reading.blocks if block.title is not None}
+    accepted: dict[int, Verdict] = {}
+    refusals: list[str] = []
+    for verdict in answer.verdicts:
+        paragraph = ids.get(verdict.paragraph)
+        if paragraph is None:
+            refusals.append(
+                f"a verdict names {verdict.paragraph!r}, which is none of the paragraphs owed one: "
+                f"{', '.join(ids) or 'none'}"
+            )
+            continue
+        if paragraph.start in accepted:
+            refusals.append(f"{verdict.paragraph} carries a second verdict; a paragraph is judged once")
+            continue
+        if verdict.title is not None:
+            title = _one_line(verdict.title)
+            if title is None or title in titles:
+                refusals.append(
+                    f"the title for paragraph {verdict.paragraph} is empty, runs over more than one line, or is "
+                    f"a title this document's claims already carry; a register entry is bound back to its "
+                    f"site by title"
+                )
+                continue
+            titles.add(title)
+            verdict = Verdict(paragraph=verdict.paragraph, title=title)
+        accepted[paragraph.start] = verdict
+    return accepted, refusals, titles
+
+
+def missing_verdicts(answer: Answer, reading: Reading) -> tuple[str, ...]:
+    """The obligated paragraphs no verdict of ``answer`` stands for, by identifier. A comparison."""
+    accepted, _, _ = _judged(answer, reading)
+    return tuple(name for name, paragraph in reading.paragraph_ids().items() if paragraph.start not in accepted)
+
+
+@dataclass(frozen=True)
+class _Placement:
+    """One span to mark: a record's extent, or a yes-verdict's whole paragraph."""
+
+    span: label.Span
+    title: str
+    #: The paragraph identifier where this is a yes-verdict, ``None`` for a record.
+    paragraph: str | None
+
+
+def _place(
+    placements: Sequence[_Placement], reading: Reading, rendered: label.Render
+) -> tuple[list[ProseClaim], list[str], list[str]]:
+    """The spans as claims the write path can land, the records refused, and the verdicts unplaceable.
+
+    Runs over them **together** and in document order, because marking one
+    claim changes the document the next claim's slice is findable in.
+    """
+    order = {sentence.label: index for index, sentence in enumerate(rendered.sentences)}
+    located: list[ProseClaim] = []
+    refusals: list[str] = []
+    unplaceable: list[str] = []
+
+    for placement in sorted(placements, key=lambda found: order[found.span.sentences[0].label]):
+        at = placement.span.locator
+        # The locator the op is handed must additionally be unique in the
+        # document, and widening within the paragraph is the lever for that
+        # alone — it names no wider result. The question asked is
+        # `ops.excerpt_lines`', which is the matching `mark-claim-in-leaf` will
+        # itself run, rather than a second implementation of it.
+        widened = _unique_slice(placement.span, rendered, reading.text)
+        if widened is None:
+            failure = (
+                f"the result at {at} runs to words that still appear more than once when widened to their "
+                f"whole paragraph, so no single line of the document names them"
+            )
+            (refusals if placement.paragraph is None else unplaceable).append(failure)
+            continue
+        span, line = widened
+        # A marker goes on the end of the first line of its own slice's span and
+        # each slice is matched against the document the previous marker left,
+        # so a slice crossing an earlier claim's marked line is unfindable by the
+        # time its turn comes — and the op's refusal would land after this
+        # document's register entries and frontmatter. It is a match over bytes
+        # and not a comparison of line numbers, two starts sharing a physical
+        # line being the ordinary case.
+        broken = next(
+            (
+                placed
+                for placed in located
+                if ops.excerpt_lines(_with_marker(reading.text, placed.line), span.excerpt) != (line,)
+            ),
+            None,
+        )
+        if broken is not None:
+            failure = (
+                f"the result at {at} runs across line {broken.line + 1}, where marking {broken.locator} puts that "
+                f"claim's own marker, so this span would no longer be findable by the time it is marked"
+            )
+            (refusals if placement.paragraph is None else unplaceable).append(failure)
+            continue
+        located.append(
+            ProseClaim(
+                document=reading.document,
+                title=placement.title,
+                excerpt=span.excerpt,
+                line=line,
+                locator=placement.span.locator,
+            )
+        )
+    return located, refusals, unplaceable
+
+
+def _record_placements(
+    anchors: Sequence[_Anchor], reading: Reading, rendered: label.Render, titles: set[str]
+) -> tuple[list[_Placement], list[str]]:
+    """The anchored records as spans to mark, and the ones that cost their claim first."""
     refusals: list[str] = []
     by_start: dict[str, _Anchor] = {}
     for anchor in anchors:
@@ -689,38 +850,18 @@ def _place(anchors: Sequence[_Anchor], reading: Reading, rendered: label.Render)
             continue
         by_start[anchor.start.label] = anchor
 
-    order = {sentence.label: index for index, sentence in enumerate(rendered.sentences)}
+    owed = {paragraph.index for paragraph in reading.obligated}
     named = frozenset(by_start)
-    located: list[ProseClaim] = []
-    titles: set[str] = set()
-
-    for anchor in sorted(by_start.values(), key=lambda bound: order[bound.start.label]):
-        extent = _extent(anchor.start, rendered, named)
-        # The locator the op is handed must additionally be unique in the
-        # document, and widening within the paragraph is the lever for that
-        # alone — it names no wider result. The question asked is
-        # `ops.excerpt_lines`', which is the matching `mark-claim-in-leaf` will
-        # itself run, rather than a second implementation of it.
-        widened = _unique_slice(extent, rendered, reading.text)
-        if widened is None:
+    placements: list[_Placement] = []
+    for anchor in by_start.values():
+        if anchor.start.paragraph in owed:
             refusals.append(
-                f"the result beginning at {anchor.start.label} runs to words that still appear more than "
-                f"once when widened to their whole paragraph, so no single line of the document names them"
+                f"the result beginning at {anchor.start.label} lies in a paragraph owed a verdict; that "
+                f"paragraph is judged whole by its verdict and takes no record"
             )
             continue
-        span, line = widened
-        # Vacuous over C-inf's scope by construction, and asserted rather than
-        # assumed, because it is what keeps this stage and C-mech from
-        # double-counting if the scope ever widens.
-        block = next((site for site in reading.blocks if site.start <= line < site.end), None)
-        if block is not None:
-            refusals.append(
-                f"the result beginning at {anchor.start.label} lands at line {line + 1}, inside the author's "
-                f"own {block.environment} block, whose claim is declared already"
-            )
-            continue
-        title = anchor.record.title.strip()
-        if not title or "\n" in title:
+        title = _one_line(anchor.record.title)
+        if title is None:
             refusals.append(
                 f"the title for {anchor.start.label} is empty or runs over more than one line; a title is "
                 f"one paragraph on one line"
@@ -728,65 +869,32 @@ def _place(anchors: Sequence[_Anchor], reading: Reading, rendered: label.Render)
             continue
         if title in titles:
             refusals.append(
-                f"{title!r} is the title of two records in this document, and a register entry is bound "
-                f"back to its site by title"
-            )
-            continue
-        # The last check, and it is here rather than in the write path because
-        # the op cannot refuse cheaply: a marker goes on the end of the first
-        # line of its own slice's span and each slice is matched against the
-        # document the previous marker left, so a slice crossing an earlier
-        # record's marked line is unfindable by the time its turn comes — and
-        # the refusal lands after this document's register entries and
-        # frontmatter, leaving it reading as hosting claims it carries no marker
-        # for, outside every re-run's scope. Two starts sharing a physical line
-        # is the ordinary case now and is not what this refuses: what it refuses
-        # is the placement that breaks, which is why it is a match over bytes
-        # and not a comparison of line numbers.
-        broken = next(
-            (
-                placed
-                for placed in located
-                if ops.excerpt_lines(_with_marker(reading.text, placed.line), span.excerpt) != (line,)
-            ),
-            None,
-        )
-        if broken is not None:
-            refusals.append(
-                f"the result beginning at {anchor.start.label} runs across line {broken.line + 1}, where "
-                f"marking {broken.locator} puts that claim's own marker, so this span would no longer be "
-                f"findable by the time it is marked"
+                f"{title!r} is a title another claim of this document already carries, and a register entry "
+                f"is bound back to its site by title"
             )
             continue
         titles.add(title)
-        located.append(
-            ProseClaim(
-                document=reading.document,
-                title=title,
-                excerpt=span.excerpt,
-                line=line,
-                locator=extent.locator,
-            )
-        )
-    return located, refusals
+        placements.append(_Placement(span=_extent(anchor.start, rendered, named), title=title, paragraph=None))
+    return placements, refusals
 
 
 def _check_reason(answer: Answer, reading: Reading) -> tuple[str, ...]:
     """The checks over the no-claim sentence, which apply only where the reason *is* the answer.
 
-    An empty reason beside claim blocks is the ordinary shape, not a reason that
+    An empty reason beside claims is the ordinary shape, not a reason that
     failed a check — and a document whose blocks were all unreadable has not
-    said it states nothing, so it is not asked to have given a reason.
+    said it states nothing, so it is not asked to have given a reason. A leaf
+    hosting claims is never asked for one.
     """
     reason = answer.no_claim.strip()
-    if answer.claims or answer.refusals:
+    if not reading.may_decline or answer.mints or answer.refusals:
         return ()
     if not reason:
-        return ("the answer returns neither a claim block nor a reason for there being none",)
+        return ("the answer mints no claim and gives no reason for there being none",)
     if reason == reading.standing_reason:
         return (
-            "the reason is the sentence this document already carries, which is the sentence that makes it "
-            "awaiting; writing it back would leave it awaiting and reopen it on every re-run",
+            "the reason is the sentence this document already carries, which says only that it carries no "
+            "author-marked claim block and nothing about what its prose states",
         )
     if "\n" in reason:
         return ("the reason runs over more than one line; it is one paragraph on one line",)
@@ -796,20 +904,25 @@ def _check_reason(answer: Answer, reading: Reading) -> tuple[str, ...]:
 def _check(answer: Answer, reading: Reading, re_ask: ReAsk | None) -> tuple[Checked, Telemetry]:
     """C4 over one answer, with the per-claim re-asks spent where a re-asker is supplied.
 
-    Two phases, and the split is what makes the per-claim re-ask expressible:
-    **resolution** binds each block to the sentence its result begins at, and
-    what fails there is re-askable with evidence; **placement** computes the
-    extents, cuts the slices and refuses what the write path could not land, and
-    what fails there costs its claim.
+    Two phases for the records, and the split is what makes the per-claim
+    re-ask expressible: **resolution** binds each block to the sentence its
+    result begins at, and what fails there is re-askable with evidence;
+    **placement** computes the extents, cuts the slices and refuses what the
+    write path could not land, and what fails there costs its claim. The
+    verdicts need no resolution: a paragraph is named by its identifier, and
+    placing a yes-verdict's claim is its whole paragraph's slice.
 
     One worker for both callers, because a check that re-derived the stage's own
     resolution would be a second reading of the same answer — and the two would
     then be able to disagree about what this document states.
     """
     rendered = reading.render
+    accepted, refusals, titles = _judged(answer, reading)
+    refusals = list(answer.refusals) + refusals
+    ids = reading.paragraph_ids()
+
     anchors: list[_Anchor] = []
     missed: list[Unresolved] = []
-    refusals = list(answer.refusals)
     for record in answer.claims:
         bound = _resolve(record, reading, rendered)
         if isinstance(bound, _Anchor):
@@ -841,19 +954,50 @@ def _check(answer: Answer, reading: Reading, re_ask: ReAsk | None) -> tuple[Chec
         else:
             still.append(bound)
 
-    located, placement = _place(anchors, reading, rendered)
-    refusals += placement
-    if answer.claims and answer.no_claim.strip():
+    placements, costs = _record_placements(anchors, reading, rendered, titles)
+    refusals += costs
+    placements += [
+        _Placement(span=rendered.span_of(ids[verdict.paragraph]), title=verdict.title, paragraph=verdict.paragraph)
+        for verdict in accepted.values()
+        if verdict.title is not None
+    ]
+    located, costs, unplaceable = _place(placements, reading, rendered)
+    refusals += costs
+    if answer.no_claim.strip() and not reading.may_decline:
         refusals.append(
-            "the answer returns claim blocks and a no-claim block. Exactly one of the two is an answer; both "
+            "the answer returns a no-claim sentence for a document hosting claims; such a document states its "
+            "blocks' results whatever its prose does, and takes no such sentence"
+        )
+    if answer.nothing_further and reading.may_decline:
+        refusals.append(
+            "the answer says nothing further for a document hosting no claim block; such a document says it "
+            "states nothing with its no-claim sentence"
+        )
+    elif answer.nothing_further and answer.mints:
+        refusals.append(
+            "the answer returns claims and says nothing further; both together says the document does and does "
+            "not state a further result"
+        )
+    if answer.mints and answer.no_claim.strip():
+        refusals.append(
+            "the answer returns claims and a no-claim block. Exactly one of the two is an answer; both "
             "together says the document does and does not state a result"
         )
     checked = Checked(
         claims=tuple(located),
-        no_claim="" if answer.claims else answer.no_claim.strip(),
+        no_claim="" if answer.mints or not reading.may_decline else answer.no_claim.strip(),
+        verdicts=tuple(
+            kb_pipeline.ParagraphVerdict(
+                line=line,
+                judgement=kb_pipeline.Judgement.NOT_A_CLAIM if verdict.title is None else kb_pipeline.Judgement.CLAIM,
+            )
+            for line, verdict in sorted(accepted.items())
+        ),
         unresolved=tuple(still),
         refusals=tuple(refusals),
         reason_failures=_check_reason(answer, reading),
+        missing=tuple(name for name, paragraph in ids.items() if paragraph.start not in accepted),
+        unplaceable=tuple(unplaceable),
     )
     telemetry = Telemetry(
         returned=len(answer.claims) + len(answer.refusals),
@@ -862,6 +1006,7 @@ def _check(answer: Answer, reading: Reading, re_ask: ReAsk | None) -> tuple[Chec
         reasked=reasked,
         resolved_on_reask=len(anchors) - resolved,
         unresolved=len(still) + len(refusals),
+        verdicts=len(accepted),
     )
     return checked, telemetry
 
@@ -883,59 +1028,80 @@ def _failure_report(failures: Sequence[str]) -> str:
 
 
 def _ask_document(reading: Reading, identifier: Identifier) -> tuple[Answer, tuple[str, ...]]:
-    """The first ask and the one allowance the *document* holds, and what the answer's reason cost.
+    """The first ask and the allowances the *document* holds, and what the answer's reason cost.
 
-    Two failures reach here and no others: an answer that could not be read at
-    all, and an answer whose reason is the whole answer and fails its checks.
-    Everything else is one claim's business.
+    Three failures reach here and no others, and two allowances answer them:
+    an answer that could not be read at all, and an answer whose reason is the
+    whole answer and fails its checks, share :data:`ANSWER_RETRY_BUDGET`; an
+    answer leaving an obligated paragraph without a verdict spends
+    :data:`VERDICT_RETRY_BUDGET`, which nothing else touches. Everything else is
+    one claim's business.
     """
+    answer_retries = ANSWER_RETRY_BUDGET
+    verdict_retries = VERDICT_RETRY_BUDGET
     report: str | None = None
-    for attempt in range(1 + ANSWER_RETRY_BUDGET):
-        last = attempt == ANSWER_RETRY_BUDGET
+    missing: tuple[str, ...] = ()
+    while True:
         try:
-            answer = identifier.identify(reading, report=report)
+            answer = identifier.identify(reading, report=report, missing=missing)
         except AnswerFormatError as refusal:
-            if last:
+            if not answer_retries:
                 raise IdentificationError(
                     refusal.check,
                     f"{reading.document}: what came back could not be read twice: {refusal.detail}. Nothing "
                     f"was written for this document, and it is not recorded as stating nothing — an answer "
                     f"that could not be read is not evidence about what the document says",
                 ) from refusal
-            report = refusal.detail
+            answer_retries -= 1
+            report, missing = refusal.detail, ()
+            continue
+        absent = missing_verdicts(answer, reading)
+        if absent:
+            if not verdict_retries:
+                raise IdentificationError(
+                    "verdict-coverage",
+                    f"{reading.document}: paragraph(s) {', '.join(absent)} still carry no verdict after the "
+                    f"re-ask that named them. Every paragraph of readable prose holding a cross-reference is "
+                    f"owed one, and nothing was written for this document",
+                )
+            verdict_retries -= 1
+            report, missing = None, absent
             continue
         reason_failures = _check_reason(answer, reading)
-        if reason_failures and not last:
-            report = _failure_report(reason_failures)
+        if reason_failures and answer_retries:
+            answer_retries -= 1
+            report, missing = _failure_report(reason_failures), ()
             continue
         return answer, reason_failures
-    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 def infer_claims(reading: Reading, identifier: Identifier) -> Identification:
-    """C3 and C4 over one document: the ask, the checks, and one re-ask per unresolved claim.
+    """C3 and C4 over one leaf: the ask, the checks, and one re-ask per unresolved claim.
 
-    Returns what the document states or the reason it states none — never both,
-    and never an empty result standing in for a failure.
+    Returns what the leaf states and its paragraphs' verdicts, or the reason it
+    states none — never both, and never an empty result standing in for a
+    failure.
 
-    **A failure costs the claim it belongs to.** A quote that will not settle on
-    one sentence is re-asked on its own, under :data:`REASK_CEILING`; when that
-    trips, every still-unresolved claim is recorded unresolved, and the ceiling
-    and the recording compose with no special case. A document landing even one
-    claim takes ``HOSTS_CLAIMS`` and leaves ``AWAITING`` as it always did; one
-    landing none of the results it named takes :data:`UNANCHORED_REASON`, which
-    is the fifth determination and not a finding that the document states
-    nothing.
+    **A failure costs the claim it belongs to**, except a yes-verdict's: its
+    claim is its paragraph, so a paragraph with no unique slice has no claim to
+    cost and stops the stage naming the document and the paragraph.
     """
     answer, reason_failures = _ask_document(reading, identifier)
     checked, telemetry = _check(answer, reading, lambda unresolved: identifier.re_ask(reading, unresolved))
+    if checked.unplaceable:
+        raise IdentificationError(
+            "verdict-placement",
+            f"{reading.document}: {'; '.join(checked.unplaceable)}. A claim judged in a paragraph is that whole "
+            f"paragraph, and nothing was written for this document",
+        )
 
-    if checked.claims:
-        return Identification(document=reading.document, claims=checked.claims, telemetry=telemetry)
-    if answer.claims or answer.refusals:
-        return Identification(document=reading.document, no_claim=UNANCHORED_REASON, telemetry=telemetry)
-    return Identification(
-        document=reading.document,
-        no_claim=SUBSTITUTED_NO_CLAIM_REASON if reason_failures else checked.no_claim,
-        telemetry=telemetry,
+    found = Identification(
+        document=reading.document, claims=checked.claims, verdicts=checked.verdicts, telemetry=telemetry
     )
+    if checked.claims:
+        return found
+    if answer.mints or answer.claims or answer.refusals:
+        return replace(found, unanchored=True)
+    if not reading.may_decline:
+        return found
+    return replace(found, no_claim=SUBSTITUTED_NO_CLAIM_REASON if reason_failures else checked.no_claim)

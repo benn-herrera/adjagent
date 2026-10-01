@@ -9,7 +9,7 @@ How the helpers in `liaison_tools/` are built to satisfy SPEC.md. Cites SPEC's r
 | `post-openai.py` | The wire transport. Builds and POSTs one SSE-streamed chat-completions request, demuxes and reassembles the stream, classifies the outcome (complete / incomplete / empty / error), and emits the canonical stdout contract. |
 | `msg-util.py` | The messages-file mutator. Three modes (`init`/`append`/`validate`) over a JSON turn array, with a lock + scratch-file + atomic-replace discipline protecting concurrent read-modify-write. |
 | `relay-driver.py` | The corpus-relay eval instrument. Composes `post-openai.py` and `msg-util.py` into a scripted, budgeted READ/LIST/GREP question-answering loop against a read-only corpus. |
-| `__init__.py` | Package marker only — the tools are shell-invoked, never imported, and this file exists so `tests/` collects under a stable module path. |
+| `__init__.py` | Package marker only, so `tests/` collects under a stable module path. The tools themselves are hyphenated — not legal module names — so nothing in the package imports another; each is a command, and the tests load the ones they exercise by file path through `importlib`. |
 | `tests/` | The verification suite (see Test Layout, below); excluded from the shipped-package install per root `SPEC.md`. |
 
 Root `ARCHITECTURE.md`'s "Liaisons + liaison_tools" bullet (Subsystem Map) states the one-paragraph version of the composition this document expands: `guest-liaison.md` and `mad-guest-liaison.md` share these helpers rather than each reimplementing the wire protocol or the messages-file format, and `relay-driver.py` composes the same two helpers into a separate, scripted loop.
@@ -17,6 +17,8 @@ Root `ARCHITECTURE.md`'s "Liaisons + liaison_tools" bullet (Subsystem Map) state
 ## Wire Transport Internals (`post-openai.py`)
 
 **One opener, redirects refused.** `_OPENER = urllib.request.build_opener(_NoRedirectHandler)` is the single `urllib` opener every request in the module goes through. `_NoRedirectHandler.redirect_request` raises `RedirectRefused` unconditionally rather than following a `3xx` — the mechanism behind SPEC's "redirects are never followed" guarantee, because `urllib`'s default handler copies request headers, `Authorization` included, to the redirect target.
+
+**Key containment.** `post-openai.py` is the only file in the package that opens the key file, reading it straight into memory with `Path.read_text`. `msg-util.py` never touches it, and `relay-driver.py` passes `API_KEY_FILE`'s path through to the transport without reading it. SPEC's API Key Handling guarantees rest on that confinement: a key read added anywhere else is a second place the key can leak from.
 
 **SSE demux (`demux_sse`).** Reads a line iterator, ignores blank lines and `:`-prefixed comments, and only inspects `data:`-prefixed lines. `[DONE]` ends the stream cleanly; a line whose parsed JSON carries an `error` object is reported to stderr immediately and short-circuits with status 2. Returns `(chunks, status)` where status is 0 (clean), 1 (no data events at all), 2 (mid-stream error), or 3 (stream ended without `[DONE]` but had data). `chunk_payloads`, when supplied, collects each payload string verbatim for `DEBUG_RESPONSE` dumps; `raw_buffer` collects every raw line for error reporting.
 
@@ -42,7 +44,7 @@ Root `ARCHITECTURE.md`'s "Liaisons + liaison_tools" bullet (Subsystem Map) state
 
 ## `relay-driver.py`: Composition and the Conversation Loop
 
-**Composition, not reimplementation.** `_TOOLS_DIR = Path(__file__).resolve().parent` locates `msg-util.py` and `post-openai.py` as siblings; every messages-file mutation goes through `_msg_init`/`_msg_append` (thin `subprocess.run` wrappers around `msg-util.py`), and every model call goes through `_post`/`_post_with_retries` (wrapping `post-openai.py` by default, with `post_fn` injectable for tests). The module docstring states this as a contract highlight: `post-openai.py` is the *only* transport and `msg-util.py` the *only* messages-file mutator this driver uses. The mutator is now importable, but the driver still spawns it: one invocation shape for every caller, and the subprocess boundary is what keeps the driver honest about using the same argv contract the liaison definitions do.
+**Composition, not reimplementation.** `_TOOLS_DIR = Path(__file__).resolve().parent` locates `msg-util.py` and `post-openai.py` as siblings; every messages-file mutation goes through `_msg_init`/`_msg_append` (thin `subprocess.run` wrappers around `msg-util.py`), and every model call goes through `_post`/`_post_with_retries` (wrapping `post-openai.py` by default, with `post_fn` injectable for tests). The module docstring states this as a contract highlight: `post-openai.py` is the *only* transport and `msg-util.py` the *only* messages-file mutator this driver uses. The driver spawns the mutator rather than loading it: one invocation shape for every caller, and the subprocess boundary is what keeps the driver honest about using the same argv contract the liaison definitions do.
 
 **One protocol definition, two consumers.** `FINAL_MARKER`, `TOOL_CALLS_MARKER`, `MIN_REQUEST_LINES`/`MAX_REQUEST_LINES`, and `_REQUEST_VERBS` are the sole source constants; `REQUEST_LINE_RE` (what `classify()` parses) and `PROTOCOL_BLOCK` (the text shown to the guest model, appended to the caller's system prompt by `build_system_prompt`) are both derived from them, so the classifier grammar and the text describing that grammar cannot drift apart by construction.
 
@@ -56,7 +58,7 @@ Root `ARCHITECTURE.md`'s "Liaisons + liaison_tools" bullet (Subsystem Map) state
 
 **TOOL_CALLS stub-and-continue.** A `tool_calls` classification is answered with a stub line per named call (`Tool call <name> is not available in this environment.`) rather than being serviced. The inline comment marks this as load-bearing, not a placeholder: a guest model fabricated never-relayed file content after a stubbed tool-call turn in a live run, so the stub text is a hardening layer against exactly that, not a TODO to "improve away."
 
-**`--env-file` allowlist (`CONNECTION_ENV_KEYS`).** `load_connection_env` parses `KEY=VALUE` lines and refuses any key outside the closed set (`API_BASE_URL`, `API_KEY_FILE`, `MODEL`, `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE`) — the inline comment states the reason: an env file is exactly the kind of thing that gets pasted around, and without this list a "connection env file" could set `PATH`/`PYTHONPATH`/`PYTHONSTARTUP` on the very process that reads the API key.
+**`--env-file` allowlist (`CONNECTION_ENV_KEYS`).** `load_connection_env` parses `KEY=VALUE` lines and refuses any key outside the closed set (`API_BASE_URL`, `API_KEY_FILE`, `MODEL`, `ALLOW_HTTP`, `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE`) — the inline comment states the reason: an env file is exactly the kind of thing that gets pasted around, and without this list a "connection env file" could set `PATH`/`PYTHONPATH`/`PYTHONSTARTUP` on the very process that reads the API key.
 
 ## Test Layout
 
@@ -68,11 +70,14 @@ Root `ARCHITECTURE.md`'s "Liaisons + liaison_tools" bullet (Subsystem Map) state
 
 Per-suite case counts are not recorded here — nothing would check them; `just test liaison_tools` reports the live numbers.
 
-All three suites are stdlib-only and never touch the network beyond `127.0.0.1` (per each module's own docstring). Run via `just test liaison_tools` (or `just test` for the full tooling suite: `kb_tools` + `liaison_tools` + `gen-defs`), which sets `PYTHONPATH` to the repository root so the shipped packages import as top-level packages — the same import shape a consumer gets with `PYTHONPATH=.claude/agents` after install.
+All three suites are stdlib-only and never touch the network beyond `127.0.0.1` (per each module's own docstring). Run via `just test liaison_tools` (or `just test` for the full tooling suite: `kb_tools` + `liaison_tools` + `gen_defs`), which sets `PYTHONPATH` to the repository root so the shipped packages import as top-level packages — the same import shape a consumer gets with `PYTHONPATH=.claude/agents` after install.
 
 ## Caller Composition
 
-| Caller | Tools it invokes |
-|---|---|
-| `guest-liaison.md`, `mad-guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body. Frontmatter stripping is not a tool here: each definition runs the `sed` range itself. |
-| `relay-driver.py` | `post-openai.py` (sole transport), `msg-util.py` (sole messages-file mutator). |
+| Caller | Tools it invokes | Session layout |
+|---|---|---|
+| `guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body | `guest-session/<topic>/messages.json` + `tmp/` |
+| `mad-guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body | `liaison-messages.json` + `tmp/` inside the run directory its referee hands it, which differs between a review run and a design run |
+| `relay-driver.py` | `post-openai.py` (sole transport), `msg-util.py` (sole messages-file mutator) | its own, under `--output-dir` (SPEC.md, `relay-driver.py`) |
+
+Frontmatter stripping is not a tool here: each liaison definition runs the `sed` range itself. No layout above is asserted or checked by anything in this package (SPEC.md, Paths).

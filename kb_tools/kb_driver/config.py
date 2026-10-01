@@ -126,10 +126,15 @@ DEFAULT_SILENCE_SECONDS = 600
 DEFAULT_TRANSPORT_ATTEMPTS = 3
 DEFAULT_BACKOFF_SECONDS = (5, 30)
 DEFAULT_LOG_LEVEL = "INFO"
-# The run directory's parent: LATEST lives here, one <run-id> directory per run
-# beneath it. The run lock does NOT — it is anchored at the repo root, so that
-# changing this value cannot buy a second concurrent run.
-DEFAULT_RUN_DIR = ".claude-temp/kb-driver"
+
+
+def default_run_dir() -> str:
+    """The run directory's parent: LATEST lives here, one <run-id> directory per run beneath it.
+
+    The run lock does NOT — it is anchored at the repo root, so that changing
+    this value cannot buy a second concurrent run.
+    """
+    return f"{kb_util.scratch_dirname()}/kb-driver"
 
 
 class ConfigError(ValueError):
@@ -167,7 +172,7 @@ class RunSection:
     #: durable path rather than restated here. A charter is an input that must
     #: already stand when the build opens, and the ``start`` boundary's body
     #: names it permanently — so the default may never point into
-    #: ``.claude-temp/``, which staging deletes wholesale: a ledger entry naming
+    #: the scratch directory, which staging deletes wholesale: a ledger entry naming
     #: a wiped path names nothing. Configurable all the same, for a consumer
     #: that keeps its charter elsewhere in the tree.
     charter_file: Path
@@ -522,7 +527,7 @@ def run_dir_parent(parent: Path | str | None) -> str:
     otherwise not look in, and a resume that dropped it would file the resumed
     run's evidence under the default parent and strand the first run's.
     """
-    if parent is None or str(parent) == DEFAULT_RUN_DIR:
+    if parent is None or str(parent) == default_run_dir():
         return ""
     return str(parent)
 
@@ -647,7 +652,7 @@ def load(
     configured_run_dir = _str_field(log_raw, "run_dir", section="log", default="")
     log = LogSection(
         level=_str_field(log_raw, "level", section="log", default=DEFAULT_LOG_LEVEL, choices=LOG_LEVELS),
-        run_dir=run_dir if run_dir is not None else Path(configured_run_dir or DEFAULT_RUN_DIR),
+        run_dir=run_dir if run_dir is not None else Path(configured_run_dir or default_run_dir()),
     )
     _refuse_unknown_keys(log_raw, section="log")
 

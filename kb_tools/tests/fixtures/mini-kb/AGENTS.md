@@ -1,7 +1,7 @@
 # Mini-KB — Cross-Cutting Invariants
 
 Synthetic framework-node source for `parse_framework_nodes` tests. Structured
-to match the real `kb-root/CLAUDE.md`: `### INVARIANT-XX:` headings
+to match a pre-split `kb-root/AGENTS.md`: `### INVARIANT-XX:` headings
 for invariants, `- Axiom N: **Title** —` bullets for axioms.
 
 ---

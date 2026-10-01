@@ -19,7 +19,7 @@ set positional-arguments := true
 PROJECT_ROOT := justfile_directory()
 import 'python.just'
 
-GEN := "gen-defs.py"
+GEN := "gen_defs"
 
 default:
     @just --list | grep -v '\[dev\]'
@@ -27,15 +27,15 @@ default:
     @just --list | grep '\[dev\]'
 
 # The one deployment shape: copies both deployed
-# surfaces into <target>/.claude/ via gen-defs.py install, minus test suites
+# surfaces into <target>/.claude/ via gen_defs install, minus test suites
 # and caches, stamping each copied file with an !INSTALLED! banner carrying the
 # hash of the content below it. Every flag forwards verbatim to
-# gen-defs.py — --family, --model-tier-map, --model-pin-map, --verbose, and
-# whatever it adds next: gen-defs.py's argparse is the single source of flag
+# gen_defs — --family, --model-tier-map, --model-pin-map, --verbose, and
+# whatever it adds next: gen_defs's argparse is the single source of flag
 # truth, so an unknown spelling fails there — stripping `--` to
 # make the params positional would make the command line worse, not better. The
 # one flag this recipe intercepts is `--subdir=X`, because it addresses this
-# recipe's own target-composition, not gen-defs.py: read only when it is the
+# recipe's own target-composition, not gen_defs: read only when it is the
 # *first* flag, stripped before the rest forwards. Absent, subdir defaults
 # to `.claude`; `--subdir=` (empty value) installs directly into <target>.
 [doc("install into <project>/<subdir>/; <project> is the first non-flag argument; [--subdir=<subdir>] defaults to .claude/")]
@@ -73,20 +73,14 @@ install target *args:
     mkdir -p "${root}"
     # ${arr[@]+...} guard: expanding an empty array trips `set -u` on the
     # bash 3.2 that macOS ships at /bin/bash.
-    python3 "{{PROJECT_ROOT / GEN}}" install "${root}" ${args[@]+"${args[@]}"}
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install "${root}" ${args[@]+"${args[@]}"}
 
-# The live ~/.claude/CLAUDE.md is a real file, deliberately not a symlink:
-# updates flow only by explicit act, never silently. This recipe is the repo ->
-# home direction, and it is a thin invocation on purpose — every protection the
-# integration carries (base recovery from git history, the four cases, the
-# report before the write, the bail path) lives in gen-defs.py, which is the
-# one place anything in this repository writes into space an operator owns. The
-# reverse flow (home -> repo) stays a manual diff-and-adopt; this recipe never
-# reads live changes back. A live file no published revision merges cleanly
-# against leaves the recipe nonzero with ~/.claude/CLAUDE.md untouched.
-[doc("safe-merge user-config/INSTALLED_CLAUDE.md into ~/.claude/CLAUDE.md")]
-install-claude-md:
-    python3 "{{PROJECT_ROOT / GEN}}" install-claude-md "${HOME}/.claude/CLAUDE.md"
+# A thin invocation on purpose: every protection the agents-file install
+# carries — block-only replacement, malformed-marker refusal, dirty-templates
+# refusal, the rolling backup — lives in gen_defs/agents_file.py.
+[doc("install the harness agents file for <harness> (claude, opencode) into <dir> — e.g. ~/.claude, ~/.config/opencode, or a project root — replacing only the adjagent block and keeping everything outside it")]
+install-agents-file harness dir:
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install-agents-file "$1" "$2"
 
 
 ##
@@ -123,29 +117,58 @@ RENDERED_DIR := "rendered"
 # they differ instead of reading as unexplained drift. A comparison's flag sets
 # belong to the invocations that produced each side, never to what an operator
 # recalls between them.
-[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) — every other --* flag forwards verbatim to gen-defs.py via install (--family, --model-tier-map, --model-pin-map, --verbose, ...)")]
+#
+# The slot also holds the harness agents file for one harness, at
+# harness/<name>/<the harness's agents-file name>, written through the
+# render-agents-file recipe: `--harness=NAME` (default claude) is the one flag
+# this recipe reads as well as forwards, in any position — the agents file and
+# the install's definitions render under the same harness — and it is
+# recorded in RENDER-FLAGS.txt like any other flag given. That recipe never
+# overwrites a differing file, so the slot's harness/ subtree is removed
+# before each render; the file's name is read from the harness file ahead of
+# the install, so an unknown harness fails before the slot is touched further.
+[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — every --* flag, --harness included, forwards verbatim to gen_defs via install (--family, --model-tier-map, --model-pin-map, --harness, --verbose, ...)")]
 render *args:
     #!/usr/bin/env bash
     set -euo pipefail
     slug="latest"
+    harness="claude"
     args=()
+    recorded=()
     have_slug=""
     for arg in "$@"; do
         if [[ -z "${have_slug}" && "${arg}" != --* ]]; then
             slug="${arg}"
             have_slug=1
+        elif [[ "${arg}" == --harness=* ]]; then
+            harness="${arg#--harness=}"
+            args+=("${arg}")
+            recorded+=("${arg}")
         else
             args+=("${arg}")
+            recorded+=("${arg}")
         fi
     done
     out="{{PROJECT_ROOT / RENDERED_DIR}}/${slug}"
     mkdir -p "${out}"
-    if [[ "${#args[@]}" -gt 0 ]]; then
-        printf '%s\n' "${args[@]}" > "${out}/RENDER-FLAGS.txt"
+    if [[ "${#recorded[@]}" -gt 0 ]]; then
+        printf '%s\n' "${recorded[@]}" > "${out}/RENDER-FLAGS.txt"
     else
         : > "${out}/RENDER-FLAGS.txt"
     fi
+    agents_file="$(PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} dev agents-file-for-harness "${harness}")"
+    rm -rf "${out}/harness"
+    mkdir -p "${out}/harness/${harness}"
+    "{{just_executable()}}" --justfile "{{justfile()}}" render-agents-file "${harness}" "${out}/harness/${harness}/${agents_file}"
     "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${args[@]+"${args[@]}"}
+
+# A stable interface, not a convenience: a later revision of this repository
+# invokes it inside a worktree of an earlier one to render that revision's
+# agents file. Its name and its two arguments never change incompatibly; the
+# body, and the gen_defs verb behind it, may.
+[private]
+render-agents-file harness out:
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} dev render-agents-file "$1" "$2"
 
 # Reports and never gates: a difference between two slots is the expected
 # outcome of doing work, so `diff -rq`'s exit 1 is swallowed. Only a
@@ -180,14 +203,14 @@ render-diff a="reference" b="latest":
 # above), so the pytest arguments that follow it start at $2 — `"${@:2}"`
 # forwards them to pytest as the separate words `just` received them as,
 # not as a re-split string, so `-k "a and b"` survives as one argument.
-[doc("[dev] run tooling python tests: no argument runs all three (kb_tools + liaison_tools + gen-defs); a surface argument (kb_tools, liaison_tools, gen-defs) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
+[doc("[dev] run tooling python tests: no argument runs all three (kb_tools + liaison_tools + gen_defs); a surface argument (kb_tools, liaison_tools, gen_defs) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
 test surface="" *pytest_args: _venv
     PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -m pytest {{ \
       if surface == "" { "kb_tools/tests liaison_tools/tests tests" } \
       else if surface == "kb_tools" { "kb_tools/tests" } \
       else if surface == "liaison_tools" { "liaison_tools/tests" } \
-      else if surface == "gen-defs" { "tests" } \
-      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen-defs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
+      else if surface == "gen_defs" { "tests" } \
+      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen_defs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }} "${@:2}"
 
 # The one writer of kb_tools/tests/fixtures/graph/mini-kb.svg is
@@ -213,8 +236,8 @@ format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
-        black_isort_paths=(kb_tools liaison_tools tests gen-defs.py dupe_sweep.py)
-        flake8_paths=(kb_tools liaison_tools gen-defs.py dupe_sweep.py tests)
+        black_isort_paths=(kb_tools liaison_tools tests gen_defs dupe_sweep.py)
+        flake8_paths=(kb_tools liaison_tools gen_defs dupe_sweep.py tests)
     else
         black_isort_paths=("$@")
         flake8_paths=("$@")

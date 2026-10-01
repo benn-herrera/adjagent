@@ -41,7 +41,7 @@ upgrade:
 * the prompt reaches the process **on stdin, never on argv** — a positional
   argv prompt does not replace the stdin one, it merges with it, at exit 0 and
   with no warning. :func:`build_argv` therefore has no parameter through which
-  prompt text could reach argv;
+  the prompt could reach argv as a positional;
 * ``start_new_session=True`` plus ``killpg`` — killing the parent ``claude``
   does not reap the workers its Agent tool dispatched;
 * **the capture reads to stream end, never to the first ``result``.** A session
@@ -266,26 +266,59 @@ def _require(condition: object, message: str) -> None:
     raise ValueError(message)
 
 
-def build_argv(*, command: Sequence[str], permission_mode: str, agent: str | None = None) -> list[str]:
+def build_argv(
+    *,
+    command: Sequence[str],
+    permission_mode: str,
+    agent: str | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    no_tools: bool = False,
+    strict_mcp_config: bool = False,
+    settings: str | None = None,
+    bare: bool = False,
+) -> list[str]:
     """Assemble the call's argv. ``agent`` names a seat definition; omitting it is seatless.
 
     **The prompt is not here and cannot be.** There is no parameter on this
-    function through which prompt text could reach argv, which is the whole
-    defence: a positional argv prompt merges with the stdin one instead of
-    replacing it, and both texts reach the turn at exit 0 with no warning.
+    function through which the prompt could reach argv as a positional, which
+    is the whole defence: a positional argv prompt merges with the stdin one
+    instead of replacing it, and both texts reach the turn at exit 0 with no
+    warning. ``system_prompt`` is a flag's value (``--system-prompt``), which
+    replaces the CLI's default system prompt and merges with nothing.
 
-    No ``--model`` either, and for the same structural reason: an explicit
-    ``--model`` overrides a seat's frontmatter pin, so "the pin is
+    ``model`` exists for a call that carries a seat's pin without ``--agent``
+    (:func:`~.seat.ask_reader`), and for nothing else: an explicit ``--model``
+    overrides a seat's frontmatter pin, so beside ``--agent`` "the pin is
     authoritative" holds only for as long as the flag is omitted. A caller
     supplying its own ``command`` prefix owns what is in it.
+
+    ``no_tools`` disables every built-in tool (``--tools ""``);
+    ``strict_mcp_config`` loads no MCP server, none being named by an
+    ``--mcp-config``; ``settings`` is a settings JSON document layered over the
+    ones the CLI reads. ``bare`` is the CLI's minimal mode, which also stops it
+    reading the keychain — so a login held there does not authenticate a bare
+    call.
     """
     _require(bool(command), "the command is empty")
     _require(bool(permission_mode), "the permission mode is empty")
     _require(agent is None or bool(agent.strip()), "the agent name is empty")
 
     tail = ["-p"]
+    if bare:
+        tail.append("--bare")
     if agent is not None:
         tail += ["--agent", agent]
+    if model is not None:
+        tail += ["--model", model]
+    if system_prompt is not None:
+        tail += ["--system-prompt", system_prompt]
+    if no_tools:
+        tail += ["--tools", ""]
+    if strict_mcp_config:
+        tail.append("--strict-mcp-config")
+    if settings is not None:
+        tail += ["--settings", settings]
     tail += ["--permission-mode", permission_mode, *STREAM_FLAGS]
     return [*command, *tail]
 
@@ -689,6 +722,12 @@ def call_claude(
     prompt: str,
     cwd: Path,
     agent: str | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    no_tools: bool = False,
+    strict_mcp_config: bool = False,
+    settings: str | None = None,
+    bare: bool = False,
     permission_mode: str = DEFAULT_PERMISSION_MODE,
     silence_seconds: float = DEFAULT_SILENCE_SECONDS,
     total_seconds: float = DEFAULT_TOTAL_SECONDS,
@@ -704,10 +743,12 @@ def call_claude(
     speaking or a bound expires, whichever comes first. Budget against
     ``total_seconds``, not against an expectation of one turn.
 
-    ``agent`` names a CLI subagent definition; ``capture_path`` is appended to
-    with every stream line verbatim, and its directory must exist. ``invoker``
-    replaces the subprocess seam, which is how a caller tests against no model
-    at all.
+    ``agent`` names a CLI subagent definition; ``model``, ``system_prompt``,
+    ``no_tools``, ``strict_mcp_config``, ``settings`` and ``bare`` are
+    :func:`build_argv`'s. ``capture_path`` is
+    appended to with every stream line verbatim, and its directory must exist.
+    ``invoker`` replaces the subprocess seam, which is how a caller tests
+    against no model at all.
 
     The returned text is the last ``result`` event's, which is empty when the
     call never produced one — a possibility on every outcome including a
@@ -718,7 +759,17 @@ def call_claude(
     end, including never starting, is a returned :class:`Outcome`.
     """
     _require(prompt.strip(), "the prompt is empty")
-    argv = build_argv(command=command, permission_mode=permission_mode, agent=agent)
+    argv = build_argv(
+        command=command,
+        permission_mode=permission_mode,
+        agent=agent,
+        model=model,
+        system_prompt=system_prompt,
+        no_tools=no_tools,
+        strict_mcp_config=strict_mcp_config,
+        settings=settings,
+        bare=bare,
+    )
 
     # The prompt goes to a spool file because that is what the seam carries, and
     # the spool is anonymous to everything but this call: nothing else names it,

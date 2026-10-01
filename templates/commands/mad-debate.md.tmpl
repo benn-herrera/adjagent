@@ -23,7 +23,7 @@ target-bullet = "path to the artifact under review (file or directory)"
 
 [outputs.mad-design]
 referee = "mad-design-referee.md"
-first-token = "**Topic name**: the first token — matches a file in `.claude/agents/mad/design-topics/[topic-name].md`. Load that file as the topic. If the file does not exist, list available topics from `.claude/agents/mad/design-topics/` and halt."
+first-token = "**Topic name**: the first token — matches a file in `@!hrn.project-harness-dir!@/agents/mad/design-topics/[topic-name].md`. Load that file as the topic. If the file does not exist, list available topics from `@!hrn.project-harness-dir!@/agents/mad/design-topics/` and halt."
 prose-name = "\n  - A short design name (for output folder and document titles) — this one has no key"
 mode-cap = "Design"
 mode = "design"
@@ -31,9 +31,9 @@ charter-term = "brief"
 suggest-tail = "the problem rewards more independent constructions"
 target-bullet = "path to the problem statement. Either (a) an existing brief defining the open problem (file or directory), or (b) an empty/not-yet-created output location — in case (b) the referee will elicit the problem statement from the user interactively before dispatching participants"
 +++
-@.claude/agents/@!arg.referee!@
-@.claude/agents/mad/participant-contract.md
-@.claude/agents/mad-alignment-assessor.md
+@@!hrn.project-harness-dir!@/agents/@!arg.referee!@
+@@!hrn.project-harness-dir!@/agents/mad/participant-contract.md
+@@!hrn.project-harness-dir!@/agents/mad-alignment-assessor.md
 
 You are the MAD @!arg.mode-cap!@ Referee. Start a multi-agent @!arg.mode!@ debate.
 

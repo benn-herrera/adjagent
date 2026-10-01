@@ -1,4 +1,4 @@
-"""Tests for gen-defs.py's pure logic — overlay anchor collection and resolution,
+"""Tests for the gen_defs package's pure logic — overlay anchor collection and resolution,
 family-file loading and validation (including the required [tiers] table and
 the member-reachability rule), family selection, scope resolution (model wins
 over family), tier resolution (each output's model scope comes from the tier
@@ -14,14 +14,15 @@ as plain content copies — and end-to-end installs of this repository — defau
 tuned, and re-installed — whose report names problems only: a clean install
 is one summary line).
 
-The script lives at the repo root under a hyphenated name, so it is loaded
-here via importlib rather than imported. Filesystem-shaped cases build
+The package is imported from the repository root, which `just test` puts on
+PYTHONPATH. Filesystem-shaped cases build
 scratch template/output trees with tempfile and drive the refactored
 functions (surface_map / all_renders / generate) against them — the real
 templates/ and deployed surfaces are never touched or written.
 """
 
 import contextlib
+import dataclasses
 import io
 import os
 import re
@@ -31,13 +32,26 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from importlib import util
 from pathlib import Path
 
+from gen_defs import (
+    agents_file,
+    banners,
+    chunks,
+    cli,
+    discovery,
+    errors,
+    generation,
+    installation,
+    markers,
+    model_tuning,
+    paths,
+    product,
+    pruning,
+    rendering,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_spec = util.spec_from_file_location("gen_defs", _REPO_ROOT / "gen-defs.py")
-gen_defs = util.module_from_spec(_spec)
-_spec.loader.exec_module(gen_defs)
 
 
 def _quiet(func, *args, **kwargs):
@@ -48,25 +62,41 @@ def _quiet(func, *args, **kwargs):
 
 def _tiers_toml(mapping=None):
     """The [tiers] table every family file must carry, as TOML text."""
-    mapping = gen_defs.DEFAULT_PIN_MAP if mapping is None else mapping
-    return "[tiers]\n" + "".join(f'{tier} = "{mapping[tier]}"\n' for tier in gen_defs.TIERS)
+    mapping = model_tuning.DEFAULT_PIN_MAP if mapping is None else mapping
+    return "[tiers]\n" + "".join(f'{tier} = "{mapping[tier]}"\n' for tier in model_tuning.TIERS)
 
 
 def _tuning(family, *, tier_map=None, pin_map=None, entries=None, is_default=False):
     """A triple for a scratch render. Tier and pin maps default to the same
     claude-shaped map, which is the shipped default family's own state."""
-    tier_map = dict(gen_defs.DEFAULT_PIN_MAP if tier_map is None else tier_map)
-    return gen_defs.Tuning(
+    tier_map = dict(model_tuning.DEFAULT_PIN_MAP if tier_map is None else tier_map)
+    return model_tuning.Tuning(
         family=Path(family),
         tier_map=tier_map,
-        pin_map=dict(gen_defs.DEFAULT_PIN_MAP if pin_map is None else pin_map),
-        stock=gen_defs.stock_tiers(entries or {}, tier_map),
+        pin_map=dict(model_tuning.DEFAULT_PIN_MAP if pin_map is None else pin_map),
+        stock=model_tuning.stock_tiers(entries or {}, tier_map),
         is_default=is_default,
     )
 
 
+# The harness file the CLI loads by default: the shipped templates carry
+# @!hrn.<key>!@ markers, so every in-process render of them needs one.
+_DEFAULT_HARNESS = agents_file.load_harness(model_tuning.DEFAULT_HARNESS)
+
+
 def _binding(chunks, pin_map=None):
-    return gen_defs.tier_binding(chunks, pin_map=dict(gen_defs.DEFAULT_PIN_MAP if pin_map is None else pin_map))
+    return model_tuning.tier_binding(
+        chunks,
+        pin_map=dict(model_tuning.DEFAULT_PIN_MAP if pin_map is None else pin_map),
+        harness=_DEFAULT_HARNESS,
+    )
+
+
+def _expand(text, chunk_table, scope, overlays=None, dynamic=None):
+    """`text` expanded under a surface render's routes, with `scope` bound as
+    the top-level span's arguments."""
+    routes = rendering.routing_table(chunk_table, {} if dynamic is None else dynamic, overlays)
+    return markers.expand(text, routes, args=scope).text
 
 
 def _shipped_renders(family_name, *, tier_spec=None, pin_spec=None):
@@ -77,30 +107,30 @@ def _shipped_renders(family_name, *, tier_spec=None, pin_spec=None):
     per tier (the None key included — the resolution an output with no pin site
     runs under), and {relative path: rendered text}.
     """
-    path = gen_defs.FAMILY_DIR / f"{family_name}{gen_defs.FAMILY_SUFFIX}"
-    family = gen_defs.load_family(path)
-    tuning = gen_defs.effective_tuning(path, family, tier_spec=tier_spec, pin_spec=pin_spec)
-    resolve = gen_defs.tier_resolver(family.entries, tuning.tier_map)
-    renders = gen_defs.all_renders(
-        _binding(gen_defs.load_chunks(), tuning.pin_map),
-        gen_defs.surface_map(gen_defs.REPO_ROOT),
+    path = paths.FAMILY_DIR / f"{family_name}{paths.FAMILY_SUFFIX}"
+    family = model_tuning.load_family(path)
+    tuning = model_tuning.effective_tuning(path, family, tier_spec=tier_spec, pin_spec=pin_spec)
+    resolve = model_tuning.tier_resolver(family.entries, tuning.tier_map)
+    renders = rendering.all_renders(
+        _binding(chunks.load_chunks(), tuning.pin_map),
+        discovery.surface_map(paths.REPO_ROOT),
         resolve,
         tuning=tuning,
     )
     return (
         tuning,
-        {tier: resolve(tier) for tier in (None, *gen_defs.TIERS)},
-        {gen_defs.rel(target): text for target, text in renders},
+        {tier: resolve(tier) for tier in (None, *model_tuning.TIERS)},
+        {paths.rel(target): text for target, text in renders},
     )
 
 
 class TestAnchorCollection(unittest.TestCase):
     def test_anchors_in_finds_overlay_markers(self):
         text = "a @!fam.one!@ b @!chunk!@ c @!fam.two-x!@"
-        self.assertEqual(gen_defs.anchors_in(text, where="probe"), {"fam.one", "fam.two-x"})
+        self.assertEqual(markers.anchors_in(text, namespace="fam", where="probe"), {"fam.one", "fam.two-x"})
 
     def test_anchors_in_ignores_other_markers_and_plain_text(self):
-        self.assertEqual(gen_defs.anchors_in('@!x!@ @!y variant="z"!@ overlay', where="probe"), set())
+        self.assertEqual(markers.anchors_in('@!x!@ @!y variant="z"!@ overlay', namespace="fam", where="probe"), set())
 
     def test_collect_anchors_spans_templates_and_chunk_bodies(self):
         chunks = {
@@ -111,7 +141,7 @@ class TestAnchorCollection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmpl = Path(tmp) / "t.md.tmpl"
             tmpl.write_text("---\n---\n@!fam.from-template!@\n")
-            found = gen_defs.collect_anchors(chunks, [tmpl])
+            found = markers.collect_anchors(chunks, [tmpl], namespace="fam")
         self.assertEqual(found, {"fam.from-text", "fam.from-variant", "fam.from-default", "fam.from-template"})
 
 
@@ -125,30 +155,30 @@ class TestIdentifierClass(unittest.TestCase):
     sites."""
 
     def test_identifier_is_embedded_in_every_site(self):
-        self.assertIn(gen_defs.IDENTIFIER, gen_defs.MARKER.pattern)
-        self.assertIn(gen_defs.IDENTIFIER, gen_defs.ARG.pattern)
-        self.assertIn(gen_defs.IDENTIFIER, gen_defs.ANCHOR_KEY.pattern)
+        self.assertIn(markers.IDENTIFIER, markers.MARKER.pattern)
+        self.assertIn(markers.IDENTIFIER, markers.ARG.pattern)
+        self.assertIn(markers.IDENTIFIER, model_tuning.ANCHOR_KEY.pattern)
 
     def test_the_namespace_separator_is_outside_the_class(self):
         # The whole of what keeps a namespace from ever being read as a name:
         # widening IDENTIFIER to admit "." would make `fam.gap` a legal chunk
         # name and the routing unrecoverable.
-        self.assertIsNone(re.fullmatch(gen_defs.IDENTIFIER, "fam.gap"))
+        self.assertIsNone(re.fullmatch(markers.IDENTIFIER, "fam.gap"))
 
     def test_every_registered_namespace_is_itself_an_identifier(self):
-        for namespace in gen_defs.NAMESPACES:
+        for namespace in markers.NAMESPACES:
             with self.subTest(namespace=namespace):
-                self.assertIsNotNone(re.fullmatch(gen_defs.IDENTIFIER, namespace))
+                self.assertIsNotNone(re.fullmatch(markers.IDENTIFIER, namespace))
 
     def test_refuses_leading_digit_leading_or_trailing_or_doubled_hyphen_and_underscore(self):
         for candidate in ("1abc", "-abc", "abc-", "abc--def", "my_key"):
             with self.subTest(candidate=candidate):
-                self.assertIsNone(re.fullmatch(gen_defs.IDENTIFIER, candidate))
+                self.assertIsNone(re.fullmatch(markers.IDENTIFIER, candidate))
 
     def test_accepts_interior_digits_and_multi_segment_kebab_names(self):
         for candidate in ("gap2", "a1b2", "ask-vs-stipulate", "abc-2-def"):
             with self.subTest(candidate=candidate):
-                self.assertIsNotNone(re.fullmatch(gen_defs.IDENTIFIER, candidate))
+                self.assertIsNotNone(re.fullmatch(markers.IDENTIFIER, candidate))
 
 
 class TestMarkerNamespace(unittest.TestCase):
@@ -158,16 +188,15 @@ class TestMarkerNamespace(unittest.TestCase):
     would otherwise be indistinguishable from a legitimately unfilled one."""
 
     def test_registered_namespaces_are_the_whole_vocabulary(self):
-        self.assertEqual(gen_defs.NAMESPACES, ("arg", "dyn", "fam"))
-        self.assertEqual(gen_defs.OVERLAY_NAMESPACES, ("fam",))
+        self.assertEqual(markers.NAMESPACES, ("arg", "dyn", "fam", "hrn"))
 
     def test_unknown_namespace_is_an_error_naming_the_registered_ones(self):
-        for marker in ("@!famly.gap!@", "@!hrn.key!@"):
+        for marker in ("@!famly.gap!@", "@!hrnx.key!@"):
             with self.subTest(marker=marker):
-                with self.assertRaisesRegex(gen_defs.TemplateError, "names no source.*arg, dyn, fam"):
-                    gen_defs.anchors_in(marker, where="probe.md.tmpl")
-                with self.assertRaisesRegex(gen_defs.TemplateError, "names no source"):
-                    gen_defs.render(marker, {}, {}, None)
+                with self.assertRaisesRegex(errors.InputError, "names no source.*arg, dyn, fam"):
+                    markers.anchors_in(marker, namespace="fam", where="probe.md.tmpl")
+                with self.assertRaisesRegex(errors.InputError, "names no source"):
+                    _expand(marker, {}, {}, None)
 
     def test_a_malformed_namespaced_marker_is_not_a_marker_at_all(self):
         # Neither half may leave the IDENTIFIER class, and neither may the
@@ -176,12 +205,12 @@ class TestMarkerNamespace(unittest.TestCase):
         # refuses at generation (TestResidualMarkerGuard).
         for marker in ("@!fam.!@", "@!.gap!@", "@!fam.a.b!@", "@!fam.Gap!@", "@!1x.gap!@", "@!fam.gap--x!@"):
             with self.subTest(marker=marker):
-                self.assertEqual(gen_defs.render(marker, {}, {}, {}), marker)
+                self.assertEqual(_expand(marker, {}, {}, {}), marker)
 
     def test_a_known_namespace_with_an_unfilled_key_stays_silent(self):
         # The deliberate half: silence is the legal outcome for a key no loaded
         # source defines, which is why the namespace itself must be policed.
-        self.assertEqual(gen_defs.render("a@!fam.nobody-fills-me!@b", {}, {}, {}), "ab")
+        self.assertEqual(_expand("a@!fam.nobody-fills-me!@b", {}, {}, {}), "ab")
 
     def test_the_namespace_routes_and_the_name_never_does(self):
         # One name, three sources, no precedence: what a marker resolves to is
@@ -192,30 +221,30 @@ class TestMarkerNamespace(unittest.TestCase):
         overlays = {"fam.gap": ("from the family", "family")}
         text = "@!gap!@ / @!arg.gap!@ / @!dyn.gap!@ / @!fam.gap!@"
         self.assertEqual(
-            gen_defs.render(text, chunks, scope, overlays, dynamic),
+            _expand(text, chunks, scope, overlays, dynamic),
             "from the chunk / from the argument / from the invocation / from the family",
         )
 
     def test_a_bare_marker_never_falls_back_to_an_argument(self):
         # The fallback chain this replaced: a chunk-argument key matching a
         # chunk name silently won, and the chunk never rendered.
-        self.assertEqual(gen_defs.render("@!gap!@", {"gap": {"text": "chunk"}}, {"gap": "arg"}), "chunk")
-        with self.assertRaisesRegex(gen_defs.TemplateError, "unknown chunk 'gap'"):
-            gen_defs.render("@!gap!@", {}, {"gap": "arg"})
+        self.assertEqual(_expand("@!gap!@", {"gap": {"text": "chunk"}}, {"gap": "arg"}), "chunk")
+        with self.assertRaisesRegex(errors.InputError, "unknown chunk 'gap'"):
+            _expand("@!gap!@", {}, {"gap": "arg"})
 
     def test_an_unbound_argument_names_itself(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "no argument 'basis' is bound here"):
-            gen_defs.render("@!arg.basis!@", {}, {})
+        with self.assertRaisesRegex(errors.InputError, "no argument 'basis' is bound here"):
+            _expand("@!arg.basis!@", {}, {})
 
     def test_an_unknown_invocation_parameter_names_what_there_is(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "unknown invocation parameter 'tier-mid'.*tier-low"):
-            gen_defs.render("@!dyn.tier-mid!@", {}, {}, None, {"tier-low": "haiku"})
+        with self.assertRaisesRegex(errors.InputError, "unknown invocation parameter 'tier-mid'.*tier-low"):
+            _expand("@!dyn.tier-mid!@", {}, {}, None, {"tier-low": "haiku"})
 
     def test_a_namespaced_marker_takes_no_arguments(self):
         for marker in ('@!fam.gap wrap="70"!@', '@!arg.x variant="v"!@', '@!dyn.tier-low wrap="70"!@'):
             with self.subTest(marker=marker):
-                with self.assertRaisesRegex(gen_defs.TemplateError, "takes no arguments"):
-                    gen_defs.render(marker, {}, {"x": "v"}, {}, {"tier-low": "haiku"})
+                with self.assertRaisesRegex(errors.InputError, "takes no arguments"):
+                    _expand(marker, {}, {"x": "v"}, {}, {"tier-low": "haiku"})
 
 
 class TestFamilyLoading(unittest.TestCase):
@@ -223,7 +252,7 @@ class TestFamilyLoading(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "family.toml"
             path.write_text((_tiers_toml() if tiers is None else tiers) + toml_text, encoding="utf-8")
-            return gen_defs.load_family(path)
+            return model_tuning.load_family(path)
 
     def _entries(self, toml_text):
         return self._load(toml_text).entries
@@ -242,11 +271,11 @@ class TestFamilyLoading(unittest.TestCase):
         self.assertEqual(entries["fam.gap"]["text"], "fam")
 
     def test_missing_file_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "does not exist"):
-            gen_defs.load_family(Path("no/such/family.toml"))
+        with self.assertRaisesRegex(errors.InputError, "does not exist"):
+            model_tuning.load_family(Path("no/such/family.toml"))
 
     def test_invalid_toml_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "invalid TOML"):
+        with self.assertRaisesRegex(errors.InputError, "invalid TOML"):
             self._load("[family.gap\n")
 
     def test_zero_entry_file_loads_cleanly(self):
@@ -256,26 +285,26 @@ class TestFamilyLoading(unittest.TestCase):
             self.assertEqual(self._load(toml_text).entries, {})
 
     def test_tiers_table_is_returned_in_canonical_order(self):
-        self.assertEqual(list(self._load("").tiers), list(gen_defs.TIERS))
-        self.assertEqual(self._load("").tiers, gen_defs.DEFAULT_PIN_MAP)
+        self.assertEqual(list(self._load("").tiers), list(model_tuning.TIERS))
+        self.assertEqual(self._load("").tiers, model_tuning.DEFAULT_PIN_MAP)
 
     def test_missing_tiers_table_is_a_load_error_naming_the_five(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, r"no \[tiers\] table.*highest, high, medium, low, lowest"):
+        with self.assertRaisesRegex(errors.InputError, r"no \[tiers\] table.*highest, high, medium, low, lowest"):
             self._load('[family.gap]\ntext = "t"\n', tiers="")
 
     def test_incomplete_tiers_table_is_a_load_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "keys must be exactly"):
+        with self.assertRaisesRegex(errors.InputError, "keys must be exactly"):
             self._load("", tiers='[tiers]\nhighest = "fable"\nhigh = "opus"\n')
 
     def test_unknown_tier_key_is_a_load_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "keys must be exactly"):
+        with self.assertRaisesRegex(errors.InputError, "keys must be exactly"):
             self._load("", tiers=_tiers_toml() + 'middling = "sonnet"\n')
 
     def test_empty_or_whitespace_member_is_a_load_error(self):
         for bad in ('""', '"two words"'):
             with self.subTest(member=bad):
                 broken = _tiers_toml().replace('"sonnet"', bad)
-                with self.assertRaisesRegex(gen_defs.TemplateError, "non-empty member name"):
+                with self.assertRaisesRegex(errors.InputError, "non-empty member name"):
                     self._load("", tiers=broken)
 
     def test_duplicate_members_across_tiers_are_legal(self):
@@ -284,11 +313,11 @@ class TestFamilyLoading(unittest.TestCase):
         self.assertEqual(self._load("").tiers["low"], self._load("").tiers["lowest"])
 
     def test_stray_top_level_table_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "unknown top-level"):
+        with self.assertRaisesRegex(errors.InputError, "unknown top-level"):
             self._load('[family.gap]\ntext = "t"\n[other]\nx = "y"\n')
 
     def test_bad_anchor_key_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "a-z0-9"):
+        with self.assertRaisesRegex(errors.InputError, "a-z0-9"):
             self._load('[family.BadName]\ntext = "t"\n')
 
     def test_entry_keys_load_under_their_full_anchor_name(self):
@@ -297,25 +326,25 @@ class TestFamilyLoading(unittest.TestCase):
         self.assertEqual(list(self._entries('[family.gap]\ntext = "t"\n')), ["fam.gap"])
 
     def test_unknown_entry_key_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "only 'text'"):
+        with self.assertRaisesRegex(errors.InputError, "only 'text'"):
             self._load('[family.gap]\ntext = "t"\nextra = "x"\n')
 
     def test_malformed_model_override_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "exactly one key"):
+        with self.assertRaisesRegex(errors.InputError, "exactly one key"):
             self._load('[family.gap.models.haiku]\ntext = "t"\nextra = "x"\n')
 
     def test_entry_filling_nothing_is_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "fills nothing"):
+        with self.assertRaisesRegex(errors.InputError, "fills nothing"):
             self._load("[family.gap]\n")
 
 
 class TestFamilyValidation(unittest.TestCase):
     def test_known_anchors_pass(self):
-        gen_defs.validate_family_anchors({"fam.gap": {}}, {"fam.gap", "fam.other"})
+        model_tuning.validate_family_anchors({"fam.gap": {}}, {"fam.gap", "fam.other"})
 
     def test_unknown_anchor_is_hard_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "ghost"):
-            gen_defs.validate_family_anchors({"fam.ghost": {}, "fam.gap": {}}, {"fam.gap"})
+        with self.assertRaisesRegex(errors.InputError, "ghost"):
+            model_tuning.validate_family_anchors({"fam.ghost": {}, "fam.gap": {}}, {"fam.gap"})
 
 
 class TestMemberReachability(unittest.TestCase):
@@ -325,24 +354,24 @@ class TestMemberReachability(unittest.TestCase):
     PATH = Path("templates/family/probe.toml")
 
     def _family(self, member, tiers=None):
-        return gen_defs.Family(
+        return model_tuning.Family(
             entries={"fam.gap": {"models": {member: {"text": "t"}}}},
-            tiers=dict(gen_defs.DEFAULT_PIN_MAP if tiers is None else tiers),
+            tiers=dict(model_tuning.DEFAULT_PIN_MAP if tiers is None else tiers),
         )
 
     def test_member_the_family_maps_passes(self):
-        gen_defs.validate_family_members(self._family("sonnet"), gen_defs.DEFAULT_PIN_MAP, self.PATH)
+        model_tuning.validate_family_members(self._family("sonnet"), model_tuning.DEFAULT_PIN_MAP, self.PATH)
 
     def test_member_only_the_effective_tier_map_reaches_passes(self):
         # The union, not just [tiers]: a table authored for a member reachable
         # through --model-tier-map must not fail a default run.
-        tier_map = {**gen_defs.DEFAULT_PIN_MAP, "medium": "probe-member"}
-        gen_defs.validate_family_members(self._family("sonnet"), tier_map, self.PATH)
-        gen_defs.validate_family_members(self._family("probe-member"), tier_map, self.PATH)
+        tier_map = {**model_tuning.DEFAULT_PIN_MAP, "medium": "probe-member"}
+        model_tuning.validate_family_members(self._family("sonnet"), tier_map, self.PATH)
+        model_tuning.validate_family_members(self._family("probe-member"), tier_map, self.PATH)
 
     def test_unreachable_member_names_itself_and_what_is_reachable(self):
-        with self.assertRaises(gen_defs.TemplateError) as caught:
-            gen_defs.validate_family_members(self._family("sonnett"), gen_defs.DEFAULT_PIN_MAP, self.PATH)
+        with self.assertRaises(errors.InputError) as caught:
+            model_tuning.validate_family_members(self._family("sonnett"), model_tuning.DEFAULT_PIN_MAP, self.PATH)
         message = str(caught.exception)
         self.assertIn("no tier reaches: sonnett", message)
         self.assertIn("sonnet", message)
@@ -363,7 +392,7 @@ class TestFamilyResolution(unittest.TestCase):
         return path
 
     def _resolve(self, name):
-        return gen_defs.resolve_family(name, self.family_dir)
+        return model_tuning.resolve_family(name, self.family_dir)
 
     def test_path_with_separator_passes_through(self):
         # Path-shaped names are never name-resolved, even when nonexistent —
@@ -381,13 +410,13 @@ class TestFamilyResolution(unittest.TestCase):
         self._family("gem.toml")
         self._family("claude.toml")
         with self.assertRaisesRegex(
-            gen_defs.TemplateError,
+            errors.InputError,
             r"--family 'opus' names no family file.*Bare model names are not " r"family names.*available: claude, gem",
         ):
             self._resolve("opus")
 
     def test_no_family_files_at_all_says_so(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, r"available: \(none\)"):
+        with self.assertRaisesRegex(errors.InputError, r"available: \(none\)"):
             self._resolve("ghost")
 
 
@@ -397,10 +426,12 @@ class TestMapMerge(unittest.TestCase):
     FLAG = "--model-pin-map"
 
     def _merge(self, spec, defaults=None):
-        return gen_defs.effective_map(gen_defs.DEFAULT_PIN_MAP if defaults is None else defaults, spec, flag=self.FLAG)
+        return model_tuning.effective_map(
+            model_tuning.DEFAULT_PIN_MAP if defaults is None else defaults, spec, flag=self.FLAG
+        )
 
     def test_no_spec_is_the_defaults(self):
-        self.assertEqual(self._merge(None), gen_defs.DEFAULT_PIN_MAP)
+        self.assertEqual(self._merge(None), model_tuning.DEFAULT_PIN_MAP)
 
     def test_named_tier_masks_only_itself(self):
         # The whole-map-replacement bug looks identical in the happy path, so
@@ -408,12 +439,12 @@ class TestMapMerge(unittest.TestCase):
         merged = self._merge("medium=fable")
         self.assertEqual(merged["medium"], "fable")
         self.assertEqual(
-            {tier: merged[tier] for tier in gen_defs.TIERS if tier != "medium"},
-            {tier: value for tier, value in gen_defs.DEFAULT_PIN_MAP.items() if tier != "medium"},
+            {tier: merged[tier] for tier in model_tuning.TIERS if tier != "medium"},
+            {tier: value for tier, value in model_tuning.DEFAULT_PIN_MAP.items() if tier != "medium"},
         )
 
     def test_all_covers_every_tier(self):
-        self.assertEqual(self._merge("all=haiku"), {tier: "haiku" for tier in gen_defs.TIERS})
+        self.assertEqual(self._merge("all=haiku"), {tier: "haiku" for tier in model_tuning.TIERS})
 
     def test_all_is_positional_independent(self):
         # Whichever side of the named tier `all` sits, the named tier wins.
@@ -426,34 +457,34 @@ class TestMapMerge(unittest.TestCase):
     def test_merged_map_is_always_total(self):
         for spec in (None, "low=x", "all=y", "all=y,highest=z"):
             with self.subTest(spec=spec):
-                self.assertEqual(set(self._merge(spec)), set(gen_defs.TIERS))
+                self.assertEqual(set(self._merge(spec)), set(model_tuning.TIERS))
 
     def test_surrounding_whitespace_is_tolerated(self):
         self.assertEqual(self._merge(" high = a , low = b ")["high"], "a")
 
     def test_unknown_tier_names_the_five_and_all(self):
         with self.assertRaisesRegex(
-            gen_defs.TemplateError,
+            errors.InputError,
             r"--model-pin-map: 'mid=sonnet' names no tier — tiers are " r"highest, high, medium, low, lowest, or all\.",
         ):
             self._merge("mid=sonnet")
 
     def test_duplicate_key_is_an_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, r"duplicate key 'low' — a map is 1:1\."):
+        with self.assertRaisesRegex(errors.InputError, r"duplicate key 'low' — a map is 1:1\."):
             self._merge("low=a,low=b")
 
     def test_duplicate_all_is_an_error_too(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "duplicate key 'all'"):
+        with self.assertRaisesRegex(errors.InputError, "duplicate key 'all'"):
             self._merge("all=a,all=b")
 
     def test_malformed_pairs_are_errors(self):
         for spec in ("high", "high=", "=haiku", "", "high=a=b", "two words=a", "high=a b"):
-            with self.subTest(spec=spec), self.assertRaises(gen_defs.TemplateError):
+            with self.subTest(spec=spec), self.assertRaises(errors.InputError):
                 self._merge(spec)
 
     def test_the_flag_name_leads_every_error(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "^--model-tier-map: "):
-            gen_defs.effective_map(gen_defs.DEFAULT_PIN_MAP, "nope=x", flag="--model-tier-map")
+        with self.assertRaisesRegex(errors.InputError, "^--model-tier-map: "):
+            model_tuning.effective_map(model_tuning.DEFAULT_PIN_MAP, "nope=x", flag="--model-tier-map")
 
     def test_pin_values_are_not_validated(self):
         # Deliberate accepted risk: nothing in-repo owns the set of legal
@@ -462,7 +493,7 @@ class TestMapMerge(unittest.TestCase):
 
     def test_map_spec_serializes_in_tier_order_never_sorted(self):
         self.assertEqual(
-            gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP),
+            model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP),
             "highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku",
         )
 
@@ -477,11 +508,11 @@ class TestTierStates(unittest.TestCase):
     }
 
     def test_a_mapped_member_with_tables_is_not_stock(self):
-        self.assertNotIn("medium", gen_defs.stock_tiers(self.ENTRIES, gen_defs.DEFAULT_PIN_MAP))
+        self.assertNotIn("medium", model_tuning.stock_tiers(self.ENTRIES, model_tuning.DEFAULT_PIN_MAP))
 
     def test_every_other_tier_is_stock(self):
         self.assertEqual(
-            gen_defs.stock_tiers(self.ENTRIES, gen_defs.DEFAULT_PIN_MAP),
+            model_tuning.stock_tiers(self.ENTRIES, model_tuning.DEFAULT_PIN_MAP),
             ("highest", "high", "low", "lowest"),
         )
 
@@ -489,14 +520,16 @@ class TestTierStates(unittest.TestCase):
         # Per-anchor fallback to family-wide text is not the stock state:
         # sonnet has no `other` table and is still a tuned member.
         self.assertNotIn("sonnet", [self.ENTRIES["fam.other"].get("models", {})])
-        self.assertNotIn("medium", gen_defs.stock_tiers(self.ENTRIES, gen_defs.DEFAULT_PIN_MAP))
+        self.assertNotIn("medium", model_tuning.stock_tiers(self.ENTRIES, model_tuning.DEFAULT_PIN_MAP))
 
     def test_a_family_with_no_member_tables_is_stock_at_every_tier(self):
-        self.assertEqual(gen_defs.stock_tiers({"fam.gap": {"text": "f"}}, gen_defs.DEFAULT_PIN_MAP), gen_defs.TIERS)
+        self.assertEqual(
+            model_tuning.stock_tiers({"fam.gap": {"text": "f"}}, model_tuning.DEFAULT_PIN_MAP), model_tuning.TIERS
+        )
 
     def test_retargeting_a_tier_moves_it_between_the_states(self):
-        tuned_low = {**gen_defs.DEFAULT_PIN_MAP, "low": "sonnet"}
-        self.assertNotIn("low", gen_defs.stock_tiers(self.ENTRIES, tuned_low))
+        tuned_low = {**model_tuning.DEFAULT_PIN_MAP, "low": "sonnet"}
+        self.assertNotIn("low", model_tuning.stock_tiers(self.ENTRIES, tuned_low))
 
 
 class TestOverlayResolution(unittest.TestCase):
@@ -507,21 +540,21 @@ class TestOverlayResolution(unittest.TestCase):
     }
 
     def test_no_member_resolves_family_scope_only(self):
-        resolved = gen_defs.resolve_overlays(self.ENTRIES, None)
+        resolved = model_tuning.resolve_overlays(self.ENTRIES, None)
         self.assertEqual(
             resolved,
             {"fam.both": ("fam", "family"), "fam.family-only": ("fam-only", "family")},
         )
 
     def test_model_scope_wins_over_family(self):
-        resolved = gen_defs.resolve_overlays(self.ENTRIES, "m1")
+        resolved = model_tuning.resolve_overlays(self.ENTRIES, "m1")
         self.assertEqual(resolved["fam.both"], ("mod", "model"))
         self.assertEqual(resolved["fam.model-only"], ("mod-only", "model"))
         # A model with no override still gets the family text.
         self.assertEqual(resolved["fam.family-only"], ("fam-only", "family"))
 
     def test_unmatched_model_falls_back_to_family_or_nothing(self):
-        resolved = gen_defs.resolve_overlays(self.ENTRIES, "other-model")
+        resolved = model_tuning.resolve_overlays(self.ENTRIES, "other-model")
         self.assertEqual(resolved["fam.both"], ("fam", "family"))
         self.assertNotIn("fam.model-only", resolved)
 
@@ -531,34 +564,34 @@ class TestFrontmatterPin(unittest.TestCase):
     frontmatter — however the pin got there."""
 
     def test_literal_frontmatter_pin(self):
-        self.assertEqual(gen_defs.frontmatter_pin("---\nname: x\nmodel: opus\n---\nbody\n"), "opus")
+        self.assertEqual(rendering.frontmatter_pin("---\nname: x\nmodel: opus\n---\nbody\n"), "opus")
 
     def test_quoted_pin(self):
-        self.assertEqual(gen_defs.frontmatter_pin('---\nmodel: "haiku"\n---\nbody\n'), "haiku")
+        self.assertEqual(rendering.frontmatter_pin('---\nmodel: "haiku"\n---\nbody\n'), "haiku")
 
     def test_frontmatter_without_a_model_key_is_unpinned(self):
-        self.assertIsNone(gen_defs.frontmatter_pin("---\nname: x\n---\nbody\n"))
-        self.assertIsNone(gen_defs.frontmatter_pin("---\n---\n\nbody\n"))
+        self.assertIsNone(rendering.frontmatter_pin("---\nname: x\n---\nbody\n"))
+        self.assertIsNone(rendering.frontmatter_pin("---\n---\n\nbody\n"))
 
     def test_file_without_frontmatter_is_unpinned(self):
-        self.assertIsNone(gen_defs.frontmatter_pin("Do the thing.\n\n## Behavior\n"))
+        self.assertIsNone(rendering.frontmatter_pin("Do the thing.\n\n## Behavior\n"))
 
     def test_a_model_line_in_the_body_is_not_a_pin(self):
-        self.assertIsNone(gen_defs.frontmatter_pin("---\nname: x\n---\nmodel: sonnet\n"))
+        self.assertIsNone(rendering.frontmatter_pin("---\nname: x\n---\nmodel: sonnet\n"))
 
     def test_real_set_pins_come_from_params_and_from_literals(self):
         # Both routes, in the deployed set: mad-participant's four pins are
         # outputs-table parameters (@!arg.model!@), while the participant contract
         # and the generated commands declare no pin at all.
         pins = {
-            gen_defs.rel(target): gen_defs.frontmatter_pin(text)
+            paths.rel(target): rendering.frontmatter_pin(text)
             # all_renders writes nothing; the root only names where the
             # targets would land, and REPO_ROOT is what makes those names
             # read as the surface-relative keys asserted below.
-            for target, text in gen_defs.all_renders(
-                _binding(gen_defs.load_chunks()),
-                gen_defs.surface_map(gen_defs.REPO_ROOT),
-                tuning=_tuning(gen_defs.FAMILY_DIR / "claude.toml"),
+            for target, text in rendering.all_renders(
+                _binding(chunks.load_chunks()),
+                discovery.surface_map(paths.REPO_ROOT),
+                tuning=_tuning(paths.FAMILY_DIR / "claude.toml"),
             )
         }
         self.assertEqual(pins["agents/mad-participant-haiku.md"], "haiku")
@@ -574,30 +607,29 @@ class TestTierDiscovery(unittest.TestCase):
         return f"---\nname: x\nmodel: {pin}\n---\nbody\n"
 
     def test_sentinel_yields_the_tier(self):
-        for tier in gen_defs.TIERS:
-            self.assertEqual(gen_defs.output_tier(self._probe(f"{gen_defs.TIER_SENTINEL}{tier}")), tier)
+        for tier in model_tuning.TIERS:
+            self.assertEqual(rendering.output_tier(self._probe(f"{model_tuning.TIER_SENTINEL}{tier}")), tier)
 
     def test_a_literal_pin_declares_no_tier(self):
         # The migration-window third state: a pin site not yet tokenized comes
         # back as itself and takes family-wide overlay text only.
-        self.assertIsNone(gen_defs.output_tier(self._probe("opus")))
+        self.assertIsNone(rendering.output_tier(self._probe("opus")))
 
     def test_no_pin_site_declares_no_tier(self):
-        self.assertIsNone(gen_defs.output_tier("---\nname: x\n---\nbody\n"))
-        self.assertIsNone(gen_defs.output_tier("bare body\n"))
+        self.assertIsNone(rendering.output_tier("---\nname: x\n---\nbody\n"))
+        self.assertIsNone(rendering.output_tier("bare body\n"))
 
     def test_the_tier_tokens_expand_from_the_pin_map_alone(self):
         # The one thing a family-member name must never reach: a model: line.
-        binding = _binding({}, pin_map={**gen_defs.DEFAULT_PIN_MAP, "medium": "sonnet-probe"})
-        self.assertEqual(gen_defs.render("@!dyn.tier-medium!@", {}, {}, None, binding.real), "sonnet-probe")
-        self.assertEqual(gen_defs.render("@!dyn.tier-medium!@", {}, {}, None, binding.probe), "tier:medium")
+        binding = _binding({}, pin_map={**model_tuning.DEFAULT_PIN_MAP, "medium": "sonnet-probe"})
+        self.assertEqual(_expand("@!dyn.tier-medium!@", {}, {}, None, binding.real), "sonnet-probe")
+        self.assertEqual(_expand("@!dyn.tier-medium!@", {}, {}, None, binding.probe), "tier:medium")
 
     def test_a_tier_token_expands_inside_a_chunk_body(self):
-        # The dynamic table is threaded through every recursive expansion, so a
-        # token reaches a chunk body where an argument — bound only at the call
-        # site — would not.
+        # The dynamic table is routed to every span, so a token reaches a chunk
+        # body where an argument — bound only at the call site — would not.
         binding = _binding({"c": {"text": "pin @!dyn.tier-low!@"}})
-        self.assertEqual(gen_defs.render("@!c!@", binding.chunks, {}, None, binding.real), "pin haiku")
+        self.assertEqual(_expand("@!c!@", binding.chunks, {}, None, binding.real), "pin haiku")
 
     def test_the_tier_tokens_are_not_in_the_chunk_table_at_all(self):
         # The re-homing: they are the invocation's parameters, so a chunk named
@@ -605,9 +637,9 @@ class TestTierDiscovery(unittest.TestCase):
         # against, and a BARE tier-low never resolves to a pin.
         binding = _binding({"tier-low": {"text": "an ordinary chunk"}})
         self.assertEqual(binding.chunks["tier-low"], {"text": "an ordinary chunk"})
-        self.assertEqual(set(binding.real), {f"tier-{tier}" for tier in gen_defs.TIERS})
-        self.assertEqual(gen_defs.render("@!tier-low!@", binding.chunks, {}, None, binding.real), "an ordinary chunk")
-        self.assertEqual(gen_defs.render("@!dyn.tier-low!@", binding.chunks, {}, None, binding.real), "haiku")
+        self.assertEqual(set(binding.real), {f"tier-{tier}" for tier in model_tuning.TIERS})
+        self.assertEqual(_expand("@!tier-low!@", binding.chunks, {}, None, binding.real), "an ordinary chunk")
+        self.assertEqual(_expand("@!dyn.tier-low!@", binding.chunks, {}, None, binding.real), "haiku")
 
 
 class TestTierResolver(unittest.TestCase):
@@ -626,10 +658,10 @@ class TestTierResolver(unittest.TestCase):
         self.family_dir = Path(self._tmp.name)
         self.family = self.family_dir / "fam.toml"
         self.family.write_text(_tiers_toml() + self.FAMILY, encoding="utf-8")
-        self.entries = gen_defs.load_family(self.family).entries
+        self.entries = model_tuning.load_family(self.family).entries
 
     def _resolver(self, tier_map=None):
-        return gen_defs.tier_resolver(self.entries, dict(tier_map or gen_defs.DEFAULT_PIN_MAP))
+        return model_tuning.tier_resolver(self.entries, dict(tier_map or model_tuning.DEFAULT_PIN_MAP))
 
     def test_member_scope_wins_over_family_scope_at_the_same_anchor(self):
         resolve = self._resolver()
@@ -649,58 +681,58 @@ class TestTierResolver(unittest.TestCase):
 
     def test_the_tier_map_decides_which_member_a_tier_resolves(self):
         # The same tier, retargeted: nothing about the output changed.
-        retargeted = self._resolver({**gen_defs.DEFAULT_PIN_MAP, "lowest": "opus"})
+        retargeted = self._resolver({**model_tuning.DEFAULT_PIN_MAP, "lowest": "opus"})
         self.assertEqual(retargeted("lowest")["fam.gap"], ("for opus", "model"))
         self.assertEqual(self._resolver()("lowest")["fam.gap"], ("family-wide", "family"))
 
     def test_a_family_with_no_entries_resolves_to_nothing(self):
-        resolve = gen_defs.tier_resolver({}, dict(gen_defs.DEFAULT_PIN_MAP))
+        resolve = model_tuning.tier_resolver({}, dict(model_tuning.DEFAULT_PIN_MAP))
         self.assertEqual(resolve(None), {})
         self.assertEqual(resolve("high"), {})
 
     def test_plain_map_stays_render_wide(self):
         # as_resolver is what keeps a caller that has already resolved one map
         # working: it reaches every output, tiered or not.
-        resolve = gen_defs.as_resolver({"fam.gap": ("wide", "family")})
+        resolve = model_tuning.as_resolver({"fam.gap": ("wide", "family")})
         self.assertEqual(resolve(None), resolve("high"))
-        self.assertIsNone(gen_defs.as_resolver(None)("high"))
+        self.assertIsNone(model_tuning.as_resolver(None)("high"))
 
 
 class TestRenderOverlay(unittest.TestCase):
     def test_unfilled_anchor_expands_to_nothing(self):
         for overlays in (None, {}):
-            self.assertEqual(gen_defs.render("a @!fam.gap!@b", {}, {}, overlays), "a b")
+            self.assertEqual(_expand("a @!fam.gap!@b", {}, {}, overlays), "a b")
 
     def test_filled_anchor_renders_the_family_text_verbatim(self):
         # Exact equality is the whole assertion: the anchor expands to the
         # family's own bytes and to nothing else — no lead-in, no wrapper.
-        out = gen_defs.render("@!fam.gap!@", {}, {}, {"fam.gap": ("watch it", "family")})
+        out = _expand("@!fam.gap!@", {}, {}, {"fam.gap": ("watch it", "family")})
         self.assertEqual(out, "watch it")
 
     def test_base_text_never_modified_around_anchor(self):
         # The never-touches-base invariant at render level: filling an anchor
         # adds the family's text and changes nothing else.
         template = "base line\n@!fam.gap!@\nmore base"
-        bare = gen_defs.render(template, {}, {}, None)
-        filled = gen_defs.render(template, {}, {}, {"fam.gap": ("t", "model")})
+        bare = _expand(template, {}, {}, None)
+        filled = _expand(template, {}, {}, {"fam.gap": ("t", "model")})
         self.assertEqual(bare, "base line\n\nmore base")
         self.assertEqual(filled, "base line\nt\nmore base")
 
     def test_overlay_text_is_marker_expanded(self):
         chunks = {"c": {"text": "chunked"}}
-        out = gen_defs.render("@!fam.gap!@", chunks, {}, {"fam.gap": ("see @!c!@", "family")})
+        out = _expand("@!fam.gap!@", chunks, {}, {"fam.gap": ("see @!c!@", "family")})
         self.assertEqual(out, "see chunked")
 
     def test_typo_in_overlay_text_fails_loudly(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "unknown chunk"):
-            gen_defs.render("@!fam.gap!@", {}, {}, {"fam.gap": ("see @!nope!@", "family")})
+        with self.assertRaisesRegex(errors.InputError, "unknown chunk"):
+            _expand("@!fam.gap!@", {}, {}, {"fam.gap": ("see @!nope!@", "family")})
 
     def test_overlay_is_no_longer_a_reserved_marker_name(self):
         # The anchor is spelled by its namespace now, so the marker name
         # `overlay` and its quoted name= argument are both gone and a chunk may
         # claim the word like any other.
         chunks = {"overlay": {"text": "an ordinary chunk"}}
-        self.assertEqual(gen_defs.render("@!overlay!@", chunks, {}, {}), "an ordinary chunk")
+        self.assertEqual(_expand("@!overlay!@", chunks, {}, {}), "an ordinary chunk")
 
     def test_render_output_resolves_against_its_own_declared_tier(self):
         # render_output reads the tier out of its own discovery pass, so a tier
@@ -708,15 +740,17 @@ class TestRenderOverlay(unittest.TestCase):
         # literal one does.
         body = "---\nname: @!arg.name!@\nmodel: @!arg.model!@\n---\n@!fam.gap!@\n"
         params = {"name": "x", "model": "@!dyn.tier-high!@"}
-        text, tier = gen_defs.render_output(body, _binding({}), params, lambda t: {"fam.gap": (str(t), "model")})
+        text, tier = rendering.render_output(body, _binding({}), params, lambda t: {"fam.gap": (str(t), "model")})
         self.assertEqual(tier, "high")
         self.assertIn("\nhigh\n", text)
         # The shipped pin, never the tier and never a family member.
-        self.assertEqual(gen_defs.frontmatter_pin(text), "opus")
+        self.assertEqual(rendering.frontmatter_pin(text), "opus")
 
     def test_render_output_of_a_body_with_no_pin_site_takes_the_no_tier_map(self):
         body = "---\nname: @!arg.name!@\n---\n@!fam.gap!@\n"
-        text, tier = gen_defs.render_output(body, _binding({}), {"name": "x"}, lambda t: {"fam.gap": (str(t), "model")})
+        text, tier = rendering.render_output(
+            body, _binding({}), {"name": "x"}, lambda t: {"fam.gap": (str(t), "model")}
+        )
         self.assertIsNone(tier)
         self.assertIn("\nNone\n", text)
 
@@ -725,18 +759,97 @@ class TestRenderOverlay(unittest.TestCase):
         # the retired "re-render only if the overlay set changed" optimization would
         # have returned the discovery render — sentinel text and all.
         body = "---\nname: @!arg.name!@\nmodel: @!dyn.tier-low!@\n---\nrun on @!dyn.tier-low!@\n"
-        text, tier = gen_defs.render_output(body, _binding({}), {"name": "x"}, lambda t: {})
+        text, tier = rendering.render_output(body, _binding({}), {"name": "x"}, lambda t: {})
         self.assertEqual(tier, "low")
-        self.assertNotIn(gen_defs.TIER_SENTINEL, text)
+        self.assertNotIn(model_tuning.TIER_SENTINEL, text)
         self.assertIn("run on haiku", text)
 
     def test_anchor_inside_chunk_body_resolves(self):
         chunks = {"c": {"text": "chunk @!fam.gap!@tail"}}
-        self.assertEqual(gen_defs.render("@!c!@", chunks, {}, None), "chunk tail")
+        self.assertEqual(_expand("@!c!@", chunks, {}, None), "chunk tail")
         self.assertEqual(
-            gen_defs.render("@!c!@", chunks, {}, {"fam.gap": ("filled", "family")}),
+            _expand("@!c!@", chunks, {}, {"fam.gap": ("filled", "family")}),
             "chunk filledtail",
         )
+
+
+class TestExpander(unittest.TestCase):
+    """markers.expand over a routing table: lexical `arg`, the three value
+    kinds, and the depth cap."""
+
+    def _routes(self, chunk_table=None, dynamic=None, overlays=None, harness=None):
+        routes = rendering.routing_table(chunk_table or {}, dynamic or {}, overlays)
+        if harness is not None:
+            routes = {**routes, "hrn": markers.TableSource(harness, "hrn", "harness key")}
+        return routes
+
+    def test_a_chunk_body_reads_its_own_call_arguments(self):
+        routes = self._routes({"c": {"text": "@!arg.x!@ @!fam.g!@"}}, overlays={"fam.g": ("fam:@!arg.x!@", "family")})
+        out = markers.expand('@!arg.x!@ @!c x="inner"!@', routes, args={"x": "outer"})
+        self.assertEqual(out.text, "outer inner fam:inner")
+
+    def test_an_authored_value_is_expanded(self):
+        routes = self._routes({"c": {"text": "C"}}, dynamic={"d": "<@!c!@>"}, harness={"h": "[@!c!@]"})
+        self.assertEqual(markers.expand("@!dyn.d!@ @!hrn.h!@", routes, args={}).text, "<C> [C]")
+
+    def test_a_verbatim_value_is_final_and_unchecked(self):
+        dynamic = {"v": markers.Verbatim("@!c!@ !@"), "e": markers.Verbatim("")}
+        out = markers.expand("a @!dyn.v!@ b@!dyn.e!@", self._routes(dynamic=dynamic), args={})
+        self.assertEqual(out.text, "a @!c!@ !@ b")
+        self.assertEqual(
+            out.verbatim,
+            (
+                markers.VerbatimSpan(2, "@!c!@ !@", "@!dyn.v!@"),
+                markers.VerbatimSpan(len("a @!c!@ !@ b"), "", "@!dyn.e!@"),
+            ),
+        )
+        markers.assert_no_residual_markers(out, path=paths.REPO_ROOT / "probe.md.tmpl", name="probe")
+
+    def test_a_cycle_hits_the_depth_cap(self):
+        for text, routes in (
+            ("@!loop!@", self._routes({"loop": {"text": "x @!loop!@"}})),
+            ("@!dyn.self!@", self._routes(dynamic={"self": "@!dyn.self!@"})),
+        ):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(errors.InputError, r"cycle\?"):
+                    markers.expand(text, routes, args={})
+
+    def test_chk_is_not_a_prefix(self):
+        with self.assertRaisesRegex(errors.InputError, "names no source"):
+            markers.expand("@!chk.x!@", self._routes({"x": {"text": "chunk"}}), args={})
+
+    def test_wrap_wraps_the_expanded_chunk_body(self):
+        # Wrapped before expansion, the lone marker has no space to break on
+        # and the words would come out on one line.
+        routes = self._routes({"c": {"text": "@!arg.w!@"}})
+        out = markers.expand('@!c w="one two three four" wrap="9"!@', routes, args={})
+        self.assertEqual(out.text, "one two\nthree\nfour")
+
+    def test_wrap_refuses_verbatim_text(self):
+        routes = self._routes({"c": {"text": "a @!dyn.v!@"}}, dynamic={"v": markers.Verbatim("operator text")})
+        with self.assertRaisesRegex(errors.InputError, "wrap="):
+            markers.expand('@!c wrap="9"!@', routes, args={})
+
+
+class TestHarnessSurfaceRender(unittest.TestCase):
+    """A surface render routes `hrn` to the harness its invocation loaded."""
+
+    BODY = "---\nname: @!arg.name!@\n---\nread @!hrn.agents-file!@\n"
+
+    def _render(self, harness):
+        binding = model_tuning.tier_binding({}, pin_map=dict(model_tuning.DEFAULT_PIN_MAP), harness=harness)
+        text, _ = rendering.render_output(self.BODY, binding, {"name": "x"}, lambda tier: {})
+        return text
+
+    def test_a_harness_marker_resolves_in_a_surface_render_given_a_harness(self):
+        self.assertIn("read AGENTS.md\n", self._render(agents_file.load_harness("opencode")))
+
+    def test_the_default_harness_supplies_the_claude_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for verb in ("generate", "install"):
+                with self.subTest(verb=verb):
+                    default = cli.build_parser().parse_args([verb, tmp]).harness
+                    self.assertIn("read CLAUDE.md\n", self._render(agents_file.load_harness(default)))
 
 
 class TestSurfaceMap(unittest.TestCase):
@@ -746,25 +859,25 @@ class TestSurfaceMap(unittest.TestCase):
         self.root = Path(self._tmp.name)
 
     def test_an_output_root_maps_both_surfaces_beneath_it(self):
-        smap = gen_defs.surface_map(self.root)
+        smap = discovery.surface_map(self.root)
         self.assertEqual(set(smap), {"agents", "commands"})
         self.assertEqual(smap["agents"][1], self.root / "agents")
 
     def test_surfaces_filters_to_one(self):
-        self.assertEqual(set(gen_defs.surface_map(self.root, surfaces="agents")), {"agents"})
-        self.assertEqual(set(gen_defs.surface_map(self.root, surfaces="commands")), {"commands"})
+        self.assertEqual(set(discovery.surface_map(self.root, surfaces="agents")), {"agents"})
+        self.assertEqual(set(discovery.surface_map(self.root, surfaces="commands")), {"commands"})
 
     def test_unknown_surface_is_error(self):
-        with self.assertRaises(gen_defs.TemplateError):
-            gen_defs.surface_map(self.root, surfaces="nope")
+        with self.assertRaises(errors.InputError):
+            discovery.surface_map(self.root, surfaces="nope")
 
     def test_output_root_must_exist(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, "existing directory"):
-            gen_defs.surface_map(output_root=Path("no/such/root"))
+        with self.assertRaisesRegex(errors.InputError, "existing directory"):
+            discovery.surface_map(output_root=Path("no/such/root"))
 
     def test_explicit_roots_route_both_trees(self):
         with tempfile.TemporaryDirectory() as tmp:
-            smap = gen_defs.surface_map(templates_root=Path(tmp) / "tsrc", output_root=Path(tmp))
+            smap = discovery.surface_map(templates_root=Path(tmp) / "tsrc", output_root=Path(tmp))
             self.assertEqual(smap["agents"][0], Path(tmp) / "tsrc" / "agents")
             self.assertEqual(smap["commands"][1], Path(tmp) / "commands")
 
@@ -776,26 +889,26 @@ class TestSelectionMatching(unittest.TestCase):
 
     def test_output_key_is_surface_relative_and_suffixless(self):
         root = Path("/out/agents")
-        self.assertEqual(gen_defs.output_key(root / "go-coder.md", root), "go-coder")
+        self.assertEqual(discovery.output_key(root / "go-coder.md", root), "go-coder")
         self.assertEqual(
-            gen_defs.output_key(root / "mad" / "participant-contract.md", root),
+            discovery.output_key(root / "mad" / "participant-contract.md", root),
             "mad/participant-contract",
         )
 
     def test_split_globs_splits_on_the_separator(self):
-        self.assertEqual(gen_defs.split_globs("*-coder*"), ["*-coder*"])
-        self.assertEqual(gen_defs.split_globs("*app-expert*|*-coder*"), ["*app-expert*", "*-coder*"])
+        self.assertEqual(discovery.split_globs("*-coder*"), ["*-coder*"])
+        self.assertEqual(discovery.split_globs("*app-expert*|*-coder*"), ["*app-expert*", "*-coder*"])
 
     def test_single_pattern_selects_its_matches_only(self):
         globs = {"agents": ["*-coder*"]}
-        self.assertTrue(gen_defs.selected("agents", "go-coder", globs))
-        self.assertFalse(gen_defs.selected("agents", "architect", globs))
+        self.assertTrue(discovery.selected("agents", "go-coder", globs))
+        self.assertFalse(discovery.selected("agents", "architect", globs))
 
     def test_alternation_selects_the_union(self):
-        globs = {"agents": gen_defs.split_globs("*app-expert*|*-coder*")}
+        globs = {"agents": discovery.split_globs("*app-expert*|*-coder*")}
         for key in ("ios-app-expert", "rust-coder"):
-            self.assertTrue(gen_defs.selected("agents", key, globs), key)
-        self.assertFalse(gen_defs.selected("agents", "architect", globs))
+            self.assertTrue(discovery.selected("agents", key, globs), key)
+        self.assertFalse(discovery.selected("agents", "architect", globs))
 
     def test_star_crosses_the_path_separator(self):
         # A nested output is addressable by its full key and by any pattern
@@ -803,20 +916,20 @@ class TestSelectionMatching(unittest.TestCase):
         # reachable at all.
         for pattern in ("mad/participant-contract", "mad/*", "*participant-contract", "*contract*"):
             self.assertTrue(
-                gen_defs.selected("agents", "mad/participant-contract", {"agents": [pattern]}),
+                discovery.selected("agents", "mad/participant-contract", {"agents": [pattern]}),
                 pattern,
             )
         # The subdirectory is still part of the key: a top-level definition
         # with a similar name is not swept in by mad/*.
-        self.assertFalse(gen_defs.selected("agents", "mad-participant-opus", {"agents": ["mad/*"]}))
+        self.assertFalse(discovery.selected("agents", "mad-participant-opus", {"agents": ["mad/*"]}))
 
     def test_unglobbed_surface_and_empty_selection_pass_whole(self):
-        self.assertTrue(gen_defs.selected("commands", "kb-start", {"agents": ["*-coder*"]}))
+        self.assertTrue(discovery.selected("commands", "kb-start", {"agents": ["*-coder*"]}))
         for nothing in (None, {}):
-            self.assertTrue(gen_defs.selected("agents", "architect", nothing))
+            self.assertTrue(discovery.selected("agents", "architect", nothing))
 
     def test_matching_does_not_depend_on_host_case_rules(self):
-        self.assertFalse(gen_defs.selected("agents", "go-coder", {"agents": ["GO-*"]}))
+        self.assertFalse(discovery.selected("agents", "go-coder", {"agents": ["GO-*"]}))
 
 
 class TestSelectionValidationAndAccounting(unittest.TestCase):
@@ -829,29 +942,29 @@ class TestSelectionValidationAndAccounting(unittest.TestCase):
     }
 
     def test_matching_patterns_validate(self):
-        gen_defs.validate_selection(self.KEYS, {"agents": ["*-coder", "mad/*"]})
+        discovery.validate_selection(self.KEYS, {"agents": ["*-coder", "mad/*"]})
 
     def test_zero_match_names_the_pattern_and_lists_the_surface(self):
         with self.assertRaisesRegex(
-            gen_defs.TemplateError,
+            errors.InputError,
             r"--agent-glob pattern '\*-codr\*' matches none of the 3 agents "
             r"output\(s\): architect, go-coder, mad/participant-contract",
         ):
-            gen_defs.validate_selection(self.KEYS, {"agents": ["*-codr*"]})
+            discovery.validate_selection(self.KEYS, {"agents": ["*-codr*"]})
 
     def test_every_alternation_segment_is_held_to_the_rule(self):
         # A typo cannot hide behind a sibling pattern that does match.
-        with self.assertRaisesRegex(gen_defs.TemplateError, "'ghost'"):
-            gen_defs.validate_selection(self.KEYS, {"agents": ["*-coder", "ghost"]})
+        with self.assertRaisesRegex(errors.InputError, "'ghost'"):
+            discovery.validate_selection(self.KEYS, {"agents": ["*-coder", "ghost"]})
 
     def test_each_surface_error_names_its_own_flag(self):
-        with self.assertRaisesRegex(gen_defs.TemplateError, r"--command-glob pattern 'nope'"):
-            gen_defs.validate_selection(self.KEYS, {"commands": ["nope"]})
+        with self.assertRaisesRegex(errors.InputError, r"--command-glob pattern 'nope'"):
+            discovery.validate_selection(self.KEYS, {"commands": ["nope"]})
 
     def test_accounting_states_selected_of_declared_per_surface(self):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            gen_defs.report_selection(self.KEYS, {"agents": ["*-coder", "mad/*"], "commands": ["kb-*"]})
+            discovery.report_selection(self.KEYS, {"agents": ["*-coder", "mad/*"], "commands": ["kb-*"]})
         self.assertIn("agents: 2 of 3 outputs selected by --agent-glob", buf.getvalue())
         self.assertIn("commands: 1 of 1 outputs selected by --command-glob", buf.getvalue())
 
@@ -893,7 +1006,7 @@ class TestSelectedGeneration(unittest.TestCase):
         self.nested_template.write_text(self.UNPINNED, encoding="utf-8")
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family_dir = root / "family"
         self.family_dir.mkdir()
         self.family = self.family_dir / "fam.toml"
@@ -902,7 +1015,7 @@ class TestSelectedGeneration(unittest.TestCase):
     def _generate(self, globs=None, chunks=None, **kwargs):
         kwargs.setdefault("tuning", _tuning(self.family))
         return _quiet(
-            gen_defs.generate,
+            generation.generate,
             _binding(self.CHUNKS if chunks is None else chunks),
             self.smap,
             globs=globs,
@@ -914,7 +1027,7 @@ class TestSelectedGeneration(unittest.TestCase):
 
     def test_output_keys_span_both_surfaces_and_nested_paths(self):
         self.assertEqual(
-            gen_defs.output_keys(self.smap)["agents"],
+            discovery.output_keys(self.smap)["agents"],
             ["architect", "go-coder", "mad/participant-contract", "multi-one", "multi-two"],
         )
 
@@ -951,19 +1064,19 @@ class TestSelectedGeneration(unittest.TestCase):
         tuning = _tuning(self.family)
         globs = {"agents": ["*-coder"]}
         self.assertTrue(self._generate(globs))
-        selected = gen_defs.all_renders(_binding(self.CHUNKS), self.smap, globs=globs, tuning=tuning)
+        selected = rendering.all_renders(_binding(self.CHUNKS), self.smap, globs=globs, tuning=tuning)
         self.assertTrue(selected)
         for target, rendered in selected:
-            self.assertEqual(target.read_text(encoding="utf-8"), rendered, gen_defs.rel(target))
-        every = gen_defs.all_renders(_binding(self.CHUNKS), self.smap, tuning=tuning)
+            self.assertEqual(target.read_text(encoding="utf-8"), rendered, paths.rel(target))
+        every = rendering.all_renders(_binding(self.CHUNKS), self.smap, tuning=tuning)
         unselected = {target for target, _ in every} - {target for target, _ in selected}
         self.assertTrue(unselected)
         for target in unselected:
-            self.assertFalse(target.exists(), gen_defs.rel(target))
+            self.assertFalse(target.exists(), paths.rel(target))
 
     def test_selection_composes_with_tier_tuning(self):
-        entries = gen_defs.load_family(self.family).entries
-        resolve = gen_defs.tier_resolver(entries, dict(gen_defs.DEFAULT_PIN_MAP))
+        entries = model_tuning.load_family(self.family).entries
+        resolve = model_tuning.tier_resolver(entries, dict(model_tuning.DEFAULT_PIN_MAP))
         tuning = _tuning(self.family, entries=entries)
         globs = {"agents": ["go-coder", "architect"]}
         self.assertTrue(self._generate(globs, overlays=resolve, tuning=tuning))
@@ -977,31 +1090,31 @@ class TestSelectedGeneration(unittest.TestCase):
         # these say "verbatim, in place" rather than merely "present".
         self.assertIn("body shared text\nopus text\n", tiered)
         self.assertIn("body shared text\nfamily\n", untiered)
-        self.assertEqual(gen_defs.tuning_claim(tiered).seat, "high")
-        self.assertEqual(gen_defs.tuning_claim(tiered).member, "opus")
-        self.assertEqual(gen_defs.tuning_claim(untiered).seat, "none")
-        self.assertEqual(gen_defs.tuning_claim(untiered).member, "none")
-        self.assertTrue(gen_defs.body_untouched(tiered))
-        for target, rendered in gen_defs.all_renders(_binding(self.CHUNKS), self.smap, resolve, globs, tuning=tuning):
-            self.assertEqual(target.read_text(encoding="utf-8"), rendered, gen_defs.rel(target))
+        self.assertEqual(banners.tuning_claim(tiered).seat, "high")
+        self.assertEqual(banners.tuning_claim(tiered).member, "opus")
+        self.assertEqual(banners.tuning_claim(untiered).seat, "none")
+        self.assertEqual(banners.tuning_claim(untiered).member, "none")
+        self.assertTrue(banners.body_untouched(tiered))
+        for target, rendered in rendering.all_renders(_binding(self.CHUNKS), self.smap, resolve, globs, tuning=tuning):
+            self.assertEqual(target.read_text(encoding="utf-8"), rendered, paths.rel(target))
 
     def test_the_banner_records_the_member_the_run_tuned_against(self):
         # Two renders of one template under two tier maps. The seat is the
         # template's own declaration and does not move; the member follows the
         # map that produced the render, which is what makes a definition's
         # tuning readable from the definition alone.
-        entries = gen_defs.load_family(self.family).entries
+        entries = model_tuning.load_family(self.family).entries
         globs = {"agents": ["go-coder"]}
         target = self.out / "agents" / "go-coder.md"
-        self._generate(globs, overlays=gen_defs.tier_resolver(entries, dict(gen_defs.DEFAULT_PIN_MAP)))
-        default = gen_defs.tuning_claim(target.read_text(encoding="utf-8"))
-        retargeted = {**gen_defs.DEFAULT_PIN_MAP, "high": "haiku"}
+        self._generate(globs, overlays=model_tuning.tier_resolver(entries, dict(model_tuning.DEFAULT_PIN_MAP)))
+        default = banners.tuning_claim(target.read_text(encoding="utf-8"))
+        retargeted = {**model_tuning.DEFAULT_PIN_MAP, "high": "haiku"}
         self._generate(
             globs,
-            overlays=gen_defs.tier_resolver(entries, retargeted),
+            overlays=model_tuning.tier_resolver(entries, retargeted),
             tuning=_tuning(self.family, tier_map=retargeted, entries=entries),
         )
-        moved = gen_defs.tuning_claim(target.read_text(encoding="utf-8"))
+        moved = banners.tuning_claim(target.read_text(encoding="utf-8"))
         self.assertEqual((default.seat, default.member), ("high", "opus"))
         self.assertEqual((moved.seat, moved.member), ("high", "haiku"))
         # …and the overlay text followed it, so the claim is not decorative.
@@ -1009,7 +1122,7 @@ class TestSelectedGeneration(unittest.TestCase):
 
 
 class TestSelectionCLI(unittest.TestCase):
-    """The verbs and their flags as shipped, driven through gen-defs.py itself:
+    """The verbs and their flags as shipped, driven through `python3 -m gen_defs` itself:
     the required verb and root, surface implication, both-glob runs, the one
     surviving conflict error, the per-verb flags a verb does not declare, and
     the loud no-match."""
@@ -1021,12 +1134,12 @@ class TestSelectionCLI(unittest.TestCase):
 
     def _run(self, *args):
         return subprocess.run(
-            [sys.executable, str(_REPO_ROOT / "gen-defs.py"), *args],
+            [sys.executable, "-m", "gen_defs", *args],
             capture_output=True,
             text=True,
             check=False,
             cwd=_REPO_ROOT,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(_REPO_ROOT)},
         )
 
     def _rendered(self):
@@ -1114,6 +1227,14 @@ class TestSelectionCLI(unittest.TestCase):
         self.assertIn("unrecognized arguments: --agent-glob", done.stderr)
         self.assertEqual(self._rendered(), [])
 
+    def test_an_unknown_harness_is_refused_before_anything_is_written(self):
+        for verb in ("generate", "install"):
+            with self.subTest(verb=verb):
+                done = self._run(verb, str(self.out), "--harness", "nope")
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn("unknown harness 'nope' — available: claude, opencode", done.stderr)
+                self.assertEqual(self._rendered(), [])
+
     def test_install_cannot_be_narrowed_by_surfaces(self):
         done = self._run("install", str(self.out), "--surfaces", "agents")
         self.assertEqual(done.returncode, 2)
@@ -1135,7 +1256,7 @@ class TestSelectionCLI(unittest.TestCase):
 
 
 class TestTuningCLI(unittest.TestCase):
-    """The three tuning flags as shipped, driven through gen-defs.py itself.
+    """The three tuning flags as shipped, driven through `python3 -m gen_defs` itself.
 
     Against an isolated COPY of the repo's templates, not the real tree: the
     member-scope route needs a family declaring member tables, neither shipped
@@ -1144,7 +1265,7 @@ class TestTuningCLI(unittest.TestCase):
     """
 
     PROBE = (
-        _tiers_toml({**gen_defs.DEFAULT_PIN_MAP, "lowest": "probe-member"})
+        _tiers_toml({**model_tuning.DEFAULT_PIN_MAP, "lowest": "probe-member"})
         + '[family.ask-vs-stipulate]\ntext = "probe family text"\n'
         '[family.ask-vs-stipulate.models.probe-member]\ntext = "probe member text"\n'
         '[family.ask-vs-stipulate.models.opus]\ntext = "probe opus text"\n'
@@ -1159,11 +1280,11 @@ class TestTuningCLI(unittest.TestCase):
         cls.repo = Path(cls._class_tmp.name) / "repo"
         cls.repo.mkdir()
         shutil.copytree(
-            gen_defs.TEMPLATES_DIR,
+            paths.TEMPLATES_DIR,
             cls.repo / "templates",
             ignore=shutil.ignore_patterns("tests", "__pycache__"),
         )
-        shutil.copy(_REPO_ROOT / "gen-defs.py", cls.repo / "gen-defs.py")
+        shutil.copytree(_REPO_ROOT / "gen_defs", cls.repo / "gen_defs", ignore=shutil.ignore_patterns("__pycache__"))
         cls.family_dir = cls.repo / "templates" / "family"
         (cls.family_dir / "probe.toml").write_text(cls.PROBE, encoding="utf-8")
 
@@ -1178,12 +1299,12 @@ class TestTuningCLI(unittest.TestCase):
 
     def _run(self, *args):
         return subprocess.run(
-            [sys.executable, str(self.repo / "gen-defs.py"), *args],
+            [sys.executable, "-m", "gen_defs", *args],
             capture_output=True,
             text=True,
             check=False,
             cwd=self.repo,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(self.repo)},
         )
 
     def _generate(self, *tuning_args):
@@ -1195,15 +1316,15 @@ class TestTuningCLI(unittest.TestCase):
         }
 
     def _claim(self, name="agents/applied-mathematician.md"):
-        return gen_defs.tuning_claim(self._bodies()[name])
+        return banners.tuning_claim(self._bodies()[name])
 
     def test_the_default_run_needs_no_flag_at_all(self):
         done = self._generate()
         self.assertEqual(done.returncode, 0, done.stderr)
         claim = self._claim()
         self.assertEqual(claim.family, "templates/family/claude.toml")
-        self.assertEqual(claim.tier, gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP))
-        self.assertEqual(claim.pin, gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP))
+        self.assertEqual(claim.tier, model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP))
+        self.assertEqual(claim.pin, model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP))
 
     def test_family_name_loads_that_family(self):
         done = self._generate("--family", "probe")
@@ -1241,7 +1362,7 @@ class TestTuningCLI(unittest.TestCase):
     def test_the_pin_map_changes_rendered_pins_and_says_so(self):
         done = self._generate("--model-pin-map", "all=haiku")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self._claim().pin, ",".join(f"{tier}=haiku" for tier in gen_defs.TIERS))
+        self.assertEqual(self._claim().pin, ",".join(f"{tier}=haiku" for tier in model_tuning.TIERS))
 
     def test_a_bad_map_key_is_a_hard_error_before_anything_is_written(self):
         for flag in ("--model-tier-map", "--model-pin-map"):
@@ -1306,8 +1427,8 @@ class TestTuningCLI(unittest.TestCase):
         stock = self._generate()
         self.assertIn(
             "tuning: family=templates/family/claude.toml "
-            f"tier[{gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP)}] "
-            f"pin[{gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP)}]",
+            f"tier[{model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP)}] "
+            f"pin[{model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP)}] harness=claude",
             stock.stdout,
         )
         # Every tier of the shipped claude family is stock and the two maps
@@ -1335,7 +1456,7 @@ class TestTuningCLI(unittest.TestCase):
         done = self._generate("--model-tier-map", "all=haiku", "--model-pin-map", "all=haiku")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual([line for line in done.stdout.splitlines() if line.startswith("notice:")], [])
-        self.assertEqual(gen_defs.frontmatter_pin(self._bodies()["agents/applied-mathematician.md"]), "haiku")
+        self.assertEqual(rendering.frontmatter_pin(self._bodies()["agents/applied-mathematician.md"]), "haiku")
 
     def test_the_divergence_notice_is_confined_to_the_claude_family(self):
         # For any other family the two maps diverge at every tier by
@@ -1366,13 +1487,13 @@ class TestTuningCLI(unittest.TestCase):
 
 
 class TestTunedBanner(unittest.TestCase):
-    TMPL = gen_defs.TEMPLATES_DIR / "agents" / "x.md.tmpl"
-    FAMILY = gen_defs.TEMPLATES_DIR / "family" / "fam.toml"
+    TMPL = paths.TEMPLATES_DIR / "agents" / "x.md.tmpl"
+    FAMILY = paths.TEMPLATES_DIR / "family" / "fam.toml"
 
     def _stamped(self, *, seat=None, tuning=None):
         body = "name: x\n---\nbody\n"
         tuning = _tuning(self.FAMILY) if tuning is None else tuning
-        stamp = gen_defs.banner(self.TMPL, body_hash=gen_defs.sha256_text(body), tuning=tuning, seat=seat)
+        stamp = banners.banner(self.TMPL, body_hash=banners.sha256_text(body), tuning=tuning, seat=seat)
         return "---\n" + stamp + "\n" + body
 
     def test_the_generated_line_carries_only_the_template_and_the_chunks(self):
@@ -1397,46 +1518,58 @@ class TestTunedBanner(unittest.TestCase):
 
     def test_claims_round_trip(self):
         text = self._stamped(seat="high")
-        self.assertEqual(gen_defs.banner_claim(text), "templates/agents/x.md.tmpl")
+        self.assertEqual(banners.banner_claim(text), "templates/agents/x.md.tmpl")
         self.assertEqual(
-            gen_defs.tuning_claim(text),
-            gen_defs.TuningClaim(
+            banners.tuning_claim(text),
+            banners.TuningClaim(
                 family="templates/family/fam.toml",
                 seat="high",
                 member="opus",
-                tier=gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP),
-                pin=gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP),
-                stock=",".join(gen_defs.TIERS),
+                tier=model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP),
+                pin=model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP),
+                stock=",".join(model_tuning.TIERS),
+                harness="claude",
             ),
         )
-        self.assertTrue(gen_defs.body_untouched(text))
+        self.assertTrue(banners.body_untouched(text))
+
+    def test_the_claim_records_the_harness_rendered_under(self):
+        tuning = dataclasses.replace(_tuning(self.FAMILY), harness="opencode")
+        self.assertEqual(banners.tuning_claim(self._stamped(tuning=tuning)).harness, "opencode")
+
+    def test_a_banner_written_before_the_harness_field_still_parses(self):
+        text = self._stamped(seat="high")
+        older = text.replace(" harness=claude\n", "\n")
+        self.assertNotEqual(older, text)
+        claim = banners.tuning_claim(older)
+        self.assertEqual((claim.seat, claim.member, claim.harness), ("high", "opus", None))
 
     def test_an_output_with_no_pin_site_records_none_for_both(self):
-        claim = gen_defs.tuning_claim(self._stamped())
+        claim = banners.tuning_claim(self._stamped())
         self.assertEqual((claim.seat, claim.member), ("none", "none"))
 
     def test_the_member_is_recorded_so_the_tier_never_has_to_be_inverted(self):
         # DEFAULT_PIN_MAP is not injective — low and lowest both ship haiku —
         # and an all= pin map collapses every tier onto one value, so seat is
         # unrecoverable from the pin. Recorded, not derived.
-        floor = _tuning(self.FAMILY, pin_map={tier: "haiku" for tier in gen_defs.TIERS})
+        floor = _tuning(self.FAMILY, pin_map={tier: "haiku" for tier in model_tuning.TIERS})
         for seat in ("low", "lowest"):
-            claim = gen_defs.tuning_claim(self._stamped(seat=seat, tuning=floor))
+            claim = banners.tuning_claim(self._stamped(seat=seat, tuning=floor))
             self.assertEqual(claim.seat, seat)
-            self.assertEqual(claim.member, gen_defs.DEFAULT_PIN_MAP[seat])
+            self.assertEqual(claim.member, model_tuning.DEFAULT_PIN_MAP[seat])
 
     def test_stock_none_when_every_tier_is_tuned(self):
-        entries = {"fam.gap": {"models": {member: {"text": "t"} for member in gen_defs.DEFAULT_PIN_MAP.values()}}}
-        claim = gen_defs.tuning_claim(self._stamped(tuning=_tuning(self.FAMILY, entries=entries)))
+        entries = {"fam.gap": {"models": {member: {"text": "t"} for member in model_tuning.DEFAULT_PIN_MAP.values()}}}
+        claim = banners.tuning_claim(self._stamped(tuning=_tuning(self.FAMILY, entries=entries)))
         self.assertEqual(claim.stock, "none")
 
     def test_maps_serialize_in_tier_order_never_sorted(self):
-        claim = gen_defs.tuning_claim(self._stamped())
+        claim = banners.tuning_claim(self._stamped())
         self.assertTrue(claim.tier.startswith("highest="))
         self.assertTrue(claim.tier.endswith("lowest=haiku"))
 
     def test_a_file_with_no_tuning_line_has_no_claim_to_read(self):
-        self.assertIsNone(gen_defs.tuning_claim("---\nname: x\n---\nbody\n"))
+        self.assertIsNone(banners.tuning_claim("---\nname: x\n---\nbody\n"))
 
 
 class TestGenerateRoundTrip(unittest.TestCase):
@@ -1457,7 +1590,7 @@ class TestGenerateRoundTrip(unittest.TestCase):
         (self.tsrc / "agents" / "probe.md.tmpl").write_text(self.BODY, encoding="utf-8")
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family = root / "family.toml"
         self.family.write_text(
             _tiers_toml() + '[family.probe]\ntext = "family fill"\n[family.probe.models.sonnet]\ntext = "model fill"\n',
@@ -1471,10 +1604,10 @@ class TestGenerateRoundTrip(unittest.TestCase):
 
     def _generate(self, **kwargs):
         kwargs.setdefault("tuning", _tuning(self.family))
-        return _quiet(gen_defs.generate, _binding(self.CHUNKS), self.smap, **kwargs)
+        return _quiet(generation.generate, _binding(self.CHUNKS), self.smap, **kwargs)
 
     def test_scratch_template_anchor_is_collectable(self):
-        found = gen_defs.collect_anchors(self.CHUNKS, gen_defs.templates(self.smap))
+        found = markers.collect_anchors(self.CHUNKS, discovery.templates(self.smap), namespace="fam")
         self.assertEqual(found, {"fam.probe"})
 
     def test_a_family_filling_nothing_leaves_the_base_render(self):
@@ -1485,21 +1618,21 @@ class TestGenerateRoundTrip(unittest.TestCase):
 
     def test_tuned_generate_fills_one_nb_and_claims_the_triple(self):
         # An output with no pin site takes family-wide text; retarget nothing.
-        overlays = gen_defs.tier_resolver(self.ENTRIES, dict(gen_defs.DEFAULT_PIN_MAP))
+        overlays = model_tuning.tier_resolver(self.ENTRIES, dict(model_tuning.DEFAULT_PIN_MAP))
         self.assertTrue(self._generate(overlays=overlays, tuning=_tuning(self.family, entries=self.ENTRIES)))
         text = self._target().read_text(encoding="utf-8")
         self.assertIn("body shared text\nfamily fill\ntail", text)
         self.assertNotIn("model fill", text)  # one text per anchor, and no tier here
-        claim = gen_defs.tuning_claim(text)
-        self.assertEqual(claim.family, gen_defs.rel(self.family))
+        claim = banners.tuning_claim(text)
+        self.assertEqual(claim.family, paths.rel(self.family))
         self.assertEqual(claim.stock, "highest,high,low,lowest")
 
     def test_the_written_file_is_the_render_and_names_the_family_behind_it(self):
-        overlays = gen_defs.tier_resolver(self.ENTRIES, dict(gen_defs.DEFAULT_PIN_MAP))
+        overlays = model_tuning.tier_resolver(self.ENTRIES, dict(model_tuning.DEFAULT_PIN_MAP))
         tuning = _tuning(self.family, entries=self.ENTRIES)
         self._generate(overlays=overlays, tuning=tuning)
         tuned = self._target().read_text(encoding="utf-8")
-        self.assertEqual(gen_defs.tuning_claim(tuned).family, gen_defs.rel(self.family))
+        self.assertEqual(banners.tuning_claim(tuned).family, paths.rel(self.family))
 
         # The same templates under a family that fills nothing: different
         # bytes, and a banner naming the file that produced them. Two renders,
@@ -1507,7 +1640,7 @@ class TestGenerateRoundTrip(unittest.TestCase):
         self._generate(tuning=_tuning(self.other))
         untuned = self._target().read_text(encoding="utf-8")
         self.assertNotEqual(untuned, tuned)
-        self.assertEqual(gen_defs.tuning_claim(untuned).family, gen_defs.rel(self.other))
+        self.assertEqual(banners.tuning_claim(untuned).family, paths.rel(self.other))
         self.assertNotIn("family fill", untuned)
 
     def test_bannerless_target_refused_out_of_repo_too(self):
@@ -1516,7 +1649,7 @@ class TestGenerateRoundTrip(unittest.TestCase):
         target.write_text("hand-maintained\n", encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            ok = gen_defs.generate(_binding(self.CHUNKS), self.smap, tuning=_tuning(self.family))
+            ok = generation.generate(_binding(self.CHUNKS), self.smap, tuning=_tuning(self.family))
         self.assertFalse(ok)
         self.assertIn("REFUSED", buf.getvalue())
         self.assertEqual(target.read_text(encoding="utf-8"), "hand-maintained\n")
@@ -1526,7 +1659,7 @@ class TestGenerateRoundTrip(unittest.TestCase):
         # untouched render is replaced outright, a hand-edited one is copied
         # aside first.
         self._generate()
-        overlays = gen_defs.tier_resolver(self.ENTRIES, dict(gen_defs.DEFAULT_PIN_MAP))
+        overlays = model_tuning.tier_resolver(self.ENTRIES, dict(model_tuning.DEFAULT_PIN_MAP))
         self._generate(overlays=overlays, tuning=_tuning(self.family, entries=self.ENTRIES))
         self.assertFalse(self._target().with_name("probe.md.00.bak").exists())
 
@@ -1561,7 +1694,7 @@ class TestRefactorBlastRadius(unittest.TestCase):
             (self.tsrc / "agents" / f"{name}.md.tmpl").write_text(body, encoding="utf-8")
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family = root / "fam.toml"
         self.family.write_text(_tiers_toml(), encoding="utf-8")
         self.tuning = _tuning(self.family)
@@ -1574,7 +1707,7 @@ class TestRefactorBlastRadius(unittest.TestCase):
         """{output key: rendered text} for the templates as they stand now."""
         return {
             target.relative_to(self.out).as_posix(): text
-            for target, text in gen_defs.all_renders(binding, self.smap, tuning=self.tuning)
+            for target, text in rendering.all_renders(binding, self.smap, tuning=self.tuning)
         }
 
     def _refactor(self):
@@ -1641,22 +1774,22 @@ class TestMixedTierRender(unittest.TestCase):
         (self.tsrc / "commands" / "plain.md.tmpl").write_text(self.NO_PIN_SITE, encoding="utf-8")
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family = root / "fam.toml"
         self.family.write_text(_tiers_toml() + self.FAMILY, encoding="utf-8")
-        self.entries = gen_defs.load_family(self.family).entries
+        self.entries = model_tuning.load_family(self.family).entries
 
     def _generate(self, *, tier_map=None):
-        tier_map = dict(tier_map or gen_defs.DEFAULT_PIN_MAP)
-        resolve = gen_defs.tier_resolver(self.entries, tier_map)
+        tier_map = dict(tier_map or model_tuning.DEFAULT_PIN_MAP)
+        resolve = model_tuning.tier_resolver(self.entries, tier_map)
         tuning = _tuning(self.family, tier_map=tier_map, entries=self.entries)
-        ok = _quiet(gen_defs.generate, _binding(self.CHUNKS), self.smap, overlays=resolve, tuning=tuning)
+        ok = _quiet(generation.generate, _binding(self.CHUNKS), self.smap, overlays=resolve, tuning=tuning)
         return ok, resolve, tuning
 
     def _bodies(self):
         return (
-            gen_defs.banner_body((self.out / "agents" / "tiered.md").read_text(encoding="utf-8")),
-            gen_defs.banner_body((self.out / "commands" / "plain.md").read_text(encoding="utf-8")),
+            banners.banner_body((self.out / "agents" / "tiered.md").read_text(encoding="utf-8")),
+            banners.banner_body((self.out / "commands" / "plain.md").read_text(encoding="utf-8")),
         )
 
     def test_each_output_resolves_against_its_own_tier(self):
@@ -1670,9 +1803,9 @@ class TestMixedTierRender(unittest.TestCase):
         self.assertIn("\nfamily\n", plain)
 
     def test_the_rendered_pin_is_the_pin_map_value_not_the_member(self):
-        self._generate(tier_map={**gen_defs.DEFAULT_PIN_MAP, "high": "haiku"})
+        self._generate(tier_map={**model_tuning.DEFAULT_PIN_MAP, "high": "haiku"})
         text = (self.out / "agents" / "tiered.md").read_text(encoding="utf-8")
-        self.assertEqual(gen_defs.frontmatter_pin(text), "opus")
+        self.assertEqual(rendering.frontmatter_pin(text), "opus")
         self.assertIn("\nhaiku text\n", text)
 
     def test_the_mixed_render_is_deterministic_across_runs(self):
@@ -1689,7 +1822,7 @@ class TestMixedTierRender(unittest.TestCase):
     def test_no_rendered_output_carries_the_sentinel(self):
         self._generate()
         for body in self._bodies():
-            self.assertNotIn(gen_defs.TIER_SENTINEL, body)
+            self.assertNotIn(model_tuning.TIER_SENTINEL, body)
 
     def test_a_family_with_no_entries_renders_byte_identically_to_anchor_free(self):
         # SPEC's additive-only guarantee at render level: an unfilled anchor
@@ -1699,10 +1832,10 @@ class TestMixedTierRender(unittest.TestCase):
         bare.write_text(_tiers_toml(), encoding="utf-8")
         self.assertTrue(
             _quiet(
-                gen_defs.generate,
+                generation.generate,
                 _binding(self.CHUNKS),
                 self.smap,
-                overlays=gen_defs.tier_resolver({}, dict(gen_defs.DEFAULT_PIN_MAP)),
+                overlays=model_tuning.tier_resolver({}, dict(model_tuning.DEFAULT_PIN_MAP)),
                 tuning=_tuning(bare),
             )
         )
@@ -1711,7 +1844,7 @@ class TestMixedTierRender(unittest.TestCase):
         marker = "@!fam.probe!@"
         (self.tsrc / "agents" / "tiered.md.tmpl").write_text(self.TIERED.replace(marker, ""), encoding="utf-8")
         (self.tsrc / "commands" / "plain.md.tmpl").write_text(self.NO_PIN_SITE.replace(marker, ""), encoding="utf-8")
-        _quiet(gen_defs.generate, _binding(self.CHUNKS), self.smap, tuning=_tuning(bare))
+        _quiet(generation.generate, _binding(self.CHUNKS), self.smap, tuning=_tuning(bare))
         self.assertEqual(bare_bodies, self._bodies())
 
 
@@ -1739,15 +1872,15 @@ class TestNestedTemplateMirroring(unittest.TestCase):
             template.write_text(self.BODY, encoding="utf-8")
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
 
-    TUNING = _tuning(gen_defs.FAMILY_DIR / "claude.toml")
+    TUNING = _tuning(paths.FAMILY_DIR / "claude.toml")
 
     def _generate(self):
-        return _quiet(gen_defs.generate, _binding(self.CHUNKS), self.smap, tuning=self.TUNING)
+        return _quiet(generation.generate, _binding(self.CHUNKS), self.smap, tuning=self.TUNING)
 
     def test_template_targets_mirror_subpaths(self):
-        targets = {template.name: out_dir for _, template, out_dir in gen_defs.template_targets(self.smap)}
+        targets = {template.name: out_dir for _, template, out_dir in discovery.template_targets(self.smap)}
         self.assertEqual(targets["flat.md.tmpl"], self.out / "agents")
         self.assertEqual(targets["participant-contract.md.tmpl"], self.out / "agents" / "mad")
 
@@ -1760,7 +1893,7 @@ class TestNestedTemplateMirroring(unittest.TestCase):
         text = nested.read_text(encoding="utf-8")
         self.assertIn("name: participant-contract\n", text)
         self.assertIn("body shared text\n", text)
-        self.assertTrue(gen_defs.banner_claim(text).endswith("agents/mad/participant-contract.md.tmpl"))
+        self.assertTrue(banners.banner_claim(text).endswith("agents/mad/participant-contract.md.tmpl"))
 
     def test_top_level_template_unaffected(self):
         self.assertTrue(self._generate())
@@ -1776,7 +1909,7 @@ class TestNestedTemplateMirroring(unittest.TestCase):
         self._generate()
         nested = self.out / "agents" / "mad" / "participant-contract.md"
         first = nested.read_text(encoding="utf-8")
-        self.assertTrue(gen_defs.body_untouched(first))
+        self.assertTrue(banners.body_untouched(first))
         self._generate()
         self.assertEqual(nested.read_text(encoding="utf-8"), first)
 
@@ -1785,24 +1918,24 @@ class TestBodyHashBanner(unittest.TestCase):
     """The banner's !BODY-SHA256! line: what it covers, and what it proves."""
 
     CHUNKS = {}
-    TMPL = gen_defs.TEMPLATES_DIR / "agents" / "x.md.tmpl"
+    TMPL = paths.TEMPLATES_DIR / "agents" / "x.md.tmpl"
 
-    TUNING = _tuning(gen_defs.FAMILY_DIR / "claude.toml")
+    TUNING = _tuning(paths.FAMILY_DIR / "claude.toml")
 
     def _stamped(self, body):
-        stamp = gen_defs.banner(self.TMPL, body_hash=gen_defs.sha256_text(body), tuning=self.TUNING)
+        stamp = banners.banner(self.TMPL, body_hash=banners.sha256_text(body), tuning=self.TUNING)
         return "---\n" + stamp + "\n" + body
 
     def test_hash_covers_everything_after_the_banner(self):
         body = "name: x\n---\nthe prompt body\n"
-        self.assertEqual(gen_defs.banner_body(self._stamped(body)), body)
+        self.assertEqual(banners.banner_body(self._stamped(body)), body)
 
     def test_untouched_output_is_provable(self):
-        self.assertTrue(gen_defs.body_untouched(self._stamped("name: x\n---\nb\n")))
+        self.assertTrue(banners.body_untouched(self._stamped("name: x\n---\nb\n")))
 
     def test_edited_body_breaks_the_proof(self):
         text = self._stamped("name: x\n---\nb\n") + "appended by hand\n"
-        self.assertFalse(gen_defs.body_untouched(text))
+        self.assertFalse(banners.body_untouched(text))
 
     def test_pre_hash_banner_proves_nothing(self):
         old = (
@@ -1810,22 +1943,22 @@ class TestBodyHashBanner(unittest.TestCase):
             "templates/shared-chunks.toml — edit those. DO NOT HAND EDIT "
             "THIS FILE.\n#\nname: x\n---\nb\n"
         )
-        self.assertIsNotNone(gen_defs.banner_claim(old))  # still a banner
-        self.assertIsNone(gen_defs.banner_body(old))
-        self.assertFalse(gen_defs.body_untouched(old))
+        self.assertIsNotNone(banners.banner_claim(old))  # still a banner
+        self.assertIsNone(banners.banner_body(old))
+        self.assertFalse(banners.body_untouched(old))
 
     def test_rendered_definitions_carry_a_true_hash(self):
         # In memory only — nothing is written under the root named here.
-        smap = gen_defs.surface_map(gen_defs.REPO_ROOT)
-        for target, rendered in gen_defs.all_renders(_binding(gen_defs.load_chunks()), smap, tuning=self.TUNING):
-            self.assertTrue(gen_defs.body_untouched(rendered), gen_defs.rel(target))
+        smap = discovery.surface_map(paths.REPO_ROOT)
+        for target, rendered in rendering.all_renders(_binding(chunks.load_chunks()), smap, tuning=self.TUNING):
+            self.assertTrue(banners.body_untouched(rendered), paths.rel(target))
 
     def test_no_shipped_render_carries_the_tier_sentinel(self):
         # The discovery pass's binding must never reach a written file. Checked
         # over the whole real set, in memory, under the shipped default triple.
-        smap = gen_defs.surface_map(gen_defs.REPO_ROOT)
-        for target, rendered in gen_defs.all_renders(_binding(gen_defs.load_chunks()), smap, tuning=self.TUNING):
-            self.assertNotIn(gen_defs.TIER_SENTINEL, rendered, gen_defs.rel(target))
+        smap = discovery.surface_map(paths.REPO_ROOT)
+        for target, rendered in rendering.all_renders(_binding(chunks.load_chunks()), smap, tuning=self.TUNING):
+            self.assertNotIn(model_tuning.TIER_SENTINEL, rendered, paths.rel(target))
 
     def test_line_endings_are_translated_so_there_is_one_reading(self):
         # Generation reads its targets through read_text, whose universal
@@ -1834,11 +1967,11 @@ class TestBodyHashBanner(unittest.TestCase):
         # what made a tree nobody edited unprovable to one caller and provable
         # to the other.
         text = self._stamped("name: x\n---\nb\n")
-        self.assertTrue(gen_defs.body_untouched(text.replace("\n", "\r\n")))
-        self.assertTrue(gen_defs.body_untouched(text.replace("\n", "\r")))
+        self.assertTrue(banners.body_untouched(text.replace("\n", "\r\n")))
+        self.assertTrue(banners.body_untouched(text.replace("\n", "\r")))
         # Translating is not forgiving: an edit inside the widened file is
         # still an edit.
-        self.assertFalse(gen_defs.body_untouched(text.replace("\n", "\r\n") + "by hand\r\n"))
+        self.assertFalse(banners.body_untouched(text.replace("\n", "\r\n") + "by hand\r\n"))
 
 
 class TestWriteSafetyBackupBranches(unittest.TestCase):
@@ -1858,15 +1991,15 @@ class TestWriteSafetyBackupBranches(unittest.TestCase):
         self.template.write_text(self.BODY, encoding="utf-8")
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.target = self.out / "agents" / "probe.md"
 
     def _generate(self, chunks=None):
         return _quiet(
-            gen_defs.generate,
+            generation.generate,
             _binding(self.CHUNKS if chunks is None else chunks),
             self.smap,
-            tuning=_tuning(gen_defs.FAMILY_DIR / "claude.toml"),
+            tuning=_tuning(paths.FAMILY_DIR / "claude.toml"),
         )
 
     def _backups(self):
@@ -1874,7 +2007,7 @@ class TestWriteSafetyBackupBranches(unittest.TestCase):
 
     def test_untouched_target_is_overwritten_without_a_backup(self):
         self._generate()
-        self.assertTrue(gen_defs.body_untouched(self.target.read_text("utf-8")))
+        self.assertTrue(banners.body_untouched(self.target.read_text("utf-8")))
         self._generate({"shared": {"text": "changed text"}})
         self.assertIn("changed text", self.target.read_text(encoding="utf-8"))
         self.assertEqual(self._backups(), [])
@@ -1909,7 +2042,7 @@ class TestInstallExclusions(unittest.TestCase):
             "kb_tools/CONVENTIONS.md",
             "liaison_tools/docs/SPEC.md",
         ):
-            self.assertTrue(gen_defs.excluded_from_install(Path(excluded)), excluded)
+            self.assertTrue(product.excluded_from_install(Path(excluded)), excluded)
         # README is the one project-doc name a package writes for its consumer,
         # and a `.tmpl` is payload rather than documentation.
         for kept in (
@@ -1919,7 +2052,7 @@ class TestInstallExclusions(unittest.TestCase):
             "kb_tools/README.md",
             "kb_tools/installed/CONVENTIONS.md.tmpl",
         ):
-            self.assertFalse(gen_defs.excluded_from_install(Path(kept)), kept)
+            self.assertFalse(product.excluded_from_install(Path(kept)), kept)
 
 
 class TestShippedPackageMapping(unittest.TestCase):
@@ -1971,14 +2104,14 @@ class TestShippedPackageMapping(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"content of {name}\n", encoding="utf-8")
         rows = self.NESTED if prefix else self.TOP_LEVEL
-        original = gen_defs.SHIPPED_PACKAGES
-        gen_defs.SHIPPED_PACKAGES = tuple(zip(rows, self.NESTED))
-        self.addCleanup(setattr, gen_defs, "SHIPPED_PACKAGES", original)
+        original = product.SHIPPED_PACKAGES
+        product.SHIPPED_PACKAGES = tuple(zip(rows, self.NESTED))
+        self.addCleanup(setattr, product, "SHIPPED_PACKAGES", original)
         return source
 
     def _pairs(self, source: Path, surfaces: str = "both"):
-        smap = gen_defs.surface_map(templates_root=self.templates, output_root=self.out, surfaces=surfaces)
-        return gen_defs.package_pairs(smap, source_root=source)
+        smap = discovery.surface_map(templates_root=self.templates, output_root=self.out, surfaces=surfaces)
+        return product.package_pairs(smap, source_root=source)
 
     def test_both_source_layouts_install_the_same_keys(self):
         for prefix in ("agents", ""):
@@ -2020,8 +2153,8 @@ class TestShippedPackageMapping(unittest.TestCase):
 
     def test_install_root_guard_covers_a_relocated_package_source(self):
         source = self._layout("")
-        with self.assertRaises(gen_defs.TemplateError) as caught:
-            gen_defs.assert_install_root(source / "kb_tools", source_root=source)
+        with self.assertRaises(errors.InputError) as caught:
+            product.assert_install_root(source / "kb_tools", source_root=source)
         self.assertIn("kb_tools/ package source", str(caught.exception))
 
 
@@ -2056,8 +2189,8 @@ class TestInstallSourceGuard(unittest.TestCase):
             path.write_text(f"content of {name}\n", encoding="utf-8")
 
     def _refuses(self, root: Path):
-        with self.assertRaises(gen_defs.TemplateError) as caught:
-            gen_defs.assert_install_root(root, source_root=self.src)
+        with self.assertRaises(errors.InputError) as caught:
+            product.assert_install_root(root, source_root=self.src)
         return str(caught.exception)
 
     def test_root_that_is_the_repository_root_is_refused(self):
@@ -2087,25 +2220,25 @@ class TestInstallSourceGuard(unittest.TestCase):
             path = clone / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"content of {name}\n", encoding="utf-8")
-        gen_defs.assert_install_root(project / ".claude", source_root=clone)  # no raise
+        product.assert_install_root(project / ".claude", source_root=clone)  # no raise
         # The dogfood install from inside the clone, and a render slot under it,
         # are ordinary consumers of the same checkout.
-        gen_defs.assert_install_root(clone / ".claude", source_root=clone)
-        gen_defs.assert_install_root(clone / "rendered" / "latest", source_root=clone)
+        product.assert_install_root(clone / ".claude", source_root=clone)
+        product.assert_install_root(clone / "rendered" / "latest", source_root=clone)
 
     def test_a_root_above_the_repository_is_allowed(self):
         # The deliberate cost of equality: a ROOT above the repository is
         # indistinguishable from the sanctioned layout's <project>/.claude, so
         # it proceeds. What it lands is a mess outside this repository rather
         # than an untracked render inside it.
-        gen_defs.assert_install_root(self.src.parent, source_root=self.src)  # no raise
+        product.assert_install_root(self.src.parent, source_root=self.src)  # no raise
 
     def test_a_root_named_like_a_deployed_surface_is_an_ordinary_consumer(self):
         # `agents/` and `commands/` are not directories in this repository, so
         # there is nothing there to protect: a consumer whose path happens to
         # end in one is installed into like any other.
-        gen_defs.assert_install_root(self.src / "agents", source_root=self.src)  # no raise
-        gen_defs.assert_install_root(self.src / "commands", source_root=self.src)
+        product.assert_install_root(self.src / "agents", source_root=self.src)  # no raise
+        product.assert_install_root(self.src / "commands", source_root=self.src)
 
     def test_a_root_reaching_the_source_through_a_symlink_is_refused(self):
         # Resolution happens before comparison, so neither a link nor a `..`
@@ -2118,24 +2251,24 @@ class TestInstallSourceGuard(unittest.TestCase):
     def test_the_justfile_install_shape_still_passes(self):
         target = self.root / "consumer" / ".claude"
         target.mkdir(parents=True)
-        gen_defs.assert_install_root(target, source_root=self.src)  # no raise
+        product.assert_install_root(target, source_root=self.src)  # no raise
         # A sibling of the source root, and the source root's own parent's
         # sibling, are both ordinary consumers.
-        gen_defs.assert_install_root(self.root / "consumer", source_root=self.src)
+        product.assert_install_root(self.root / "consumer", source_root=self.src)
 
     def test_install_into_the_repo_root_refuses_before_writing_anything(self):
         # The real thing, end to end and against the real repository: no file
         # is touched, because the guard runs before the copy set is built.
         out = self.root / "out"
         out.mkdir()
-        smap = gen_defs.surface_map(output_root=out)
-        with self.assertRaises(gen_defs.TemplateError):
+        smap = discovery.surface_map(output_root=out)
+        with self.assertRaises(errors.InputError):
             _quiet(
-                gen_defs.install,
-                _binding(gen_defs.load_chunks()),
+                installation.install,
+                _binding(chunks.load_chunks()),
                 smap,
-                root=gen_defs.REPO_ROOT,
-                tuning=_tuning(gen_defs.FAMILY_DIR / "claude.toml"),
+                root=paths.REPO_ROOT,
+                tuning=_tuning(paths.FAMILY_DIR / "claude.toml"),
             )
         self.assertEqual(sorted(out.rglob("*")), [])
 
@@ -2155,13 +2288,13 @@ class TestInstalledBanner(unittest.TestCase):
         return path
 
     def _lines(self, name, text, surface="agents"):
-        content = gen_defs.install_content(self._source(name, text), surface=surface)
+        content = installation.install_content(self._source(name, text), surface=surface)
         return content.split("\n")
 
     def test_frontmatter_banner_sits_inside_the_block(self):
         lines = self._lines("hand.md", "---\nname: hand\n---\nprompt body\n")
         self.assertEqual(lines[0], "---")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, lines[2])
+        self.assertIn(banners.INSTALLED_NOTICE, lines[2])
         self.assertTrue(lines[3].startswith("# !BODY-SHA256! "))
         self.assertEqual(lines[5], "name: hand")
 
@@ -2171,7 +2304,7 @@ class TestInstalledBanner(unittest.TestCase):
         # it in frontmatter, not in front of it.
         lines = self._lines("guest-end.md", "End the session.\n\n## Behavior\n", surface="commands")
         self.assertEqual(lines[0], "---")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, lines[2])
+        self.assertIn(banners.INSTALLED_NOTICE, lines[2])
         self.assertEqual(lines[5], "---")
         self.assertEqual(lines[6], "End the session.")
 
@@ -2183,13 +2316,13 @@ class TestInstalledBanner(unittest.TestCase):
             ("conf.toml", "[table]"),
         ):
             lines = self._lines(name, first + "\n")
-            self.assertIn(gen_defs.INSTALLED_NOTICE, lines[1], name)
+            self.assertIn(banners.INSTALLED_NOTICE, lines[1], name)
             self.assertEqual(lines[4], first, name)
 
     def test_hash_comment_banner_sits_below_a_shebang(self):
         lines = self._lines("tool.sh", "#!/usr/bin/env bash\nset -eu\n")
         self.assertEqual(lines[0], "#!/usr/bin/env bash")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, lines[2])
+        self.assertIn(banners.INSTALLED_NOTICE, lines[2])
         self.assertEqual(lines[5], "set -eu")
 
     def test_html_banner_wraps_agents_material_without_frontmatter(self):
@@ -2198,7 +2331,7 @@ class TestInstalledBanner(unittest.TestCase):
         # rather than yield a body, and frontmatter would make it succeed.
         lines = self._lines("topic.md", "# TOPIC: Review\n")
         self.assertEqual(lines[0], "<!--")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, lines[1])
+        self.assertIn(banners.INSTALLED_NOTICE, lines[1])
         self.assertEqual(lines[3], "-->")
         self.assertEqual(lines[4], "# TOPIC: Review")
 
@@ -2210,35 +2343,35 @@ class TestInstalledBanner(unittest.TestCase):
             ("agents", "tool.py", '"""d."""\ncode()\n'),
             ("agents", "tool.sh", "#!/bin/sh\nexec true\n"),
         ):
-            stamped = gen_defs.install_content(self._source(name, text), surface=surface)
+            stamped = installation.install_content(self._source(name, text), surface=surface)
             # The shared mechanics read either banner kind: the body is what
             # follows the block, and it hashes to the block's own claim.
-            self.assertTrue(gen_defs.body_untouched(stamped), name)
-            self.assertTrue(stamped.endswith(gen_defs.banner_body(stamped)), name)
-            self.assertFalse(gen_defs.body_untouched(stamped + "edit\n"), name)
+            self.assertTrue(banners.body_untouched(stamped), name)
+            self.assertTrue(stamped.endswith(banners.banner_body(stamped)), name)
+            self.assertFalse(banners.body_untouched(stamped + "edit\n"), name)
 
     def test_generated_definition_is_exempt(self):
-        template = gen_defs.TEMPLATES_DIR / "agents" / "x.md.tmpl"
+        template = paths.TEMPLATES_DIR / "agents" / "x.md.tmpl"
         body = "name: x\n---\nbody\n"
-        stamp = gen_defs.banner(
-            template, body_hash=gen_defs.sha256_text(body), tuning=_tuning(gen_defs.FAMILY_DIR / "claude.toml")
+        stamp = banners.banner(
+            template, body_hash=banners.sha256_text(body), tuning=_tuning(paths.FAMILY_DIR / "claude.toml")
         )
         generated = "---\n" + stamp + "\n" + body
-        self.assertIsNone(gen_defs.install_content(self._source("gen.md", generated), surface="agents"))
+        self.assertIsNone(installation.install_content(self._source("gen.md", generated), surface="agents"))
 
     def test_vendor_carve_out_matches_a_directory_at_any_depth(self):
         for key in ("agents/kb_tools/_vendor/x.py", "agents/kb_tools/_vendor/pkg/deep/x.py"):
-            self.assertTrue(gen_defs.vendored(Path(key)), key)
+            self.assertTrue(installation.vendored(Path(key)), key)
         # A file NAMED _vendor is not a vendored tree, and the carve-out reaches
         # no further than one.
         for key in ("agents/kb_tools/kb_util.py", "agents/kb_tools/_vendor", "agents/_vendored/x.py"):
-            self.assertFalse(gen_defs.vendored(Path(key)), key)
+            self.assertFalse(installation.vendored(Path(key)), key)
 
     def test_comment_less_suffix_takes_no_banner(self):
-        self.assertFalse(gen_defs.bannerable(Path("settings.json")))
-        self.assertIsNone(gen_defs.install_content(self._source("s.json", "{}\n"), surface="agents"))
+        self.assertFalse(installation.bannerable(Path("settings.json")))
+        self.assertIsNone(installation.install_content(self._source("s.json", "{}\n"), surface="agents"))
         for kept in ("a.md", "a.py", "a.sh", "a.toml", "a.mk", "a.just"):
-            self.assertTrue(gen_defs.bannerable(Path(kept)), kept)
+            self.assertTrue(installation.bannerable(Path(kept)), kept)
 
 
 class TestInstallWritePath(unittest.TestCase):
@@ -2260,7 +2393,7 @@ class TestInstallWritePath(unittest.TestCase):
     def _install(self, source=None, target=None):
         source = self.source if source is None else source
         target = self.target if target is None else target
-        gen_defs.install_file(source, target, gen_defs.install_content(source, surface="agents"))
+        installation.install_file(source, target, installation.install_content(source, surface="agents"))
 
     def _mode(self, path):
         return stat.S_IMODE(path.stat().st_mode)
@@ -2268,8 +2401,8 @@ class TestInstallWritePath(unittest.TestCase):
     def test_creation_lands_the_content_and_its_banner(self):
         self._install()
         text = self.target.read_text(encoding="utf-8")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, text)
-        self.assertTrue(gen_defs.body_untouched(text))
+        self.assertIn(banners.INSTALLED_NOTICE, text)
+        self.assertTrue(banners.body_untouched(text))
         # The parent directory is made on the way: a package's subdirectories
         # went with its destination and nothing else recreates them.
         self.assertTrue(self.target.parent.is_dir())
@@ -2285,7 +2418,7 @@ class TestInstallWritePath(unittest.TestCase):
         target = self.target.with_name("tool.sh")
         self._install(source, target)
         self.assertTrue(self._mode(target) & 0o111)
-        self.assertIn(gen_defs.INSTALLED_NOTICE, target.read_text(encoding="utf-8"))
+        self.assertIn(banners.INSTALLED_NOTICE, target.read_text(encoding="utf-8"))
 
     def test_creation_leaves_a_non_executable_source_non_executable(self):
         self.assertFalse(self._mode(self.source) & 0o111)
@@ -2303,7 +2436,7 @@ class TestBackupIdentity(unittest.TestCase):
             target = root / "probe.md"
             target.write_text("their content\n", encoding="utf-8")
             target.chmod(0o646)
-            backup = gen_defs.back_up(target)
+            backup = generation.back_up(target)
 
             self.assertEqual(backup, root / "probe.md.00.bak")
             self.assertEqual(backup.read_text(encoding="utf-8"), "their content\n")
@@ -2326,8 +2459,8 @@ class TestQuietPass(unittest.TestCase):
     def _drive(self, run, *, verbose=False):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            with contextlib.suppress(gen_defs.TemplateError):
-                ok = gen_defs.quiet_pass(run, verbose=verbose)
+            with contextlib.suppress(errors.InputError):
+                ok = installation.quiet_pass(run, verbose=verbose)
                 self.assertIsInstance(ok, bool)
         return buf.getvalue()
 
@@ -2347,17 +2480,17 @@ class TestQuietPass(unittest.TestCase):
         # the pass had already covered.
         def run():
             print("  OK      agents/first.md")
-            raise gen_defs.TemplateError("unknown chunk or placeholder 'no-such-chunk'")
+            raise errors.InputError("unknown chunk or placeholder 'no-such-chunk'")
 
         self.assertIn("agents/first.md", self._drive(run))
 
     def test_the_exception_still_propagates(self):
         def run():
-            raise gen_defs.TemplateError("boom")
+            raise errors.InputError("boom")
 
         with contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaises(gen_defs.TemplateError):
-                gen_defs.quiet_pass(run, verbose=False)
+            with self.assertRaises(errors.InputError):
+                installation.quiet_pass(run, verbose=False)
 
 
 class TestInstallPassContract(unittest.TestCase):
@@ -2389,8 +2522,8 @@ class TestInstallPassContract(unittest.TestCase):
             _tiers_toml() + '[family.probe.models.sonnet]\ntext = "watch the tier"\n', encoding="utf-8"
         )
 
-        entries = gen_defs.load_family(self.family).entries
-        self.overlays = gen_defs.tier_resolver(entries, dict(gen_defs.DEFAULT_PIN_MAP))
+        entries = model_tuning.load_family(self.family).entries
+        self.overlays = model_tuning.tier_resolver(entries, dict(model_tuning.DEFAULT_PIN_MAP))
         self.tuning = _tuning(self.family, entries=entries)
         self.binding = _binding(self.CHUNKS)
         self.src.mkdir(exist_ok=True)
@@ -2399,20 +2532,20 @@ class TestInstallPassContract(unittest.TestCase):
         (self.src / "kb_tools").mkdir()
         self.source_tool = self.src / "kb_tools" / "probe_tool.py"
         self.source_tool.write_text('"""a probe tool."""\n', encoding="utf-8")
-        surfaces = gen_defs.surface_map(templates_root=self.templates, output_root=self.src)
-        _quiet(gen_defs.generate, self.binding, surfaces, overlays=self.overlays, tuning=self.tuning)
+        surfaces = discovery.surface_map(templates_root=self.templates, output_root=self.src)
+        _quiet(generation.generate, self.binding, surfaces, overlays=self.overlays, tuning=self.tuning)
         self.source_def = self.src / "agents" / "probe.md"
         self.assertIn("watch the tier", self.source_def.read_text(encoding="utf-8"))
 
         self.root = root / "consumer"
         self.root.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.templates, output_root=self.root)
+        self.smap = discovery.surface_map(templates_root=self.templates, output_root=self.root)
 
     def _install(self, **kwargs):
         kwargs.setdefault("tuning", self.tuning)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            ok = gen_defs.install(self.binding, self.smap, root=self.root, source_root=self.src, **kwargs)
+            ok = installation.install(self.binding, self.smap, root=self.root, source_root=self.src, **kwargs)
         return ok, buf.getvalue()
 
     def test_byte_perfect_install_of_a_tiered_output_is_clean(self):
@@ -2442,8 +2575,8 @@ class TestInstallPassContract(unittest.TestCase):
         # install reports its own tree as MISTUNED on the next check.
         ok, _ = self._install(overlays=self.overlays)
         self.assertTrue(ok)
-        claim = gen_defs.tuning_claim((self.root / "agents" / "probe.md").read_text(encoding="utf-8"))
-        self.assertEqual(claim.family, gen_defs.rel(self.family))
+        claim = banners.tuning_claim((self.root / "agents" / "probe.md").read_text(encoding="utf-8"))
+        self.assertEqual(claim.family, paths.rel(self.family))
         self.assertEqual((claim.seat, claim.member), ("medium", "sonnet"))
 
     def test_a_raising_pass_still_names_what_landed(self):
@@ -2453,8 +2586,8 @@ class TestInstallPassContract(unittest.TestCase):
         self.template.write_text(self.BODY.replace("body\n", "body @!no-such-chunk!@\n"), encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            with self.assertRaises(gen_defs.TemplateError):
-                gen_defs.install(
+            with self.assertRaises(errors.InputError):
+                installation.install(
                     self.binding,
                     self.smap,
                     root=self.root,
@@ -2463,12 +2596,12 @@ class TestInstallPassContract(unittest.TestCase):
                     tuning=self.tuning,
                 )
         report = buf.getvalue()
-        self.assertIn(f"installed: 1 under agents/ → {gen_defs.rel(self.root)}", report)
+        self.assertIn(f"installed: 1 under agents/ → {paths.rel(self.root)}", report)
         self.assertIn("the packages are in place", report)
         # Said because it is true: the package really is live, and stamped.
         landed = (self.root / "agents" / "kb_tools" / "probe_tool.py").read_text(encoding="utf-8")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, landed)
-        self.assertEqual(gen_defs.banner_body(landed), self.source_tool.read_text(encoding="utf-8"))
+        self.assertIn(banners.INSTALLED_NOTICE, landed)
+        self.assertEqual(banners.banner_body(landed), self.source_tool.read_text(encoding="utf-8"))
         # And the render really did not happen.
         self.assertFalse((self.root / "agents" / "probe.md").exists())
 
@@ -2485,23 +2618,23 @@ class TestInstallEndToEnd(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.chunks = gen_defs.load_chunks()
+        cls.chunks = chunks.load_chunks()
         # The triple `just install <target>` runs under, built the way main()
         # builds it, so an end-to-end install here is the shipped default one.
-        family_path = gen_defs.FAMILY_DIR / "claude.toml"
-        cls.family = gen_defs.load_family(family_path)
-        cls.tuning = gen_defs.effective_tuning(family_path, cls.family)
+        family_path = paths.FAMILY_DIR / "claude.toml"
+        cls.family = model_tuning.load_family(family_path)
+        cls.tuning = model_tuning.effective_tuning(family_path, cls.family)
         # staticmethod: a plain function on a class would bind as a method and
         # arrive at render_output with `self` prepended.
-        cls.overlays = staticmethod(gen_defs.tier_resolver(cls.family.entries, cls.tuning.tier_map))
-        cls.binding = gen_defs.tier_binding(cls.chunks, pin_map=cls.tuning.pin_map)
+        cls.overlays = staticmethod(model_tuning.tier_resolver(cls.family.entries, cls.tuning.tier_map))
+        cls.binding = model_tuning.tier_binding(cls.chunks, pin_map=cls.tuning.pin_map, harness=_DEFAULT_HARNESS)
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name) / ".claude"
         self.root.mkdir()
-        self.smap = gen_defs.surface_map(output_root=self.root)
+        self.smap = discovery.surface_map(output_root=self.root)
 
     def _defaults(self, kwargs):
         kwargs.setdefault("overlays", self.overlays)
@@ -2511,13 +2644,13 @@ class TestInstallEndToEnd(unittest.TestCase):
 
     def _install(self, **kwargs):
         binding, kwargs = self._defaults(kwargs)
-        return _quiet(gen_defs.install, binding, self.smap, root=self.root, **kwargs)
+        return _quiet(installation.install, binding, self.smap, root=self.root, **kwargs)
 
     def _install_report(self, **kwargs) -> str:
         binding, kwargs = self._defaults(kwargs)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            gen_defs.install(binding, self.smap, root=self.root, **kwargs)
+            installation.install(binding, self.smap, root=self.root, **kwargs)
         return buf.getvalue()
 
     def _installed(self):
@@ -2555,7 +2688,7 @@ class TestInstallEndToEnd(unittest.TestCase):
         # The suffix is what keeps the sweep off the payload: this template is
         # a file a build writes into a consuming project's own KB, and it must
         # keep shipping.
-        self.assertIn("agents/kb_tools/installed/CLAUDE.md.tmpl", installed)
+        self.assertIn("agents/kb_tools/installed/AGENTS.md.tmpl", installed)
 
     def test_plain_install_carries_no_test_suites_or_caches(self):
         self._install()
@@ -2564,7 +2697,7 @@ class TestInstallEndToEnd(unittest.TestCase):
             for name in self._installed()
             # Drop the surface component: the exclusion rule is written
             # against surface-relative paths.
-            if gen_defs.excluded_from_install(Path(*Path(name).parts[1:]))
+            if product.excluded_from_install(Path(*Path(name).parts[1:]))
         )
         self.assertEqual(stray, [])
         self.assertFalse((self.root / "agents" / "kb_tools" / "tests").exists())
@@ -2598,19 +2731,19 @@ class TestInstallEndToEnd(unittest.TestCase):
     def test_every_installed_banner_claims_the_triple_the_install_ran_under(self):
         self._install()
         claims = {
-            path: gen_defs.tuning_claim(path.read_text(encoding="utf-8"))
+            path: banners.tuning_claim(path.read_text(encoding="utf-8"))
             for path in sorted((self.root / "agents").glob("*.md"))
-            if gen_defs.banner_claim(path.read_text(encoding="utf-8")) is not None
+            if banners.banner_claim(path.read_text(encoding="utf-8")) is not None
         }
         self.assertTrue(claims)
         for path, claim in claims.items():
-            self.assertEqual(claim.family, gen_defs.rel(self.tuning.family), gen_defs.rel(path))
-            self.assertEqual(claim.pin, gen_defs.map_spec(self.tuning.pin_map), gen_defs.rel(path))
+            self.assertEqual(claim.family, paths.rel(self.tuning.family), paths.rel(path))
+            self.assertEqual(claim.pin, model_tuning.map_spec(self.tuning.pin_map), paths.rel(path))
 
     def test_no_installed_file_carries_the_tier_sentinel(self):
         self._install()
         for path in sorted(self.root.rglob("*.md")):
-            self.assertNotIn(gen_defs.TIER_SENTINEL, path.read_text(encoding="utf-8"), gen_defs.rel(path))
+            self.assertNotIn(model_tuning.TIER_SENTINEL, path.read_text(encoding="utf-8"), paths.rel(path))
 
     def test_clean_install_is_one_summary_line(self):
         # Report by exception: a fresh install is a non-event. The whole report
@@ -2619,7 +2752,7 @@ class TestInstallEndToEnd(unittest.TestCase):
         lines = self._install_report().splitlines()
         self.assertEqual(len(lines), 1, lines)
         self.assertRegex(lines[0], r"^installed: \d+ under agents/, \d+ under commands/ → ")
-        self.assertTrue(lines[0].endswith(gen_defs.rel(self.root)), lines[0])
+        self.assertTrue(lines[0].endswith(paths.rel(self.root)), lines[0])
 
     def test_clean_reinstall_stays_one_line_and_names_no_unbannered_file(self):
         # A clean overwrite is as much a non-event as a fresh install, and the
@@ -2656,10 +2789,10 @@ class TestInstallEndToEnd(unittest.TestCase):
         # a rendered definition by the generation pass's own created/updated
         # line, which names an absolute target.
         self.assertIn("  written    agents/kb_tools/kb_util.py", report)
-        self.assertIn(f"  created    {gen_defs.rel(self.root / 'agents' / 'python-coder.md')}", report)
+        self.assertIn(f"  created    {paths.rel(self.root / 'agents' / 'python-coder.md')}", report)
         unbannered = [line for line in report.splitlines() if line.startswith("unbannered")]
         self.assertEqual(len(unbannered), 1, report)
-        expected = [key for key, source, _ in gen_defs.package_pairs(self.smap) if not gen_defs.bannerable(source)]
+        expected = [key for key, source, _ in product.package_pairs(self.smap) if not installation.bannerable(source)]
         self.assertIn(f"{len(expected)} file(s)", unbannered[0])
         self.assertIn(expected[0], unbannered[0])
 
@@ -2683,16 +2816,16 @@ class TestInstallEndToEnd(unittest.TestCase):
         # It ships: a stamping carve-out, never an exclusion.
         self.assertTrue(vendored.is_file())
         self.assertEqual(vendored.read_bytes(), self.VENDOR_SOURCE.encode("utf-8"))
-        self.assertNotIn(gen_defs.INSTALLED_NOTICE, vendored.read_text(encoding="utf-8"))
+        self.assertNotIn(banners.INSTALLED_NOTICE, vendored.read_text(encoding="utf-8"))
         self.assertEqual(
             (self.root / "agents" / "kb_tools" / "_vendor" / "LICENSE.txt").read_text(encoding="utf-8"),
             "MIT, upstream's.\n",
         )
         # Narrow: identical bytes one directory up are stamped exactly as ever.
         sibling = (self.root / "agents" / "kb_tools" / "sibling.py").read_text(encoding="utf-8")
-        self.assertIn(gen_defs.INSTALLED_NOTICE, sibling)
-        self.assertTrue(gen_defs.body_untouched(sibling))
-        self.assertEqual(gen_defs.banner_body(sibling), self.VENDOR_SOURCE)
+        self.assertIn(banners.INSTALLED_NOTICE, sibling)
+        self.assertTrue(banners.body_untouched(sibling))
+        self.assertEqual(banners.banner_body(sibling), self.VENDOR_SOURCE)
         # Re-vendoring the same bytes is a no-op: an unstamped file is never
         # provably ours, so only a CHANGED one can cost a numbered backup.
         self._install(source_root=src)
@@ -2713,7 +2846,7 @@ class TestInstallEndToEnd(unittest.TestCase):
         self.assertNotIn("walker.py", unbannered[0])
 
     def _package_key(self, name: str) -> bool:
-        return any(name.startswith(f"{key.as_posix()}/") for _, key, _ in gen_defs.package_destinations(self.smap))
+        return any(name.startswith(f"{key.as_posix()}/") for _, key, _ in product.package_destinations(self.smap))
 
     def test_reinstall_is_idempotent(self):
         self._install()
@@ -2748,15 +2881,15 @@ class TestInstallEndToEnd(unittest.TestCase):
         # and is stamped on the way out, so each has a never-stamped-here
         # claim to keep. Listing the eliminated surfaces here would make the
         # walk silently empty and the assertion vacuous.
-        surfaces = [gen_defs.REPO_ROOT / source for source, _ in gen_defs.SHIPPED_PACKAGES]
+        surfaces = [paths.REPO_ROOT / source for source, _ in product.SHIPPED_PACKAGES]
         before = {
-            path: gen_defs.sha256_text(path.read_text(encoding="utf-8"))
+            path: banners.sha256_text(path.read_text(encoding="utf-8"))
             for surface in surfaces
             for path in sorted(surface.rglob("*.md"))
         }
         self._install()
         after = {
-            path: gen_defs.sha256_text(path.read_text(encoding="utf-8"))
+            path: banners.sha256_text(path.read_text(encoding="utf-8"))
             for surface in surfaces
             for path in sorted(surface.rglob("*.md"))
         }
@@ -2765,9 +2898,9 @@ class TestInstallEndToEnd(unittest.TestCase):
         for source in surfaces:
             for path in source.rglob("*.md"):
                 self.assertNotIn(
-                    gen_defs.INSTALLED_NOTICE,
+                    banners.INSTALLED_NOTICE,
                     path.read_text(encoding="utf-8"),
-                    gen_defs.rel(path),
+                    paths.rel(path),
                 )
         # One row per banner style the real product can exercise: `#` comments
         # in a shipped .py, and the exempt case, a generated definition
@@ -2783,8 +2916,8 @@ class TestInstallEndToEnd(unittest.TestCase):
             ("agents/python-coder.md", False),
         ):
             text = (self.root / name).read_text(encoding="utf-8")
-            self.assertEqual(gen_defs.INSTALLED_NOTICE in text, bannered, name)
-            self.assertTrue(gen_defs.body_untouched(text), name)
+            self.assertEqual(banners.INSTALLED_NOTICE in text, bannered, name)
+            self.assertTrue(banners.body_untouched(text), name)
 
     def _extract(self, path):
         """The extraction the liaison definitions run, verbatim: drop every line
@@ -2809,7 +2942,7 @@ class TestInstallEndToEnd(unittest.TestCase):
         rendered = [
             path
             for path in sorted((self.root / "agents").rglob("*.md"))
-            if gen_defs.banner_claim(path.read_text(encoding="utf-8")) is not None
+            if banners.banner_claim(path.read_text(encoding="utf-8")) is not None
         ]
         self.assertGreater(len(rendered), 20, "the walk found no definitions to check")
         for path in rendered:
@@ -2821,30 +2954,30 @@ class TestInstallEndToEnd(unittest.TestCase):
                 # No body content lost: the frontmatter block and what came
                 # out reconstitute the file byte for byte.
                 text = path.read_text(encoding="utf-8")
-                front = gen_defs.frontmatter_of(text)
+                front = banners.frontmatter_of(text)
                 self.assertEqual(text, "---\n" + front + "\n---\n" + done.stdout)
 
     def test_a_non_default_triple_renders_and_earns_its_summary_clause(self):
-        family_path = gen_defs.FAMILY_DIR / "gemma-4.toml"
-        family = gen_defs.load_family(family_path)
-        tuning = gen_defs.effective_tuning(family_path, family)
+        family_path = paths.FAMILY_DIR / "gemma-4.toml"
+        family = model_tuning.load_family(family_path)
+        tuning = model_tuning.effective_tuning(family_path, family)
         self.assertFalse(tuning.is_default)
-        binding = gen_defs.tier_binding(self.chunks, pin_map=tuning.pin_map)
-        overlays = gen_defs.tier_resolver(family.entries, tuning.tier_map)
+        binding = model_tuning.tier_binding(self.chunks, pin_map=tuning.pin_map, harness=_DEFAULT_HARNESS)
+        overlays = model_tuning.tier_resolver(family.entries, tuning.tier_map)
 
         # The default-triple render to compare against, produced the same way:
         # a comparison between two delivered artifacts, not a reconstruction.
         base_root = Path(self._tmp.name) / "base"
         base_root.mkdir()
         _quiet(
-            gen_defs.install,
+            installation.install,
             self.binding,
-            gen_defs.surface_map(base_root),
+            discovery.surface_map(base_root),
             root=base_root,
             overlays=self.overlays,
             tuning=self.tuning,
         )
-        plain_body = gen_defs.banner_body((base_root / "agents" / "go-coder.md").read_text(encoding="utf-8"))
+        plain_body = banners.banner_body((base_root / "agents" / "go-coder.md").read_text(encoding="utf-8"))
 
         report = self._install_report(binding=binding, overlays=overlays, tuning=tuning)
         # A non-default render IS an event: the one summary line says how many
@@ -2861,16 +2994,16 @@ class TestInstallEndToEnd(unittest.TestCase):
         self.assertIn(family.entries["fam.gap-aversion"]["text"].splitlines()[0], scorer_tuned)
         tuned = (self.root / "agents" / "applied-mathematician.md").read_text(encoding="utf-8")
         self.assertIn(family.entries["fam.ask-vs-stipulate"]["text"].splitlines()[0], tuned)
-        claim = gen_defs.tuning_claim(tuned)
+        claim = banners.tuning_claim(tuned)
         self.assertEqual(claim.family, "templates/family/gemma-4.toml")
         self.assertIn("gemma-4-31B-it", claim.tier)
         # A family member never reaches a pin: the tokens come from the pin map
         # alone, so the rendered pins are claude-legal under any family.
-        self.assertEqual(claim.pin, gen_defs.map_spec(gen_defs.DEFAULT_PIN_MAP))
+        self.assertEqual(claim.pin, model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP))
         # A definition the family does not touch keeps a byte-identical body;
         # only its banner records the triple it was rendered under.
         untouched = (self.root / "agents" / "go-coder.md").read_text(encoding="utf-8")
-        self.assertEqual(gen_defs.banner_body(untouched), plain_body)
+        self.assertEqual(banners.banner_body(untouched), plain_body)
 
     # ── the stale-output prune ───────────────────────────────────────────────
     #
@@ -2983,13 +3116,13 @@ class TestInstallEndToEnd(unittest.TestCase):
         self._install()
         inside = self.root / "agents" / "kb_tools" / "kb_util.py"
         self.assertTrue(
-            gen_defs.body_untouched(inside.read_text(encoding="utf-8")),
+            banners.body_untouched(inside.read_text(encoding="utf-8")),
             "the fixture must be a file the prune WOULD take",
         )
         # A write set holding every installed file EXCEPT this one: the single
         # condition that would otherwise make it a candidate.
         written = {path for path in self.root.rglob("*") if path.is_file()} - {inside}
-        stale = gen_defs.prune_stale(self.smap, written=written)
+        stale = pruning.prune_stale(self.smap, written=written)
         self.assertTrue(inside.is_file())
         self.assertEqual(stale.pruned, [])
         self.assertEqual(stale.kept_edited, [])
@@ -3006,7 +3139,7 @@ class TestInstallEndToEnd(unittest.TestCase):
         self._install()
         orphan = self.root / "agents" / "kb_tools" / "retired_tool.py"
         orphan.write_bytes((self.root / "agents" / "kb_tools" / "kb_util.py").read_bytes())
-        self.assertTrue(gen_defs.body_untouched(orphan.read_text(encoding="utf-8")))
+        self.assertTrue(banners.body_untouched(orphan.read_text(encoding="utf-8")))
         self._install()
         self.assertFalse(orphan.exists())
         self.assertTrue((self.root / "agents" / "kb_tools" / "kb_util.py").is_file())
@@ -3049,8 +3182,8 @@ class TestInstallEndToEnd(unittest.TestCase):
         # which is the same reading package_pairs copies by.
         self._install()
         commands_only = {"commands": self.smap["commands"]}
-        self.assertEqual(gen_defs.package_destinations(commands_only), [])
-        self.assertEqual(gen_defs.replace_package_destinations(commands_only), [])
+        self.assertEqual(product.package_destinations(commands_only), [])
+        self.assertEqual(product.replace_package_destinations(commands_only), [])
         self.assertTrue((self.root / "agents" / "kb_tools" / "kb_util.py").is_file())
 
     def test_a_clean_reinstall_says_nothing_about_pruning(self):
@@ -3068,22 +3201,28 @@ class TestShippedFamilyFiles(unittest.TestCase):
     def test_both_shipped_families_declare_a_total_tier_map(self):
         for name in ("claude.toml", "gemma-4.toml"):
             with self.subTest(family=name):
-                family = gen_defs.load_family(gen_defs.FAMILY_DIR / name)
-                self.assertEqual(set(family.tiers), set(gen_defs.TIERS))
+                family = model_tuning.load_family(paths.FAMILY_DIR / name)
+                self.assertEqual(set(family.tiers), set(model_tuning.TIERS))
 
     def test_the_default_family_is_the_default_triple(self):
-        path = gen_defs.FAMILY_DIR / f"{gen_defs.DEFAULT_FAMILY}{gen_defs.FAMILY_SUFFIX}"
-        tuning = gen_defs.effective_tuning(path, gen_defs.load_family(path))
+        path = paths.FAMILY_DIR / f"{model_tuning.DEFAULT_FAMILY}{paths.FAMILY_SUFFIX}"
+        tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path))
         self.assertTrue(tuning.is_default)
+        self.assertEqual(tuning.harness, "claude")
         # The two maps coincide inside claude, which is what makes a divergence
         # there a deliberate act worth naming.
         self.assertEqual(tuning.tier_map, tuning.pin_map)
 
+    def test_another_harness_is_not_the_default(self):
+        path = paths.FAMILY_DIR / f"{model_tuning.DEFAULT_FAMILY}{paths.FAMILY_SUFFIX}"
+        tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path), harness="opencode")
+        self.assertFalse(tuning.is_default)
+
     def test_an_explicit_no_op_override_is_still_the_default_triple(self):
         # `is_default` is a comparison by VALUE, not "was a flag passed": an
         # override that changes nothing must not turn an install into an event.
-        path = gen_defs.FAMILY_DIR / f"{gen_defs.DEFAULT_FAMILY}{gen_defs.FAMILY_SUFFIX}"
-        tuning = gen_defs.effective_tuning(path, gen_defs.load_family(path), pin_spec="high=opus")
+        path = paths.FAMILY_DIR / f"{model_tuning.DEFAULT_FAMILY}{paths.FAMILY_SUFFIX}"
+        tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path), pin_spec="high=opus")
         self.assertTrue(tuning.is_default)
 
     def test_both_shipped_families_are_stock_at_every_tier(self):
@@ -3091,13 +3230,13 @@ class TestShippedFamilyFiles(unittest.TestCase):
         # member-scoped overrides authored against any of them yet.
         for name in ("claude.toml", "gemma-4.toml"):
             with self.subTest(family=name):
-                path = gen_defs.FAMILY_DIR / name
-                tuning = gen_defs.effective_tuning(path, gen_defs.load_family(path))
-                self.assertEqual(tuning.stock, gen_defs.TIERS)
+                path = paths.FAMILY_DIR / name
+                tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path))
+                self.assertEqual(tuning.stock, model_tuning.TIERS)
 
     def test_gemma_members_carry_the_it_spellings(self):
         self.assertEqual(
-            gen_defs.load_family(gen_defs.FAMILY_DIR / "gemma-4.toml").tiers,
+            model_tuning.load_family(paths.FAMILY_DIR / "gemma-4.toml").tiers,
             {
                 "highest": "gemma-4-31B-it",
                 "high": "gemma-4-31B-it",
@@ -3124,9 +3263,7 @@ def declared_pins(templates_root: Path, pin_map: dict) -> dict[str, list[str]]:
     The template side of the comparison, read straight out of the sources.
     """
     return {
-        gen_defs.rel(path): sorted(
-            pin_map[tier] for tier in _DECLARED_PIN_SITE.findall(path.read_text(encoding="utf-8"))
-        )
+        paths.rel(path): sorted(pin_map[tier] for tier in _DECLARED_PIN_SITE.findall(path.read_text(encoding="utf-8")))
         for path in sorted(templates_root.rglob("*.md.tmpl"))
     }
 
@@ -3144,9 +3281,9 @@ def rendered_pins(renders: dict, known: dict) -> dict[str, list[str]]:
     """
     grouped: dict[str, list[str]] = {key: [] for key in known}
     for text in renders.values():
-        pin = gen_defs.frontmatter_pin(text)
+        pin = rendering.frontmatter_pin(text)
         if pin is not None:
-            grouped.setdefault(gen_defs.banner_claim(text), []).append(pin)
+            grouped.setdefault(banners.banner_claim(text), []).append(pin)
     return {key: sorted(pins) for key, pins in grouped.items()}
 
 
@@ -3176,14 +3313,14 @@ class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
         for label, family, tier_spec, pin_spec in self.TUNINGS:
             with self.subTest(tuning=label):
                 tuning, _, renders = _shipped_renders(family, tier_spec=tier_spec, pin_spec=pin_spec)
-                declared = declared_pins(gen_defs.TEMPLATES_DIR, tuning.pin_map)
+                declared = declared_pins(paths.TEMPLATES_DIR, tuning.pin_map)
                 self.assertEqual(rendered_pins(renders, declared), declared)
 
     def test_the_comparison_is_not_vacuous(self):
         # Floors rather than fixtures: a fortieth template and a sixth tier
         # must not require editing these, only a sweep that has quietly stopped
         # reaching the tree.
-        declared = declared_pins(gen_defs.TEMPLATES_DIR, gen_defs.DEFAULT_PIN_MAP)
+        declared = declared_pins(paths.TEMPLATES_DIR, model_tuning.DEFAULT_PIN_MAP)
         pinned = {key: pins for key, pins in declared.items() if pins}
         self.assertGreaterEqual(len(pinned), 30)
         # More than one distinct pin under the default map, or the comparison
@@ -3202,12 +3339,12 @@ class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
             root = Path(tmp)
             template = root / "probe.md.tmpl"
             template.write_text("---\nname: probe\nmodel: @!dyn.tier-high!@\n---\nbody\n", encoding="utf-8")
-            declared = declared_pins(root, gen_defs.DEFAULT_PIN_MAP)
-            self.assertEqual(list(declared.values()), [[gen_defs.DEFAULT_PIN_MAP["high"]]])
+            declared = declared_pins(root, model_tuning.DEFAULT_PIN_MAP)
+            self.assertEqual(list(declared.values()), [[model_tuning.DEFAULT_PIN_MAP["high"]]])
 
-            banner = f"# !GENERATED! from {gen_defs.rel(template)} and x\n"
-            honest = {"probe.md": f"---\n{banner}model: {gen_defs.DEFAULT_PIN_MAP['high']}\n---\nbody\n"}
-            wrong = {"probe.md": f"---\n{banner}model: {gen_defs.DEFAULT_PIN_MAP['medium']}\n---\nbody\n"}
+            banner = f"# !GENERATED! from {paths.rel(template)} and x\n"
+            honest = {"probe.md": f"---\n{banner}model: {model_tuning.DEFAULT_PIN_MAP['high']}\n---\nbody\n"}
+            wrong = {"probe.md": f"---\n{banner}model: {model_tuning.DEFAULT_PIN_MAP['medium']}\n---\nbody\n"}
 
             self.assertEqual(rendered_pins(honest, declared), declared)
             self.assertNotEqual(rendered_pins(wrong, declared), declared)
@@ -3219,8 +3356,8 @@ class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
             root = Path(tmp)
             template = root / "probe.md.tmpl"
             template.write_text("---\nname: probe\nmodel: @!dyn.tier-low!@\n---\nbody\n", encoding="utf-8")
-            declared = declared_pins(root, gen_defs.DEFAULT_PIN_MAP)
-            unpinned = {"probe.md": f"---\n# !GENERATED! from {gen_defs.rel(template)} and x\n---\nbody\n"}
+            declared = declared_pins(root, model_tuning.DEFAULT_PIN_MAP)
+            unpinned = {"probe.md": f"---\n# !GENERATED! from {paths.rel(template)} and x\n---\nbody\n"}
             self.assertNotEqual(rendered_pins(unpinned, declared), declared)
 
 
@@ -3242,19 +3379,19 @@ class TestFloorRung(unittest.TestCase):
             tier_spec=f"all={cls.FLOOR}",
             pin_spec=f"all={cls.FLOOR}",
         )
-        cls.pinned = {key: text for key, text in cls.renders.items() if gen_defs.frontmatter_pin(text)}
+        cls.pinned = {key: text for key, text in cls.renders.items() if rendering.frontmatter_pin(text)}
         cls.unpinned = {key: text for key, text in cls.renders.items() if key not in cls.pinned}
 
     def test_every_pin_site_pins_the_floor_and_tunes_against_it(self):
         for key, text in self.pinned.items():
             with self.subTest(output=key):
-                self.assertEqual(gen_defs.frontmatter_pin(text), self.FLOOR)
-                claim = gen_defs.tuning_claim(text)
+                self.assertEqual(rendering.frontmatter_pin(text), self.FLOOR)
+                claim = banners.tuning_claim(text)
                 self.assertEqual(claim.member, self.FLOOR)
-                self.assertIn(claim.seat, gen_defs.TIERS)
+                self.assertIn(claim.seat, model_tuning.TIERS)
 
     def test_the_merge_reached_every_tier_a_definition_sits_at(self):
-        seats = {gen_defs.tuning_claim(text).seat for text in self.pinned.values()}
+        seats = {banners.tuning_claim(text).seat for text in self.pinned.values()}
         self.assertEqual(seats, {"highest", "high", "medium", "low"})
 
     def test_an_output_with_no_pin_site_gains_none(self):
@@ -3272,7 +3409,7 @@ class TestFloorRung(unittest.TestCase):
         )
         for key, text in self.unpinned.items():
             with self.subTest(output=key):
-                claim = gen_defs.tuning_claim(text)
+                claim = banners.tuning_claim(text)
                 self.assertEqual((claim.seat, claim.member), ("none", "none"))
 
     def test_the_census_of_pinned_and_unpinned_templates_is_the_recorded_one(self):
@@ -3296,15 +3433,15 @@ class TestStockRung(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _, cls.overlays, cls.renders = _shipped_renders("gemma-4")
-        cls.members = set(gen_defs.load_family(gen_defs.FAMILY_DIR / "gemma-4.toml").tiers.values())
+        cls.members = set(model_tuning.load_family(paths.FAMILY_DIR / "gemma-4.toml").tiers.values())
 
     def test_every_banner_records_the_family_the_tier_map_and_a_stock_render(self):
         for key, text in self.renders.items():
             with self.subTest(output=key):
-                claim = gen_defs.tuning_claim(text)
+                claim = banners.tuning_claim(text)
                 self.assertEqual(claim.family, "templates/family/gemma-4.toml")
                 self.assertEqual(claim.tier, self.TIER_MAP)
-                self.assertEqual(claim.stock, ",".join(gen_defs.TIERS))
+                self.assertEqual(claim.stock, ",".join(model_tuning.TIERS))
 
     def test_both_family_wide_anchors_fill_at_every_tier_and_at_none(self):
         # The no-tier resolution is what the outputs with no pin site run
@@ -3331,7 +3468,7 @@ class TestStockRung(unittest.TestCase):
         # sole source of pin text. Over the body, since the banner's own tier=
         # field names all five by design.
         for key, text in self.renders.items():
-            body = gen_defs.banner_body(text)
+            body = banners.banner_body(text)
             for member in self.members:
                 with self.subTest(output=key, member=member):
                     self.assertNotIn(member, body)
@@ -3356,7 +3493,7 @@ class TestResidualMarkerGuard(unittest.TestCase):
         (self.tsrc / "agents").mkdir(parents=True)
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family = root / "fam.toml"
         self.family.write_text(_tiers_toml(), encoding="utf-8")
 
@@ -3364,7 +3501,7 @@ class TestResidualMarkerGuard(unittest.TestCase):
         (self.tsrc / "agents" / "probe.md.tmpl").write_text(body, encoding="utf-8")
 
     def _generate(self):
-        return _quiet(gen_defs.generate, _binding({}), self.smap, tuning=_tuning(self.family))
+        return _quiet(generation.generate, _binding({}), self.smap, tuning=_tuning(self.family))
 
     def test_a_clean_render_is_unaffected(self):
         self._write(self.CLEAN)
@@ -3372,7 +3509,7 @@ class TestResidualMarkerGuard(unittest.TestCase):
 
     def test_a_malformed_marker_is_refused_naming_the_file_and_line(self):
         self._write(self.RESIDUAL)
-        with self.assertRaises(gen_defs.TemplateError) as caught:
+        with self.assertRaises(errors.InputError) as caught:
             self._generate()
         message = str(caught.exception)
         self.assertIn("templates/agents/probe.md.tmpl", message)
@@ -3391,7 +3528,7 @@ class TestResidualMarkerGuard(unittest.TestCase):
         target = self.out / "agents" / "probe.md"
         clean = target.read_text(encoding="utf-8")
         self._write(self.RESIDUAL)
-        with self.assertRaises(gen_defs.TemplateError):
+        with self.assertRaises(errors.InputError):
             self._generate()
         self.assertEqual(target.read_text(encoding="utf-8"), clean)
 
@@ -3416,7 +3553,7 @@ class TestArgumentKeyIdentifierClass(unittest.TestCase):
         (self.tsrc / "agents").mkdir(parents=True)
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family = root / "fam.toml"
         self.family.write_text(_tiers_toml(), encoding="utf-8")
         (self.tsrc / "agents" / "probe.md.tmpl").write_text(
@@ -3428,8 +3565,8 @@ class TestArgumentKeyIdentifierClass(unittest.TestCase):
         # this ever surfaces is through the marker's own grammar, not through
         # an unknown-placeholder error inside the chunk body.
         chunks = {"some-chunk": {"text": "expanded"}}
-        with self.assertRaises(gen_defs.TemplateError) as caught:
-            _quiet(gen_defs.generate, _binding(chunks), self.smap, tuning=_tuning(self.family))
+        with self.assertRaises(errors.InputError) as caught:
+            _quiet(generation.generate, _binding(chunks), self.smap, tuning=_tuning(self.family))
         message = str(caught.exception)
         self.assertIn("templates/agents/probe.md.tmpl", message)
         self.assertIn("my_key", message)
@@ -3457,19 +3594,19 @@ class TestLiteralPinGuard(unittest.TestCase):
         (self.tsrc / "agents").mkdir(parents=True)
         self.out = root / "out"
         self.out.mkdir()
-        self.smap = gen_defs.surface_map(templates_root=self.tsrc, output_root=self.out)
+        self.smap = discovery.surface_map(templates_root=self.tsrc, output_root=self.out)
         self.family = root / "fam.toml"
         self.family.write_text(_tiers_toml(), encoding="utf-8")
 
     def _generate(self, body):
         (self.tsrc / "agents" / "probe.md.tmpl").write_text(body, encoding="utf-8")
-        return _quiet(gen_defs.generate, _binding({}), self.smap, tuning=_tuning(self.family))
+        return _quiet(generation.generate, _binding({}), self.smap, tuning=_tuning(self.family))
 
     def _rendered(self):
         return (self.out / "agents" / "probe.md").read_text(encoding="utf-8")
 
     def _refused(self, body):
-        with self.assertRaises(gen_defs.TemplateError) as caught:
+        with self.assertRaises(errors.InputError) as caught:
             self._generate(body)
         # Nothing lands: the render raises before generate writes its first
         # target, so a refused template leaves no half-tuned tree behind.
@@ -3490,13 +3627,13 @@ class TestLiteralPinGuard(unittest.TestCase):
 
     def test_a_tokenized_pin_site_renders(self):
         self.assertTrue(self._generate(self.TOKENIZED))
-        self.assertEqual(gen_defs.tuning_claim(self._rendered()).seat, "high")
+        self.assertEqual(banners.tuning_claim(self._rendered()).seat, "high")
 
     def test_an_output_with_no_pin_site_renders(self):
         # The guard is about a pin site that resolves nothing, never about the
         # absence of one: no `model:` key is a property of the output's type.
         self.assertTrue(self._generate(self.NO_PIN_SITE))
-        self.assertEqual(gen_defs.tuning_claim(self._rendered()).seat, "none")
+        self.assertEqual(banners.tuning_claim(self._rendered()).seat, "none")
 
     def test_every_shipped_pin_site_resolves_a_tier(self):
         # The guard's positive half, over the real set: the whole tree renders,
@@ -3505,11 +3642,11 @@ class TestLiteralPinGuard(unittest.TestCase):
         _, _, renders = _shipped_renders("claude")
         for key, text in renders.items():
             with self.subTest(output=key):
-                seat = gen_defs.tuning_claim(text).seat
-                if gen_defs.frontmatter_pin(text) is None:
+                seat = banners.tuning_claim(text).seat
+                if rendering.frontmatter_pin(text) is None:
                     self.assertEqual(seat, "none")
                 else:
-                    self.assertIn(seat, gen_defs.TIERS)
+                    self.assertIn(seat, model_tuning.TIERS)
 
 
 if __name__ == "__main__":

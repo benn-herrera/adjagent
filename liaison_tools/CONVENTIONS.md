@@ -18,8 +18,9 @@ this directory's copies; the repository-root documents are named as root.
   docstrings, and it binds anything added beside them — `tests/` included,
   which runs on `unittest` under the pytest runner rather than on pytest's
   own fixtures.
-- **Key handling stays confined to `post-openai.py`.** SPEC.md, API Key
-  Handling, states the containment; these are the edits that would break it
+- **Key handling stays confined to `post-openai.py`.** ARCHITECTURE.md, Key
+  containment, states the confinement SPEC.md's API Key Handling rests on;
+  these are the edits that would break it
   — key reads added to `msg-util.py` or `relay-driver.py`; `DEBUG_POST`/`DEBUG_RESPONSE` extended to dump the key
   rather than the request payload and response stream; a synthetic
   `tests/test-fixture-*.txt` swapped for a real key file while debugging; a
@@ -57,7 +58,7 @@ this directory's copies; the repository-root documents are named as root.
   Reaching for `argparse` changes all four at once — that is why the parsing
   is hand-rolled.
 - **Nothing here may assume a session-directory shape.** The two callers run
-  different layouts over the same tools (SPEC.md, Session Directory Layout);
+  different layouts over the same tools (ARCHITECTURE.md, Caller Composition);
   `msg-util.py` and `post-openai.py` each operate on whatever path they are
   handed. Baking in a directory name or file name
   breaks the other caller silently.

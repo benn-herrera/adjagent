@@ -1,30 +1,28 @@
 # KB maintenance recipes. This file is installed at
-# .claude/agents/kb_tools/runner-snippets/ by `just install-defs`, and is
-# imported from the consuming project's justfile by one installed line
-# (never copied into it):
+# <harness-dir>/agents/kb_tools/runner-snippets/ — <harness-dir> being the
+# project's .claude or .opencode — and is imported from the consuming
+# project's justfile by one installed line (never copied into it), e.g.
 #
 #     import? '.claude/agents/kb_tools/runner-snippets/kb.just'
 #
 # The line is managed by the installer (run from the consumer root):
-#     PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util install-targets
-# `import?` requires just >= 1.33; the optional form is deliberate: if
-# .claude/agents is absent — not yet installed, or removed — the consumer's
+#     PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util install-targets
+# `import?` requires just >= 1.33; the optional form is deliberate: if the
+# installed tree is absent — not yet installed, or removed — the consumer's
 # justfile keeps working and only these KB recipes go missing.
 #
-# Assumed consumer layout: the repo root contains kb-root/ and .claude/agents
-# — the agent-definition repo's agents/ surface as installed by `just
-# install-defs`, which holds the kb_tools package. Inside an imported file,
-# justfile_directory() resolves to the ROOT justfile's directory — the
-# consumer root — so KB_PYTHONPATH lands on the consumer's .claude/agents.
-# (source_directory() would instead resolve to this fragment's own directory
-# inside the installed tree — the wrong path.) The tools are stdlib-only and
-# run under the system python3.
+# Assumed consumer layout: the repo root contains kb-root/ and
+# <harness-dir>/agents, which holds the kb_tools package. KB_PYTHONPATH is
+# that agents directory, found from this fragment's own location:
+# source_directory() is this file's directory inside the installed tree,
+# and two levels up is the directory holding kb_tools. The tools are
+# stdlib-only and run under the system python3.
 #
 # Recipe names carry a `kb-` prefix and variables a `KB_` prefix, so neither
 # collides with a project's own verify/refresh/stats. Plain recipe lines, no
 # `set shell` — nothing here needs bash.
 
-KB_PYTHONPATH := justfile_directory() / ".claude" / "agents"
+KB_PYTHONPATH := parent_directory(parent_directory(source_directory()))
 
 # Composite, not sequential: all three verifiers run, and the recipe carries the
 # worst outcome. Three plain lines stop at the first failure, so a report

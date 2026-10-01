@@ -33,7 +33,7 @@ run through it, and this toolchain builds and checks both:
    (`kb_write/`; ARCHITECTURE.md, The Write API (`kb_write/`)) renders every
    metadata byte and `kb_index_lib` parses it back, and no KB carries a local
    copy of a contract. Which kinds and classes a given KB populates, and
-   against which corpus, is pinned in `<kb-root>/CLAUDE.md` — see Project
+   against which corpus, is pinned in `<kb-root>/AGENTS.md` — see Project
    Scoping, below.
 
 **A leaf's body is verbatim.** This is what lets the KB stand in for the
@@ -69,7 +69,11 @@ What is *said about* a leaf is inference's still: which registered claims it
 establishes, or the reason it establishes none. That declaration is metadata and
 reaches the file the way all metadata does, through the write API — as do a
 multi-claim leaf's in-body markers, which the build places from the leaf's own
-words (ARCHITECTURE.md, The Leaf-Body Renderer and The Driver).
+words (ARCHITECTURE.md, The Leaf-Body Renderer and The Driver). Where no reading
+reached a leaf with no author-marked claim block, its reason says only that it
+carries none, and asserts nothing about its prose: which leaves were read is
+build record, never KB metadata. A paragraph a reading judges a claim mints one
+whose span is that paragraph.
 
 ### The Skeleton Is Derived
 
@@ -495,7 +499,8 @@ document and to nothing narrower. Where a claim-bearing block holds the
 labelled equation, or a proof does, the reference resolves through to that
 block's claim or that proof's subject and nothing is minted; everywhere else
 the equation is minted, bounded by the author's own cross-references — an
-equation nobody cites is scaffolding and mints nothing. No prefix is added:
+equation nobody cites is scaffolding and mints nothing, and a reference in prose
+judged not a claim does not count. No prefix is added:
 `kb_schema.ID_KINDS` is untouched and the out-of-scope ruling below is
 unengaged.
 
@@ -569,16 +574,18 @@ threshold is concerned.
 author who writes one result's identifier inside another's statement — *a second
 certificate, distinct from the `V` of Theorem 2*, *not derivable from the bare
 cap-table dynamics (Proposition 8(iii))* — has stated a relationship between two
-claims in formal notation. Most such references are not dependencies, and
-recording only the dependencies discards the rest to avoid a wrong edge, which
-leaves the graph asserting the two claims are unrelated: a different wrong
-answer, arrived at silently. So the relationship is recorded as what it is.
+claims in formal notation. The notation settles that the relationship exists
+and not whether it is a dependency, so recording only the dependencies would
+discard every reference the markup cannot classify, leaving the graph asserting
+the two claims are unrelated: a different wrong answer, arrived at silently. So the relationship is recorded as what it is.
 Three properties are what keep the class from being a weak `depends`, and each
 is a requirement rather than an observation:
 
 - **Direction comes from the markup, not from judgement.** The source is the
   claim whose text carries the reference; the target is the claim the reference
-  resolves to. Nothing infers it and nothing is asked about it.
+  resolves to. Nothing infers it and nothing is asked about it. A reference in
+  prose judged not a claim has no source claim and yields no edge; in prose
+  never judged, the source is every claim its document hosts.
 - **It is under no acyclicity constraint.** Two claims naming each other is the
   author's argument, not the defect a dependency cycle is — point 6's own
   reading of a cross-reference set that may contain cycles. `check_acyclic`
@@ -868,8 +875,8 @@ prepared and proven before any of them replaces a live file, so a refusal
 anywhere writes nothing anywhere.
 
 ```sh
-PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util <write-op> --values <path.toml>
-PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util insert-claim-entry --values <path.toml> [--create]
+PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util <write-op> --values <path.toml>
+PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util insert-claim-entry --values <path.toml> [--create]
 ```
 
 **Three outcomes, three exit codes, and they are not interchangeable:**
@@ -922,7 +929,7 @@ result: this op moves the excerpt check to the moment of writing, it does not
 replace the gate.
 
 ```sh
-PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util render-citation --values <path.toml>
+PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util render-citation --values <path.toml>
 ```
 
 ## The Driver's Contract
@@ -988,14 +995,20 @@ boundary accounts for is discarded rather than trusted, which is safe precisely
 because the rule above guarantees nothing expensive is ever in that position.
 
 **Resumption's state has exactly one home, and it is the working tree —
-never scratch.** `.claude-temp/` is disposable: wiped wholesale, without
+never scratch.** The project's scratch directory (Runner Targets, below) is disposable: wiped wholesale, without
 warning, by the tooling that manages it. A run's own evidence — its log, the
 calls it made, the briefs it composed, the barriers it raised — may
 legitimately live there, because nothing resumes from it; a person reads it
 after the fact, and its loss costs a diagnosis, never a rebuild. Where
 resumption needs a home no other artifact already supplies, the ledger is
 that home: a boundary is a commit, and a commit is in the working tree by
-construction.
+construction — and so is a tracked, build-owned artifact outside `kb-root/`,
+committed at the boundary of the stage that wrote it.
+
+**Build state never enters `kb-root/`.** A value whose only consumer is a later
+stage of the same build lives in a tracked, build-owned artifact outside
+`kb-root/`, committed at its stage boundary. The KB's authored and derived
+layers hold only what the finished KB is.
 
 **The build states what it did without.** A stage's ledger boundary is
 recorded either way, and where a step was dropped the boundary names it: what
@@ -1083,6 +1096,16 @@ being interpreted.
 
 ## Runner Targets
 
+**The toolchain runs installed, and finds its own install.** It is installed at
+`<project>/<harness-dir>/agents/kb_tools/`, where `<harness-dir>` is `.claude`
+or `.opencode`, and every path it spells relative to the project root follows
+from the one it sits in: the `PYTHONPATH` entry `<harness-dir>/agents` in every
+command line it prints, the runner include line, and the scratch directory
+`<harness-dir>-temp/` (`.claude-temp/`, `.opencode-temp/`). A copy that sits
+under no harness directory refuses, naming the expected layout, wherever it
+would have spelled one of those paths. The repository it works on is still
+found from the working directory.
+
 Per project policy, **do not** run these tools ad-hoc — use the consuming
 project's runner target. The tools detect the runner and name it in
 remediation hints. Every operational entry point below — seeding a KB,
@@ -1093,11 +1116,11 @@ in ARCHITECTURE.md, Runner Targets and the Build Ledger.
 
 ## Citation Grammar
 
-`invariants.md`, `CLAUDE.md` and `CONVENTIONS.md` are authored but are not
-leaves; all three are in `EXCLUDE_NAMES`. Only `invariants.md` is the
-framework-node source (Claim-Graph Nodes and Edges, above) — the two
-orientation docs are **not** an invariant channel (Project Scoping, below,
-for who writes them).
+`invariants.md`, `AGENTS.md`, its `CLAUDE.md` redirect and `CONVENTIONS.md`
+are authored but are not leaves; all four are in `EXCLUDE_NAMES`. Only
+`invariants.md` is the framework-node source (Claim-Graph Nodes and Edges,
+above) — the orientation docs are **not** an invariant channel (Project
+Scoping, below, for who writes them).
 
 **Citation grammar** (`verify_citations.py`, part of `kb-verify`). A claim id
 may appear only in a sanctioned channel — leaf frontmatter, a register's
@@ -1235,12 +1258,12 @@ A KB that exercises only claim nodes still conforms; the unused record
 schemas simply have zero instances, and verify/refresh stay green either
 way. The concrete node population, scope, and canonical source for a given
 consuming project's KB live in that project's own orientation docs and
-`<kb-root>/CLAUDE.md`; run the project's stats target for live node/edge
+`<kb-root>/AGENTS.md`; run the project's stats target for live node/edge
 counts.
 
 **Who writes the pin.** The pin is charter prose, not metadata: no write op
 composes it and no op takes it as a value. **The build run writes it** into
-`<kb-root>/CLAUDE.md`, from what the project's charter states — never an agent
+`<kb-root>/AGENTS.md`, from what the project's charter states — never an agent
 in the KB set, which authors neither orientation doc. A build given no charter
 has no scope statement to write, and the document says so in as many words
 rather than carrying a blank section: a KB nobody pinned and one whose pin went
@@ -1267,9 +1290,19 @@ voicemail greeting giving another number. Agent-assisted launch and
 management of a run is later work, and the straightforward case has to work
 first: the primary process in a user's terminal.
 
-**One file arrives once, carrying both halves.** `kb_tools/installed/CLAUDE.md.tmpl`
+**One file arrives once, carrying both halves.** `kb_tools/installed/AGENTS.md.tmpl`
 holds the KB's standing orientation and a slot for the pin, and the stamp fills
 the slot as it writes the file — so there is no path on which the document
 lands asserting a pin it does not carry. The stamp stays only-if-absent: against
-a `CLAUDE.md` a project authored for itself it writes nothing and reports
+an `AGENTS.md` a project authored for itself it writes nothing and reports
 `present, left as authored`, that project's pin being its own to state.
+
+**`AGENTS.md` is the KB's agents file; `kb-root/CLAUDE.md` is exactly the
+one-line redirect `@AGENTS.md`**, which the stamp writes beside it where none
+stands, so both harnesses read one document. A `kb-root/CLAUDE.md` holding
+anything else — a KB built before this split, or a hand edit — is never
+converted: `kb-refresh` and `kb-verify` fail, the metadata tool behind each
+exiting 2, and the stamp refuses — each before writing anything, and each
+saying to move the content into `AGENTS.md` and leave the redirect. A pre-split KB whose invariants still sit in that
+content keeps them parsed once they move: the legacy framework-node source is
+`AGENTS.md`.

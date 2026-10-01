@@ -13,7 +13,7 @@ golden diff instead of hiding behind a frozen copy. :func:`render_mini_kb_golden
 and :func:`write_mini_kb_golden` are that helper, and ``just regenerate-mini-kb-golden``
 runs through them so the recipe and this suite build the index the same way.
 
-**The copy must carry the fixture's ``CLAUDE.md``** or the framework nodes it
+**The copy must carry the fixture's ``AGENTS.md``** or the framework nodes it
 declares never appear — the fixture hosts its invariants and axioms there, and a
 golden rendered without them would be a smaller picture that still reproduced
 itself forever.
@@ -86,7 +86,7 @@ def render_mini_kb_golden() -> str:
 
     The committed fixture is never mutated and the index it derives is never
     committed. The copy is a whole-tree copy, so it carries the fixture's
-    ``CLAUDE.md`` — the framework nodes' authored home.
+    ``AGENTS.md`` — the framework nodes' authored home.
     """
     with tempfile.TemporaryDirectory() as workspace:
         kb_root = Path(workspace) / _MINI_KB.name
@@ -169,7 +169,7 @@ def _framework(fid: str, node_type: str = "invariant") -> kb_index.FrameworkNode
         node_type=node_type,
         id=fid,
         title="A framework rule",
-        canonical_path="CLAUDE.md",
+        canonical_path="AGENTS.md",
         canonical_anchor=fid.lower(),
     )
 
@@ -277,7 +277,7 @@ def test_the_golden_is_the_document_and_not_an_empty_one() -> None:
     """A golden regenerated from a renderer that drew nothing would compare against
     itself forever and assert nothing at all. The fixture's own shape is the guard:
     all four node types, the two edge classes the real corpus does not exercise, and
-    the framework nodes that only arrive if the copy carried ``CLAUDE.md``.
+    the framework nodes that only arrive if the copy carried ``AGENTS.md``.
 
     **The fixture no longer crosses, and that is itself pinned here.** Its two
     crossings were the barycentre sweep's residue and the transpose refinement
@@ -292,7 +292,7 @@ def test_the_golden_is_the_document_and_not_an_empty_one() -> None:
 
     assert len(groups) == 32
     assert len(_edge_lines(root)) == 18
-    assert any(node_id.startswith("INVARIANT-") for node_id in groups), "the copy lost kb-root/CLAUDE.md"
+    assert any(node_id.startswith("INVARIANT-") for node_id in groups), "the copy lost kb-root/AGENTS.md"
     assert any(node_id.startswith("axiom-") for node_id in groups)
     assert any(node_id.startswith("sup-") for node_id in groups)
     assert any(node_id.startswith("exp-") for node_id in groups)

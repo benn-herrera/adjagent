@@ -67,16 +67,12 @@ class LedgerOp(StrEnum):
 
 # --- the scratch layout this cut touches ------------------------------------
 #
-# The `.claude-temp/kb-build/` layout is a contract governing build artifacts —
-# things later stages consume and postconditions check. These constants are the
-# driver's own statement of it: a row declares its outputs as patterns over
-# them, and the run loop resolves the path it writes from the same format
-# string, so a row's declaration and the file it produces cannot drift.
-
-# Every path a postcondition checks is imported rather than restated:
-# `kb_pipeline` states it once and its coverage checks read it there. A second
-# spelling here could send an artifact somewhere the tool never looks.
-SCRATCH_ROOT = kb_pipeline.SCRATCH_RELROOT
+# The `<scratch>/kb-build/` layout (`kb_pipeline.scratch_relroot`) is a
+# contract governing build artifacts — things later stages consume and
+# postconditions check. These constants are the driver's own statement of it: a
+# row declares its outputs as patterns over them, and the run loop resolves the
+# path it writes from the same format string, so a row's declaration and the
+# file it produces cannot drift.
 
 # The charter is not a member of this layout and may not become one: it is an
 # input that must already stand when the build opens, and the `start` boundary
@@ -271,6 +267,7 @@ _DOCUMENT_GRAPH = "document-graph"
 _SPINE_SEED = "spine-seed"
 _CLAIMS_DECLARED = "claims-declared"
 _CLAIMS_DISCOVERED = "claims-discovered"
+_EQUATIONS_MINTED = "equations-minted"
 _DEPENDS_ATTRIBUTED = "depends-attributed"
 _PHASE_3A = "phase-3a"
 _OVERVIEW_DRAFTED = "overview-drafted"
@@ -291,7 +288,7 @@ TABLE_STAGE_IDS: tuple[str, ...] = _through(_PHASE_5)
 
 STEPS: tuple[Step, ...] = (
     # --- pre-stage: before `start` is recorded -------------------------------
-    # `pre.lock` holds <repo>/.claude-temp/kb-driver.lock — the REPOSITORY's
+    # `pre.lock` holds <repo>/<scratch>/kb-driver.lock — the REPOSITORY's
     # lock, not the run directory's, so a second `--run-dir` cannot slip past
     # it. A live pid there is exit 16.
     Step(id="pre.lock", stage=_START, unit=Unit.DRIVER_OP, writer=Writer.DRIVER),
@@ -327,13 +324,14 @@ STEPS: tuple[Step, ...] = (
     ),
     # --- the head: the build's own production ---------------------------------
     #
-    # Five tool rows and their records. Every one of them invokes a module and
+    # Six tool rows and their records. Every one of them invokes a module and
     # reads an exit code, so none briefs a seat and none raises a barrier of its
     # own — the two exceptions being stated where they sit. The order is forced
     # end to end: the seed refuses a `kb-root/` with no tree in it, the declared
-    # pass refuses a `kb-root/` with no spine, discovery reads what the declared
-    # pass left awaiting, and stage D authors edges over the claims discovery
-    # minted. Each stage's boundary commit is also what leaves the worktree
+    # pass refuses a `kb-root/` with no spine, the node pass reads the leaves the
+    # declared pass recorded unread, equations are minted from the references
+    # its verdicts leave counting, and stage D authors edges over the node set
+    # those three fixed. Each stage's boundary commit is also what leaves the worktree
     # clean for the next stage's tool, which is why the seed is a stage of its
     # own rather than a row of `start`: its preflight refuses the dirty worktree
     # the document graph has just created.
@@ -389,7 +387,7 @@ STEPS: tuple[Step, ...] = (
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
-    # --- claims-discovered — stage C-inf ---------------------------------------
+    # --- claims-discovered — the node pass --------------------------------------
     # The whole of this row is a model call, and it is spawned inside
     # `kb_claimgraph` rather than through this driver's own transport: the seat
     # is that package's `ask.SeatAsk`. That is what `spends_own_inference`
@@ -398,9 +396,9 @@ STEPS: tuple[Step, ...] = (
     # by different code.
     #
     # `--no-inference` excludes this row outright, which is not a bound: the
-    # walk continues, `discover.record` still writes the boundary, and the
-    # documents this row would have read keep the awaiting reason the declared
-    # pass wrote (ARCHITECTURE.md, The Driver).
+    # walk continues, `discover.record` still writes the boundary, and the node
+    # pass's record still lists every leaf this row would have read as unread
+    # (ARCHITECTURE.md, The Driver).
     Step(
         id="discover.build",
         stage=_CLAIMS_DISCOVERED,
@@ -411,6 +409,23 @@ STEPS: tuple[Step, ...] = (
     Step(
         id="discover.record",
         stage=_CLAIMS_DISCOVERED,
+        unit=Unit.DRIVER_OP,
+        writer=Writer.TOOL,
+        ledger_op=LedgerOp.ADVANCE_STEP,
+    ),
+    # --- equations-minted — the node set's close ------------------------------
+    # Mechanical, and a stage of its own rather than a tail on `discover.build`:
+    # as a tail it would stop that row declaring its inference, and the ledger
+    # would no longer name the row a build spending none drops.
+    Step(
+        id="equations.build",
+        stage=_EQUATIONS_MINTED,
+        unit=Unit.DRIVER_OP,
+        writer=Writer.TOOL,
+    ),
+    Step(
+        id="equations.record",
+        stage=_EQUATIONS_MINTED,
         unit=Unit.DRIVER_OP,
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,

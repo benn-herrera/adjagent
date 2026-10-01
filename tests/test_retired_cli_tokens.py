@@ -55,6 +55,8 @@ RETIRED_TOKENS: tuple[str, ...] = (
 RETIRED_COMMANDS: tuple[str, ...] = (
     "kb_tools.mint_claim_ids",
     "mint_claim_ids.py",
+    # Retired when the agents file moved to block replacement under install-agents-file.
+    "install-claude-md",
 )
 
 #: Matched with a right boundary so `--init` does not answer for a future

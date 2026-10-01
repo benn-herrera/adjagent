@@ -470,6 +470,10 @@ def main(argv: list[str] | None = None) -> int:
     if not KB.is_dir():
         print(f"FAIL: KB directory {KB} not found.", file=sys.stderr)
         return 2
+    unmigrated = kb_index_lib.unmigrated_agents_file(KB)
+    if unmigrated is not None:
+        print(f"FAIL: {unmigrated}", file=sys.stderr)
+        return 2
 
     # BOTH aggregates come from the SAME shared library computation the
     # verifier uses (compute_subtree_aggregates over a single discover_kb

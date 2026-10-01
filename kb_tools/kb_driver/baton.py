@@ -119,8 +119,9 @@ class BatonSpec:
 
 # The resume names the directory this run's evidence is in, through the
 # invocation it was launched with (`config.invocation` renders `--run-dir`
-# wherever it is not the default).
-_RESUME = f"{kb_util.DRIVER_INVOCATION} run {{invocation}}"
+# wherever it is not the default). `{driver}` is `kb_util.driver_invocation()`,
+# filled at render.
+_RESUME = "{driver} run {invocation}"
 _DECIDE = (f"{_RESUME} \\", "    --decide {pair}=<answer>")
 
 _BATONS: dict[int, BatonSpec] = {
@@ -228,6 +229,7 @@ def render(exit_code: int, context: BatonContext | None = None) -> str:
     if spec.substitutes_answer and not ctx.pair:
         spec = _NO_BARRIER
     fields = {
+        "driver": kb_util.driver_invocation(),
         "invocation": ctx.invocation or "<the flags this run was launched with>",
         "pair": ctx.pair or "<stage>.<kind>",
         "question": ctx.question,

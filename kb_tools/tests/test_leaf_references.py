@@ -30,9 +30,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from kb_tools import install_location
 from kb_tools import kb_index_lib as lib
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _REFRESH_MOD = "kb_tools.refresh_kb_metadata"
 _VERIFY_MOD = "kb_tools.verify_kb_metadata"
 
@@ -40,7 +41,7 @@ _VERIFY_MOD = "kb_tools.verify_kb_metadata"
 def _run(module: str, kb_root: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", module, "--kb-root", str(kb_root)],
-        cwd=_REPO_ROOT,
+        cwd=_PKG_PARENT,
         capture_output=True,
         text=True,
         check=False,
@@ -52,7 +53,7 @@ def _run(module: str, kb_root: Path) -> subprocess.CompletedProcess:
 # its directory citing claims, hosting one experiment and one support.
 # ---------------------------------------------------------------------------
 
-_CLAUDE_MD = """# Mini Invariants
+_AGENTS_MD = """# Mini Invariants
 
 ### INVARIANT-S2: Core Axiom numbering
 
@@ -197,7 +198,7 @@ Body.
 
 def _build_kb(root: Path) -> None:
     """Materialize the synthetic KB under ``root``."""
-    (root / "CLAUDE.md").write_text(_CLAUDE_MD, encoding="utf-8")
+    (root / "AGENTS.md").write_text(_AGENTS_MD, encoding="utf-8")
     (root / "entry-point.md").write_text(_ENTRY_POINT, encoding="utf-8")
     vol = root / "vol"
     vol.mkdir()

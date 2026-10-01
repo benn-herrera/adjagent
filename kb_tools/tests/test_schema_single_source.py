@@ -100,7 +100,7 @@ class TestInvariantsFilenameSingleSourced(unittest.TestCase):
 
     def test_kb_index_lib_owns_both_spellings(self):
         self.assertEqual(lib.INVARIANTS_FILENAME, "invariants.md")
-        self.assertEqual(lib.LEGACY_INVARIANTS_FILENAME, "CLAUDE.md")
+        self.assertEqual(lib.LEGACY_INVARIANTS_FILENAME, "AGENTS.md")
 
     def test_kb_util_exports_no_second_invariants_channel(self):
         for name in ("INVARIANTS_FILENAME", "invariants_md"):

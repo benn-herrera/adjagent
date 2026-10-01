@@ -38,15 +38,13 @@ silently, which is the failure this sweep exists to prevent.
 import re
 from collections.abc import Iterator
 from functools import cache
-from importlib import util
 from pathlib import Path
 
 import pytest
 
+from gen_defs import agents_file, chunks, discovery, model_tuning, paths, rendering
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_spec = util.spec_from_file_location("gen_defs", _REPO_ROOT / "gen-defs.py")
-gen_defs = util.module_from_spec(_spec)
-_spec.loader.exec_module(gen_defs)
 
 
 #: The four shapes. ``follow`` is matched only with ``links``
@@ -94,16 +92,20 @@ JUDGMENT_SITES: dict[tuple[str, str], str] = {
 @cache
 def _rendered_kb_definitions() -> tuple[tuple[str, str], ...]:
     """Every ``kb-*`` agent definition, rendered in memory under the shipped triple."""
-    tier_map = dict(gen_defs.DEFAULT_PIN_MAP)
-    tuning = gen_defs.Tuning(
-        family=gen_defs.FAMILY_DIR / "claude.toml",
+    tier_map = dict(model_tuning.DEFAULT_PIN_MAP)
+    tuning = model_tuning.Tuning(
+        family=paths.FAMILY_DIR / "claude.toml",
         tier_map=tier_map,
-        pin_map=dict(gen_defs.DEFAULT_PIN_MAP),
-        stock=gen_defs.stock_tiers({}, tier_map),
+        pin_map=dict(model_tuning.DEFAULT_PIN_MAP),
+        stock=model_tuning.stock_tiers({}, tier_map),
         is_default=True,
     )
-    binding = gen_defs.tier_binding(gen_defs.load_chunks(), pin_map=dict(gen_defs.DEFAULT_PIN_MAP))
-    renders = gen_defs.all_renders(binding, gen_defs.surface_map(gen_defs.REPO_ROOT), tuning=tuning)
+    binding = model_tuning.tier_binding(
+        chunks.load_chunks(),
+        pin_map=dict(model_tuning.DEFAULT_PIN_MAP),
+        harness=agents_file.load_harness(model_tuning.DEFAULT_HARNESS),
+    )
+    renders = rendering.all_renders(binding, discovery.surface_map(paths.REPO_ROOT), tuning=tuning)
     return tuple(sorted((target.name, text) for target, text in renders if target.name.startswith("kb-")))
 
 

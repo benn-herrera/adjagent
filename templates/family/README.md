@@ -5,8 +5,8 @@ One TOML file per model family, named for the family (`claude.toml`,
 this directory, or a path to a family file. There is no third resolution step —
 a bare model name is not a family name.
 
-This is the authoring guide for the files that live here. `gen-defs.py`'s module
-docstring is the definitive description of the mechanism they feed.
+This is the authoring guide for the files that live here. The `gen_defs` module docstrings are the definitive description of the mechanism they feed:
+`model_tuning.py` for family selection, tiers, the two maps, and the family source that fills anchors.
 
 ## Schema
 
@@ -39,8 +39,8 @@ ladder, not a defect.
 
 **Anchors are consumed through a namespace.** A template or chunk spells one
 `@!fam.<key>!@`, where `fam` is the namespace naming this file as the source
-that fills it — the only overlay namespace registered today
-(`OVERLAY_NAMESPACES` in `gen-defs.py`). A table here supplies the key:
+that fills it (the family source, `model_tuning.py` in `gen_defs`). A table
+here supplies the key:
 `[family.gap-aversion]` fills `@!fam.gap-aversion!@`. The table name stays
 `family`, because this file is where the text is *authored*; `fam` is how a
 template *reads* it. The key matches the same kebab-case identifier class every
@@ -59,7 +59,7 @@ member spelling.
 | Map | Source | What it decides |
 |---|---|---|
 | tier → member | this file's `[tiers]`, masked per tier by `--model-tier-map` | which member's `[family.*.models.*]` overrides a definition is tuned against |
-| tier → pin | `DEFAULT_PIN_MAP` in `gen-defs.py`, masked per tier by `--model-pin-map` | the `model:` text a definition renders, always a claude-legal name |
+| tier → pin | `model_tuning.DEFAULT_PIN_MAP` in `gen_defs`, masked per tier by `--model-pin-map` | the `model:` text a definition renders, always a claude-legal name |
 
 The two are independent on purpose: what a definition is tuned for and what it
 dispatches on are separately chosen. No member name ever reaches rendered text —

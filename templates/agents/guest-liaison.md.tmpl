@@ -32,7 +32,7 @@ guest-session/<topic>/
 **Decide new-session-or-continuation with `validate`, never by inspecting the file yourself:**
 
 ```bash
-.claude/agents/liaison_tools/msg-util.py validate guest-session/<topic>/messages.json
+@!hrn.project-harness-dir!@/agents/liaison_tools/msg-util.py validate guest-session/<topic>/messages.json
 ```
 
 Exit 0 — a well-formed session exists: this invocation is a **continuation**; append only. Non-zero because the file does not exist — a **new session**: run full Onboarding init. @!liaison-validate-corrupt principal="the user"!@
@@ -53,7 +53,7 @@ At every invocation, collect (from the user, or from caller-supplied parameters 
 For a **new session only**, additionally collect:
 
 - **Guest system prompt source**, one of:
-  1. **Agent identity**: a path to an agent definition under `.claude/agents/` whose body (frontmatter stripped) becomes the guest model's system prompt. Capture the body to a temporary file via:
+  1. **Agent identity**: a path to an agent definition under `@!hrn.project-harness-dir!@/agents/` whose body (frontmatter stripped) becomes the guest model's system prompt. Capture the body to a temporary file via:
      ```bash
      export TMPDIR=guest-session/<topic>/tmp/
      SYS_PROMPT_FILE=$(mktemp "${TMPDIR}/sys-prompt.XXXXXX")
@@ -76,7 +76,7 @@ For a **new session only**, additionally collect:
 
 ```bash
 TMPDIR=guest-session/<topic>/tmp/ \
-  .claude/agents/liaison_tools/msg-util.py init \
+  @!hrn.project-harness-dir!@/agents/liaison_tools/msg-util.py init \
     --system-prompt="${SYS_PROMPT_FILE}" \
     --instructions="${INIT_MSG_FILE}" \
     guest-session/<topic>/messages.json
@@ -90,7 +90,7 @@ For a **continuation invocation**, skip init; append the new user message via `m
 ```bash
 API_BASE_URL=<url> API_KEY_FILE=<path-to-api-key-file> MODEL=<model> \
 TMPDIR=guest-session/<topic>/tmp/ \
-  .claude/agents/liaison_tools/post-openai.py guest-session/<topic>/messages.json
+  @!hrn.project-harness-dir!@/agents/liaison_tools/post-openai.py guest-session/<topic>/messages.json
 ```
 
 @!liaison-tool-tail messages="the messages file"!@
@@ -124,7 +124,7 @@ READ: <path, as the model asked for it>
 
   ```bash
   TMPDIR=guest-session/<topic>/tmp/ \
-    .claude/agents/liaison_tools/msg-util.py append --role=<user|agent> \
+    @!hrn.project-harness-dir!@/agents/liaison_tools/msg-util.py append --role=<user|agent> \
       guest-session/<topic>/messages.json <content-file>
   ```
 

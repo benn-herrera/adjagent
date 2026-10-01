@@ -28,10 +28,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from kb_tools import install_location
 from kb_tools import kb_index_lib as lib
 
 _THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
 _REFRESH_MOD = "kb_tools.refresh_kb_metadata"
 
@@ -48,7 +49,7 @@ def _run_refresh(kb_root: Path) -> subprocess.CompletedProcess:
     """Run refresh_kb_metadata against ``kb_root`` and return the result."""
     return subprocess.run(
         [sys.executable, "-m", _REFRESH_MOD, "--kb-root", str(kb_root)],
-        cwd=_REPO_ROOT,
+        cwd=_PKG_PARENT,
         capture_output=True,
         text=True,
         check=False,
@@ -486,7 +487,7 @@ class TestRefreshNodeDiscoveryByKind(unittest.TestCase):
         self.assertEqual(_run_refresh(self.kb_root).returncode, 0)
         check = subprocess.run(
             [sys.executable, "-m", "kb_tools.verify_kb_metadata", "--kb-root", str(self.kb_root)],
-            cwd=_REPO_ROOT,
+            cwd=_PKG_PARENT,
             capture_output=True,
             text=True,
             check=False,
@@ -568,7 +569,7 @@ class TestRefreshOverAScoredExternalWork(unittest.TestCase):
 
         check = subprocess.run(
             [sys.executable, "-m", "kb_tools.verify_kb_metadata", "--kb-root", str(self.kb_root)],
-            cwd=_REPO_ROOT,
+            cwd=_PKG_PARENT,
             capture_output=True,
             text=True,
             check=False,

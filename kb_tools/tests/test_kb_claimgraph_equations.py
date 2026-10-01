@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from kb_tools import kb_index_lib, kb_schema, kb_util, verify_kb_metadata
-from kb_tools.kb_claimgraph import attribute, equation, graph, inventory, tree
+from kb_tools.kb_claimgraph import attribute, equation, equations, graph, inventory, tree
 from kb_tools.kb_claimgraph.build import build
 
 _PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
@@ -185,7 +185,11 @@ _TREE = {
 
 @pytest.fixture
 def declared(tmp_path: Path) -> Path:
-    """A consuming repo carrying the tree, after the declared pass has run green."""
+    """A consuming repo carrying the tree, after the declared pass and the equations stage have run green.
+
+    No node pass between them: its record lists every leaf unread, so every
+    reference counts — a build spending no inference.
+    """
     repo = tmp_path / "consumer"
     for relative, text in _TREE.items():
         target = repo / "kb-root" / relative
@@ -198,8 +202,11 @@ def declared(tmp_path: Path) -> Path:
     os.symlink(_PACKAGE_ROOT, installed / _PACKAGE_ROOT.name)
     kb_util.install_targets(repo, "just")
 
-    outcome = build(kb_root=repo / "kb-root", repo_root=repo, scratch=repo / kb_util.SCRATCH_DIRNAME / "claimgraph")
+    scratch = repo / kb_util.scratch_dirname() / "claimgraph"
+    outcome = build(kb_root=repo / "kb-root", repo_root=repo, scratch=scratch)
     assert not outcome.failed, outcome.lines()
+    minted = equations.build(kb_root=repo / "kb-root", repo_root=repo, scratch=scratch)
+    assert not minted.failed, minted.lines()
     return repo
 
 

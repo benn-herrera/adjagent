@@ -39,16 +39,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import kb_util
+from .. import install_location, kb_util
 from . import baton, runlog
 
 _log = runlog.logger("ledger")
-
-# The directory holding the ``kb_tools`` package, for the child's PYTHONPATH.
-# ``__file__`` is the right anchor here and only here: this locates the
-# *toolchain*, which lives wherever it was installed. Repo and KB paths stay
-# cwd-anchored (see ``kb_util``'s module docstring).
-_PKG_PARENT = Path(__file__).resolve().parents[2]
 
 # The running interpreter, not a bare ``python3``: the tool and the driver must
 # be the same 3.11+ runtime, and PATH resolution could disagree.
@@ -131,7 +125,7 @@ class Outcome:
 def _child_env() -> dict[str, str]:
     """The child's environment: `kb_tools` importable, no bytecode in a deployed tree."""
     inherited = os.environ.get("PYTHONPATH", "")
-    parts = [str(_PKG_PARENT), *(part for part in inherited.split(os.pathsep) if part)]
+    parts = [str(install_location.current().agents_dir), *(part for part in inherited.split(os.pathsep) if part)]
     return {**os.environ, "PYTHONPATH": os.pathsep.join(parts), "PYTHONDONTWRITEBYTECODE": "1"}
 
 

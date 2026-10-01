@@ -285,7 +285,7 @@ def repo(tmp_path: Path) -> Path:
     a fixture detail.
     """
     root = tmp_path / "repo"
-    (root / steps.SCRATCH_ROOT).mkdir(parents=True)
+    (root / kb_pipeline.scratch_relroot()).mkdir(parents=True)
     (root / kb_pipeline.CHARTER_RELPATH).write_text("# Build charter\n\nBoth volumes.\n", encoding="utf-8")
 
     index_dir = kb_util.index_dir(root)
@@ -297,7 +297,7 @@ def repo(tmp_path: Path) -> Path:
     for name in kb_index_lib.build_all_records(EMPTY_KB):
         (index_dir / f"{name}.jsonl").write_text("", encoding="utf-8")
 
-    commands = root / kb_util.CLAUDE_DIRNAME / kb_util.COMMANDS_DIRNAME
+    commands = root / kb_util.harness_dirname() / kb_util.COMMANDS_DIRNAME
     commands.mkdir(parents=True)
     for name in kb_util.DOCENT_COMMAND_FILENAMES:
         (commands / name).write_text(f"# {name}\n", encoding="utf-8")
@@ -453,7 +453,7 @@ def test_a_red_gate_stops_the_run_and_records_nothing(repo: Path, tmp_path: Path
     assert result.pair == "", "a red gate is an exit, not a barrier — no answer would repair the KB"
     assert script.calls == [], "no seat is dispatched over a mechanical gate"
     assert "phase-3a" not in fake.recorded
-    assert not (repo / steps.SCRATCH_ROOT / "review").exists(), "nothing writes a findings round here"
+    assert not (repo / kb_pipeline.scratch_relroot() / "review").exists(), "nothing writes a findings round here"
 
     # The card the relay actually prints, from the very context the run ended
     # with: the failing gate's own lines are in it, and nothing in it asks a
@@ -564,7 +564,7 @@ def test_a_revision_composing_the_document_already_standing_is_not_a_failure(
 
 def _findings_path(repo: Path) -> Path:
     """Where the review's findings land — the path the review row declares."""
-    return repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT)
+    return repo / kb_pipeline.scratch_relroot() / steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT)
 
 
 def test_a_findings_file_a_dead_process_left_is_overwritten_by_the_review_that_runs(
@@ -661,7 +661,7 @@ def test_the_review_reports_its_counts_by_severity_and_where_the_findings_are(
     assert line is not None, "the review reported no counts at all"
     assert f"critical={returned.critical} warning={returned.warning} note={returned.note}" in line
     assert expected in line
-    assert f"findings: {steps.SCRATCH_ROOT}/{findings}" in line
+    assert f"findings: {kb_pipeline.scratch_relroot()}/{findings}" in line
 
 
 def test_the_fix_call_reads_the_reviewers_findings_and_the_first_pass_does_not(
@@ -709,7 +709,7 @@ def test_every_path_a_brief_hands_a_seat_resolves_without_a_base(repo: Path, tmp
         ("p5.review", "README"): repo / "kb-root" / kb_pipeline.OVERVIEW_DOC,
         ("p5.review", "CONVENTIONS"): repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC,
         ("p5.fix", "Findings"): repo
-        / steps.SCRATCH_ROOT
+        / kb_pipeline.scratch_relroot()
         / steps.findings(stage="phase-5", author=steps.META_REVIEW_SEAT),
     }
     for (step_id, name), expected in stated.items():
@@ -729,7 +729,7 @@ def test_missing_docent_commands_stop_the_build_with_preflights_own_restore_line
     In front of one, an incomplete install costs the run nothing but the stage.
     """
     distilled(repo)
-    (repo / kb_util.CLAUDE_DIRNAME / kb_util.COMMANDS_DIRNAME / kb_util.DOCENT_COMMAND_FILENAMES[1]).unlink()
+    (repo / kb_util.harness_dirname() / kb_util.COMMANDS_DIRNAME / kb_util.DOCENT_COMMAND_FILENAMES[1]).unlink()
     fake = FakeLedger(recorded=RECORDED_THROUGH_3A, preflight_stdout=PREFLIGHT_MISSING_DOCENT)
     script = phase_5_script()
 
@@ -762,7 +762,7 @@ def test_missing_docent_commands_stop_the_build_with_preflights_own_restore_line
 
 def _overview_prose(repo: Path) -> Path:
     """The draft row's own declared artifact, under the scratch layout."""
-    return repo / steps.SCRATCH_ROOT / steps.overview_prose(stage=META_STAGES[0])
+    return repo / kb_pipeline.scratch_relroot() / steps.overview_prose(stage=META_STAGES[0])
 
 
 def test_a_resume_past_a_recorded_boundary_does_not_buy_the_draft_again(

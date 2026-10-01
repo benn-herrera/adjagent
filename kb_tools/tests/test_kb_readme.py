@@ -37,7 +37,7 @@ DOCUMENTS = {
 #: Files `kb_index_lib.kb_files` excludes: authored, but not documents of the
 #: tree. Present in the fixture so their exclusion is exercised rather than
 #: assumed.
-NON_DOCUMENTS = ("README.md", "CONVENTIONS.md", "CLAUDE.md", "vol/claim-quality.md")
+NON_DOCUMENTS = ("README.md", "CONVENTIONS.md", "AGENTS.md", "CLAUDE.md", "vol/claim-quality.md")
 
 REGISTER = "vol/claim-quality.md"
 

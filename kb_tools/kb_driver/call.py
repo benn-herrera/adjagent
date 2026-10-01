@@ -78,7 +78,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import inference
+from .. import inference, kb_pipeline
 from ..kb_survey.manifest import write_text_atomic
 from . import baton, prompt_templates, runlog, steps
 from .config import DriverConfig
@@ -262,7 +262,7 @@ class Caller:
     @property
     def scratch_root(self) -> Path:
         """The build-artifact layout root — the only place under the repo this module writes."""
-        return self.repo_root / steps.SCRATCH_ROOT
+        return self.repo_root / kb_pipeline.scratch_relroot()
 
     # --- the one entry point -------------------------------------------------
 

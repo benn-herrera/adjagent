@@ -15,12 +15,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from kb_tools import __version__
+from kb_tools import __version__, install_location
 
 _THIS_DIR = Path(__file__).resolve().parent
 # The directory containing the ``kb_tools`` package — used only to point the
 # subprocess PYTHONPATH at the package, never to derive a consumer repo root.
-_PKG_PARENT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 
 # Every argparse entry point in the package (module form, runnable via -m).
 ENTRY_POINTS = (

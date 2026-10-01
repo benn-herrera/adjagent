@@ -14,13 +14,12 @@ the graph. Point 14 guarantees a fresh tree carries none of the artifacts it
 writes, so the presence of any one of them means the input is not a fresh tree,
 and :func:`gate` refuses.
 
-**The discovered pass's entry condition is a different one, and it is per
-document.** That pass extends the tree additively — SPEC declares nodes
-additively in leaf frontmatter — so a whole-tree refusal on "any frontmatter at
-all" would forbid it entirely. What it must not do is re-mint, so the question
-moves from the tree to the document: :func:`determination` says whether one
-document has already had its claim declaration settled, and
-:func:`pass_two_gate` partitions the tree by that answer.
+**The later invocations' entry condition is a different one.** They extend the
+tree additively — SPEC declares nodes additively in leaf frontmatter — so a
+whole-tree refusal on "any frontmatter at all" would forbid them entirely.
+:func:`pass_two_gate` makes the structural checks alone and partitions the tree
+by :func:`determination` for the report. What keeps the node pass from
+re-minting is not here: it is the node-pass record's read state.
 
 **The forbidden artifacts are read off the module that composes them**
 (:data:`tree.METADATA_OPENERS`, itself read off :mod:`kb_tools.kb_write.render`)
@@ -44,8 +43,6 @@ from enum import StrEnum
 from pathlib import Path
 
 from .. import kb_index_lib, kb_util, verify_md_links
-from .assemble import UNSCANNED_REASON
-from .identify import UNANCHORED_REASON
 from .report import ClaimGraphError
 from .tree import ANCHOR_RE, DECLARING_KINDS, METADATA_OPENERS, Tree, document_kind, resolve, strip_markers, unquote
 
@@ -211,60 +208,26 @@ def gate(tree: Tree) -> None:
         check(tree)
 
 
-# --- the discovered pass's entry condition ----------------------------------
+# --- the later invocations' entry condition ---------------------------------
 
 
 class Determination(StrEnum):
-    """Whether one document's claim declaration has already been settled.
+    """What one leaf's frontmatter declares about its claims.
 
-    ``AWAITING`` is the only value that admits a document to a minting stage.
-    The other four each close the document to one, and they close it for
-    different reasons: three say the question is answered — by a declared claim,
-    by somebody's authored reason, or by the document not being asked — and
-    ``UNANCHORED`` says it is not, but that this build has already tried and
-    could not. That last one is not a finding about the document, and it is the
-    distinction that keeps a failure to point into a document from being written
-    down as the document stating nothing.
+    A reading for the report and nothing more: no value here admits a leaf to
+    a minting stage or closes one to it. Which leaves the node pass reads, and
+    how far it got with each, is the node-pass record's.
     """
 
-    #: Carries the unscanned reason: settled by nothing, and awaiting this pass.
-    AWAITING = "awaiting"
-    #: Declares ids. Its claims exist; re-minting would double them.
+    #: Declares ids.
     HOSTS_CLAIMS = "hosts-claims"
-    #: Carries a reason somebody wrote. A hand or a stage decided this document
-    #: states no claim, and that decision is not this pass's to overturn.
+    #: Carries a no-claim reason.
     AUTHORED_NO_CLAIM = "authored-no-claim"
-    #: Carries the unanchored reason: claim identification ran over this
-    #: document's prose, named results in it, and anchored none of them. It
-    #: leaves ``AWAITING`` so a run finishes rather than halting on it, and it
-    #: reopens for nobody — a re-run would buy the same failure at the same
-    #: price, and what the state is for is being reported loudly enough that a
-    #: person looks.
-    UNANCHORED = "unanchored"
     #: Declares neither, and is a kind that must — including one carrying no
-    #: frontmatter block at all, which declares nothing by declaring nothing.
-    #: Nobody has settled it, so :func:`pass_two_gate` reads it as awaiting: the
-    #: reading it has not had is what a minting pass is. The refusal, where the
-    #: state is a defect rather than a document nobody got to, is the runner's —
-    #: ``verify_kb_metadata``'s frontmatter-presence and tier-1 coverage checks,
-    #: over what the pass leaves behind rather than ahead of what it reads.
+    #: frontmatter block at all. The refusal, where the state is a defect, is the
+    #: runner's: ``verify_kb_metadata``'s frontmatter-presence and tier-1
+    #: coverage checks, over what a pass leaves behind.
     UNDECLARED = "undeclared"
-
-
-#: The reason literals this module compares by identity, and what each says.
-#: **Both literals are load-bearing.** :data:`assemble.UNSCANNED_REASON` was
-#: written as an honest description of what a block-hosted build did not look at,
-#: and it is *also* the resumption marker: it is the one ``no-claim:`` reason
-#: that asserts nothing about the document, so it is the one a later pass may
-#: replace. :data:`identify.UNANCHORED_REASON` is the same pattern for the run
-#: that tried and failed. Every other reason is somebody's finding. Reword either
-#: without moving this table with it and the documents carrying it read as
-#: finished ones — the pass that would have read them reads nothing, reports
-#: success, and the claims stay unfound.
-_RESERVED_REASONS: dict[str, Determination] = {
-    UNSCANNED_REASON: Determination.AWAITING,
-    UNANCHORED_REASON: Determination.UNANCHORED,
-}
 
 
 def determination(fields: dict) -> Determination:
@@ -274,70 +237,44 @@ def determination(fields: dict) -> Determination:
     reason = fields.get("no-claim")
     if not isinstance(reason, str) or not reason:
         return Determination.UNDECLARED
-    return _RESERVED_REASONS.get(reason, Determination.AUTHORED_NO_CLAIM)
+    return Determination.AUTHORED_NO_CLAIM
 
 
 @dataclass(frozen=True)
 class PassTwoState:
-    """The tree partitioned by :func:`determination`, over the kinds that declare.
+    """The leaves partitioned by :func:`determination`, for a run's census line."""
 
-    ``awaiting`` is what a minting stage may read. ``hosting`` is what the
-    dependency stage reads — a claim has to exist before an edge can name it.
-    ``determined`` is refused to both, and is reported rather than dropped so a
-    run states how much of the tree it declined to touch; a document a previous
-    run could anchor nothing in is in there, because a re-run would buy the same
-    failure at the same price.
-    """
-
-    awaiting: tuple[str, ...] = ()
+    undeclared: tuple[str, ...] = ()
     hosting: tuple[str, ...] = ()
     determined: tuple[str, ...] = ()
 
 
 def pass_two_gate(tree: Tree) -> PassTwoState:
-    """The discovered pass's entry condition: the structural checks, then the partition.
+    """The later invocations' entry condition: the structural checks, then the partition.
 
-    **Which documents are asked is read off the tree rather than off what an
+    **Which documents are counted is read off the tree rather than off what an
     earlier pass recorded about it.** A ``kind:`` field is
     :func:`tree.document_kind`'s answer written down — :mod:`assemble` stamps it
-    from exactly this call, and :mod:`identify` scopes itself by the function
-    rather than the field for the same reason. Asking the function is what makes
-    the partition total over the tree: a document whose frontmatter is missing
-    has no ``kind:`` either, and reading the field would drop it through the gap
-    where an absent value and a non-declaring one look alike.
-
-    **A leaf nobody has settled reads as awaiting, and that is not a refusal.**
-    Neither of the two states this once refused — a document carrying no
-    frontmatter, and a leaf declaring neither claims nor a reason — is one the
-    driver can produce: ``--pass`` is the argv ``kb_pipeline``'s stage table
-    composes for a subprocess and not a command line anybody types
-    (ARCHITECTURE.md, The Claim Graph), so the declared pass runs and this one
-    runs over its output. Where such a document does arrive — a hand edit, a
-    stopped pass 1, a leaf authored since — it is one nobody has read for
-    claims, and reading those is what this pass is for. The refusal is the
-    runner's: :func:`gate.run` ends either driver on ``verify_kb_metadata``'s
-    frontmatter-presence and tier-1 coverage checks, which report both states
-    over the tree the pass leaves behind.
+    from exactly this call. Asking the function is what makes the partition
+    total over the tree: a document whose frontmatter is missing has no
+    ``kind:`` either, and reading the field would drop it through the gap where
+    an absent value and a non-declaring one look alike.
     """
     for check in _STRUCTURE:
         check(tree)
 
-    awaiting: list[str] = []
-    hosting: list[str] = []
-    determined: list[str] = []
+    partition: dict[Determination, list[str]] = {determined: [] for determined in Determination}
     for path in sorted(tree.documents):
         if document_kind(path, has_children=bool(tree.children[path])) not in DECLARING_KINDS:
             continue
         fields = kb_index_lib.parse_frontmatter(tree.documents[path].text) or {}
-        {
-            Determination.AWAITING: awaiting,
-            Determination.HOSTS_CLAIMS: hosting,
-            Determination.AUTHORED_NO_CLAIM: determined,
-            Determination.UNANCHORED: determined,
-            Determination.UNDECLARED: awaiting,
-        }[determination(fields)].append(path)
+        partition[determination(fields)].append(path)
 
-    return PassTwoState(awaiting=tuple(awaiting), hosting=tuple(hosting), determined=tuple(determined))
+    return PassTwoState(
+        undeclared=tuple(partition[Determination.UNDECLARED]),
+        hosting=tuple(partition[Determination.HOSTS_CLAIMS]),
+        determined=tuple(partition[Determination.AUTHORED_NO_CLAIM]),
+    )
 
 
 def spine_seeded(kb_root: Path, *, targets_installed: bool) -> str | None:

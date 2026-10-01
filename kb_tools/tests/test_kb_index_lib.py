@@ -205,7 +205,7 @@ class TestParseClaimQualityFile(unittest.TestCase):
 
 
 class TestParseFrameworkNodes(unittest.TestCase):
-    """parse_framework_nodes against the fixture's CLAUDE.md.
+    """parse_framework_nodes against the fixture's AGENTS.md (the legacy framework source).
 
     The fixture declares four invariant headings (INVARIANT-S1, S2, S3, and
     the subsumed-tombstone S6) and four axiom bullets in the INVARIANT-S2
@@ -237,7 +237,7 @@ class TestParseFrameworkNodes(unittest.TestCase):
 
     def test_invariant_anchor_is_own_heading_slug(self):
         s2 = self.by_id["INVARIANT-S2"]
-        self.assertEqual(s2.canonical_path, "CLAUDE.md")
+        self.assertEqual(s2.canonical_path, "AGENTS.md")
         self.assertEqual(s2.canonical_anchor, "invariant-s2-core-axiom-numbering")
         self.assertEqual(s2.title, "Core Axiom numbering")
 
@@ -246,21 +246,21 @@ class TestParseFrameworkNodes(unittest.TestCase):
         s2_anchor = self.by_id["INVARIANT-S2"].canonical_anchor
         for num in (1, 2, 3, 4):
             self.assertEqual(self.by_id[f"axiom-{num}"].canonical_anchor, s2_anchor)
-            self.assertEqual(self.by_id[f"axiom-{num}"].canonical_path, "CLAUDE.md")
+            self.assertEqual(self.by_id[f"axiom-{num}"].canonical_path, "AGENTS.md")
 
 
 class TestParseFrameworkNodesTolerance(unittest.TestCase):
     """Axiom generality and absent-section tolerance.
 
     Axiom numbering is not capped (any ``- Axiom N:`` bullet parses), and a
-    ``CLAUDE.md`` with no INVARIANT-S2 section, no axiom bullets, or no
+    ``AGENTS.md`` with no INVARIANT-S2 section, no axiom bullets, or no
     content at all yields empty results — never an exception.
     """
 
     def _parse(self, text: str) -> list:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "CLAUDE.md").write_text(text, encoding="utf-8")
+            (root / "AGENTS.md").write_text(text, encoding="utf-8")
             return lib.parse_framework_nodes(root)
 
     def test_axiom_numbers_above_four_parse(self):
@@ -287,10 +287,10 @@ class TestParseFrameworkNodesTolerance(unittest.TestCase):
         self.assertEqual(nodes[0].node_type, "axiom")
         self.assertEqual(nodes[0].canonical_anchor, "")
 
-    def test_empty_claude_md_yields_empty_list(self):
+    def test_empty_agents_md_yields_empty_list(self):
         self.assertEqual(self._parse(""), [])
 
-    def test_absent_claude_md_yields_empty_list(self):
+    def test_absent_agents_md_yields_empty_list(self):
         with tempfile.TemporaryDirectory() as td:
             self.assertEqual(lib.parse_framework_nodes(Path(td)), [])
 
@@ -563,7 +563,7 @@ class TestBuildClaimsRecords(unittest.TestCase):
         self.assertEqual(len(fw_recs), 8)
         for rec in fw_recs:
             self.assertEqual(list(rec.keys()), expected_keys)
-            self.assertEqual(rec["canonical_path"], "CLAUDE.md")
+            self.assertEqual(rec["canonical_path"], "AGENTS.md")
 
     def test_build_band_derived(self):
         # clm-aa1111 computed solidity 0.90 -> ok-to-build.
@@ -1889,10 +1889,10 @@ class TestCycleDetectionIsIndependentOfScoring(unittest.TestCase):
 
 class TestFrameworkNodeCoverageGuard(unittest.TestCase):
     """Issue #28 regression: refresh must fail loudly — not silently emit a
-    dangling index — when CLAUDE.md framework-node parsing drops nodes that
+    dangling index — when framework-node parsing drops nodes that
     the claim graph references.
 
-    Root cause of #28 was a transient mid-merge CLAUDE.md whose axiom bullets
+    Root cause of #28 was a transient mid-merge framework source whose axiom bullets
     no longer matched the parser, so ``parse_framework_nodes`` yielded zero
     axioms and the rebuilt index lost ``axiom-1``..``axiom-4`` while
     ``depends-on`` edges still targeted them — surfacing only later as a flood
@@ -1917,7 +1917,7 @@ class TestFrameworkNodeCoverageGuard(unittest.TestCase):
             lib._assert_framework_node_coverage(claims, edges)
         msg = str(ctx.exception)
         self.assertIn("axiom-1", msg)
-        self.assertIn("CLAUDE.md", msg)
+        self.assertIn("AGENTS.md", msg)
 
     # --- integration: real parse → build chain on the fixture -----------
 
@@ -1927,7 +1927,7 @@ class TestFrameworkNodeCoverageGuard(unittest.TestCase):
         axioms = [r for r in records["claims"] if r["node_type"] == "axiom"]
         self.assertEqual(len(axioms), 4)
 
-    def test_build_all_records_fires_on_malformed_claude_md(self):
+    def test_build_all_records_fires_on_malformed_framework_source(self):
         # Reproduce #28: copy the fixture, mangle the axiom bullets so the
         # parser regex (`^- Axiom N: **...**`) no longer matches (here: indent
         # them, as a hand-merge might). The fixture's claim depends on Axiom 4,
@@ -1935,11 +1935,11 @@ class TestFrameworkNodeCoverageGuard(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             kb = Path(tmp) / "mini-kb"
             shutil.copytree(_FIXTURE, kb)
-            claude = kb / "CLAUDE.md"
-            text = claude.read_text(encoding="utf-8")
+            source = kb / "AGENTS.md"
+            text = source.read_text(encoding="utf-8")
             mangled = text.replace("\n- Axiom ", "\n  - Axiom ")  # indent bullets
             self.assertNotEqual(text, mangled, "fixture must contain axiom bullets")
-            claude.write_text(mangled, encoding="utf-8")
+            source.write_text(mangled, encoding="utf-8")
 
             state = lib.discover_kb(kb, diagnostic_stream=None)
             # Sanity: the mangle actually dropped the axioms at parse time.
@@ -1948,7 +1948,7 @@ class TestFrameworkNodeCoverageGuard(unittest.TestCase):
                 lib.build_all_records(state)
             msg = str(ctx.exception)
             self.assertIn("axiom-4", msg)
-            self.assertIn("CLAUDE.md", msg)
+            self.assertIn("AGENTS.md", msg)
 
 
 class TestFrontmatterListShapes(unittest.TestCase):

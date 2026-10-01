@@ -64,12 +64,12 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_util
+from kb_tools import install_location, kb_util
 from kb_tools.kb_survey import validate
 
 # The directory holding the `kb_tools` package — the subprocess cases' PYTHONPATH,
 # and never a way to derive a repo root.
-_PKG_PARENT = Path(__file__).resolve().parents[2]
+_PKG_PARENT = install_location.current().agents_dir
 
 _DOMAIN = "volume-one"
 

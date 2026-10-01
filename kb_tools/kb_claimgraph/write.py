@@ -49,10 +49,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import kb_index_lib, kb_schema
-from ..kb_write import ops
+from ..kb_write import ops, render
 from . import endcap
 from .assemble import WORKS_REGISTER, Plan, register_for
-from .identify import Identification, ProseClaim
 from .report import FACT, PASS, ClaimGraphError, Finding
 
 #: How many times an 8 is re-issued before the run stops. The contract says
@@ -274,106 +273,132 @@ def write(plan: Plan, *, kb_root: Path, scratch: Path) -> tuple[list[Finding], M
     return findings, minted
 
 
-def _prose_rationale(claim: ProseClaim) -> str:
+def prose_rationale(document: str) -> str:
     return (
-        f"Identified in the prose of {claim.document}, which carries no author-marked claim block; the span "
-        f"this entry names is anchored in that document by this claim's Tier-2 marker. Neither dependency "
-        f"attribution nor rigor assessment has run over it."
+        f"Identified in the prose of {document}; the span this entry names is anchored in that document by "
+        f"this claim's Tier-2 marker. Neither dependency attribution nor rigor assessment has run over it."
     )
 
 
-def write_claims(identification: Identification, *, kind: str, kb_root: Path, scratch: Path) -> list[Finding]:
-    """C5 — one document's claims landed, through three of the write path's four passes.
+#: The ``set-frontmatter`` keys a writer after the declared pass carries forward
+#: rather than owns: the op replaces the whole block, so a key left out of the
+#: values file is a key removed. The hosted-node declarations are not here: the
+#: op refuses to drop one rather than dropping it, and nothing in a build writes
+#: one.
+_CARRIED_FRONTMATTER: tuple[str, ...] = ("path-stable", "experiments")
 
-    **Per document, not per batch.** A discovery run is order a hundred minutes,
-    and a stop at document ninety that discards eighty-nine documents' work is a
-    fault rather than a design. Writing here makes ``conform.determination`` the
-    checkpoint: a document that got its claims reads ``HOSTS_CLAIMS`` on a
-    re-run and is skipped, one still awaiting is retried.
 
-    **A marker is minted for every claim, however few the document declares.**
-    That departs from :func:`assemble.assemble`, which mints them only above
-    two, and the reason is specific: a block-hosted claim's locator is
-    recoverable from the tree forever because ``graph.read`` finds the block by
-    title, and **a prose claim's is not**. Without the marker the excerpt exists
-    only in this run's scratch, ``ClaimNode.locator`` is ``None``, and the next
-    stage describes the claim by path alone.
-    ``verify_kb_metadata.check_tier2_coverage`` demands markers above two claims
-    and forbids them nowhere, so this is additive and green.
-
-    **A document that anchored nothing is written, and it is written loudly.**
-    It lands ``no-claim:`` like any other reason-carrying document — one
-    ``set-frontmatter`` call, no op of its own, because what differs is the
-    reason and not the write. What differs downstream is everything: the reason
-    is :data:`~.identify.UNANCHORED_REASON`, which
-    :func:`~.conform.determination` reads as the fifth state, and the finding
-    this returns names the document and the count rather than reporting a
-    document that states nothing. A silent zero is the failure class this whole
-    path exists to remove.
-    """
-    document = identification.document
-    stem = f"cinf-{document.replace('/', '_')}"
-    claims = identification.claims
-    if bool(claims) == bool(identification.no_claim):
-        raise WriteError(
-            "identification",
-            f"{document}: an identification carries claims or a reason, never both and never neither. "
-            f"This one carries {len(claims)} claim(s) and {'a' if identification.no_claim else 'no'} reason",
-        )
-
-    minted: tuple[str, ...] = ()
+def _frontmatter(text: str, *, document: str, kind: str, claims: Sequence[str], no_claim: str | None) -> dict:
+    """One ``set-frontmatter`` entry: the primary field this writer owns, and every carried attribute as it stands."""
+    fields = kb_index_lib.parse_frontmatter(text) or {}
+    entry: dict[str, object] = {"document": document, "kind": kind}
+    for key in _CARRIED_FRONTMATTER:
+        value = fields.get(key)
+        if value:
+            entry[key] = Prose(value) if isinstance(value, str) else tuple(value)
     if claims:
-        register = register_for(document)
+        entry["claims"] = tuple(claims)
+    elif no_claim is not None:
+        entry["no-claim"] = Prose(no_claim)
+    return entry
+
+
+@dataclass(frozen=True)
+class NewClaim:
+    """One claim a leaf gains after the declared pass."""
+
+    title: str
+    rationale: str
+    #: What its Tier-2 marker is placed by, or ``None`` for an equation, which takes none.
+    locator: str | None
+
+
+def land_leaf(
+    *,
+    document: str,
+    kind: str,
+    claims: Sequence[NewClaim],
+    no_claim: str | None,
+    blocks: Mapping[str, str],
+    elsewhere: frozenset[str],
+    kb_root: Path,
+    scratch: Path,
+    stem: str,
+) -> tuple[str, ...]:
+    """One leaf's final state after the declared pass, in one per-document act. Returns the ids ``claims`` took.
+
+    **Idempotent, because a stopped run completes from its own record.** A
+    claim whose title its register already carries under an id this leaf
+    hosts, or under an id no document hosts — the insert of an interrupted run,
+    whose frontmatter write never landed — takes that id rather than a second
+    one. ``elsewhere`` is every id some other document hosts.
+
+    **The final state is the whole state.** ``claims:`` is the leaf's existing
+    list with the new ids after it, so the claims its blocks carry are carried
+    forward, and every attribute this writer does not own is carried as it
+    stands (:data:`_CARRIED_FRONTMATTER`). ``no_claim`` replaces the reason a
+    leaf with no claim carries, and is given only where ``claims`` is empty.
+
+    **Markers cover the final claim set.** A new claim with a locator is marked
+    however few the leaf declares, a prose claim's position being recoverable
+    from nothing else; and where the leaf's claims other than equations number
+    two or more, a block claim not yet marked is marked at its display line —
+    ``blocks`` maps each block claim's id to that line.
+    """
+    text = (kb_root / document).read_text(encoding="utf-8")
+    fields = kb_index_lib.parse_frontmatter(text) or {}
+    existing = tuple(fields.get("claims") or ())
+    register = register_for(document)
+    held = kb_index_lib.parse_claim_quality_file(kb_root / register, kb_root) if (kb_root / register).is_file() else []
+    landed = {entry.title: entry.id for entry in held if entry.id in existing or entry.id not in elsewhere}
+
+    fresh = [claim for claim in claims if claim.title not in landed]
+    if fresh:
         batch = [
             {
                 "register": register,
                 "title": Prose(claim.title),
                 "rigor": kb_schema.PENDING_LITERAL,
-                "rationale": Prose(_prose_rationale(claim)),
+                "rationale": Prose(claim.rationale),
             }
-            for claim in claims
+            for claim in fresh
         ]
         path = _values_path(scratch, f"{stem}-1-insert-claim-entry")
         path.write_text(_compose(batch), encoding="utf-8")
-        result = _landed(_call(ops.insert_claim_entry, kb_root=kb_root, values_file=path, create=True), "c-inf-insert")
-        minted = tuple(result.minted)
-        if len(minted) != len(claims):
-            raise WriteError("c-inf-insert", f"{document}: {len(claims)} entries in, {len(minted)} ids back")
-        _prove_mint_order(kb_root, register, minted, [claim.title for claim in claims])
+        minted = _landed(_call(ops.insert_claim_entry, kb_root=kb_root, values_file=path, create=True), stem).minted
+        if len(minted) != len(fresh):
+            raise WriteError(stem, f"{document}: {len(fresh)} entries in, {len(minted)} ids back")
+        _prove_mint_order(kb_root, register, minted, [claim.title for claim in fresh])
+        landed.update(zip((claim.title for claim in fresh), minted, strict=True))
+        held = kb_index_lib.parse_claim_quality_file(kb_root / register, kb_root)
+    ids = tuple(landed[claim.title] for claim in claims)
 
-    # `set-frontmatter` replaces the whole block, so the unscanned reason is
-    # gone and `claims:` stands in its place in one call — the mutual exclusion
-    # `check_tier1_coverage` enforces is satisfied by construction rather than
-    # by a delete.
-    entry: dict[str, object] = {"document": document, "kind": kind}
-    if minted:
-        entry["claims"] = minted
-    else:
-        entry["no-claim"] = Prose(identification.no_claim)
-    path = _values_path(scratch, f"{stem}-2-set-frontmatter")
-    path.write_text(_compose([entry]), encoding="utf-8")
-    _landed(_call(ops.set_frontmatter, kb_root=kb_root, values_file=path), "c-inf-frontmatter")
-
-    if minted:
-        markers = [
-            {"document": document, "id": node_id, "locator": Prose(claim.excerpt)}
-            for node_id, claim in zip(minted, claims, strict=True)
-        ]
-        path = _values_path(scratch, f"{stem}-4-mark-claim-in-leaf")
-        path.write_text(_compose(markers), encoding="utf-8")
-        _landed(_call(ops.mark_claim_in_leaf, kb_root=kb_root, values_file=path), "c-inf-mark")
-
-    if minted:
-        detail = f"{document}: {len(minted)} claim(s) minted and marked"
-    elif identification.anchored_nothing:
-        detail = (
-            f"{document}: 0 claims — identification named {identification.telemetry.returned} result(s) in "
-            f"this document and anchored none of them. Nothing is recorded about what it states; what is "
-            f"recorded is that this run could not find where. {identification.telemetry.line()}"
+    final = existing + tuple(node_id for node_id in ids if node_id not in existing)
+    if final != existing or (no_claim is not None and fields.get("no-claim") != no_claim):
+        path = _values_path(scratch, f"{stem}-2-set-frontmatter")
+        path.write_text(
+            _compose([_frontmatter(text, document=document, kind=kind, claims=final, no_claim=no_claim)]),
+            encoding="utf-8",
         )
-    else:
-        detail = f"{document}: states no result, and the reason it gives is recorded"
-    return [Finding(FACT, "c-inf-document", detail)]
+        _landed(_call(ops.set_frontmatter, kb_root=kb_root, values_file=path), f"{stem}-frontmatter")
+        text = (kb_root / document).read_text(encoding="utf-8")
+
+    titles = {entry.id: entry.title for entry in held}
+    counted = [node_id for node_id in final if kb_schema.equation_label(titles.get(node_id, "")) is None]
+    locators = {**blocks, **{node_id: claim.locator for node_id, claim in zip(ids, claims) if claim.locator}}
+    prose_ids = {node_id for node_id, claim in zip(ids, claims) if claim.locator}
+    wanted = [
+        {"document": document, "id": node_id, "locator": Prose(locators[node_id])}
+        for node_id in final
+        if node_id in locators
+        and (node_id in prose_ids or len(counted) > 1)
+        and render.render_tier2_marker(node_id) not in text
+    ]
+    if wanted:
+        path = _values_path(scratch, f"{stem}-4-mark-claim-in-leaf")
+        path.write_text(_compose(wanted), encoding="utf-8")
+        _landed(_call(ops.mark_claim_in_leaf, kb_root=kb_root, values_file=path), f"{stem}-mark")
+    return ids
 
 
 def write_edges(

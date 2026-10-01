@@ -10,7 +10,7 @@ template to use — its callers do: the step table for the seat briefs, and
 composed prompts land in that build's own workspace rather than through
 :func:`persist`.
 
-**A slot is spelled** ``@!slot-name!@``, the same marker grammar ``gen-defs.py``
+**A slot is spelled** ``@!slot-name!@``, the same marker grammar ``gen_defs``
 renders the agent-definition templates with — delimiters and name class alike
 (:data:`SLOT_NAME`) — so a model reading either surface reads one syntax. The
 delimiter is polar rather than symmetric because an
@@ -91,7 +91,7 @@ TEMPLATE_SUFFIX = ".tmpl"
 FRAGMENTS_DIRNAME = "fragments"
 
 #: A slot name: letter-led lower-case segments joined by single hyphens, the
-#: identifier class ``gen-defs.py`` admits for a marker name. Stated
+#: identifier class ``gen_defs.markers`` admits for a marker name. Stated
 #: independently rather than imported — the generator is stdlib-only, does not
 #: ship, and neither package depends on the other — so the two spellings are
 #: kept identical by hand and by a reader comparing them, not by an import.
@@ -131,10 +131,15 @@ _DELIMITER = re.compile(r"@!|!@")
 # of three — is `tests/test_write_op_contract_sources.py`, which is the only
 # thing naming both. Editing that fragment out of one of those facts fails
 # there.
+#
+# `no-tools` is named by no template: `kb_claimgraph.ask` renders it whole and
+# hands it to `inference.ask_reader`, which appends it to the seat definition's
+# body as the system prompt of a claim-graph ask.
 FRAGMENT_SLOTS: tuple[str, ...] = (
     "verdict-contract",
     "return-contract",
     "write-op-contract",
+    "no-tools",
 )
 
 #: The caller-selected alternatives, by the slot each is a choice for. A template
@@ -143,20 +148,24 @@ FRAGMENT_SLOTS: tuple[str, ...] = (
 #: a conditional out of a template body and the chosen prose out of the code that
 #: chooses. ``None`` is a registered choice where the slot's absence is itself an
 #: answer: a first ask carries no correction, and the slot fills with nothing.
-#: Today all three slots are :mod:`kb_tools.kb_claimgraph.ask`'s.
+#: Today every slot here is :mod:`kb_tools.kb_claimgraph.ask`'s.
 #:
 #: ``correction`` is **shared** by both of that module's asks, which is why
 #: C-inf's per-claim re-ask registers a slot of its own rather than tailoring
-#: that fragment: an edit there would change the other stage's re-ask.
+#: that fragment: an edit there would change the other stage's re-ask. The
+#: node pass's re-ask for unjudged paragraphs is a further alternative on it for
+#: the same reason.
 ALTERNATIVE_SLOTS: Mapping[str, tuple[str | None, ...]] = MappingProxyType(
     {
-        "correction": (None, "ask-correction"),
+        "correction": (None, "ask-correction", "identify-missing-verdicts"),
         "display-maths": ("identify-display-maths", "identify-no-display-maths"),
         "claim-evidence": (
             "identify-reask-nowhere",
             "identify-reask-several",
             "identify-reask-disagreed",
         ),
+        "paragraph-verdicts": ("identify-verdicts", "identify-no-verdicts"),
+        "no-claim-sentence": ("identify-no-claim-admitted", "identify-no-claim-refused"),
     }
 )
 

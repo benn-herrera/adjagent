@@ -7,8 +7,10 @@
   :func:`call_claude` builds the argv, spools the prompt, and returns the
   response text and the outcome.
 * :mod:`seat` — one call to a named seat of this agent set, built on the
-  first. It knows what a seat is and how to name one, and nothing about what a
-  seat is being asked to do.
+  first: :func:`ask_seat` invokes the seat as an agent with its tools, and
+  :func:`ask_reader` puts a question to it with none, its definition's body as
+  the system prompt. It knows what a seat is and how to name one, and nothing
+  about what a seat is being asked to do.
 
 Neither parses what comes back beyond taking the response text out of the
 stream, and neither retries: policy of every kind — retry, a re-ask, where a
@@ -27,7 +29,7 @@ from .claude import (
     call_claude,
     invoke,
 )
-from .seat import ask_seat
+from .seat import ask_reader, ask_seat
 
 #: The logger tree this package writes to. It attaches no handler of its own —
 #: an application wanting a call's spawn, kill and classification lines in its
@@ -43,6 +45,7 @@ __all__ = [
     "Invoker",
     "Outcome",
     "SubprocessInvoker",
+    "ask_reader",
     "ask_seat",
     "build_argv",
     "call_claude",

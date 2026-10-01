@@ -181,8 +181,8 @@ def test_a_units_classification_has_no_default() -> None:
         kb_pipeline.CoverageUnit(id="u", source="s", satisfied=True)  # type: ignore[call-arg]
 
 
-def test_the_check_two_stages_share_carries_one_classification(tmp_path: Path) -> None:
-    """``_check_verify_gates`` is a validity check at ``depends-attributed`` too.
+def test_the_check_three_stages_share_carries_one_classification(tmp_path: Path) -> None:
+    """``_check_verify_gates`` is a validity check at ``equations-minted`` and ``depends-attributed`` too.
 
     The case a per-stage classification breaks: ``depends-attributed`` is a
     stage whose work a no-inference build excludes, so a stage-level rule would
@@ -191,7 +191,7 @@ def test_the_check_two_stages_share_carries_one_classification(tmp_path: Path) -
     """
     sharing = [stage for stage in kb_pipeline.STAGES if stage.coverage is kb_pipeline._check_verify_gates]
 
-    assert {stage.id for stage in sharing} == {"depends-attributed", "phase-3a"}
+    assert {stage.id for stage in sharing} == {"equations-minted", "depends-attributed", "phase-3a"}
     for stage in sharing:
         report = stage.coverage(kb_pipeline.CheckContext(tmp_path))
         assert [unit.asserts_own_work for unit in report.units] == [False], stage.id
@@ -255,30 +255,118 @@ def test_kb_pipeline_imports_nothing_from_the_claim_graph_builder() -> None:
     would close a cycle. Two of them used to sit inside function bodies, which
     is exactly the tidy-up a later reader performs — nothing failed first and
     nothing said why they were there. What they reached for now lives in
-    ``kb_index_lib``: the document walk, and the awaiting reason.
+    ``kb_index_lib``: the document walk.
     """
     source = Path(kb_pipeline.__file__).read_text(encoding="utf-8")
     code = [line for line in source.splitlines() if line.strip().startswith(("import ", "from "))]
 
     assert [line for line in code if "kb_claimgraph" in line] == []
-    assert kb_index_lib.UNSCANNED_REASON
     assert "kb_claimgraph" not in str(kb_index_lib.document_texts.__module__)
 
 
-def test_the_awaiting_reason_is_one_literal_wherever_it_is_read() -> None:
-    """The writer names it and the coverage check reads it — one definition, two sides."""
-    from kb_tools.kb_claimgraph import assemble, conform
+# ---------------------------------------------------------------------------
+# The node-pass record, and the node set it helps fix
+# ---------------------------------------------------------------------------
 
-    assert assemble.UNSCANNED_REASON is kb_index_lib.UNSCANNED_REASON
-    assert conform.determination({"no-claim": kb_index_lib.UNSCANNED_REASON}) is conform.Determination.AWAITING
+
+def test_no_reserved_resumption_literal_survives() -> None:
+    """Which leaves were read is build record, never KB metadata: nothing compares a reason by identity."""
+    from kb_tools.kb_claimgraph import conform, identify
+
+    assert not hasattr(kb_index_lib, "UNSCANNED_REASON")
+    assert not hasattr(identify, "UNANCHORED_REASON")
+    assert {member.value for member in conform.Determination} == {"hosts-claims", "authored-no-claim", "undeclared"}
+
+
+def test_the_record_reads_back_what_was_written(tmp_path: Path) -> None:
+    record = (
+        kb_pipeline.NodePassRecord()
+        .with_leaf(
+            "vol/a.md",
+            kb_pipeline.LeafEntry(
+                state=kb_pipeline.ReadState.PLANNED,
+                outcome=kb_pipeline.LeafOutcome.MINTED,
+                claims=(kb_pipeline.PlannedClaim(title="A \\sigma title", locator="The words it is found by."),),
+                verdicts=(
+                    kb_pipeline.ParagraphVerdict(line=12, judgement=kb_pipeline.Judgement.NOT_A_CLAIM),
+                    kb_pipeline.ParagraphVerdict(line=4, judgement=kb_pipeline.Judgement.CLAIM),
+                ),
+            ),
+        )
+        .with_leaf("vol/b.md", kb_pipeline.LeafEntry())
+    )
+
+    kb_pipeline.write_node_pass(tmp_path, record)
+    back = kb_pipeline.read_node_pass(tmp_path)
+
+    assert back is not None and dict(back.leaves)["vol/b.md"] == kb_pipeline.LeafEntry()
+    assert back.leaves["vol/a.md"].claims == record.leaves["vol/a.md"].claims
+    assert sorted(back.leaves["vol/a.md"].verdicts, key=lambda verdict: verdict.line) == sorted(
+        record.leaves["vol/a.md"].verdicts, key=lambda verdict: verdict.line
+    )
+    written = (tmp_path / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8")
+    kb_pipeline.write_node_pass(tmp_path, back)
+    assert (tmp_path / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
+    assert kb_pipeline.NODE_PASS_ABOUT in written
+
+
+def test_no_record_is_no_record_and_a_torn_one_is_refused(tmp_path: Path) -> None:
+    assert kb_pipeline.read_node_pass(tmp_path) is None
+    (tmp_path / kb_pipeline.NODE_PASS_RELPATH).write_text('{"leaves": {"a.md": {"state": "nowhere"}}}', "utf-8")
+    with pytest.raises(kb_pipeline.NodePassRecordError):
+        kb_pipeline.read_node_pass(tmp_path)
+
+
+def test_the_record_lives_outside_the_kb_and_outside_scratch() -> None:
+    assert not kb_pipeline.NODE_PASS_RELPATH.startswith((kb_util.KB_DIRNAME, kb_util.scratch_dirname()))
+    assert "/" not in kb_pipeline.NODE_PASS_RELPATH
+
+
+@pytest.mark.parametrize(
+    ("leaves", "satisfied"),
+    [
+        ({}, True),
+        ({"a.md": kb_pipeline.ReadState.LANDED}, True),
+        ({"a.md": kb_pipeline.ReadState.LANDED, "b.md": kb_pipeline.ReadState.UNREAD}, False),
+        ({"a.md": kb_pipeline.ReadState.PLANNED}, False),
+        (None, False),
+    ],
+)
+def test_the_node_pass_is_covered_when_its_record_lists_no_leaf_unread_or_planned(
+    tmp_path: Path, leaves: dict | None, satisfied: bool
+) -> None:
+    if leaves is not None:
+        record = kb_pipeline.NodePassRecord()
+        for path, state in leaves.items():
+            record = record.with_leaf(path, kb_pipeline.LeafEntry(state=state))
+        kb_pipeline.write_node_pass(tmp_path, record)
+
+    report = kb_pipeline._check_claims_discovered(kb_pipeline.CheckContext(tmp_path))
+
+    assert [unit.satisfied for unit in report.units] == [satisfied]
+    assert all(unit.asserts_own_work for unit in report.units)
+
+
+def test_the_stages_that_mint_nodes_are_one_run_ending_at_equations_minted() -> None:
+    """I5: the node set is fixed before any edge is drawn over it."""
+    minting = [index for index, stage in enumerate(kb_pipeline.STAGES) if stage.mints_nodes]
+
+    assert minting == list(range(minting[0], minting[-1] + 1))
+    assert kb_pipeline.STAGES[minting[-1]].id == "equations-minted"
+    assert [kb_pipeline.STAGES[index].id for index in minting] == [
+        "claims-declared",
+        "claims-discovered",
+        "equations-minted",
+    ]
 
 
 def test_the_document_walk_is_one_walk(tmp_path: Path) -> None:
     """The coverage checks and the claim-graph builder see the same document set.
 
     Two implementations of the exclusion rules is how one of them starts
-    checking a set the other does not — and the coverage check that reads the
-    awaiting reason is exactly a question about "every document of this KB".
+    checking a set the other does not — and the declared pass's coverage check,
+    a metadata block on every document, is exactly a question about "every
+    document of this KB".
     """
     from kb_tools.kb_claimgraph import tree
 

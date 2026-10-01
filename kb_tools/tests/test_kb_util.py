@@ -28,7 +28,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from kb_tools import kb_pipeline, kb_util
+from kb_tools import install_location, kb_pipeline, kb_util
 from kb_tools.kb_driver import baton, runlog
 from kb_tools.kb_survey import manifest as survey_manifest
 from kb_tools.kb_survey import skeleton as survey_skeleton
@@ -37,7 +37,7 @@ from kb_tools.tests._manifests import surveyed_manifest
 _THIS_DIR = Path(__file__).resolve().parent
 # The directory containing the ``kb_tools`` package — used only to point the
 # subprocess PYTHONPATH at the package, never to derive a consumer repo root.
-_PKG_PARENT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
 
 
@@ -293,7 +293,7 @@ def test_install_appends_include_line_to_existing_justfile(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
     assert "installed" in result.stdout
     text = (repo / "justfile").read_text(encoding="utf-8")
-    assert text == _JUSTFILE_BODY + "\n" + kb_util.INSTALL_LINE_JUST + "\n"
+    assert text == _JUSTFILE_BODY + "\n" + kb_util.install_line("just") + "\n"
 
 
 def test_install_appends_include_line_to_existing_makefile(tmp_path: Path) -> None:
@@ -302,7 +302,7 @@ def test_install_appends_include_line_to_existing_makefile(tmp_path: Path) -> No
     result = _run_installer(repo / "kb-root", "install-targets")
     assert result.returncode == 0, result.stderr
     text = (repo / "Makefile").read_text(encoding="utf-8")
-    assert text == _MAKEFILE_BODY + "\n" + kb_util.INSTALL_LINE_MAKE + "\n"
+    assert text == _MAKEFILE_BODY + "\n" + kb_util.install_line("make") + "\n"
 
 
 def test_install_prefers_justfile_when_both_runner_files_exist(tmp_path: Path) -> None:
@@ -311,7 +311,7 @@ def test_install_prefers_justfile_when_both_runner_files_exist(tmp_path: Path) -
     (repo / "Makefile").write_text(_MAKEFILE_BODY, encoding="utf-8")
     result = _run_installer(repo, "install-targets")
     assert result.returncode == 0, result.stderr
-    assert kb_util.INSTALL_LINE_JUST in (repo / "justfile").read_text(encoding="utf-8")
+    assert kb_util.install_line("just") in (repo / "justfile").read_text(encoding="utf-8")
     # The Makefile is byte-untouched.
     assert (repo / "Makefile").read_text(encoding="utf-8") == _MAKEFILE_BODY
 
@@ -322,7 +322,7 @@ def test_install_runner_flag_overrides_probe_order(tmp_path: Path) -> None:
     (repo / "Makefile").write_text(_MAKEFILE_BODY, encoding="utf-8")
     result = _run_installer(repo, "install-targets", "--runner", "make")
     assert result.returncode == 0, result.stderr
-    assert kb_util.INSTALL_LINE_MAKE in (repo / "Makefile").read_text(encoding="utf-8")
+    assert kb_util.install_line("make") in (repo / "Makefile").read_text(encoding="utf-8")
     assert (repo / "justfile").read_text(encoding="utf-8") == _JUSTFILE_BODY
 
 
@@ -336,8 +336,8 @@ def test_install_refuses_when_no_runner_file_and_no_flag(tmp_path: Path) -> None
 
 def test_install_creates_runner_file_with_explicit_flag(tmp_path: Path) -> None:
     for runner, filename, line in (
-        ("just", "justfile", kb_util.INSTALL_LINE_JUST),
-        ("make", "Makefile", kb_util.INSTALL_LINE_MAKE),
+        ("just", "justfile", kb_util.install_line("just")),
+        ("make", "Makefile", kb_util.install_line("make")),
     ):
         repo = _make_repo(tmp_path / runner)
         result = _run_installer(repo, "install-targets", "--runner", runner)
@@ -364,7 +364,7 @@ def test_uninstall_removes_installed_line(tmp_path: Path) -> None:
     result = _run_installer(repo, "uninstall-targets")
     assert result.returncode == 0, result.stderr
     assert "uninstalled" in result.stdout
-    assert kb_util.INSTALL_LINE_MAKE not in (repo / "Makefile").read_text(encoding="utf-8")
+    assert kb_util.install_line("make") not in (repo / "Makefile").read_text(encoding="utf-8")
 
 
 def test_uninstall_reports_not_installed_without_error(tmp_path: Path) -> None:
@@ -389,7 +389,7 @@ def test_install_uninstall_round_trip_is_byte_exact(tmp_path: Path) -> None:
     assert _run_installer(repo, "install-targets").returncode == 0
     installed = (repo / "justfile").read_bytes()
     # Install touches nothing but the appended blank line + canonical line.
-    assert installed == original + b"\n" + kb_util.INSTALL_LINE_JUST.encode() + b"\n"
+    assert installed == original + b"\n" + kb_util.install_line("just").encode() + b"\n"
     assert _run_installer(repo, "uninstall-targets").returncode == 0
     assert (repo / "justfile").read_bytes() == original
 
@@ -506,7 +506,7 @@ def test_graph_init_initialises_over_a_document_tree(tmp_path: Path) -> None:
     assert index.is_dir()
     assert claims.is_file()
     assert not (index / "SCHEMA.md").exists(), "the seed wrote a local schema copy"
-    assert kb_util.INSTALL_LINE_JUST in (repo / "justfile").read_text(encoding="utf-8").splitlines()
+    assert kb_util.install_line("just") in (repo / "justfile").read_text(encoding="utf-8").splitlines()
 
 
 def test_graph_init_is_idempotent(tmp_path: Path) -> None:
@@ -540,14 +540,14 @@ def test_graph_init_completes_a_partly_initialised_tree(tmp_path: Path) -> None:
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     _, claims = _seeded_paths(repo)
     assert claims.is_file()
-    assert kb_util.INSTALL_LINE_JUST in (repo / "justfile").read_text(encoding="utf-8").splitlines()
+    assert kb_util.install_line("just") in (repo / "justfile").read_text(encoding="utf-8").splitlines()
 
 
 @pytest.mark.parametrize(
     ("runner", "filename", "line"),
     [
-        ("just", "justfile", kb_util.INSTALL_LINE_JUST),
-        ("make", "Makefile", kb_util.INSTALL_LINE_MAKE),
+        ("just", "justfile", kb_util.install_line("just")),
+        ("make", "Makefile", kb_util.install_line("make")),
     ],
 )
 def test_graph_init_creates_the_named_runner_file_when_the_repo_has_neither(
@@ -581,7 +581,7 @@ def test_graph_init_with_no_runner_file_takes_the_default_runner(tmp_path: Path)
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     created = repo / kb_util.runner_filename(kb_util.DEFAULT_RUNNER)
-    assert kb_util.INSTALL_LINE_MAKE in created.read_text(encoding="utf-8").splitlines()
+    assert kb_util.install_line("make") in created.read_text(encoding="utf-8").splitlines()
     # One runner file, not two: the default is a choice made where there was
     # nothing to detect, never a second file beside a runner already there.
     assert not (repo / "justfile").exists()
@@ -603,7 +603,7 @@ def test_graph_init_does_not_create_the_default_beside_an_existing_runner(tmp_pa
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert not (repo / "Makefile").exists()
-    assert kb_util.INSTALL_LINE_JUST in (repo / "justfile").read_text(encoding="utf-8").splitlines()
+    assert kb_util.install_line("just") in (repo / "justfile").read_text(encoding="utf-8").splitlines()
 
 
 def test_graph_init_outside_a_git_repo_reports_cwd_derivation(tmp_path: Path) -> None:
@@ -650,7 +650,7 @@ def test_graph_init_refuses_a_kb_root_holding_no_document_tree(
     """
     repo = _git_repo(tmp_path / "consumer", files={"justfile": _JUSTFILE_BODY, **files})
     # Pre-created so preflight's own mkdir is not the difference under test.
-    (repo / kb_util.SCRATCH_DIRNAME).mkdir()
+    (repo / kb_util.scratch_dirname()).mkdir()
     before = _tree_snapshot(repo)
 
     result = _run_installer(repo, "graph-init")
@@ -687,7 +687,7 @@ def test_preflight_all_green(tmp_path: Path) -> None:
     create, which is why this case starts without one.
     """
     repo = _git_repo(tmp_path / "consumer")
-    assert not (repo / kb_util.SCRATCH_DIRNAME).exists()
+    assert not (repo / kb_util.scratch_dirname()).exists()
 
     result = _run_installer(repo, "preflight")
 
@@ -713,7 +713,7 @@ def test_preflight_flags_missing_docent_commands(tmp_path: Path) -> None:
 
 def test_preflight_creates_the_scratch_dir_then_reports_it_present(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "consumer")
-    scratch = repo / kb_util.SCRATCH_DIRNAME
+    scratch = repo / kb_util.scratch_dirname()
     assert not scratch.exists()
 
     first = _run_installer(repo, "preflight")
@@ -801,7 +801,7 @@ def test_preflight_reports_kb_build_scratch_existence_without_gating(tmp_path: P
     assert absent.returncode == 0, absent.stderr
     assert "absent" in _item(absent.stdout, "scratch-kb-build")
 
-    (repo / kb_util.SCRATCH_DIRNAME / kb_util.SCRATCH_BUILD_DIRNAME).mkdir(parents=True)
+    (repo / kb_util.scratch_dirname() / kb_util.SCRATCH_BUILD_DIRNAME).mkdir(parents=True)
     present = _run_installer(repo, "preflight")
     assert present.returncode == 0, present.stderr
     assert "exists" in _item(present.stdout, "scratch-kb-build")
@@ -820,7 +820,7 @@ def test_preflight_ignores_unrelated_scratch_contents(tmp_path: Path) -> None:
     baseline = _run_installer(repo, "preflight")
     assert baseline.returncode == 0, baseline.stderr
 
-    scratch = repo / kb_util.SCRATCH_DIRNAME
+    scratch = repo / kb_util.scratch_dirname()
     (scratch / "probe-harness").mkdir()
     (scratch / "probe-harness" / "out.log").write_text("noise\n", encoding="utf-8")
     (scratch / "old-notes.txt").write_text("unrelated\n", encoding="utf-8")
@@ -840,7 +840,7 @@ def test_preflight_outside_a_git_repo_reports_cwd_derivation(tmp_path: Path) -> 
     assert result.returncode == 2
     assert "working directory" in result.stderr
     # No side effect when the root cannot be resolved.
-    assert not (bare / kb_util.SCRATCH_DIRNAME).exists()
+    assert not (bare / kb_util.scratch_dirname()).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -857,7 +857,7 @@ def _pipeline_repo(root: Path) -> Path:
     both are what ``spine-seed`` records against: this fixture stands in for the
     head's product exactly as it stands in for the tree.
     """
-    justfile = f"{_JUSTFILE_BODY}\n{kb_util.INSTALL_LINE_JUST}\n"
+    justfile = f"{_JUSTFILE_BODY}\n{kb_util.install_line('just')}\n"
     return _git_repo(root, files=_with_tree(**{"justfile": justfile, "kb-root/.index/.keep": ""}))
 
 
@@ -947,7 +947,13 @@ _ARTIFACTS = {
 
 
 def _lay_down_artifacts(repo: Path, *, only: set[str] | None = None) -> None:
-    """Create the build artifacts the postconditions check for."""
+    """Create the build artifacts the postconditions check for.
+
+    The node-pass record among them, written by its own writer rather than
+    typed: it lists no leaf, so none is left unread.
+    """
+    if (only is None or kb_pipeline.NODE_PASS_RELPATH in only) and not (repo / kb_pipeline.NODE_PASS_RELPATH).exists():
+        kb_pipeline.write_node_pass(repo, kb_pipeline.NodePassRecord())
     for relpath, content in _ARTIFACTS.items():
         if only is not None and relpath not in only:
             continue
@@ -1004,6 +1010,7 @@ def test_show_status_exposes_the_frozen_stage_vocabulary_in_order(tmp_path: Path
         "spine-seed",
         "claims-declared",
         "claims-discovered",
+        "equations-minted",
         "depends-attributed",
         "phase-3a",
         "overview-drafted",
@@ -1151,8 +1158,8 @@ def test_advance_step_sweeps_worktree_changes_into_the_boundary(tmp_path: Path) 
         encoding="utf-8",
     )
     # Scratch is gitignored and must stay out of the commit.
-    (repo / kb_util.SCRATCH_DIRNAME).mkdir(exist_ok=True)
-    (repo / kb_util.SCRATCH_DIRNAME / "noise.txt").write_text("junk\n", encoding="utf-8")
+    (repo / kb_util.scratch_dirname()).mkdir(exist_ok=True)
+    (repo / kb_util.scratch_dirname() / "noise.txt").write_text("junk\n", encoding="utf-8")
 
     assert _op(repo, "advance-step", "--stage", "overview-drafted").returncode == 0
 
@@ -1160,7 +1167,7 @@ def test_advance_step_sweeps_worktree_changes_into_the_boundary(tmp_path: Path) 
         ["git", "ls-files"], cwd=repo, capture_output=True, text=True, check=True
     ).stdout.splitlines()
     assert "kb-root/extra-note.md" in tracked
-    assert not any(name.startswith(kb_util.SCRATCH_DIRNAME) for name in tracked)
+    assert not any(name.startswith(kb_util.scratch_dirname()) for name in tracked)
 
 
 def test_advance_step_records_a_note_in_the_commit_body(tmp_path: Path) -> None:
@@ -1207,7 +1214,7 @@ def test_advance_step_refuses_an_out_of_order_stage(tmp_path: Path) -> None:
 
 # --- the scope pin: phase-3a's readiness stamp -----------------------------
 #
-# `kb-root/CLAUDE.md` asserts that this KB's scope is pinned in it, so the pin
+# `kb-root/AGENTS.md` asserts that this KB's scope is pinned in it, so the pin
 # has to actually be there. It is charter prose, and the stamp that writes the
 # document is what fills it.
 
@@ -1252,6 +1259,50 @@ def test_scope_pin_reaches_the_document_that_claims_to_carry_it(tmp_path: Path) 
     # And no slot survives into the consumer's own file.
     assert kb_pipeline.SCOPE_PIN_FIELD not in stamped
     assert kb_pipeline.PROJECT_NAME_FIELD not in stamped
+
+
+def test_the_stamp_writes_the_claude_md_redirect_and_the_installed_agents_dir(tmp_path: Path) -> None:
+    repo = _charter_build_repo(tmp_path / "consumer")
+    (repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC).unlink(missing_ok=True)
+
+    result = _op(repo, "advance-step", "--stage", "phase-3a")
+
+    assert result.returncode == 0, result.stderr
+    assert (repo / "kb-root" / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+    conventions = (repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC).read_text(encoding="utf-8")
+    assert "PYTHONPATH=<project-root>/.claude/agents python3 -m kb_tools.kb_util --help" in conventions
+
+
+def test_the_stamp_refuses_a_claude_md_that_is_not_the_redirect(tmp_path: Path) -> None:
+    """A pre-split KB's full CLAUDE.md is the operator's to move, never converted here."""
+    repo = _charter_build_repo(tmp_path / "consumer")
+    (repo / "kb-root" / "CLAUDE.md").write_text("# Old orientation\n\nProject notes.\n", encoding="utf-8")
+
+    result = _op(repo, "advance-step", "--stage", "phase-3a")
+
+    assert result.returncode != 0
+    assert "is not the one-line redirect" in result.stdout + result.stderr
+    assert not (repo / "kb-root" / kb_pipeline.SCOPE_PIN_DOC).exists()
+    assert (repo / "kb-root" / "CLAUDE.md").read_text(encoding="utf-8") == "# Old orientation\n\nProject notes.\n"
+
+
+@pytest.mark.parametrize("module", ["refresh_kb_metadata", "verify_kb_metadata"])
+def test_refresh_and_verify_refuse_an_unmigrated_claude_md(tmp_path: Path, module: str) -> None:
+    kb = tmp_path / "kb-root"
+    kb.mkdir()
+    (kb / "CLAUDE.md").write_text("### INVARIANT-S1: an old home for invariants\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "-m", f"kb_tools.{module}", "--kb-root", str(kb)],
+        cwd=tmp_path,
+        env=_subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "is not the one-line redirect" in result.stderr
 
 
 def test_charterless_build_states_the_absence_as_the_pin(tmp_path: Path) -> None:
@@ -1833,7 +1884,7 @@ def _break_a_link(repo: Path) -> None:
 def _uninstall_the_include_line(repo: Path) -> None:
     """The half of the seed that installs the runner targets, undone."""
     justfile = repo / "justfile"
-    kept = [line for line in justfile.read_text(encoding="utf-8").splitlines() if line != kb_util.INSTALL_LINE_JUST]
+    kept = [line for line in justfile.read_text(encoding="utf-8").splitlines() if line != kb_util.install_line("just")]
     justfile.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
 
@@ -1842,14 +1893,9 @@ def _a_document_without_its_metadata_block(repo: Path) -> None:
     (repo / "kb-root" / "unstamped.md").write_text("# Unstamped\n\nContent.\n", encoding="utf-8")
 
 
-def _a_document_still_awaiting_a_reading(repo: Path) -> None:
-    """One document carrying the declared pass's own awaiting reason, verbatim."""
-    from kb_tools.kb_claimgraph.assemble import UNSCANNED_REASON
-
-    (repo / "kb-root" / "awaiting.md").write_text(
-        f"<!-- kb-frontmatter\nkind: leaf\nno-claim: {UNSCANNED_REASON}\n-->\n\n# Awaiting\n\nContent.\n",
-        encoding="utf-8",
-    )
+def _a_leaf_the_node_pass_never_read(repo: Path) -> None:
+    """The node-pass record listing one leaf unread, as the declared pass leaves every leaf."""
+    kb_pipeline.write_node_pass(repo, kb_pipeline.NodePassRecord().with_leaf("unread.md", kb_pipeline.LeafEntry()))
 
 
 #: One constructed repo state per stage, built on that stage's own predecessor
@@ -1860,8 +1906,10 @@ _PARTIAL_COVERAGE: dict[str, Callable[[Path], None]] = {
     "document-graph": _remove("kb-root/entry-point.md"),
     "spine-seed": _uninstall_the_include_line,
     "claims-declared": _a_document_without_its_metadata_block,
-    "claims-discovered": _a_document_still_awaiting_a_reading,
-    # The head's exit is the same gate the tail enters on, so it fails the same way.
+    "claims-discovered": _a_leaf_the_node_pass_never_read,
+    # The node set's close, the head's exit and the tail's entry are one gate,
+    # so each fails the same way.
+    "equations-minted": _break_a_link,
     "depends-attributed": _break_a_link,
     "phase-3a": _break_a_link,
     # Both meta-documentation boundaries read one check, and the overview is
@@ -2592,9 +2640,9 @@ def test_a_non_matching_excerpt_refuses_with_nothing_on_stdout(tmp_path: Path) -
 def test_the_published_invocation_constants_are_what_the_renderers_render() -> None:
     """Both published invocations, pinned against the renderers that consume them.
 
-    ``verify_kb_metadata`` builds its remediation hint from ``INVOCATION``;
+    ``verify_kb_metadata`` builds its remediation hint from ``invocation()``;
     ``kb_driver.baton`` builds every ``THEN RUN:``
-    line from ``DRIVER_INVOCATION``.
+    line from ``driver_invocation()``.
     Pinning each against the text a reader actually gets is what keeps one
     invocation from becoming several spellings of itself — and the literals here
     are what keep a spelling that drops the ``PYTHONPATH`` prefix, and so does
@@ -2602,12 +2650,12 @@ def test_the_published_invocation_constants_are_what_the_renderers_render() -> N
     """
     from kb_tools import verify_kb_metadata
 
-    assert kb_util.INVOCATION == "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util"
-    assert verify_kb_metadata.SET_FRONTMATTER_CMD.startswith(f"{kb_util.INVOCATION} ")
+    assert kb_util.invocation() == "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util"
+    assert verify_kb_metadata.set_frontmatter_cmd().startswith(f"{kb_util.invocation()} ")
 
-    assert kb_util.DRIVER_INVOCATION == "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_driver"
+    assert kb_util.driver_invocation() == "PYTHONPATH=.claude/agents python3 -m kb_tools.kb_driver"
     resume = baton.render(baton.EXIT_TRANSPORT, baton.BatonContext(invocation="--config cfg.toml"))
-    assert f"{kb_util.DRIVER_INVOCATION} run --config cfg.toml" in resume
+    assert f"{kb_util.driver_invocation()} run --config cfg.toml" in resume
 
 
 def test_the_charter_lands_outside_the_scratch_tree_and_outside_the_kb(tmp_path: Path) -> None:
@@ -2620,5 +2668,5 @@ def test_the_charter_lands_outside_the_scratch_tree_and_outside_the_kb(tmp_path:
     relpath = PurePosixPath(kb_pipeline.CHARTER_RELPATH)
 
     assert not relpath.is_absolute()
-    assert kb_util.SCRATCH_DIRNAME not in relpath.parts
+    assert kb_util.scratch_dirname() not in relpath.parts
     assert kb_util.KB_DIRNAME not in relpath.parts

@@ -355,7 +355,7 @@ class Runner:
         self.answers = answers
         self.ops = ops
         self.stages = tuple(stages)
-        self.scratch = repo_root / steps.SCRATCH_ROOT
+        self.scratch = repo_root / kb_pipeline.scratch_relroot()
         self._seq = 0
         self._recorded: frozenset[str] = frozenset()
         self._check_attributes()
@@ -826,7 +826,7 @@ class Runner:
         self._claim_graph(step)
 
     def _discover_build(self, step: steps.Step) -> None:
-        """``discover.build``: stage C-inf, one ask per awaiting document.
+        """``discover.build``: the node pass, one ask per leaf its record lists unread.
 
         The model this row spends is spawned inside ``kb_claimgraph``, through
         that package's own seat seam, and the whole of the row is that call —
@@ -864,12 +864,12 @@ class Runner:
 
         One clause, and only a build that dropped a row earns it.
 
-        **A dropped row is the one thing about a finished build its own product
+        **A dropped row is the one thing about a finished build its own KB
         cannot state.** A document a stage never read looks exactly like one it
-        read and found nothing in — both carry the awaiting reason the declared
-        pass wrote — so a later reader counting documents learns nothing, and the
-        ledger is the build record. Writing it here is what keeps that reader
-        from having to infer it.
+        read and found nothing in, so a later reader counting documents learns
+        nothing, and the ledger — beside the node pass's own record — is the
+        build record. Writing it here is what keeps that reader from having to
+        infer it.
 
         The rows are named rather than counted: which of a stage's rows cost a
         model call is the step table's answer (``steps.inference_rows``), and a
@@ -1093,7 +1093,7 @@ class Runner:
         install them. The remediation relayed is preflight's own ``restore:``
         line rather than a second wording of the same action.
         """
-        commands = self.repo_root / kb_util.CLAUDE_DIRNAME / kb_util.COMMANDS_DIRNAME
+        commands = self.repo_root / kb_util.harness_dirname() / kb_util.COMMANDS_DIRNAME
         missing = [name for name in kb_util.DOCENT_COMMAND_FILENAMES if not (commands / name).is_file()]
         if not missing:
             return
@@ -1124,6 +1124,8 @@ _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType
         "declared.record": Runner._record_stage,
         "discover.build": Runner._discover_build,
         "discover.record": Runner._record_stage,
+        "equations.build": Runner._claim_graph,
+        "equations.record": Runner._record_stage,
         "depends.attribute": Runner._depends_attribute,
         "depends.record": Runner._record_stage,
         "p3a.gate": Runner._p3a_gate,

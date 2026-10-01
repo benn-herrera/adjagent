@@ -32,6 +32,16 @@ directory's copies; the repository-root documents are named as root.
   the same way `measure-sheet` is, and neither is the deliverable. A report
   hands over the sheets and may name the crops it read; it does not substitute
   them for it.
+- **Never spell a harness path.** `.claude`, `.opencode`, their `-temp`
+  scratch directories and the `<harness-dir>/agents` PYTHONPATH entry come
+  from `install_location` through `kb_util`'s functions, called where the
+  value is used and never at import: the package is imported from the source
+  tree by tests and `kb-testing` recipes, where no harness directory exists,
+  and a module-level spelling would fail every one of those imports. A test
+  that spawns a kb_tools subprocess sets its PYTHONPATH to
+  `install_location.current().agents_dir` — the installed layout
+  `tests/conftest.py` stands up — never to the source tree, from which the
+  child cannot locate itself.
 - **`pandoc.py` is the only module that names the `pandoc` binary.** It is
   the single enumerated stdlib-only exception (SPEC.md, Corpus Invariants),
   and the property that makes it enumerable is that nothing else in the
@@ -73,19 +83,22 @@ directory's copies; the repository-root documents are named as root.
   holds what is spliced.** Which one a new file is, is settled by where it goes
   and by nothing else — no prefix, no suffix, no list to read. Every file under
   `fragments/` is registered in exactly one of `prompt_templates`' two
-  vocabularies, `FRAGMENT_SLOTS` (the composer resolves it because a template
-  named its slot) or `ALTERNATIVE_NAMES` (a caller picked it), and
+  vocabularies, `FRAGMENT_SLOTS` (the composer resolves it, because a template
+  named its slot or a caller rendered it whole) or `ALTERNATIVE_NAMES` (a
+  caller picked it), and
   `tests/test_kb_driver_prompt_templates.py` checks that correspondence both
   ways — so a fragment nobody registered fails rather than sitting unreachable.
 - **A caller-selected alternative ends without a newline; the template it fills
-  supplies every line break around it.** `kb_claimgraph`'s two asks pick between
-  `fragments/ask-correction.tmpl`, `fragments/identify-display-maths.tmpl` and
-  `fragments/identify-no-display-maths.tmpl`, and each is spliced into a slot
+  supplies every line break around it.** Every alternative a caller can pick —
+  the set `prompt_templates.ALTERNATIVE_SLOTS` registers — is spliced into a slot
   sitting inside a line rather than appended as a block of lines. An editor that
   adds the customary final newline moves the prompt's bytes and nothing about
   the file says so; the byte-exactness checks in
   `tests/test_kb_claimgraph_cinf.py` and `tests/test_kb_claimgraph_pass2.py`
   are what report it.
+- **A `dyn.` slot the caller supplies under one alternative lives in that
+  alternative's fragment and nowhere else.** Composition refuses an unsupplied
+  slot and an unused value alike.
 - **A register holds four entry kinds, and `RegisterEntry.kind` is where you
   learn which.** `clm`, `sup`, `exp` and — since the off-graph endcap —
   `work`, whose id is `work-` plus a citation key rather than a hash body, so a
@@ -95,6 +108,13 @@ directory's copies; the repository-root documents are named as root.
   entry the census reports and nobody expected. The one asymmetry to know: a
   `work-` entry carries no `- solidity:` line and no depends-on list, because
   the node is terminal and nothing derives a value for it.
+- **A frontmatter writer after the declared pass carries forward every
+  attribute it does not own.** `set-frontmatter` replaces the whole block, so a
+  key left out of the values file is a key removed: a leaf's block-hosted
+  `claims:` left out is caught only by verify, after the write, and a
+  `path-stable:` left out is caught by nothing. Such a writer reads the block as it stands
+  and restates what is not its own: `write.land_leaf` is the one that does, and
+  a new writer goes through it rather than beside it.
 - **Keep no prose copy of an op's key vocabulary.** The vocabulary is
   closed, total, and per-op, stated once in `values.OP_FIELDS`
   (SPEC.md, The Write API's Contract). A second statement of it — in a doc,
@@ -162,6 +182,6 @@ The agent-definition repo's own justfile; never installed into consumers:
   a dev dependency, never imported at runtime).
 - `format-python` — `black` (line-length 120) + `isort` over every python
   surface in the repo at once: `kb_tools`, `liaison_tools`, `tests`, and
-  `gen-defs.py`. There is no `kb_tools`-only invocation, so a run after
+  `gen_defs`. There is no `kb_tools`-only invocation, so a run after
   editing here also reformats anything left unformatted elsewhere; check the
   diff before committing.

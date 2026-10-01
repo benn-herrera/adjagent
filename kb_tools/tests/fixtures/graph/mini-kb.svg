@@ -59,7 +59,7 @@
   </g>
   <g class="hops" />
   <g class="nodes">
-    <a href="../mini-kb/CLAUDE.md#invariant-s2-core-axiom-numbering">
+    <a href="../mini-kb/AGENTS.md#invariant-s2-core-axiom-numbering">
       <g class="node">
         <title>axiom-2 — Topo-Kinematic Isomorphism</title>
         <rect x="-608" y="634" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -68,7 +68,7 @@
         <text x="-600" y="684" fill="#111111">Isomorphism</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s2-core-axiom-numbering">
+    <a href="../mini-kb/AGENTS.md#invariant-s2-core-axiom-numbering">
       <g class="node">
         <title>axiom-3 — Minimum Reflection Principle</title>
         <rect x="-432" y="634" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -77,7 +77,7 @@
         <text x="-424" y="684" fill="#111111">Principle</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s1-synthetic-structural-rule">
+    <a href="../mini-kb/AGENTS.md#invariant-s1-synthetic-structural-rule">
       <g class="node">
         <title>INVARIANT-S1 — Synthetic structural rule</title>
         <rect x="-608" y="498" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -86,7 +86,7 @@
         <text x="-600" y="548" fill="#111111">structural rule</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s3-another-synthetic-structural-rule">
+    <a href="../mini-kb/AGENTS.md#invariant-s3-another-synthetic-structural-rule">
       <g class="node">
         <title>INVARIANT-S3 — Another synthetic structural rule</title>
         <rect x="-432" y="498" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -95,7 +95,7 @@
         <text x="-424" y="548" fill="#111111">structural rule</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s6-subsumed-into-s2-numbering">
+    <a href="../mini-kb/AGENTS.md#invariant-s6-subsumed-into-s2-numbering">
       <g class="node">
         <title>INVARIANT-S6 — (subsumed into S2 numbering)</title>
         <rect x="-256" y="498" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -104,7 +104,7 @@
         <text x="-248" y="548" fill="#111111">numbering)</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s2-core-axiom-numbering">
+    <a href="../mini-kb/AGENTS.md#invariant-s2-core-axiom-numbering">
       <g class="node">
         <title>axiom-1 — Substrate Topology</title>
         <rect x="-80" y="498" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -112,7 +112,7 @@
         <text x="-72" y="532" fill="#111111">Substrate Topology</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s2-core-axiom-numbering">
+    <a href="../mini-kb/AGENTS.md#invariant-s2-core-axiom-numbering">
       <g class="node">
         <title>INVARIANT-S2 — Core Axiom numbering</title>
         <rect x="448" y="-46" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />
@@ -121,7 +121,7 @@
         <text x="456" y="4" fill="#111111">numbering</text>
       </g>
     </a>
-    <a href="../mini-kb/CLAUDE.md#invariant-s2-core-axiom-numbering">
+    <a href="../mini-kb/AGENTS.md#invariant-s2-core-axiom-numbering">
       <g class="node">
         <title>axiom-4 — Universal Saturation Kernel</title>
         <rect x="448" y="-318" width="160" height="92" fill="#e3d3ec" stroke="#333333" stroke-width="1" />

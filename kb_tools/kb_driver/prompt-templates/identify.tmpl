@@ -2,8 +2,11 @@ You are identifying the results a single document of a knowledge base states.
 
 ## The document — `@!dyn.document!@`
 
-Each line of the body below opens with its own label, then one sentence in the document's own
-words. The label and the colon after it belong to this rendering and not to the document.
+Each labelled line of the body below is one sentence in the document's own words, opened by its
+label. The label and the colon after it belong to this rendering and not to the document. A blank
+line ends a paragraph. Lines carrying no label — the navigation and frontmatter at the top,
+headings, and any block the document itself marks as a claim, a proof or a definition — are shown
+for context only: no answer names one of them, and each ends the paragraph it interrupts.
 
 ````````````markdown
 @!dyn.body!@
@@ -15,22 +18,29 @@ words. The label and the colon after it belong to this rendering and not to the 
 
 ## What to return
 
-**Which of two answers applies is a question about the whole document, never about one line of
-it.** A document that restates or indexes material stated authoritatively elsewhere states no
-result of its own: a notation table, a glossary, a reference list, a section preamble. Its lines
-read as assertions, and each one recalls a result some other document states first — a table of
-symbols is such a document however many of its rows would make sentences.
+**What you are looking for is results.** A result is something the document asserts to be so: a
+theorem, a relation it derives, a bound, a condition under which something holds, a conclusion it
+draws from an argument. Record what the document states rather than only what it proves formally:
+a result stated in plain prose is a result. What is not a result, however assertive its sentences
+read: motivation (why a question matters), signposting (what the document or a later section will
+do), and recap (a result already stated, here or in another document, repeated or summarised).
 
-Otherwise the document states results of its own, and every one of them is one block. Record what
-the document states rather than only what it proves formally: a result stated in prose is a
-result.
+Your answer is a sequence of blocks, each opened and closed by its two markers on lines of their
+own. Nothing numbers them and nothing in one refers to another. What sits between a block's two
+markers is taken exactly as it stands: write backslashes, dollars and braces as you would write
+them, and escape nothing.
+
+### Claim blocks
+
+Each result is one claim block, unless it begins inside a paragraph listed under *Paragraph
+verdicts* below.
 
 **You name where a result begins; the tool works out how far it runs.** A result runs from the
 sentence you name to the next sentence you name in the same paragraph, or to the end of that
 paragraph. So name the sentence each result begins at; how much of the document a result covers
 is not something the answer carries.
 
-Each block carries three lines:
+Each claim block carries three lines:
 
 - **`quote:`** the opening of the sentence the result begins at, copied from the body above in the
   document's own words — around ten words, enough that no other sentence opens the same way.
@@ -40,13 +50,11 @@ Each block carries three lines:
   as a cross-check, so a quote and a label naming two different sentences is an answer it cannot
   use.
 - **`title:`** yours to write: one line naming the result. It is a title and never a heading — no
-  leading `#`, no numbering, no markup — and no two blocks from this document may share one.
+  leading `#`, no numbering, no markup. No two titles in your answer may be the same, and none may
+  repeat the title of a claim the document already carries.
 
 A structural label standing on its own — `Proof.`, `Definition 3.` — is not a sentence a result
 begins at.
-
-One block per result, its two markers on lines of their own. Nothing numbers them and nothing in
-one refers to another:
 
     @!claim-open!@
     quote: The bifurcation is supercritical whenever $\sigma < 1$
@@ -59,19 +67,10 @@ one refers to another:
     title: Boundedness of every trajectory
     @!claim-close!@
 
-A document stating no result of its own returns no block of that kind and exactly one of this
-kind, holding one sentence:
+### Paragraph verdicts
 
-    @!no-claim-open!@
-    This section fixes the notation the rest of the volume uses and states no result of its own.
-    @!no-claim-close!@
+@!paragraph-verdicts!@
 
-That sentence is permanent: it is written into this document's frontmatter and is what a later
-reader is told about why this document carries no result. Say what the document is and what that
-makes of its lines. Write it yourself, and do not hand back a sentence already sitting in this
-document's frontmatter — that is the sentence which made this document a question.
+### An answer with no claim in it
 
-Returning both kinds of block, or neither, is not an answer.
-
-What sits between a block's two markers is taken exactly as it stands: write backslashes, dollars
-and braces as you would write them, and escape nothing.@!correction!@
+@!no-claim-sentence!@@!correction!@

@@ -26,7 +26,9 @@ that the equation states anything.
 cites is scaffolding: the author numbered it and then never pointed at it, and
 minting for it would put a corpus's display maths into the graph rather than the
 part of it the corpus reasons over. Measured over the 50-paper arXiv corpus:
-2057 labelled equations, of which this yields 755.
+2057 labelled equations, of which this yields 755. A reference in prose the node
+pass judged not a claim does not count: stage D drops it, so an equation it
+alone named would be a node nothing points at.
 
 **Identity is the label, and the title is the only field that can carry it.**
 Point 9 leaves an equation's ``\\label`` inside the maths fence rather than as an
@@ -45,9 +47,10 @@ references and names none, which is why adding a corpus's worth of them leaves
 :func:`attribute.check_acyclic` with nothing new to find.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-from .inventory import PROOF_ENVIRONMENT, Inventory, by_document, hosting_block
+from .inventory import PROOF_ENVIRONMENT, Anchor, Inventory, by_document, hosting_block
 
 
 @dataclass(frozen=True)
@@ -62,15 +65,24 @@ class ReferencedEquation:
     line: int
 
 
-def unheld(inventory: Inventory) -> tuple[ReferencedEquation, ...]:
-    """Every referenced equation no claim-bearing block and no proof holds, in scan order.
+def unheld(inventory: Inventory, counting: Iterable[Anchor] | None = None) -> tuple[ReferencedEquation, ...]:
+    """Every equation a counting reference names and no claim-bearing block and no proof holds, in scan order.
+
+    ``counting`` is the references that count, and ``None`` is every reference
+    stage B read. A reference counts unless the node pass judged the paragraph
+    it sits in not a claim (:func:`prose.standing`), which is the caller's to
+    decide: this reading knows nothing of verdicts.
 
     Deterministic and total over stage B's readings: nothing is sampled, and an
     equation appearing twice under one label in one document is one node rather
     than two, the label being what a reference names.
     """
     blocks = by_document(inventory.blocks)
-    named = {(anchor.target, anchor.label) for anchor in inventory.anchors if anchor.target is not None}
+    named = {
+        (anchor.target, anchor.label)
+        for anchor in (inventory.anchors if counting is None else counting)
+        if anchor.target is not None
+    }
 
     found: list[ReferencedEquation] = []
     seen: set[tuple[str, str]] = set()

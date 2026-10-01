@@ -44,7 +44,7 @@ class TestReadinessTemplatesResolve(unittest.TestCase):
     def test_templates_carry_no_slot_the_stamp_cannot_fill(self):
         # An unfilled slot reaches a consumer's KB as its own literal text. The
         # stamp refuses one; this fails at the edit instead.
-        fillable = {kb_pipeline.PROJECT_NAME_FIELD, kb_pipeline.SCOPE_PIN_FIELD}
+        fillable = {kb_pipeline.PROJECT_NAME_FIELD, kb_pipeline.AGENTS_DIR_FIELD, kb_pipeline.SCOPE_PIN_FIELD}
         for name in kb_pipeline.READINESS_DOCS:
             text = kb_pipeline.installed_template(name).read_text(encoding="utf-8")
             found = set(kb_pipeline.TEMPLATE_SLOT_RE.findall(text))

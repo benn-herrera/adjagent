@@ -32,17 +32,11 @@ displayed equations carry auto-assigned identifiers. A claim that got an environ
 identity, and that identity is in the file.
 
 **Edges** A reference to one of those identifiers is written in `\ref`-family
-syntax, which names the source and target of a dependency explicitly. Edges are especially
-valuable because an edge is the thing you cannot reconstruct by looking harder at one document — it
-is a relation the author asserted between two places, and either it was written down or it is
-gone.
+syntax, which names the reference target explicitly. A ref can not fully determine an edge mechanically
+as it may be a mention, supported by, or in support of the citation. It does indicate an edge
+candidate, however.
 
-Base claims sit at the bottom: asserted de novo, or resting on a citation to a work outside this
-document set. The result is a directed graph whose nodes and edges were both determined
-mechanically.
-
-**For an ideally transcribed paper, that graph is the whole claim graph, and there is no role for
-inference in building it.**
+**For an ideally transcribed paper, that captures all nodes and edge candidates.**
 
 ## Why the ideal does not hold
 
@@ -54,10 +48,15 @@ exhaustively. Under-marking is the issue refinement via inference resolves.
 **Inference refines a mechanical draft. It never produces one.** Both hierarchies come out of the
 mechanical pass first.
 
-**Claim-graph refinement is the half that needs bounding**, and it closes exactly two gaps, both
+**Claim-graph refinement is the half that needs bounding**, and it closes exactly three gaps, all
 nameable:
 
 1. A claim constructed in prose without a formal delimiter — real, argued, and carrying no
-   environment.
+   environment. (nodes)
 2. A reference made in prose without `\ref` syntax — inside either a prose-defined claim or a
-   properly delimited one.
+   properly delimited one. (additional edge candidates)
+3. Edge existence and direction - mention, supported by, in support of (exactly 3 options)
+
+In the final claim graph construction, base claims sit at the bottom, asserted de novo, or resting
+on a citation to a work outside this document set. The rest of the edges connect internally, resulting
+in a directed graph whose nodes and edges were drafted mechanically and refined by inference.

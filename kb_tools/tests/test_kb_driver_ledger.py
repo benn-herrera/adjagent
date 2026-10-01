@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_pipeline, kb_util
+from kb_tools import install_location, kb_pipeline, kb_util
 from kb_tools.kb_driver import baton, ledger, runlog
 
 _THIS_DIR = Path(__file__).resolve().parent
-_PKG_PARENT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 
 _CHARTER = "docs/charter.md"
 
@@ -28,12 +28,14 @@ _CHARTER = "docs/charter.md"
 # ``targets_installed`` looks for — plus locally-defined targets, so the runner
 # path is exercised without needing the toolchain installed under
 # ``.claude/agents/`` in the fixture. The include is non-fatal by design.
-_MAKEFILE_GREEN = f"{kb_util.INSTALL_LINE_MAKE}\n\nkb-verify:\n\t@echo verifying\n"
-_MAKEFILE_RED = f"{kb_util.INSTALL_LINE_MAKE}\n\nkb-verify:\n\t@echo 'dead link'; exit 1\n"
+_MAKEFILE_GREEN = f"{kb_util.install_line('make')}\n\nkb-verify:\n\t@echo verifying\n"
+_MAKEFILE_RED = f"{kb_util.install_line('make')}\n\nkb-verify:\n\t@echo 'dead link'; exit 1\n"
 # The same red gate, printing one byte that is not valid UTF-8 (0xE9, latin-1
 # 'é'). A consuming repo's recipe prints whatever its verifiers print, and the
 # driver does not get to assume that is decodable.
-_MAKEFILE_UNDECODABLE = f"{kb_util.INSTALL_LINE_MAKE}\n\nkb-verify:\n\t@printf 'dead link in caf\\351.md\\n'; exit 1\n"
+_MAKEFILE_UNDECODABLE = (
+    f"{kb_util.install_line('make')}\n\nkb-verify:\n\t@printf 'dead link in caf\\351.md\\n'; exit 1\n"
+)
 
 
 def _git(root: Path, *args: str) -> None:
@@ -206,7 +208,7 @@ def test_graph_init_without_a_runner_file_passes_the_configured_runner_through(t
     outcome = ledger.graph_init(repo, runner="just")
 
     assert outcome.ok, outcome.detail
-    assert kb_util.INSTALL_LINE_JUST in (repo / "justfile").read_text(encoding="utf-8").splitlines()
+    assert kb_util.install_line("just") in (repo / "justfile").read_text(encoding="utf-8").splitlines()
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +432,7 @@ def _failing_makefile(*, out: str = "", err: str = "") -> str:
     if err:
         recipe.append(f"@echo '{err}' >&2")
     recipe.append("@exit 1")
-    return f"{kb_util.INSTALL_LINE_MAKE}\n\nkb-verify:\n" + "".join(f"\t{line}\n" for line in recipe)
+    return f"{kb_util.install_line('make')}\n\nkb-verify:\n" + "".join(f"\t{line}\n" for line in recipe)
 
 
 @pytest.mark.skipif(shutil.which("make") is None, reason="the runner target needs make on PATH")

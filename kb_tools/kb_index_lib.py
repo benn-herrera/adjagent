@@ -72,13 +72,19 @@ PENDING_FRACTION = _PendingFraction()
 # refresh_kb_metadata and verify_kb_metadata import these rather than keeping
 # their own copies. `claim-quality-closure-roadmap.md` is one known consumer's
 # planning-doc convention — harmless to KBs that don't use the name.
+# The KB's agents file — its orientation document — and the one-line redirect
+# beside it that points Claude Code, which reads `CLAUDE.md`, at the same file.
+AGENTS_FILENAME = "AGENTS.md"
+AGENTS_REDIRECT_FILENAME = "CLAUDE.md"
+AGENTS_REDIRECT = f"@{AGENTS_FILENAME}"
+
 # The corpus-invariant source: the authored home of `### INVARIANT-*`
 # headings and `- Axiom N:` bullets, and therefore of every framework
-# node. `CLAUDE.md` is canned generic orientation and is not an invariant
+# node. The agents file is canned generic orientation and is not an invariant
 # channel; parse_framework_nodes still falls back to it for KBs built
 # before the split.
 INVARIANTS_FILENAME = "invariants.md"
-LEGACY_INVARIANTS_FILENAME = "CLAUDE.md"
+LEGACY_INVARIANTS_FILENAME = AGENTS_FILENAME
 
 # The external works' register: the KB root's own `claim-quality.md`, one file
 # for the whole corpus. Its home is stated here rather than derived per volume
@@ -102,7 +108,8 @@ EXCLUDE_DIRS = {"session", ".index", "tools"}
 EXCLUDE_NAMES = {
     "claim-quality.md",
     "claim-quality-closure-roadmap.md",
-    "CLAUDE.md",
+    AGENTS_FILENAME,
+    AGENTS_REDIRECT_FILENAME,
     "CONVENTIONS.md",
     "CONVENTIONS.md",
     "README.md",
@@ -193,7 +200,7 @@ FRONTMATTER_RE = re.compile(r"<!--\s*kb-frontmatter\s*\n(.*?)\n[ \t]*-->", re.DO
 _FRONTMATTER_OPEN_RE = re.compile(r"<!--\s*kb-frontmatter\s*\n")
 _TIER2_INLINE_RE = re.compile(r"<!--\s*claim-quality:\s*(.*?)\s*-->", re.DOTALL)
 
-# Framework-node parsing (from the KB's CLAUDE.md).
+# Framework-node parsing (from the KB's framework source).
 # Invariant headings: `### INVARIANT-XX: <title>`.
 _INVARIANT_HEADING_RE = re.compile(r"^### (INVARIANT-[A-Z]+[0-9]+):\s*(.+)$")
 # Axiom bullets in the INVARIANT-S2 section: `- Axiom N: **<title>** — ...`.
@@ -376,7 +383,7 @@ class SupportNode:
 class FrameworkNode:
     """A structural invariant or axiom — a first-class framework graph node.
 
-    Framework nodes are parsed from the KB's ``CLAUDE.md``. They are
+    Framework nodes are parsed from the KB's framework source. They are
     solidity-1.0 by definition (framework bedrock) — a documented rule, not a
     stored field. The record carries only the five identifying fields.
     """
@@ -672,11 +679,11 @@ def parse_frontmatter(text: str) -> dict | None:
 
 class FrameworkNodeParseError(ValueError):
     """Edges reference framework nodes (axiom-N / INVARIANT-*) that did not
-    parse out of the KB's ``CLAUDE.md``.
+    parse out of the KB's framework source (:func:`framework_source`).
 
     Raised by :func:`build_all_records` when the assembled depends-on edges
     target framework nodes that are absent from the rebuilt ``claims.jsonl``
-    node set. The usual cause is a transient ``CLAUDE.md`` state where the
+    node set. The usual cause is a transient source state where the
     INVARIANT-S2 axiom bullets or ``### INVARIANT-*`` headings don't match the
     parser (e.g. indented, reflowed, or carrying merge-conflict markers mid
     hand-merge): :func:`parse_framework_nodes` then silently yields fewer
@@ -686,15 +693,35 @@ class FrameworkNodeParseError(ValueError):
     """
 
 
+def unmigrated_agents_file(kb_root: Path) -> str | None:
+    """The refusal for a KB whose ``CLAUDE.md`` is not the redirect, else None.
+
+    A KB keeps its agents file in ``AGENTS.md`` and its ``CLAUDE.md`` holds
+    exactly the one-line redirect to it. A ``CLAUDE.md`` carrying anything else
+    is a KB from before that split, or a hand edit; nothing here converts it,
+    because its content may be the project's own.
+    """
+    redirect = kb_root / AGENTS_REDIRECT_FILENAME
+    if not redirect.is_file() or redirect.read_text(encoding="utf-8").strip() == AGENTS_REDIRECT:
+        return None
+    return (
+        f"{redirect} is not the one-line redirect '{AGENTS_REDIRECT}' — this KB predates the "
+        f"{AGENTS_FILENAME} split, or the file was edited. Nothing here converts it and no agent edits "
+        f"it: an agent stops and reports this message. Operator: move its content into "
+        f"{kb_root / AGENTS_FILENAME} (append if that file exists), make {redirect} the single line "
+        f"'{AGENTS_REDIRECT}', then rerun."
+    )
+
+
 # ---------------------------------------------------------------------------
-# Framework-node parsing (CLAUDE.md)
+# Framework-node parsing (invariants.md, legacy AGENTS.md)
 # ---------------------------------------------------------------------------
 
 
 def framework_source(kb_root: Path) -> Path | None:
     """The file framework nodes are parsed from, or None when there is none.
 
-    ``invariants.md`` is the authored home of corpus invariants. ``CLAUDE.md``
+    ``invariants.md`` is the authored home of corpus invariants. ``AGENTS.md``
     is the legacy home, kept as a fallback so a KB built before the split keeps
     minting its framework nodes; :func:`framework_source_is_legacy` is what
     lets a report say so out loud rather than migrating silently.
@@ -707,13 +734,13 @@ def framework_source(kb_root: Path) -> Path | None:
 
 
 def framework_source_is_legacy(kb_root: Path) -> bool:
-    """True when framework nodes still come from the deprecated CLAUDE.md."""
+    """True when framework nodes still come from the deprecated agents file."""
     source = framework_source(kb_root)
     return source is not None and source.name == LEGACY_INVARIANTS_FILENAME
 
 
 def parse_framework_nodes(kb_root: Path | None = None) -> list[FrameworkNode]:
-    """Parse invariant and axiom nodes from the KB's ``CLAUDE.md``.
+    """Parse invariant and axiom nodes from the KB's framework source.
 
     Invariants come from ``### INVARIANT-XX: <title>`` headings; each node's
     ``canonical_anchor`` is the GitHub-style slug of its own heading.
@@ -723,7 +750,7 @@ def parse_framework_nodes(kb_root: Path | None = None) -> list[FrameworkNode]:
     slug (the KB's axiom-numbering authority, empty when the KB declares no
     INVARIANT-S2 heading). Node ids are ``axiom-<N>``.
 
-    The source is ``invariants.md`` when present, else ``CLAUDE.md`` — see
+    The source is ``invariants.md`` when present, else ``AGENTS.md`` — see
     :func:`framework_source`. Framework nodes are optional: no source file, or
     a source carrying no invariant headings and no axiom bullets, yields an
     empty list — never an error. ``canonical_path`` is the source file's name,
@@ -880,21 +907,6 @@ def document_texts(kb_root: Path) -> dict[str, str]:
     stage table, so an import the other way would close a cycle.
     """
     return {_posix_relative(path, kb_root): path.read_text(encoding="utf-8") for path in kb_files(kb_root)}
-
-
-#: What a document carries while no claim has been looked for in its prose —
-#: the declared pass's own statement of its scope, not a finding about the
-#: document. **Compared by identity** wherever a determination is read
-#: (``kb_claimgraph.conform.determination``), and the admission ticket claim
-#: discovery reads a document in on.
-#:
-#: It lives here, beside the frontmatter parser, rather than in the module that
-#: writes it: the build pipeline's coverage check for claim discovery reads it
-#: too, and ``kb_pipeline`` may not import ``kb_claimgraph``.
-UNSCANNED_REASON = (
-    "No author-marked claim block; this build identified block-hosted claims only, so no claim has been "
-    "looked for in this document's prose."
-)
 
 
 _SOLIDITY_TRACE_RE = re.compile(r"\[[^\]]*\]\s*$")
@@ -2590,7 +2602,7 @@ def discover_kb(
     diagnostic_stream: TextIO | None = sys.stderr,
 ) -> KbState:
     """One-shot load of the KB. Reads every non-excluded .md file under
-    kb_root plus every claim-quality.md register and ``CLAUDE.md`` (for the
+    kb_root plus every claim-quality.md register and the framework source (for the
     framework nodes — invariants and axioms).
 
     Two passes over claim-quality registers: the first collects the canonical
@@ -3839,7 +3851,7 @@ def _assert_framework_node_coverage(claims_records: list[dict], depends_on_recor
 
     Guards the silent-drop failure mode: if ``parse_framework_nodes`` yields
     fewer axiom/invariant nodes than the claim graph references (a malformed
-    ``CLAUDE.md`` state), the index would be written with dangling edges. We
+    framework source), the index would be written with dangling edges. We
     catch it at build time with an actionable message instead.
     """
     present = {r["id"] for r in claims_records if r["node_type"] in kb_schema.FRAMEWORK_KINDS}
@@ -3854,12 +3866,12 @@ def _assert_framework_node_coverage(claims_records: list[dict], depends_on_recor
         f"{len(missing)} depends-on edge target(s) reference framework nodes "
         f"absent from the rebuilt index: {', '.join(missing)}.\n"
         f"parse_framework_nodes() yielded {yielded} node(s) from the KB's "
-        f"CLAUDE.md (kb-root/CLAUDE.md).\n"
-        f"This is the silent framework-node drop (issue #28): the CLAUDE.md "
+        f"framework source (kb-root/{INVARIANTS_FILENAME}, or legacy kb-root/{LEGACY_INVARIANTS_FILENAME}).\n"
+        f"This is the silent framework-node drop (issue #28): the source's "
         f"INVARIANT-S2 axiom bullets and/or '### INVARIANT-*' headings did not "
         f"parse. Axiom bullets must match '- Axiom N: **Title** — ...' at "
         f"line start (no leading indent, no merge-conflict markers); invariants "
-        f"need '### INVARIANT-XNN: <title>' headings. Fix CLAUDE.md and re-run "
+        f"need '### INVARIANT-XNN: <title>' headings. Fix the source and re-run "
         f"(refresh aborted before writing a dangling index)."
     )
 
@@ -3894,7 +3906,7 @@ def build_all_records(state: KbState) -> dict[str, list[dict]]:
     """Return every JSONL file's records keyed by short file name.
 
     Raises :class:`FrameworkNodeParseError` if the assembled edges reference
-    framework nodes that did not parse from ``CLAUDE.md`` (issue #28 guard), and
+    framework nodes that did not parse from the framework source (issue #28 guard), and
     :class:`ExternalWorkParseError` if they reference an external work with no
     register entry.
     """
@@ -4003,6 +4015,7 @@ __all__ = [
     "min_dependency_solidity",
     "SolidityCycleError",
     "FrameworkNodeParseError",
+    "unmigrated_agents_file",
     "format_solidity",
     "render_solidity_trace",
     "render_min_trace",

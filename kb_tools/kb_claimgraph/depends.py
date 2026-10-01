@@ -55,6 +55,7 @@ dependencies instead.
 from collections.abc import Sequence
 from pathlib import Path
 
+from .. import kb_pipeline
 from . import attribute, conform, gate, graph, inventory, tree, write
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
@@ -66,8 +67,8 @@ def _census_findings(
         Finding(
             FACT,
             "stage-A-determinations",
-            f"{len(state.hosting)} documents host claims, {len(state.awaiting)} await claim identification, "
-            f"{len(state.determined)} carry an authored no-claim reason and are not this pass's to reopen",
+            f"{len(state.hosting)} leaves host claims, {len(state.determined)} carry a no-claim reason, "
+            f"{len(state.undeclared)} declare neither",
         ),
         Finding(
             FACT,
@@ -146,6 +147,13 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path, selector: attribute.
     report = Report()
 
     try:
+        record = kb_pipeline.read_node_pass(repo_root)
+        if record is None:
+            raise ClaimGraphError(
+                "node-pass-record",
+                f"no node-pass record stands at {kb_pipeline.NODE_PASS_RELPATH}; the source end of a reference "
+                f"in prose is read off its verdicts, and the declared pass is what writes it",
+            )
         documents = tree.read(kb_root)
         state = conform.pass_two_gate(documents)
         report.findings.append(
@@ -156,7 +164,7 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path, selector: attribute.
         authored = graph.read(documents, sites)
         report.findings += _census_findings(state, authored, sites)
 
-        narrowed = attribute.narrow(documents, authored, sites)
+        narrowed = attribute.narrow(documents, authored, sites, record)
         offered = sum(len(question.candidates) for question in narrowed.questions)
         routes = ", ".join(f"{route} {count}" for route, count in sorted(narrowed.routes.items())) or "none"
         report.findings.append(
@@ -180,7 +188,7 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path, selector: attribute.
             _unasked_finding(offered=offered, sources=len(narrowed.questions), asked=selector is not None)
         )
 
-        edges = attribute.attribute_dependencies(documents, authored, sites, selector)
+        edges = attribute.attribute_dependencies(documents, authored, sites, selector, record)
         report.findings.append(
             _attribute_finding(
                 edges=len(edges),

@@ -171,7 +171,7 @@ def test_the_template_sweep_reaches_the_shipped_surfaces() -> None:
         "templates/commands/kb-build.md.tmpl",
         "templates/shared-chunks.toml",
         "kb_tools/installed/CONVENTIONS.md.tmpl",
-        "kb_tools/installed/CLAUDE.md.tmpl",
+        "kb_tools/installed/AGENTS.md.tmpl",
     ):
         assert _REPO_ROOT / relative in swept, relative
 

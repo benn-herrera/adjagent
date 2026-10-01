@@ -130,6 +130,20 @@ class Span:
 
 
 @dataclass(frozen=True)
+class Paragraph:
+    """One paragraph of the render: the unit a slice cannot leave.
+
+    ``start`` is the 0-based source line it begins on, which is what names it
+    outside this module; ``index`` is :attr:`Sentence.paragraph`'s ordinal for
+    it; ``lines`` is every source line it holds.
+    """
+
+    index: int
+    start: int
+    lines: frozenset[int]
+
+
+@dataclass(frozen=True)
 class Render:
     """One document as the ask shows it, with every label resolvable back to a span."""
 
@@ -137,6 +151,15 @@ class Render:
     #: per sentence, with the paragraph breaks kept.
     text: str
     sentences: tuple[Sentence, ...]
+    paragraphs: tuple[Paragraph, ...] = ()
+
+    def paragraph_at(self, line: int) -> Paragraph | None:
+        """The paragraph holding source line ``line``, or ``None`` for a line in none of them."""
+        return next((paragraph for paragraph in self.paragraphs if line in paragraph.lines), None)
+
+    def span_of(self, paragraph: Paragraph) -> Span:
+        """Every sentence of ``paragraph``, as one span."""
+        return Span(sentences=tuple(sentence for sentence in self.sentences if sentence.paragraph == paragraph.index))
 
     def resolve(self, locator: str) -> Span:
         """The span ``locator`` names, or :class:`LocatorError` saying which way it failed."""
@@ -212,6 +235,19 @@ def _body_start(text: str) -> int:
     return max(text.count("\n", 0, block.end()) + 1 if block else 0, 1)
 
 
+def heading_lines(text: str) -> frozenset[int]:
+    """Every line of the labelled region that is a heading, by the rule the render opens a paragraph on.
+
+    Named here so a caller excluding headings asks this module's own reading of
+    one rather than a second pattern: a heading is navigation, not a sentence.
+    """
+    return frozenset(
+        number
+        for number, line in enumerate(text.splitlines())
+        if number >= _body_start(text) and _HEADING_RE.match(BLOCKQUOTE_PREFIX.sub("", line).strip())
+    )
+
+
 def _inside_run(text: str, at: int, delimiter: str) -> bool:
     """True where ``at`` sits inside an unclosed ``delimiter`` run — inline maths, or a code span."""
     opened = sum(1 for index in range(at) if text[index] == delimiter and text[index - 1 : index] != "\\")
@@ -260,8 +296,8 @@ class _Group:
     opens: bool = False
 
 
-def _group(lines: Sequence[str], *, first: int, fenced: frozenset[int]) -> list[_Group]:
-    """The labelled region as runs: a break, one fence line, a heading, or wrapped prose."""
+def _group(lines: Sequence[str], *, first: int, fenced: frozenset[int], excluded: frozenset[int]) -> list[_Group]:
+    """The labelled region as runs: a break, an excluded line, one fence line, a heading, or wrapped prose."""
     groups: list[_Group] = []
     prose: list[int] = []
     opens = False
@@ -275,7 +311,10 @@ def _group(lines: Sequence[str], *, first: int, fenced: frozenset[int]) -> list[
 
     for number in range(first, len(lines)):
         line = BLOCKQUOTE_PREFIX.sub("", lines[number]).strip()
-        if number in fenced:
+        if number in excluded:
+            flush()
+            groups.append(_Group("excluded", (number,)))
+        elif number in fenced:
             flush()
             groups.append(_Group("fence", (number,)))
         elif not line:
@@ -335,8 +374,12 @@ def _pieces(lines: Sequence[str], offsets: Sequence[int], group: _Group) -> list
     return found
 
 
-def render(text: str, *, fences: Sequence[MathFence] = ()) -> Render:
-    """``text`` as the ask shows it: navigation verbatim, then one labelled sentence per line."""
+def render(text: str, *, fences: Sequence[MathFence] = (), excluded: frozenset[int] = frozenset()) -> Render:
+    """``text`` as the ask shows it: navigation verbatim, then one labelled sentence per line.
+
+    ``excluded`` lines are shown as they stand and carry no label, so no locator
+    can name one, and each of them ends the paragraph it interrupts.
+    """
     lines = text.splitlines()
     offsets: list[int] = []
     cursor = 0
@@ -351,18 +394,24 @@ def render(text: str, *, fences: Sequence[MathFence] = ()) -> Render:
     # render, so the seat can see where the part it may name begins.
     shown: list[str] = list(lines[:first]) + ([""] if first < len(lines) else [])
     sentences: list[Sentence] = []
+    held: dict[int, list[int]] = {}
     paragraph = 0
     previous = "break"
 
-    for group in _group(lines, first=first, fenced=fenced):
+    for group in _group(lines, first=first, fenced=fenced, excluded=excluded):
         if group.kind == "break":
             if previous != "break":
                 shown.append("")
             previous = "break"
             continue
-        if previous in ("break", "heading") or group.opens:
+        if group.kind == "excluded":
+            shown.append(lines[group.lines[0]])
+            previous = "excluded"
+            continue
+        if previous in ("break", "heading", "excluded") or group.opens:
             paragraph += 1
         previous = group.kind
+        held.setdefault(paragraph, []).extend(group.lines)
 
         for body, start, end in _pieces(lines, offsets, group):
             if not body:
@@ -380,4 +429,7 @@ def render(text: str, *, fences: Sequence[MathFence] = ()) -> Render:
             )
             shown.append(f"{label}: {body}")
 
-    return Render(text="\n".join(shown) + "\n", sentences=tuple(sentences))
+    paragraphs = tuple(
+        Paragraph(index=index, start=min(numbers), lines=frozenset(numbers)) for index, numbers in held.items()
+    )
+    return Render(text="\n".join(shown) + "\n", sentences=tuple(sentences), paragraphs=paragraphs)

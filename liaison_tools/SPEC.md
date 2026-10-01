@@ -1,26 +1,36 @@
 # SPEC – liaison_tools
 
-`liaison_tools/` is the shipped package of Python helpers that let an agent relay a conversation with an external, non-Claude model without that model's credentials or wire protocol ever entering the agent's own context. This document states the observable contract each helper holds today, independent of how it is implemented — see ARCHITECTURE.md for mechanism. **Draft status**: distilled from the code, not yet ruled. Where the code leaves a question open, the "not established by the code" notes below say so rather than assert a guarantee.
+`liaison_tools/` is the shipped package of helpers that let an agent relay a conversation with an external, non-Claude model without that model's credentials or wire protocol ever entering the agent's own context. This document states the observable contract each helper holds today, independent of how it is implemented — see ARCHITECTURE.md for mechanism. **Draft status**: distilled from the code, not yet ruled. Where a behaviour is left open, an "Unspecified" note says so rather than assert a guarantee.
 
 This document specializes root `SPEC.md`'s "Deployed Surfaces" (shipped-package class) for this package specifically; on any conflict, the root document governs and this one is the defect.
 
 ## Components
 
-| File | Contract role |
+| Command | Contract role |
 |---|---|
 | `post-openai.py` | The wire transport: one OpenAI-compatible chat-completions call, SSE-streamed, reassembled to a canonical stdout shape. |
 | `msg-util.py` | The sole sanctioned mutator of a messages-file: `init` / `append` / `validate`. |
-| `relay-driver.py` | A scripted corpus-relay eval instrument, invoked directly rather than by a liaison agent; composes the two tools above rather than reimplementing either. |
+| `relay-driver.py` | A scripted corpus-relay eval instrument, invoked directly rather than by a liaison agent. |
 
-`__init__.py` is a package marker only (for pytest module-path stability) and carries no contract of its own. `tests/` is the verification suite for the claims below, not part of the contract.
-
-**stdlib-only.** No file in this package imports a third-party module, tests included; `post-openai.py`, `msg-util.py` and `relay-driver.py` each state the invariant in their own module docstring. An installed consumer needs a `python3` on `PATH` and nothing else — no install step is ever a precondition for these tools running.
-
-**Every file here is a command, not a module.** `msg-util.py`, `post-openai.py` and `relay-driver.py` are hyphenated, so none of them is a legal module name and none can be imported — which is the whole of the contract, since each is invoked by command line and nothing in this package imports another.
+**Runtime requirement.** A consumer needs a `python3` on `PATH` and nothing else — no install step is ever a precondition for these commands running.
 
 ## Wire Transport (`post-openai.py`)
 
-**Invocation.** `API_BASE_URL`, `API_KEY_FILE`, and `MODEL` are required environment variables; the messages-file path is a positional argument or `MESSAGES_FILE`. The full optional-parameter list (`MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`) and their defaults are documented once, in `post-openai.py`'s module docstring — that docstring is the source of record for the exact parameter grammar; this section states the guarantees built on top of it.
+**Invocation.** `post-openai.py [--allow-http] [<messages.json>]`, parameterised by environment variables. The messages-file path is required by one of two routes, and `MESSAGES_FILE` wins when both are given. A missing or malformed parameter is a usage error, exit 1.
+
+| Variable | Required | Value | Default |
+|---|---|---|---|
+| `API_BASE_URL` | yes | OpenAI-compatible base URL, under the transport rules below | — |
+| `API_KEY_FILE` | yes | path to the key file (API Key Handling, below) | — |
+| `MODEL` | yes | model id (Model resolution, below) | — |
+| `MESSAGES_FILE` | one route | the messages-file path | — |
+| `ALLOW_HTTP` | no | exactly `1` opts in to plaintext http to a non-loopback host; `--allow-http` is the same opt-in, and either alone suffices | unset |
+| `MAX_TOKENS` | no | integer, sent as `max_tokens` | `32768` |
+| `ENABLE_THINKING` | no | `true` in any case enables and any other value disables; sent as `chat_template_kwargs.enable_thinking` | `true` |
+| `TEMPERATURE` | no | plain decimal in [0.0, 2.0] | `0.0` |
+| `DEBUG_POST` | no | `true` in any case writes the request payload to stderr | off |
+| `DEBUG_RESPONSE` | no | `true` in any case writes the raw SSE stream and the reassembled output to stderr | off |
+| `USAGE_STATS_FILE` | no | path for the usage side channel (below) | unset |
 
 **Output contract.** On success, stdout carries exactly one of two shapes: the reassembled response text, or `TOOL_CALLS\n<json>` where `<json>` is an ordered array of `{"id", "type", "function": {"name", "arguments"}}` objects. Nothing else is ever written to stdout; warnings and errors go to stderr only.
 
@@ -43,16 +53,14 @@ Exit 3 and 4 are protocol events, not transport failures — a caller retries ne
 
 **Usage side channel.** When `USAGE_STATS_FILE` is set, one JSON line — `{"prompt_tokens", "completion_tokens", "total_tokens", "model"}`, fields `null` where the endpoint omitted them — is appended per successful call (any of exit 0, 3, or 4). A write failure there is a stderr warning only and never fails the transport call itself. This channel never carries key material, and nothing about it reaches stdout.
 
-**Not established by the code:** behavior on a key file containing non-whitespace control bytes is unspecified beyond the internal-whitespace check (see API Key Handling); the retry-once-on-model-error path is not itself retried, so a resolution query that itself fails transiently is not retried.
+**Unspecified:** behaviour on a key file containing non-whitespace control bytes, beyond the internal-whitespace check (API Key Handling). The model-resolution query is made once, and a transient failure of that query is not retried.
 
 ## API Key Handling
 
 `API_KEY_FILE` names a file whose entire content, leading/trailing whitespace trimmed, is the key. The key is invalid — a usage error, exit 1 — if it is empty after trimming or contains any internal whitespace.
 
-- `post-openai.py` is the only file in this package that ever opens the key file. `msg-util.py` and `relay-driver.py` never read it; `relay-driver.py` passes `API_KEY_FILE`'s path through opaquely and never reads or prints key material itself.
-- The key is read directly into process memory (`Path.read_text`) and is never placed on the command line and never written into an environment variable — so it is not exposed through `argv` or through process-environment inspection.
-- The only place the key leaves process memory is the `Authorization: Bearer <token>` header, sent on the `/chat/completions` and `/models` requests over the transport rules stated above (https-or-loopback, no redirects followed).
-- No file in this package, and no test fixture under `tests/`, is permitted to hold a real key; `tests/test-fixture-*.txt` fixtures used by `test_post_openai.py` are synthetic.
+- The key is never placed on a command line or in an environment variable, so it is not exposed through `argv` or through process-environment inspection.
+- The key leaves process memory only as the `Authorization: Bearer <token>` header, sent on the `/chat/completions` and `/models` requests over the transport rules stated above (https-or-loopback, no redirects followed). No command in this package writes key material to stdout, stderr, a messages file, a usage file, or `relay-driver.py`'s output directory.
 
 ## Messages-File Format and Legal Mutations (`msg-util.py`)
 
@@ -63,11 +71,11 @@ Exit 3 and 4 are protocol events, not transport failures — a caller retries ne
 - `append --role=<user|agent> <messages.json> <content-file>` — appends exactly one turn to the end of the array, `content` equal to the full content of `<content-file>`. `--role=user` maps to JSON role `user`; `--role=agent` maps to JSON role `assistant`. (`agent` is a CLI-only spelling — it never appears as a role value inside the file.)
 - `validate <messages.json>` — reads only; exits 0 and prints `valid: <N> turns` for a well-formed session per the Format rule above, otherwise exits 1 with a diagnostic naming the specific defect (not valid JSON, wrong top-level type, empty array, a turn missing a legal role, non-string content, or turn 0 not `system`).
 
-**Concurrency.** `init` and `append` take an exclusive lock (`flock` on `<messages-file>.lock`, waited for up to 10 seconds) spanning the entire read-modify-write, so two concurrent mutators against the same file never race. The lock is held by an open descriptor, so the operating system releases it when its holder exits by any route — a mutator that dies mid-write leaves no lock behind and never has to be unwedged by hand. The lock file itself is created once and never removed; it is empty, and its presence says nothing about whether the lock is held. `validate` takes no lock: every mutation writes to a scratch temp file on the same filesystem and replaces the target with it atomically, so an unlocked reader observes either the pre- or post-mutation file in full, never a partial write. A scratch directory on a *different* filesystem is refused rather than degraded to a copy-plus-unlink.
+**Concurrency.** `init` and `append` are mutually exclusive on the same file: two concurrent mutators never lose a turn, and one waits up to 10 seconds for the other before failing. A mutator that dies mid-write leaves nothing behind that blocks the next one. A mutation creates `<messages-file>.lock` beside its target and leaves it there; it is empty, and its presence says nothing about whether a mutation is in progress. `validate` takes no lock and needs none: a reader observes a messages file either as it was before a mutation or as it is after, in full, never partly written. A scratch directory (`TMPDIR`) on a different filesystem from the target is refused rather than degraded to a copy.
 
 **Exit codes.** Unlike `post-openai.py`, `msg-util.py` carries only a binary contract: 0 is success, any non-zero (in practice always 1) is failure — there is no finer-grained code for "usage error" vs. "lock timeout" vs. "validation failure" beyond what the stderr text names. The help forms (`help`, `-h`, `--help`) print the usage block and exit 1 like any other usage error.
 
-**Not established by the code:** there is no upper bound on turn `content` size, no check that `user`/`assistant` turns alternate after the initial system turn, and no schema version field — a caller cannot distinguish "this file's shape predates a future format change" from "this file is simply well-formed" beyond the fields checked above.
+**Unspecified:** turn `content` has no upper bound on size, `user`/`assistant` turns are not required to alternate after the initial system turn, and the format carries no version — a caller cannot distinguish "this file's shape predates a future format change" from "this file is simply well-formed" beyond the fields checked above.
 
 **Encoding is UTF-8, uniformly.** Every file all three modes touch — the system-prompt, instructions and content files, and the messages file itself — is read and written as UTF-8 explicitly, so the three modes cannot disagree about whether the same file is well-formed text on a platform whose default encoding is something else. A source file that is not valid UTF-8 is a failure naming the file, not a silent substitution.
 
@@ -76,8 +84,8 @@ Exit 3 and 4 are protocol events, not transport failures — a caller retries ne
 `relay-driver.py` is invoked directly (not dispatched as an agent). Its contract:
 
 - **Required flags:** `--corpus-root`, `--system-prompt`, one of `--question`/`--questions-file`, `--output-dir`.
-- **Connection parameters** (`API_BASE_URL`, `API_KEY_FILE`, `MODEL`, and `post-openai.py`'s optional connection flags) are inherited from the process environment, or injected via `--env-file` (`KEY=VALUE` lines). An `--env-file` may set only the keys in `CONNECTION_ENV_KEYS` — `API_BASE_URL`, `API_KEY_FILE`, `MODEL`, `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE` — any other key is a hard refusal naming the offending key(s), never a silent pass-through.
-- **Path confinement is a trust boundary.** Every `READ`/`LIST`/`GREP` request the guest model issues is resolved against the corpus root and required (resolve-then-`relative_to`) to stay inside it; a path that cannot even be resolved (embedded NUL, over `PATH_MAX`) is refused the same way a traversal or symlink escape is. This holds per-file during a `GREP` walk as well, not only at the top-level path argument.
+- **Connection parameters** (`API_BASE_URL`, `API_KEY_FILE`, `MODEL`, and `post-openai.py`'s optional connection parameters) are inherited from the process environment, or injected via `--env-file` (`KEY=VALUE` lines). An `--env-file` may set only `API_BASE_URL`, `API_KEY_FILE`, `MODEL`, `ALLOW_HTTP`, `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE` — any other key is a hard refusal naming the offending key(s), never a silent pass-through.
+- **Path confinement is a trust boundary.** Every `READ`/`LIST`/`GREP` request the guest model issues must stay inside the corpus root, symlinks included; a path that cannot even be resolved (embedded NUL, over `PATH_MAX`) is refused the same way a traversal or symlink escape is. This holds per-file during a `GREP` walk as well, not only at the top-level path argument.
 - **Output layout**, entirely under `--output-dir`:
   ```
   session/qNN/messages.json    full conversation (audit-permanent)
@@ -87,8 +95,8 @@ Exit 3 and 4 are protocol events, not transport failures — a caller retries ne
   answers/stats.csv            per-question round trips, token totals, outcome
   ```
   This driver creates no files anywhere else.
-- **Exit codes:** 0 if every question completed without a halting transport failure; 1 if any question halted the run (transport failure exhausted its retries — remaining questions are skipped); argument-parsing errors (`argparse`) exit 2 by argparse's own convention.
+- **Exit codes:** 0 if every question completed without a halting transport failure; 1 if any question halted the run (transport failure exhausted its retries — remaining questions are skipped); 2 for an argument error.
 
-## Session Directory Layout — a caller convention
+## Paths
 
-The `guest-session/<topic>/` layout (`messages.json` + `tmp/`) is documented in the `guest-liaison` agent definition; `mad-guest-liaison` uses a different one over the same tools — `liaison-messages.json` + `tmp/` inside whatever run directory its referee hands it, which differs between a review run and a design run. **Neither directory name, nor the `<topic>` segment, nor the file name `messages.json` vs. `liaison-messages.json`, is asserted or checked by any file in this package.** `msg-util.py` and `post-openai.py` operate on whatever path they are given — with the one derived name a caller must expect: a mutation creates `<messages-file>.lock` beside its target and leaves it there (Concurrency, above). A future caller chooses its own shape without touching this package, and nothing here constrains that choice.
+`msg-util.py` and `post-openai.py` operate on whatever paths they are given and assume no directory layout or file name. The one name derived from a given path is `<messages-file>.lock`, which a mutation creates beside its target and leaves there (Concurrency, above). A caller chooses its own session layout without touching this package.

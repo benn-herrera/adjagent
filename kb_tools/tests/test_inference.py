@@ -396,7 +396,7 @@ def test_an_unusable_argument_is_refused_before_anything_is_spawned(
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """A directory with one seat defined in it, the way an installed project has."""
-    agents = tmp_path / seat.SEAT_DIRECTORY
+    agents = tmp_path / seat.seat_directory()
     agents.mkdir(parents=True)
     (agents / "architect.md").write_text("---\nname: architect\n---\n", encoding="utf-8")
     return tmp_path
@@ -587,3 +587,97 @@ def test_a_command_that_is_not_on_the_path_comes_back_as_a_spawn_failure(tmp_pat
 
     assert outcome is claude.Outcome.SPAWN_FAILURE
     assert text == ""
+
+
+# ---------------------------------------------------------------------------
+# Readers: a seat answering from the prompt alone
+# ---------------------------------------------------------------------------
+
+READER_BODY = "You are the architect.\n\nState invariants, nothing else."
+ADDENDUM = "You have no tools."
+
+
+@pytest.fixture
+def reader_project(tmp_path: Path) -> Path:
+    """One seat whose definition has a body and a pin, laid out as generation writes one."""
+    agents = tmp_path / seat.seat_directory()
+    agents.mkdir(parents=True)
+    (agents / "architect.md").write_text(
+        f"---\n#\n# !GENERATED! banner\n#\nname: architect\ntools: Read, Grep\nmodel: opus\n---\n\n{READER_BODY}\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def _flag_value(argv: Sequence[str], flag: str) -> str:
+    return argv[argv.index(flag) + 1]
+
+
+def test_a_reader_call_disables_tools_and_is_not_an_agent(reader_project: Path) -> None:
+    invoker = ScriptedInvoker(ScriptedCall(lines=(init_event(), result_event("ok"))))
+
+    text, outcome = seat.ask_reader(
+        seat="architect", prompt=PROMPT, system_addendum=ADDENDUM, cwd=reader_project, invoker=invoker
+    )
+
+    assert (text, outcome) == ("ok", claude.Outcome.OK)
+    argv = invoker.calls[0].argv
+    assert _flag_value(argv, "--tools") == ""
+    assert "--agent" not in argv
+    assert _flag_value(argv, "--system-prompt") == f"{READER_BODY}\n\n{ADDENDUM}"
+    assert invoker.calls[0].prompt == PROMPT, "the prompt still travels on stdin"
+
+
+def test_a_reader_call_carries_the_seats_own_pin_and_no_other(reader_project: Path) -> None:
+    # Without --agent the CLI never reads the definition, so the pin reaches it
+    # only as --model; the value is the definition's, not the caller's.
+    invoker = ScriptedInvoker(ScriptedCall(lines=(init_event(), result_event("ok"))))
+
+    seat.ask_reader(seat="architect", prompt=PROMPT, system_addendum=ADDENDUM, cwd=reader_project, invoker=invoker)
+
+    assert _flag_value(invoker.calls[0].argv, "--model") == "opus"
+
+
+def test_a_reader_call_for_an_unpinned_seat_names_no_model(reader_project: Path) -> None:
+    (reader_project / seat.seat_directory() / "architect.md").write_text(
+        f"---\nname: architect\n---\n{READER_BODY}\n", encoding="utf-8"
+    )
+    invoker = ScriptedInvoker(ScriptedCall(lines=(init_event(), result_event("ok"))))
+
+    seat.ask_reader(seat="architect", prompt=PROMPT, system_addendum=ADDENDUM, cwd=reader_project, invoker=invoker)
+
+    assert "--model" not in invoker.calls[0].argv
+
+
+@pytest.mark.parametrize("bare", [False, True])
+def test_bare_is_passed_only_when_asked_for(reader_project: Path, bare: bool) -> None:
+    invoker = ScriptedInvoker(ScriptedCall(lines=(init_event(), result_event("ok"))))
+
+    seat.ask_reader(
+        seat="architect", prompt=PROMPT, system_addendum=ADDENDUM, cwd=reader_project, bare=bare, invoker=invoker
+    )
+
+    assert ("--bare" in invoker.calls[0].argv) is bare
+
+
+@pytest.mark.parametrize(
+    ("definition", "complaint"),
+    [
+        (None, "no definition"),
+        (f"name: architect\n\n{READER_BODY}\n", "no frontmatter"),
+        ("---\nname: architect\n---\n\n", "no body"),
+    ],
+)
+def test_a_reader_call_without_a_usable_definition_is_refused_before_spawning(
+    tmp_path: Path, definition: str | None, complaint: str
+) -> None:
+    agents = tmp_path / seat.seat_directory()
+    agents.mkdir(parents=True)
+    if definition is not None:
+        (agents / "no-such-reader.md").write_text(definition, encoding="utf-8")
+    invoker = ScriptedInvoker(ScriptedCall(lines=(init_event(), result_event("ok"))))
+
+    with pytest.raises(ValueError, match=complaint):
+        seat.ask_reader(seat="no-such-reader", prompt=PROMPT, system_addendum=ADDENDUM, cwd=tmp_path, invoker=invoker)
+
+    assert invoker.calls == []

@@ -19,17 +19,18 @@ from pathlib import Path
 
 import pytest
 
+from kb_tools import install_location
 from kb_tools.kb_claimgraph import inventory, tree
 from kb_tools.kb_docgraph import judge
 from kb_tools.kb_docgraph import text as docgraph_text
 from kb_tools.kb_docgraph.outline import VolumeTree
 from kb_tools.kb_write import ops
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PKG_PARENT = install_location.current().agents_dir
 
 
 def _env() -> dict[str, str]:
-    return {"PYTHONPATH": str(_REPO_ROOT), "PATH": os.environ.get("PATH", "")}
+    return {"PYTHONPATH": str(_PKG_PARENT), "PATH": os.environ.get("PATH", "")}
 
 
 def test_the_display_name_survives_forms_no_table_of_handles_would_reach(tmp_path: Path) -> None:

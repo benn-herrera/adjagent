@@ -270,6 +270,11 @@ NOT_CLAIM_BEARING: frozenset[str] = frozenset(
 #: refusal.
 PROOF_ENVIRONMENT = "proof"
 
+#: A definition's label line, case-folded. With :data:`PROOF_ENVIRONMENT` and
+#: the claim-bearing names it bounds the region the node pass does not read as
+#: prose (:mod:`~kb_tools.kb_claimgraph.prose`).
+DEFINITION_ENVIRONMENT = "definition"
+
 #: The names a cross-reference's fragment may land on and get **no claim target
 #: at all** for: stage D contributes no pair where an anchor's fragment names one
 #: of these blocks (:func:`~kb_tools.kb_claimgraph.attribute._target_end`),

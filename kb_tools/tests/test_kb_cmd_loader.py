@@ -21,12 +21,12 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_schema
+from kb_tools import install_location, kb_index_lib, kb_schema
 from kb_tools.kb_cmd import cli as kb_cli
 from kb_tools.kb_cmd import index as kb_index
 
 _THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
 
 
@@ -328,7 +328,7 @@ def refreshed_mini_kb(tmp_path_factory) -> Path:
     shutil.copytree(_FIXTURE_SRC, kb)
     result = subprocess.run(
         [sys.executable, "-m", "kb_tools.refresh_kb_metadata", "--kb-root", str(kb)],
-        cwd=_REPO_ROOT,
+        cwd=_PKG_PARENT,
         capture_output=True,
         text=True,
         check=False,

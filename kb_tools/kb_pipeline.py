@@ -27,12 +27,18 @@ obeyed.
 Stdlib only.
 """
 
+import json
 import re
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
 
-from kb_tools import kb_index_lib, kb_util
+from kb_tools import install_location, kb_index_lib, kb_util
+from kb_tools.kb_survey.manifest import write_text_atomic
 
 # Exit codes. 0/2 keep kb_util's meanings (success; environment unfit, which
 # includes an unresolvable root and a failed git invocation) and 3 stays
@@ -55,11 +61,16 @@ _SUBJECT_RE = re.compile(rf"^{re.escape(LEDGER_PREFIX)} ([^\s|]+) \| ")
 # confused by a parser or by a reader.
 _TAG = f"[{LEDGER_PREFIX[:-1]}]"
 
-# The build's scratch layout, repo-root-relative. One definition per path, read
-# by the coverage checks that look there and by `kb_driver.steps`, which imports
-# these rather than restating them: a second spelling could send an artifact
-# somewhere the tool never looks.
-SCRATCH_RELROOT = f"{kb_util.SCRATCH_DIRNAME}/{kb_util.SCRATCH_BUILD_DIRNAME}"
+
+def scratch_relroot() -> str:
+    """The build's scratch layout root, repo-root-relative.
+
+    One definition, read by the coverage checks that look there and by
+    ``kb_driver``, which call this rather than restating it: a second spelling
+    could send an artifact somewhere the tool never looks.
+    """
+    return f"{kb_util.scratch_dirname()}/{kb_util.SCRATCH_BUILD_DIRNAME}"
+
 
 # Where the build charter lands, repo-root-relative and tracked. Not under the
 # scratch tree with the rest of the build's working artifacts: the start
@@ -78,6 +89,139 @@ CHARTER_RELPATH = "kb-build-charter.md"
 #: found by reading the boundary, not by inferring from silence.
 CHARTER_BODY_FIELD = "charter:"
 NO_CHARTER_BODY = "charter: none — this build was given none and runs on its sources"
+
+# Where the claim graph's node pass keeps its build state, repo-root-relative
+# and tracked, on the charter's placement and for its reasons: never under
+# kb-root/, which holds only what the finished KB is, and never under scratch,
+# which is wiped while a build still needs to resume from this. Swept into each
+# boundary commit by `_record`'s `git add -A`.
+NODE_PASS_RELPATH = "kb-build-node-pass.json"
+
+
+# --- the node-pass record ---------------------------------------------------
+#
+# Written only by `kb_claimgraph`'s `claims-declared` and `claims-discovered`
+# invocations and read by those two, `equations-minted` and `depends-attributed`.
+# Its reader and writer live here because `kb_claimgraph` imports this module
+# and not the reverse. This module stores verdicts; it never interprets one.
+
+
+class ReadState(StrEnum):
+    """How far the node pass has got with one leaf."""
+
+    UNREAD = "unread"
+    #: The leaf's whole outcome is in the record and its KB writes may not all have landed.
+    PLANNED = "planned"
+    LANDED = "landed"
+
+
+class LeafOutcome(StrEnum):
+    """What reading one leaf came to."""
+
+    MINTED = "minted"
+    #: The leaf's own no-claim sentence, carried in :attr:`LeafEntry.reason`.
+    NO_CLAIM = "no-claim"
+    #: Results were named and none of them anchored.
+    UNANCHORED = "unanchored"
+    NOTHING_TO_READ = "nothing-to-read"
+
+
+class Judgement(StrEnum):
+    CLAIM = "claim"
+    NOT_A_CLAIM = "not-a-claim"
+
+
+@dataclass(frozen=True)
+class PlannedClaim:
+    """One claim a leaf's outcome mints: its register title and the locator its marker is placed by."""
+
+    title: str
+    locator: str
+
+
+@dataclass(frozen=True)
+class ParagraphVerdict:
+    """One obligated paragraph's verdict. ``line`` is the 0-based line the paragraph begins on."""
+
+    line: int
+    judgement: Judgement
+
+
+@dataclass(frozen=True)
+class LeafEntry:
+    state: ReadState = ReadState.UNREAD
+    outcome: LeafOutcome | None = None
+    reason: str | None = None
+    claims: tuple[PlannedClaim, ...] = ()
+    verdicts: tuple[ParagraphVerdict, ...] = ()
+
+
+#: The record's own statement of what it joins to, carried in the file so a
+#: reader holding only the file is told.
+NODE_PASS_ABOUT = (
+    "The claim-graph node pass's build record: each leaf's read state and outcome, and a verdict for every "
+    "paragraph of readable prose that holds a cross-reference, identified by the 0-based line it begins on. "
+    "It joins to the tree at this build's own boundary commits, not to a KB a maintainer later edits."
+)
+
+
+@dataclass(frozen=True)
+class NodePassRecord:
+    leaves: Mapping[str, LeafEntry] = dataclass_field(default_factory=lambda: MappingProxyType({}))
+
+    def with_leaf(self, path: str, entry: LeafEntry) -> "NodePassRecord":
+        return NodePassRecord(leaves=MappingProxyType({**self.leaves, path: entry}))
+
+
+class NodePassRecordError(ValueError):
+    """The record on disk does not read as one."""
+
+
+def _entry_json(entry: LeafEntry) -> dict[str, object]:
+    return {
+        "state": entry.state.value,
+        "outcome": None if entry.outcome is None else entry.outcome.value,
+        "reason": entry.reason,
+        "claims": [{"title": claim.title, "locator": claim.locator} for claim in entry.claims],
+        "verdicts": [
+            {"line": verdict.line, "verdict": verdict.judgement.value}
+            for verdict in sorted(entry.verdicts, key=lambda verdict: verdict.line)
+        ],
+    }
+
+
+def _entry_of(raw: Mapping[str, object]) -> LeafEntry:
+    outcome = raw["outcome"]
+    return LeafEntry(
+        state=ReadState(raw["state"]),
+        outcome=None if outcome is None else LeafOutcome(outcome),
+        reason=raw["reason"],  # type: ignore[arg-type]
+        claims=tuple(PlannedClaim(title=c["title"], locator=c["locator"]) for c in raw["claims"]),  # type: ignore[attr-defined]
+        verdicts=tuple(
+            ParagraphVerdict(line=v["line"], judgement=Judgement(v["verdict"])) for v in raw["verdicts"]  # type: ignore[attr-defined]
+        ),
+    )
+
+
+def write_node_pass(repo_root: Path, record: NodePassRecord) -> None:
+    """Land ``record`` whole, deterministically ordered, through the toolchain's one atomic writer."""
+    payload = {
+        "about": NODE_PASS_ABOUT,
+        "leaves": {path: _entry_json(record.leaves[path]) for path in sorted(record.leaves)},
+    }
+    write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / NODE_PASS_RELPATH)
+
+
+def read_node_pass(repo_root: Path) -> NodePassRecord | None:
+    """The record, or ``None`` where no node pass has written one."""
+    path = repo_root / NODE_PASS_RELPATH
+    if not path.is_file():
+        return None
+    try:
+        leaves = json.loads(path.read_text(encoding="utf-8"))["leaves"]
+        return NodePassRecord(leaves=MappingProxyType({key: _entry_of(value) for key, value in leaves.items()}))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise NodePassRecordError(f"{path} does not read as a node-pass record: {error!r}") from error
 
 
 class PipelineError(RuntimeError):
@@ -348,26 +492,30 @@ def _check_claims_declared(ctx: CheckContext) -> CoverageReport:
 
 
 def _check_claims_discovered(ctx: CheckContext) -> CoverageReport:
-    """Claim discovery's exit condition: no document is still awaiting a reading.
+    """The node pass's exit condition: the record lists no leaf as unread or still planned.
 
-    The declared pass writes one reason — ``kb_index_lib.UNSCANNED_REASON``, its
-    own statement that no claim has been looked for in this document's prose —
-    and discovery's whole job is to replace every instance of it. A document
-    still carrying it is a document this stage did not reach.
+    The declared pass writes the record with every declaring leaf unread, and
+    this stage's whole job is to carry each one to landed. A leaf still unread
+    is one no reading reached; one still planned is one whose KB writes did not
+    all land.
     """
-    documents = _tree_documents(ctx.repo_root)
-    awaiting = sorted(path for path, text in documents.items() if kb_index_lib.UNSCANNED_REASON in text)
+    record = read_node_pass(ctx.repo_root)
+    pending = (
+        ()
+        if record is None
+        else tuple(sorted(path for path, entry in record.leaves.items() if entry.state is not ReadState.LANDED))
+    )
     detail = (
-        f"{kb_util.KB_DIRNAME}/ holds no document to read"
-        if not documents
-        else f"{len(awaiting)} document(s) still await a reading: {', '.join(awaiting[:5])}"
+        "no node-pass record stands, so no declared pass wrote one"
+        if record is None
+        else f"{len(pending)} leaf/leaves not yet landed: {', '.join(pending[:5])}"
     )
     return CoverageReport.declared(
         (
             CoverageUnit(
-                id="determinations",
-                source=str(kb_util.kb_root(ctx.repo_root)),
-                satisfied=bool(documents) and not awaiting,
+                id="node-pass",
+                source=str(ctx.repo_root / NODE_PASS_RELPATH),
+                satisfied=record is not None and not pending,
                 asserts_own_work=True,
                 detail=detail,
             ),
@@ -377,9 +525,10 @@ def _check_claims_discovered(ctx: CheckContext) -> CoverageReport:
 
 
 def _check_verify_gates(ctx: CheckContext) -> CoverageReport:
-    """The three verifiers, green. Two stages share it, for two different reasons.
+    """The three verifiers, green. Three stages share it, each for its own reason.
 
-    ``phase-3a`` is the tail's entry gate. ``depends-attributed`` is the head's
+    ``phase-3a`` is the tail's entry gate. ``equations-minted`` is the node
+    set's close, handed to a stage that reads the graph whole. ``depends-attributed`` is the head's
     exit, and it is this rather than an artifact check because dependency
     attribution is the one stage whose product cannot be found by looking: it
     writes ``- depends-on:`` bullets, how many is the corpus's answer, and an
@@ -464,15 +613,19 @@ def _check_meta_docs(ctx: CheckContext) -> CoverageReport:
 # it writes is swept into that commit rather than left dangling for the next
 # stage to pick up.
 
-#: The KB's orientation document, and the home of its scope pin — charter prose
-#: the build run writes there (`kb_tools/SPEC.md`, Project Scoping). Named
-#: rather than spelled twice: it is also the name `stamp_readiness_docs` seeds
-#: through :data:`READINESS_DOCS`, pin and orientation text together, and only
-#: where no file already stands there.
-SCOPE_PIN_DOC = "CLAUDE.md"
+#: The KB's orientation document — its agents file — and the home of its scope
+#: pin, charter prose the build run writes there (`kb_tools/SPEC.md`, Project
+#: Scoping). Named rather than spelled twice: it is also the name
+#: `stamp_readiness_docs` seeds through :data:`READINESS_DOCS`, pin and
+#: orientation text together, and only where no file already stands there.
+SCOPE_PIN_DOC = kb_index_lib.AGENTS_FILENAME
 
 READINESS_DOCS = (SCOPE_PIN_DOC, CONVENTIONS_DOC)
 PROJECT_NAME_FIELD = "{project-name}"
+
+#: The installed toolchain's PYTHONPATH entry, repo-root-relative, for a
+#: template that spells the sanctioned invocation.
+AGENTS_DIR_FIELD = "{agents-dir}"
 
 #: The scope pin's slot in :data:`SCOPE_PIN_DOC`'s template. The stamp fills it
 #: with what the build's charter states, so the document that says it carries
@@ -545,10 +698,14 @@ def scope_pin_text(repo_root: Path) -> str:
 def stamp_readiness_docs(ctx: CheckContext) -> list[str]:
     """Write the KB's readiness docs from their packaged templates.
 
-    Only-if-absent: a project that has authored its own CLAUDE.md or CONVENTIONS.md
-    keeps it. ``{project-name}`` is substituted from the repo directory name, and
-    ``{scope-pin}`` from the build's charter — the per-project facts these
-    otherwise canned documents carry.
+    Only-if-absent: a project that has authored its own AGENTS.md or
+    CONVENTIONS.md keeps it. Beside ``AGENTS.md`` it writes ``CLAUDE.md`` as the
+    one-line redirect to it, likewise only where none stands; a ``CLAUDE.md``
+    that is not that redirect is refused before anything is written
+    (:func:`kb_index_lib.unmigrated_agents_file`). ``{project-name}`` is
+    substituted from the repo directory name, ``{agents-dir}`` from the
+    installed location, and ``{scope-pin}`` from the build's charter — the
+    per-project facts these otherwise canned documents carry.
 
     **Why the pin lands here and not when the build opens.** ``kb-root/`` holds
     nothing outside ``.index/`` until the document graph writes the tree, so a
@@ -557,10 +714,13 @@ def stamp_readiness_docs(ctx: CheckContext) -> list[str]:
     reading ``pre.kb-root`` refuses a fresh build on. By this stage the tree is
     populated already and the stamp cannot change that answer.
 
-    Neither file is the corpus-invariant channel: those live in
+    None of them is the corpus-invariant channel: those live in
     ``invariants.md``, which is what the toolchain parses for framework nodes.
     """
     kb = kb_util.kb_root(ctx.repo_root)
+    unmigrated = kb_index_lib.unmigrated_agents_file(kb)
+    if unmigrated is not None:
+        raise PipelineError(unmigrated)
     reports = []
     for name in READINESS_DOCS:
         target = kb / name
@@ -576,7 +736,10 @@ def stamp_readiness_docs(ctx: CheckContext) -> list[str]:
         text = source.read_text(encoding="utf-8")
         # Per template, and the pin read only for a template that takes one: a
         # stamp that writes nothing must not fail over a charter it never needs.
-        fields = {PROJECT_NAME_FIELD: ctx.repo_root.name}
+        fields = {
+            PROJECT_NAME_FIELD: ctx.repo_root.name,
+            AGENTS_DIR_FIELD: install_location.current().agents_relpath,
+        }
         if SCOPE_PIN_FIELD in text:
             fields[SCOPE_PIN_FIELD] = scope_pin_text(ctx.repo_root)
         # Checked on the template, never on the result: a charter is arbitrary
@@ -593,6 +756,12 @@ def stamp_readiness_docs(ctx: CheckContext) -> list[str]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
         reports.append(f"{name}: written from {source.name}")
+    redirect = kb / kb_index_lib.AGENTS_REDIRECT_FILENAME
+    if redirect.exists():
+        reports.append(f"{redirect.name}: present, already the redirect")
+    else:
+        redirect.write_text(f"{kb_index_lib.AGENTS_REDIRECT}\n", encoding="utf-8")
+        reports.append(f"{redirect.name}: written as the redirect to {SCOPE_PIN_DOC}")
     return reports
 
 
@@ -601,8 +770,8 @@ class ClaimgraphInvocation:
     """Which ``kb_claimgraph`` invocation a stage is, as its own command line spells it.
 
     **The table that used to exist nowhere.** ``--pass 1 --scope block-hosted``,
-    ``--pass 1 --scope full`` and ``--pass 2`` are three stages of this
-    pipeline, and until this declaration the pairing lived in two places that
+    ``--pass 1 --scope full``, ``--pass 1 --scope equations`` and ``--pass 2``
+    are four stages of this pipeline, and until this declaration the pairing lived in two places that
     could not see each other: the driver composed the flags from pass numbers
     of its own, and the tool parsed them back into a branch of its own. Both
     read this now, in opposite directions — :attr:`flags` composes and
@@ -625,11 +794,13 @@ class ClaimgraphInvocation:
 #: because the stages below are what the two values distinguish.
 CLAIMGRAPH_SCOPE_BLOCK_HOSTED = "block-hosted"
 CLAIMGRAPH_SCOPE_FULL = "full"
+CLAIMGRAPH_SCOPE_EQUATIONS = "equations"
 
-# The three claim-graph invocations, named before the table so the stage that
+# The four claim-graph invocations, named before the table so the stage that
 # declares one and the flags composed from it are one value.
 _DECLARED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_BLOCK_HOSTED)
 _DISCOVERED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_FULL)
+_EQUATIONS_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_EQUATIONS)
 _ATTRIBUTED_INVOCATION = ClaimgraphInvocation(which_pass=2)
 
 
@@ -655,9 +826,14 @@ class Stage:
     inference and the unit asserts that work is there nothing left to assert
     (:func:`_excused`).
 
-    ``claimgraph_invocation`` is set on the three stages ``kb_claimgraph`` runs
+    ``claimgraph_invocation`` is set on the four stages ``kb_claimgraph`` runs
     and on no other — the mapping between this vocabulary and that tool's
     command line, read from both ends.
+
+    ``mints_nodes`` marks a stage that may add a node to the claim graph. The
+    stages that do form one contiguous run, and ``kb_index_lib.scan_authored_ids``
+    keeps the same keys across every stage after it: the node set is fixed
+    before any edge is drawn over it.
     """
 
     id: str
@@ -668,6 +844,7 @@ class Stage:
     pre_commit: Callable[["CheckContext"], list[str]] | None = None
     work_is_inference: bool = False
     claimgraph_invocation: ClaimgraphInvocation | None = None
+    mints_nodes: bool = False
 
 
 # The frozen vocabulary. Ids are a cross-team contract — templates elsewhere
@@ -712,6 +889,7 @@ STAGES: tuple[Stage, ...] = (
         "declared claim graph",
         coverage=_check_claims_declared,
         claimgraph_invocation=_DECLARED_INVOCATION,
+        mints_nodes=True,
     ),
     Stage(
         "claims-discovered",
@@ -719,6 +897,14 @@ STAGES: tuple[Stage, ...] = (
         coverage=_check_claims_discovered,
         work_is_inference=True,
         claimgraph_invocation=_DISCOVERED_INVOCATION,
+        mints_nodes=True,
+    ),
+    Stage(
+        "equations-minted",
+        "equation nodes minted",
+        coverage=_check_verify_gates,
+        claimgraph_invocation=_EQUATIONS_INVOCATION,
+        mints_nodes=True,
     ),
     Stage(
         "depends-attributed",

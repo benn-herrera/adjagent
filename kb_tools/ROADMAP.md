@@ -47,7 +47,7 @@ retire; an item that conflicts with one of them is the defect.
 2. **Pre-split invariants parsing, deprecation.** A KB built before
    `kb-root/invariants.md` split off as the framework-node source still
    parses `### INVARIANT-*` headings and `- Axiom N:` bullets from
-   `CLAUDE.md`. `verify_kb_metadata.py` carries a deprecation note for this
+   `AGENTS.md`. `verify_kb_metadata.py` carries a deprecation note for this
    compatibility path, live until the headings move.
 
 3. **Generality corpus — arXiv papers, varied in construction.** The
@@ -176,10 +176,10 @@ retire; an item that conflicts with one of them is the defect.
 
    **Why pinning rather than single-sourcing.** True single-sourcing needs one
    side to read the other, and neither direction is affordable. `kb_tools`
-   cannot read `shared-chunks.toml`: `gen-defs.py` is project space and never
+   cannot read `shared-chunks.toml`: `gen_defs` is project space and never
    installs, so an installed `kb_tools` would import something absent. The
    inverse is architecturally sound — a generator may read its inputs — but
-   `gen-defs.py` is stdlib-only and renders the whole definition set, most of
+   `gen_defs` is stdlib-only and renders the whole definition set, most of
    it unrelated to this toolchain; importing a shipped package to render it
    would make the agent set's build depend on this one importing cleanly,
    which is the coupling the surface boundary exists to keep out.
@@ -311,7 +311,7 @@ retire; an item that conflicts with one of them is the defect.
     **The stronger reason for that field is not rewind.** Control-flow state
     lives in a directory whose entire contract is that it can be deleted: the
     repository concurrency lock is anchored by `runlog.repo_lock_path` inside
-    `.claude-temp/` — the directory a routine restage wipes — so a restage
+    the scratch directory — the one a routine restage wipes — so a restage
     landing mid-run removes the lock and a second driver can start against the
     same repository and ledger. That instance turned up in an unrelated
     investigation rather than by looking for the class, and nothing in the

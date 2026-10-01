@@ -31,7 +31,7 @@ def test_the_table_covers_the_whole_stage_vocabulary_and_the_walk_covers_the_tab
     fails it rather than quietly buying a green by not going there.
     """
     assert steps.TABLE_STAGE_IDS == kb_pipeline.STAGE_IDS
-    assert len(steps.TABLE_STAGE_IDS) == 9
+    assert len(steps.TABLE_STAGE_IDS) == 10
 
 
 def test_every_row_of_the_table_is_executed_by_a_handler_or_driven_by_another_row() -> None:
@@ -188,7 +188,7 @@ def test_declared_outputs_are_scratch_relative_layout_patterns() -> None:
     for step in steps.STEPS:
         for output in step.outputs:
             assert not output.startswith("/")
-            assert not output.startswith(steps.SCRATCH_ROOT), "outputs are relative to the scratch root"
+            assert not output.startswith(kb_pipeline.scratch_relroot()), "outputs are relative to the scratch root"
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +393,10 @@ def test_each_claim_graph_stage_composes_and_resolves_to_itself(stage: kb_pipeli
 def test_every_claim_graph_row_belongs_to_a_stage_that_declares_an_invocation() -> None:
     """The driver has no pass number of its own left to get wrong."""
     invoking = {stage.id for stage in kb_pipeline.STAGES if stage.claimgraph_invocation}
-    rows = {steps.STEPS_BY_ID[step_id].stage for step_id in ("declared.build", "discover.build", "depends.attribute")}
+    rows = {
+        steps.STEPS_BY_ID[step_id].stage
+        for step_id in ("declared.build", "discover.build", "equations.build", "depends.attribute")
+    }
 
     assert rows == invoking
 

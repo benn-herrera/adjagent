@@ -1,0 +1,11 @@
+[harness.project-temp-dir]
+text = ".claude-temp"
+
+[harness.project-harness-dir]
+text = ".claude"
+
+[harness.user-harness-dir]
+text = "~/.claude"
+
+[harness.agents-file]
+text = "CLAUDE.md"

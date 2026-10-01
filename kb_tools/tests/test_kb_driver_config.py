@@ -52,7 +52,7 @@ def test_minimal_config_applies_every_default(tmp_path: Path) -> None:
     assert cfg.timeouts.by_step == {}
     assert cfg.retry.backoff_seconds == config.DEFAULT_BACKOFF_SECONDS
     assert cfg.log.level == "INFO"
-    assert cfg.log.run_dir == Path(config.DEFAULT_RUN_DIR)
+    assert cfg.log.run_dir == Path(config.default_run_dir())
     assert cfg.decisions == {}
 
 
@@ -131,7 +131,7 @@ def test_flags_alone_specify_a_run_and_every_other_field_defaults() -> None:
     assert cfg.run.charter_file == Path(kb_pipeline.CHARTER_RELPATH)
     assert cfg.run.runner is None
     assert cfg.claude.command == config.DEFAULT_CLAUDE_COMMAND
-    assert cfg.log.run_dir == Path(config.DEFAULT_RUN_DIR)
+    assert cfg.log.run_dir == Path(config.default_run_dir())
     assert cfg.decisions == {}
 
 
@@ -206,7 +206,7 @@ def test_the_resume_line_reproduces_what_the_run_was_given(
     ("run_dir", "expected"),
     [
         (None, "--source a.tex"),
-        (config.DEFAULT_RUN_DIR, "--source a.tex"),
+        (config.default_run_dir(), "--source a.tex"),
         (Path("/outside/runs"), f"--source a.tex {config.RUN_DIR_FLAG} /outside/runs"),
     ],
 )

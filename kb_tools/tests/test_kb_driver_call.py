@@ -125,7 +125,7 @@ def repo(tmp_path: Path) -> Path:
     slot is checked against disk before its call is made.
     """
     root = tmp_path / "repo"
-    (root / steps.SCRATCH_ROOT).mkdir(parents=True)
+    (root / kb_pipeline.scratch_relroot()).mkdir(parents=True)
     (root / "kb-root").mkdir()
     for name in REVIEW_DOCS.values():
         (root / "kb-root" / name).write_text(f"# {name}\n", encoding="utf-8")
@@ -177,7 +177,7 @@ def _changed(before: Mapping[Path, str], after: Mapping[Path, str]) -> set[Path]
 
 def _passage(repo: Path) -> Path:
     """``ov.docs``' one declared artifact: the prose answer, under the scratch layout."""
-    return repo / steps.SCRATCH_ROOT / steps.overview_prose(stage=steps.STEPS_BY_ID["ov.docs"].stage)
+    return repo / kb_pipeline.scratch_relroot() / steps.overview_prose(stage=steps.STEPS_BY_ID["ov.docs"].stage)
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ def test_the_driver_persists_a_never_writers_return_and_writes_nowhere_else(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
     harness = build(fake_model.clean(VERDICT_TEXT))
-    findings = repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author="tech-writer-reviewer")
+    findings = repo / kb_pipeline.scratch_relroot() / steps.findings(stage="phase-5", author="tech-writer-reviewer")
     before = _snapshot(harness.root)
 
     outcome = harness.caller.execute(
@@ -278,7 +278,7 @@ def test_a_path_a_seat_could_not_act_on_is_refused_before_the_call(repo: Path, b
     at the seat — it goes looking — so all three are refused before it is asked.
     """
     harness = build(fake_model.clean(VERDICT_TEXT))
-    findings = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
+    findings = repo / kb_pipeline.scratch_relroot() / "review" / "phase-5-r1-tech-writer-reviewer.md"
     sound = review_slots(repo)
     broken = {
         "is relative": {**sound, "readme-path": "kb-root/README.md"},
@@ -309,7 +309,7 @@ def test_an_optional_path_slot_may_carry_the_named_absence(repo: Path, build: Ca
 
 def test_an_empty_return_never_becomes_an_artifact(repo: Path, build: Callable[..., Harness]) -> None:
     harness = build(fake_model.clean("   \n"))
-    target = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
+    target = repo / kb_pipeline.scratch_relroot() / "review" / "phase-5-r1-tech-writer-reviewer.md"
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=20, slots=review_slots(repo), outputs=(target,))
@@ -328,7 +328,7 @@ def test_a_call_carries_its_rows_seat_on_agent(repo: Path, build: Callable[..., 
     """``--agent`` is how the seat's own definition — and its model pin — is selected."""
     step = steps.STEPS_BY_ID["p5.review"]
     harness = build(fake_model.clean(VERDICT_TEXT))
-    findings = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
+    findings = repo / kb_pipeline.scratch_relroot() / "review" / "phase-5-r1-tech-writer-reviewer.md"
 
     outcome = harness.caller.execute(call.CallRequest(step=step, seq=1, slots=review_slots(repo), outputs=(findings,)))
 
@@ -534,7 +534,7 @@ def test_a_contract_failure_re_asks_the_same_step_once_with_the_complaint(
     harness = build(
         fake_model.sequence(fake_model.clean("no verdict anywhere in this text"), fake_model.clean(VERDICT_TEXT))
     )
-    findings = repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author="tech-writer-reviewer")
+    findings = repo / kb_pipeline.scratch_relroot() / steps.findings(stage="phase-5", author="tech-writer-reviewer")
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=5, slots=review_slots(repo), outputs=(findings,))
@@ -556,7 +556,7 @@ def test_a_second_contract_failure_exits_17_naming_the_step_and_the_complaint(
     repo: Path, build: Callable[..., Harness]
 ) -> None:
     harness = build(fake_model.clean("VERDICT: critical=none"))
-    findings = repo / steps.SCRATCH_ROOT / steps.findings(stage="phase-5", author="tech-writer-reviewer")
+    findings = repo / kb_pipeline.scratch_relroot() / steps.findings(stage="phase-5", author="tech-writer-reviewer")
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=5, slots=review_slots(repo), outputs=(findings,))
@@ -577,7 +577,7 @@ def test_a_premature_dispatch_fails_the_contract_check_rather_than_passing_as_a_
     # work never happened — the false green this architecture exists to
     # eliminate.
     harness = build(fake_model.sequence(fake_model.premature_dispatch(VERDICT_TEXT), fake_model.clean(VERDICT_TEXT)))
-    findings = repo / steps.SCRATCH_ROOT / "review" / "phase-5-r1-tech-writer-reviewer.md"
+    findings = repo / kb_pipeline.scratch_relroot() / "review" / "phase-5-r1-tech-writer-reviewer.md"
 
     outcome = harness.caller.execute(
         call.CallRequest(step=steps.STEPS_BY_ID["p5.review"], seq=1, slots=review_slots(repo), outputs=(findings,))

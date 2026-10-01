@@ -11,7 +11,10 @@ a claim where a rule settles it, and left open where none does:
   try. That last one is a fallback rather than a rule: it settles nothing about
   direction and nothing about which claim, and where the document happens to
   host one it narrows to that claim by arithmetic rather than by reading
-  anything.
+  anything. **The node pass's verdict precedes all three** for a reference in
+  readable prose (:mod:`prose`): a paragraph judged not a claim gives the
+  reference no source and so no pair, and one judged a claim gives it that
+  paragraph's claim alone. The fallback is what is left for prose nobody judged.
 * the **target** end, in this order. A reference whose fragment names a block's
   own source label lands on that block's claim; a reference whose fragment names
   a block :data:`inventory.NOT_A_CLAIM_TARGET` classifies contributes no pair at
@@ -231,11 +234,11 @@ text, in the formal notation LaTeX generated — *a second certificate, distinct
 from the ``V`` of Theorem 2*, *not derivable from the bare cap-table dynamics
 (Proposition 8(iii))*. What the narrowing cannot settle is the *direction of
 dependence*; the fact that the source names the target is not in doubt and is
-the whole content of the class. Measured on that same tree at the declared
-graph, four of five such references read as contrasts or pointers rather than
-dependencies, so a stage that recorded only dependencies discarded four facts to
-avoid one wrong one — and left the graph asserting the claims are unrelated,
-which is a wrong answer arrived at silently.
+the whole content of the class. The notation settles that the relationship
+exists and not whether it is a dependency, so a stage that recorded only
+dependencies would discard every reference the markup cannot classify — and
+leave the graph asserting the claims are unrelated, which is a wrong answer
+arrived at silently.
 
 Three properties keep it from being a weak ``depends``. It carries **no
 acyclicity constraint**: two claims naming each other is the author's argument,
@@ -333,8 +336,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from .. import kb_index_lib
+from .. import kb_index_lib, kb_pipeline
 from ..kb_write import render
+from . import prose
 from .graph import AuthoredGraph, ClaimNode
 from .inventory import (
     NOT_A_CLAIM_TARGET,
@@ -552,9 +556,19 @@ def _equation_claims(
 
 
 def _source_end(
-    anchor: Anchor, blocks: Sequence[Block], hosted: Sequence[ClaimNode], proofs: Mapping[int, _Proof]
+    anchor: Anchor,
+    blocks: Sequence[Block],
+    hosted: Sequence[ClaimNode],
+    proofs: Mapping[int, _Proof],
+    judged: tuple[prose.Standing, ClaimNode | None],
 ) -> tuple[tuple[ClaimNode, ...], bool]:
     """The claims the reference may belong to, and whether containment settled it.
+
+    **The node pass's verdict comes first** (``judged``, :func:`prose.standing`).
+    A reference in prose judged not a claim has no source and yields no pair; one
+    in a paragraph judged a claim has that paragraph's claim as its source and no
+    other. Everywhere else — inside a block, or in prose nobody judged — the
+    rules below apply.
 
     Settled means a *direction* was established, which only a proof does: the
     claim the proof establishes rests on what the proof draws on. A reference
@@ -564,6 +578,11 @@ def _source_end(
     claim out of that fallback is a document hosting one, not a rule that read
     anything.
     """
+    standing, claim = judged
+    if standing is prose.Standing.NOT_A_CLAIM:
+        return (), False
+    if standing is prose.Standing.CLAIM:
+        return ((claim,) if claim is not None else ()), False
     if (anchor.hosting_environment or "").casefold() == PROOF_ENVIRONMENT:
         block = hosting_block(anchor.line, blocks)
         proof = proofs.get(block.start) if block is not None else None
@@ -739,7 +758,9 @@ class Attribution:
     demoted: tuple[tuple[str, str], ...] = ()
 
 
-def narrow(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Attribution:
+def narrow(
+    tree: Tree, graph: AuthoredGraph, inventory: Inventory, record: kb_pipeline.NodePassRecord | None = None
+) -> Attribution:
     """Stage B's anchors, split into the edges containment settles and the pairs left open.
 
     Deterministic and total: nothing is sampled, nothing is dropped silently,
@@ -747,10 +768,25 @@ def narrow(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Attributio
     empty question. A pair the narrowing settled is never also asked about,
     a ring's demoted edges included — what the ring refuses is the set, and
     containment's reading of each member stands as the reference it becomes.
+
+    ``record`` is the node pass's, whose verdicts decide the source end of a
+    reference in readable prose (:func:`_source_end`). ``None`` is a record
+    judging nothing, every such reference unjudged.
     """
     blocks = by_document(inventory.blocks)
     fences = by_document(inventory.fences)
     proofs = _proofs(graph, inventory)
+    readable: dict[str, prose.Readable] = {}
+
+    def judged(anchor: Anchor) -> tuple[prose.Standing, ClaimNode | None]:
+        if anchor.document not in readable:
+            readable[anchor.document] = prose.readable(tree.documents[anchor.document], inventory)
+        leaf = readable[anchor.document]
+        standing = prose.standing(anchor, leaf, None if record is None else record.leaves.get(anchor.document))
+        if standing is not prose.Standing.CLAIM:
+            return standing, None
+        claim = prose.claim_of(anchor, leaf, (node.id for node in graph.hosted_by(anchor.document)))
+        return standing, None if claim is None else graph.nodes[claim]
 
     settled: dict[tuple[str, str], str] = {}
     pairs: dict[str, dict[str, str]] = {}
@@ -781,6 +817,7 @@ def narrow(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Attributio
             blocks.get(anchor.document, ()),
             graph.hosted_by(anchor.document),
             proofs.get(anchor.document, {}),
+            judged(anchor),
         )
 
         for source in from_ends:
@@ -990,7 +1027,11 @@ def _ask(selector: Selector, question: Question, *, report: str | None, cycle: s
 
 
 def attribute_dependencies(
-    tree: Tree, graph: AuthoredGraph, inventory: Inventory, selector: Selector | None
+    tree: Tree,
+    graph: AuthoredGraph,
+    inventory: Inventory,
+    selector: Selector | None,
+    record: kb_pipeline.NodePassRecord | None = None,
 ) -> tuple[tuple[str, str], ...]:
     """The authored dependency edges, as ``(source, target)`` claim-id pairs.
 
@@ -1010,7 +1051,7 @@ def attribute_dependencies(
     did *not* decide it, and a build that guessed at the uncertain half would be
     worse than one that dropped the certain half.
     """
-    narrowed = narrow(tree, graph, inventory)
+    narrowed = narrow(tree, graph, inventory, record)
 
     mechanical = check_acyclic(graph, narrowed.edges)
     if mechanical:

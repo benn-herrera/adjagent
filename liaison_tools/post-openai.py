@@ -2,8 +2,7 @@
 """POST a messages array to an OpenAI-compatible
 chat completions endpoint using SSE streaming, reassemble delta content /
 tool_calls, and emit the canonical stdout contract (text body, or
-"TOOL_CALLS\\n<json>"). See ../../tools/test_inference.py for the urllib+SSE
-pattern this script mirrors.
+"TOOL_CALLS\\n<json>").
 
 INVARIANT: stdlib only. No third-party dependencies. Ever.
 Adding `pip install` of anything is not on the table — if you reach for one,
@@ -29,7 +28,10 @@ env vars:
                                 spelling of the same opt-in; either alone is
                                 enough.
   MAX_TOKENS         (optional) integer max response tokens (default: 32768)
-  ENABLE_THINKING    (optional) boolean (exactly true or false) (default: true)
+  ENABLE_THINKING    (optional) "true" in any case enables, any other value
+                                disables; sent as
+                                chat_template_kwargs.enable_thinking
+                                (default: true)
   TEMPERATURE        (optional) float in [0.0, 2.0] (default: 0.0)
   DEBUG_POST         (optional) "true" to dump the request payload to stderr
   DEBUG_RESPONSE     (optional) "true" to tee the raw SSE stream + reassembled output to stderr
@@ -63,7 +65,7 @@ exit codes:
   0  a complete reply; stdout carries the stdout contract above
   1  usage / configuration / transport failure (retryable by the caller)
   3  the endpoint completed the call but the reply is incomplete — a
-     finish_reason other than stop/tool_calls (e.g. "length"). Whatever
+     finish_reason other than stop/tool_calls/function_call (e.g. "length"). Whatever
      arrived is still written to stdout for the audit trail, but it must not
      be recorded as a complete reply. Retrying the same request will not help
   4  the endpoint returned an empty completion with a normal finish reason: a

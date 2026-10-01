@@ -1,12 +1,15 @@
 """Claim discovery: the labelled render, the checks over one answer, and the run end to end.
 
-**Every check here runs against a fixed inference.** The seam is
+**Every check here runs against a fixed inference, at one of two seams.** The
+prompt and the transport are checked at
 :class:`kb_tools.kb_claimgraph.ask.SeatAsk` — a seat and a prompt in, response
-text and an ``Outcome`` out — and the fake reads the prompt the stage actually
-composed and answers from a table keyed by document path. So the ask, the reply
-parse, both transport failure paths, every mechanical exclusion, each of the two
-re-asks, the per-document write and the run's own exit condition are all
-exercised, and none of it needs a model to be reachable.
+text and an ``Outcome`` out — where the fake reads the prompt the stage actually
+composed. Everything below the ask is checked one seam up, at
+:class:`~kb_tools.kb_claimgraph.identify.Identifier`, where the fake composes the
+answer text a seat would return and hands it to the production parse: the reply
+parse, every mechanical exclusion, each of the re-asks, the per-leaf write and
+the run's own exit condition are exercised, none of it needs a model, and none
+of it depends on the wording of a prompt.
 
 **Nothing here asserts agreement between two live runs**, and nothing could: the
 answers are fixed, so what these checks establish is that the mechanism holds
@@ -33,10 +36,10 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_schema, kb_util, refresh_kb_metadata, verify_kb_metadata
+from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, refresh_kb_metadata, verify_kb_metadata
 from kb_tools.inference import Outcome
-from kb_tools.kb_claimgraph import ask, conform, discover, graph, identify, inventory, label, tree, write
-from kb_tools.kb_claimgraph.assemble import UNSCANNED_REASON
+from kb_tools.kb_claimgraph import ask, discover, graph, identify, inventory, label, tree
+from kb_tools.kb_claimgraph.assemble import BLOCKLESS_REASON
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import AnswerFormatError
 from kb_tools.kb_driver import envelope
@@ -122,18 +125,18 @@ _TREE = {
 #: later check states a label rather than an ordinal nobody can follow. They are
 #: the render's coordinates, not the answer's: an answer names a sentence by
 #: quoting its opening, and carries the label only as the cross-check.
-_CLOSURE_LABEL = "S3"
-_UNIQUENESS_LABEL = "S5"
+_CLOSURE_LABEL = "S2"
+_UNIQUENESS_LABEL = "S4"
 
 #: What §1.2 makes of each of those starts over the default answer: from the
 #: start to the next start in the same paragraph, or to the paragraph's end.
-#: ``S3`` runs to ``S4`` because nothing else starts in that paragraph; ``S5``
-#: runs to ``S9``, across the fence flush against the prose it interrupts.
-_CLOSURE_EXTENT = "S3-S4"
-_UNIQUENESS_EXTENT = "S5-S9"
+#: ``S2`` runs to ``S3`` because nothing else starts in that paragraph; ``S4``
+#: runs to ``S8``, across the fence flush against the prose it interrupts. The
+#: heading carries no label, a heading being no sentence of the leaf's prose.
+_CLOSURE_EXTENT = "S2-S3"
+_UNIQUENESS_EXTENT = "S4-S8"
 
-_SEPARATED_FENCE_LOCATOR = "S11-S13"
-_HEADING_LOCATOR = "S1"
+_SEPARATED_FENCE_LOCATOR = "S10-S12"
 
 #: The openings a seat quotes, each lifted from the corpus above. A quote is the
 #: opening of the sentence a result begins at and never the whole of it: §2.3's
@@ -255,32 +258,90 @@ class FakeInference:
 _Turn = tuple[tuple[_Block, ...], str]
 
 
-class ScriptedInference:
-    """An :class:`ask.SeatAsk` answering one scripted turn per call, keyed by document.
+class FakeIdentifier:
+    """An :class:`identify.Identifier` answering from a table keyed by document path.
 
-    :class:`FakeInference` answers one thing on the ask and another on every
+    What a seat would return is composed with :func:`ask.identify_answer_block`
+    and read back through :func:`ask.parse_identify_answer`, so the parse is the
+    production one and only the prompt is skipped. A document with no entry
+    answers with no block at all. ``trailing`` and ``on_retry_trailing`` are
+    text returned beside the answer on the ask and on the re-ask; ``reask``
+    answers a per-claim re-ask keyed by the quote it is about, a quote with no
+    entry being declined with "none of these".
+    """
+
+    def __init__(
+        self,
+        answers=None,
+        *,
+        on_retry=None,
+        reask: dict[str, _Block] | None = None,
+        trailing: str = "",
+        on_retry_trailing: str = "",
+    ):
+        self._answers = _ANSWERS if answers is None else answers
+        self._on_retry = on_retry
+        self._reask = reask or {}
+        self._trailing = trailing
+        self._on_retry_trailing = on_retry_trailing
+        #: One entry per document ask: the document, and the report or missing
+        #: paragraphs it carried.
+        self.asks: list[tuple[str, str | None, tuple[str, ...]]] = []
+        #: One entry per per-claim re-ask: the quote it was about.
+        self.reasks: list[str] = []
+
+    @property
+    def calls(self) -> int:
+        return len(self.asks) + len(self.reasks)
+
+    def identify(self, reading, *, report, missing=()):
+        self.asks.append((reading.document, report, tuple(missing)))
+        retrying = report is not None or bool(missing)
+        table = self._on_retry if (retrying and self._on_retry is not None) else self._answers
+        blocks, reason = table.get(reading.document, ((), ""))
+        text = ask.identify_answer_block(
+            _records(blocks), reason, nothing_further=not blocks and not reason and not reading.may_decline
+        )
+        text += self._on_retry_trailing if retrying else self._trailing
+        return ask.parse_identify_answer(text, document=reading.document)
+
+    def re_ask(self, reading, unresolved):
+        self.reasks.append(unresolved.record.quote)
+        chosen = self._reask.get(unresolved.record.quote)
+        if chosen is None:
+            return ask.parse_claim_reask_answer(
+                f"{ask.NONE_OF_THESE_OPEN}\n{ask.NONE_OF_THESE_CLOSE}\n", document=reading.document
+            )
+        return ask.parse_claim_reask_answer(ask.identify_answer_block(_records([chosen])), document=reading.document)
+
+
+class ScriptedIdentifier:
+    """An :class:`identify.Identifier` answering one scripted turn per document ask.
+
+    :class:`FakeIdentifier` answers one thing on the ask and another on every
     re-ask, which cannot express a document whose first two answers fail
-    *different* classes — and which class each answer failed is the whole of
-    what a sequence is about. A call past the last scripted turn is the call
-    bound broken, and fails here rather than looping.
+    *different* classes. A call past the last scripted turn is the call bound
+    broken, and fails here rather than looping.
     """
 
     def __init__(self, script: dict[str, tuple[_Turn, ...]]):
         self._script = script
         self._taken: Counter[str] = Counter()
-        self.prompts: list[str] = []
+        self.reports: list[str | None] = []
 
-    def __call__(
-        self, *, seat: str, prompt: str, cwd: Path | None = None, capture_path: Path | None = None
-    ) -> tuple[str, Outcome]:
-        del seat, cwd, capture_path
-        self.prompts.append(prompt)
-        document = _DOCUMENT_RE.search(prompt).group(1)
-        turns = self._script[document]
-        assert self._taken[document] < len(turns), f"{document}: a call past the last scripted turn"
-        blocks, trailing = turns[self._taken[document]]
-        self._taken[document] += 1
-        return ask.identify_answer_block(_records(blocks)) + trailing, Outcome.OK
+    def identify(self, reading, *, report, missing=()):
+        del missing
+        self.reports.append(report)
+        turns = self._script[reading.document]
+        assert self._taken[reading.document] < len(turns), f"{reading.document}: a call past the last scripted turn"
+        blocks, trailing = turns[self._taken[reading.document]]
+        self._taken[reading.document] += 1
+        return ask.parse_identify_answer(
+            ask.identify_answer_block(_records(blocks)) + trailing, document=reading.document
+        )
+
+    def re_ask(self, reading, unresolved):
+        raise AssertionError("no scripted document fails a claim")
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +366,7 @@ def consumer(tmp_path: Path) -> Path:
 
 
 def _scratch(repo: Path) -> Path:
-    return repo / kb_util.SCRATCH_DIRNAME / "claimgraph"
+    return repo / kb_util.scratch_dirname() / "claimgraph"
 
 
 @pytest.fixture
@@ -320,13 +381,8 @@ def _identifier(inference: ask.SeatAsk, *, cwd: Path = Path(".")) -> ask.ModelId
     return ask.ModelIdentifier(cwd=cwd, ask=inference)
 
 
-def _discover(repo: Path, inference: FakeInference):
-    return discover.build(
-        kb_root=repo / "kb-root",
-        repo_root=repo,
-        scratch=_scratch(repo),
-        identifier=_identifier(inference),
-    )
+def _discover(repo: Path, identifier: identify.Identifier):
+    return discover.build(kb_root=repo / "kb-root", repo_root=repo, scratch=_scratch(repo), identifier=identifier)
 
 
 def _texts(kb_root: Path) -> dict[str, str]:
@@ -353,106 +409,43 @@ def _entries(repo: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_the_scope_is_the_awaiting_partition_and_nothing_else(declared: Path):
-    state = conform.pass_two_gate(tree.read(declared / "kb-root"))
-    assert state.hosting == ("vol/alpha.md",)
-    assert state.awaiting == ("vol/epsilon.md", "vol/zeta.md")
-    assert state.determined == ()
+def test_the_declared_pass_records_every_leaf_unread_and_nothing_else(declared: Path):
+    """The node pass's scope is the record's leaves, and the declared pass lists every one of them."""
+    record = kb_pipeline.read_node_pass(declared)
+
+    assert record is not None
+    assert sorted(record.leaves) == ["vol/alpha.md", "vol/epsilon.md", "vol/zeta.md"]
+    assert {entry.state for entry in record.leaves.values()} == {kb_pipeline.ReadState.UNREAD}
 
 
-def test_a_document_carrying_an_authored_reason_is_not_reopened(declared: Path):
-    leaf = declared / "kb-root" / "vol" / "zeta.md"
-    leaf.write_text(
-        leaf.read_text(encoding="utf-8").replace(UNSCANNED_REASON, _ZETA_REASON),
-        encoding="utf-8",
+def test_a_leaf_hosting_a_block_is_read_too(declared: Path):
+    """THESIS gap 1 is any claim constructed in prose, with no exception for a leaf that also has blocks."""
+    identifier = FakeIdentifier()
+    assert not _discover(declared, identifier).failed
+    assert sorted(document for document, _, _ in identifier.asks) == ["vol/alpha.md", "vol/epsilon.md", "vol/zeta.md"]
+
+
+def test_a_leaf_the_record_holds_landed_is_not_asked_again(declared: Path):
+    record = kb_pipeline.read_node_pass(declared)
+    kb_pipeline.write_node_pass(
+        declared,
+        record.with_leaf(
+            "vol/zeta.md",
+            kb_pipeline.LeafEntry(state=kb_pipeline.ReadState.LANDED, outcome=kb_pipeline.LeafOutcome.NO_CLAIM),
+        ),
     )
-    inference = FakeInference()
-    assert not _discover(declared, inference).failed
-    assert [_DOCUMENT_RE.search(prompt).group(1) for prompt in inference.prompts] == ["vol/epsilon.md"]
+    identifier = FakeIdentifier()
+    assert not _discover(declared, identifier).failed
+    assert "vol/zeta.md" not in [document for document, _, _ in identifier.asks]
 
 
-def test_a_run_over_a_tree_the_declared_pass_has_not_touched_stops_before_the_ask(consumer: Path):
-    """The stop is a comparison over the tree rather than a refusal of its own.
-
-    The entry condition no longer spells "no frontmatter": every leaf reads as
-    one nobody has read for claims, so the whole tree enters this run's scope.
-    What catches it is the assertion C2 makes over that scope — the documents
-    the author marked blocks in are in it, and this stage and the declared pass
-    would each mint a claim for the same site.
-    """
-    inference = FakeInference()
-    report = _discover(consumer, inference)
+def test_a_run_with_no_record_stops_before_the_ask(consumer: Path):
+    """No declared pass has run, so nothing says which leaves are this pass's."""
+    identifier = FakeIdentifier()
+    report = _discover(consumer, identifier)
     assert report.failed
-    assert any("block-in-scope" in line for line in report.lines()), report.lines()
-    assert inference.prompts == []
-
-
-def test_a_document_both_awaiting_and_hosting_a_block_stops_the_stage():
-    """Vacuous over a real tree, and asserted rather than assumed."""
-    sites = inventory.Inventory(
-        blocks=(
-            inventory.Block(
-                document="vol/alpha.md",
-                environment="theorem",
-                identifier=None,
-                title="A",
-                display="**Theorem 1** (A).",
-                start=4,
-                end=7,
-            ),
-        )
-    )
-    with pytest.raises(discover.DiscoveryError) as refusal:
-        discover._no_block_in_scope(sites, ("vol/alpha.md",))
-    assert refusal.value.check == "block-in-scope"
-
-
-def test_a_leaf_that_declares_nothing_is_in_the_scope_and_the_exit_condition_reads_it(declared: Path):
-    """The exit condition is over the scope, so it answers for every state that scope admits.
-
-    A leaf declaring neither claims nor a reason is ``UNDECLARED``, and the
-    partition puts it in ``awaiting`` — nobody has read it, and reading it is
-    what this pass is for. It reads ``UNDECLARED`` again where the write did not
-    land, which is a state an exit condition keyed on ``AWAITING`` alone sees in
-    neither direction: it would report the run finished over a document nobody
-    read.
-    """
-    kb_root = declared / "kb-root"
-    leaf = kb_root / "vol" / "zeta.md"
-    body = leaf.read_text(encoding="utf-8").split(render.FRONTMATTER_CLOSER, 1)[1]
-    leaf.write_text(
-        f"{_UPLINK}\n\n{render.FRONTMATTER_OPENER}\nkind: leaf\n{render.FRONTMATTER_CLOSER}{body}",
-        encoding="utf-8",
-    )
-
-    fields = kb_index_lib.parse_frontmatter(leaf.read_text(encoding="utf-8"))
-    assert conform.determination(fields) is conform.Determination.UNDECLARED
-    assert "vol/zeta.md" in conform.pass_two_gate(tree.read(kb_root)).awaiting
-    assert discover._still_awaiting(kb_root, ("vol/zeta.md",)) == ("vol/zeta.md",)
-
-
-def test_a_leaf_carrying_no_frontmatter_is_written_with_the_kind_the_tree_gives_it(consumer: Path):
-    """The ``kind:`` vocabulary is closed, and a field nobody wrote is not in it.
-
-    Every leaf of an unstamped tree enters this run's scope, so the kind read
-    off a document's own frontmatter can be absent — which reaches the write API
-    as the string ``"None"`` and is refused at ``set-frontmatter``, one pass
-    after the register entries for that same document have been minted. The
-    tree answers what the field cannot, and the only refusal left is the
-    runner's.
-    """
-    (consumer / "kb-root" / "vol" / "alpha.md").write_text(
-        f"{_UPLINK}\n\n# Alpha\n\nAlpha is argued directly.\n", encoding="utf-8"
-    )
-    answers = dict(_ANSWERS, **{"vol/alpha.md": ((), "The section argues a result stated elsewhere.")})
-    report = _discover(consumer, FakeInference(answers))
-
-    written = _texts(consumer / "kb-root")
-    assert all("kind: leaf" in written[path] for path in answers), written
-    assert [finding.check for finding in report.findings if finding.status == kb_util.FAIL] in (
-        [kb_util.refresh_cmd(consumer)],
-        [kb_util.verify_cmd(consumer)],
-    ), report.lines()
+    assert any("node-pass-record" in line for line in report.lines()), report.lines()
+    assert identifier.asks == []
 
 
 # ---------------------------------------------------------------------------
@@ -464,19 +457,19 @@ def test_the_render_labels_one_sentence_per_line_with_the_wraps_collapsed(declar
     rendered = _reading(declared, "vol/epsilon.md").render
     labelled = {sentence.label: sentence.text for sentence in rendered.sentences}
 
-    assert labelled["S1"] == "# Epsilon"
-    assert labelled["S2"] == "The author marked nothing here."
+    assert "# Epsilon" not in labelled.values(), "a heading is shown unlabelled: it states nothing"
+    assert labelled["S1"] == "The author marked nothing here."
     assert labelled[_CLOSURE_LABEL].startswith("The admissible configuration set is closed under")
     assert labelled[_CLOSURE_LABEL].endswith("admits a stationary point.")
     assert "\n" not in labelled[_CLOSURE_LABEL]
-    assert labelled["S5"] == "The rate parameter satisfies"
-    assert labelled["S6"] == "``` math"
+    assert labelled["S4"] == "The rate parameter satisfies"
+    assert labelled["S5"] == "``` math"
 
 
 def test_an_abbreviation_followed_by_a_numeral_is_not_a_sentence_end(declared: Path):
     """``Fig. 3`` is what a naive split on a full stop and a space gets wrong."""
     labelled = {sentence.label: sentence.text for sentence in _reading(declared, "vol/epsilon.md").render.sentences}
-    assert labelled["S4"] == "See Fig. 3 for the picture."
+    assert labelled["S3"] == "See Fig. 3 for the picture."
 
 
 def test_inline_maths_carrying_a_decimal_point_is_not_two_sentences():
@@ -527,15 +520,17 @@ def test_a_blank_separated_fence_is_a_paragraph_of_its_own(declared: Path):
     assert len(separated.paragraphs) == 1
     assert ops.excerpt_lines(reading.text, separated.excerpt) == (separated.line,)
 
-    crossing = reading.render.resolve("S10-S13")
+    crossing = reading.render.resolve("S9-S12")
     assert len(crossing.paragraphs) > 1
     assert ops.excerpt_lines(reading.text, crossing.excerpt) == ()
 
 
 def test_a_heading_opens_a_paragraph_of_its_own(declared: Path):
     """So a locator cannot widen out of a stated result and into the section holding it."""
-    rendered = _reading(declared, "vol/epsilon.md").render
-    assert len(rendered.resolve(f"{_HEADING_LOCATOR}-S2").paragraphs) == 2
+    reading = _reading(declared, "vol/epsilon.md")
+    rendered = label.render(reading.body, fences=reading.fences)
+    assert rendered.sentences[0].text == "# Epsilon"
+    assert len(rendered.resolve("S1-S2").paragraphs) == 2
 
 
 def test_a_locator_resolves_to_the_tool_s_own_slice_and_the_seat_supplies_no_bytes(declared: Path):
@@ -571,7 +566,7 @@ def test_the_prompt_carries_the_labelled_document_its_maths_labels_and_no_other_
 
     assert _DOCUMENT_RE.search(prompt).group(1) == "vol/epsilon.md"
     assert f"{_CLOSURE_LABEL}: The admissible configuration set" in prompt
-    assert "S6, S7, S8" in prompt, "the maths spans are named as labels, which are the seat's only coordinates"
+    assert "S5, S6, S7" in prompt, "the maths spans are named as labels, which are the seat's only coordinates"
     assert "Alpha holds for every admissible state" not in prompt
 
 
@@ -587,7 +582,7 @@ def test_each_substitution_lands_inside_its_own_section(declared: Path):
     bare = ask.compose_identify_prompt(_reading(declared, "vol/zeta.md"), report=None)
     corrected = ask.compose_identify_prompt(_reading(declared, "vol/zeta.md"), report="the locator names no label")
 
-    assert "\n\n- S6, S7, S8, S11, S12, S13\n\n## What to return\n" in fenced
+    assert "\n\n- S5, S6, S7, S10, S11, S12\n\n## What to return\n" in fenced
     assert "\n\nThe document carries no display-maths block.\n\n## What to return\n" in bare
     assert corrected == bare.rstrip("\n") + (
         "\n\n## A previous answer failed a mechanical check\n\nthe locator names no label\n"
@@ -820,7 +815,7 @@ def test_mathematical_prose_reaches_the_register_and_the_marker_line_byte_identi
     returned = ask.identify_answer_block(_records([(_UNIQUENESS_QUOTE, _UNIQUENESS_LABEL, _MATHEMATICAL_PROSE)]))
     assert f"title: {_MATHEMATICAL_PROSE}\n" in returned, "the returned text carries the words as the seat wrote them"
 
-    assert not _discover(declared, FakeInference(answers)).failed
+    assert not _discover(declared, FakeIdentifier(answers)).failed
 
     documents = tree.read(declared / "kb-root")
     text = documents.documents["vol/epsilon.md"].text
@@ -878,13 +873,13 @@ def test_an_extent_runs_to_the_next_start_in_its_paragraph_or_to_the_paragraph_s
 
     both = _checked(
         declared,
-        [(_OPENER_QUOTE, "S2", "The opener"), (_CLOSURE_QUOTE, _CLOSURE_LABEL, "Closure")],
+        [(_OPENER_QUOTE, "S1", "The opener"), (_CLOSURE_QUOTE, _CLOSURE_LABEL, "Closure")],
     )
     assert both.failures == ()
     # The earlier start's extent now stops where the later one begins, and the
     # later one still runs to the paragraph's end. They partition; they do not
     # nest, and neither crosses the break.
-    assert [claim.locator for claim in both.claims] == ["S2", _CLOSURE_EXTENT]
+    assert [claim.locator for claim in both.claims] == ["S1", _CLOSURE_EXTENT]
 
 
 def test_an_extent_may_contain_an_equation(declared: Path):
@@ -952,12 +947,12 @@ def test_a_quote_resolving_in_several_places_is_settled_by_its_label_without_a_c
     assert len(missed.candidates) == 2
 
 
-def test_a_start_inside_a_claim_bearing_block_is_refused(declared: Path):
-    """Vacuous over C-inf's scope, and asserted rather than assumed."""
-    checked = _checked(declared, [("Alpha holds for every admissible state", "S4", "A title")], path="vol/alpha.md")
+def test_a_quote_inside_a_claim_bearing_block_resolves_nowhere(declared: Path):
+    """The block is shown unlabelled, so no sentence in it can be a start: nothing needs refusing."""
+    checked = _checked(declared, [("Alpha holds for every admissible state", "S2", "A title")], path="vol/alpha.md")
 
-    assert checked.claims == ()
-    assert "inside the author's own theorem block" in checked.refusals[0]
+    assert checked.claims == () and checked.refusals == ()
+    assert [missed.trigger for missed in checked.unresolved] == [identify.Trigger.NOWHERE]
 
 
 def test_a_repeated_slice_is_widened_within_its_paragraph_rather_than_re_asked(declared: Path):
@@ -1010,7 +1005,7 @@ def test_two_blocks_sharing_a_title_cost_the_second(declared: Path):
         [(_CLOSURE_QUOTE, _CLOSURE_LABEL, "One title"), (_UNIQUENESS_QUOTE, _UNIQUENESS_LABEL, "One title")],
     )
     assert len(checked.claims) == 1
-    assert "is the title of two records" in checked.refusals[0]
+    assert "a title another claim of this document already carries" in checked.refusals[0]
 
 
 @pytest.mark.parametrize(
@@ -1018,7 +1013,7 @@ def test_two_blocks_sharing_a_title_cost_the_second(declared: Path):
     [
         (((_CLOSURE_QUOTE, _CLOSURE_LABEL, "A title"),), "and also a reason", "record"),
         ((), "", "reason"),
-        ((), UNSCANNED_REASON, "reason"),
+        ((), BLOCKLESS_REASON, "reason"),
         ((), "a reason\nover two lines", "reason"),
     ],
 )
@@ -1056,7 +1051,7 @@ def test_two_starts_sharing_a_wrapped_line_are_both_written(declared: Path):
     """
     checked = _checked(
         declared,
-        [(_OPENER_QUOTE, "S2", "First"), (_CLOSURE_QUOTE, _CLOSURE_LABEL, "Second")],
+        [(_OPENER_QUOTE, "S1", "First"), (_CLOSURE_QUOTE, _CLOSURE_LABEL, "Second")],
     )
 
     assert checked.failures == ()
@@ -1095,21 +1090,20 @@ def test_an_unresolvable_claim_is_re_asked_on_its_own_and_costs_only_that_claim(
     One call for the whole document, then one call about the one quote that did
     not settle — never the document again.
     """
-    inference = FakeInference(_ONE_FAILS)
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    identifier = FakeIdentifier(_ONE_FAILS)
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
     assert [claim.title for claim in found.claims] == [_UNIQUENESS_TITLE]
-    assert len(inference.prompts) == 2
-    assert _REASK_RE.search(inference.prompts[1]).group(1) == "no such words appear in this document"
-    assert _RETRY_HEADING not in inference.prompts[1], "a per-claim re-ask is not the document asked again"
+    assert len(identifier.asks) == 1, "a per-claim re-ask is not the document asked again"
+    assert identifier.reasks == ["no such words appear in this document"]
 
 
 def test_a_re_ask_that_settles_recovers_that_claim(declared: Path):
-    inference = FakeInference(
+    identifier = FakeIdentifier(
         _ONE_FAILS,
         reask={"no such words appear in this document": (_CLOSURE_QUOTE, _CLOSURE_LABEL, _CLOSURE_TITLE)},
     )
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
     assert sorted(claim.title for claim in found.claims) == sorted([_CLOSURE_TITLE, _UNIQUENESS_TITLE])
     assert found.telemetry.resolved_on_reask == 1
@@ -1118,10 +1112,10 @@ def test_a_re_ask_that_settles_recovers_that_claim(declared: Path):
 
 def test_none_of_these_ends_that_claim_without_another_call(declared: Path):
     """A forced choice over a narrowed window gets confidently answered even when it is wrong."""
-    inference = FakeInference(_ONE_FAILS)
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    identifier = FakeIdentifier(_ONE_FAILS)
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
-    assert len(inference.prompts) == 2, "declining ends the claim rather than re-asking about it"
+    assert identifier.calls == 2, "declining ends the claim rather than re-asking about it"
     assert found.telemetry.reasked == 1
     assert found.telemetry.unresolved == 1
 
@@ -1181,53 +1175,48 @@ def test_every_re_ask_carries_a_fact_computed_after_the_previous_answer(declared
         assert ask.NONE_OF_THESE_OPEN in prompt
 
 
-def test_a_document_whose_every_claim_fails_takes_the_fifth_determination(declared: Path):
-    """Acceptance 6 and 7: it does not halt C6, it is not ``AUTHORED_NO_CLAIM``, and it is loud."""
+def test_a_leaf_whose_every_claim_fails_is_recorded_unanchored_and_the_kb_is_left_as_it_was(declared: Path):
+    """It does not halt the run, it states nothing about the leaf, and it is loud — in the record and the report."""
     all_fail = {
         "vol/epsilon.md": ((("no such words appear in this document", "S9", "A fabricated result"),), ""),
         "vol/zeta.md": ((), _ZETA_REASON),
     }
-    report = _discover(declared, FakeInference(all_fail))
+    before = (declared / "kb-root" / "vol" / "epsilon.md").read_text(encoding="utf-8")
+    report = _discover(declared, FakeIdentifier(all_fail))
 
     assert not report.failed, report.lines()
-    documents = tree.read(declared / "kb-root")
-    fields = kb_index_lib.parse_frontmatter(documents.documents["vol/epsilon.md"].text)
-    assert conform.determination(fields) is conform.Determination.UNANCHORED
-    assert fields["no-claim"] == identify.UNANCHORED_REASON
-    assert fields["no-claim"] not in (UNSCANNED_REASON, identify.SUBSTITUTED_NO_CLAIM_REASON)
-
-    prominent = [line for line in report.lines() if "stage-C-anchored-nothing" in line]
+    assert (declared / "kb-root" / "vol" / "epsilon.md").read_text(encoding="utf-8") == before
+    entry = kb_pipeline.read_node_pass(declared).leaves["vol/epsilon.md"]
+    assert (entry.state, entry.outcome) == (kb_pipeline.ReadState.LANDED, kb_pipeline.LeafOutcome.UNANCHORED)
+    prominent = [line for line in report.lines() if "stage-C-unanchored" in line]
     assert len(prominent) == 1 and "vol/epsilon.md" in prominent[0]
-    assert any("0 claims" in line and "vol/epsilon.md" in line for line in report.lines())
 
-    # It leaves AWAITING, so a re-run neither halts nor re-reads it.
-    state = conform.pass_two_gate(documents)
-    assert "vol/epsilon.md" not in state.awaiting and "vol/epsilon.md" in state.determined
-    again = FakeInference(all_fail)
+    # Landed, so a re-run neither halts nor re-reads it.
+    again = FakeIdentifier(all_fail)
     assert not _discover(declared, again).failed
-    assert again.prompts == []
+    assert again.asks == []
 
 
 def test_the_re_ask_ceiling_records_the_rest_unresolved_rather_than_spending_more_calls(declared: Path):
     """The ceiling and the recording compose with no special case."""
     fabricated = tuple((f"no such words number {n} appear here", "S9", f"Title {n}") for n in range(8))
-    inference = FakeInference({"vol/epsilon.md": (fabricated, "")})
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    identifier = FakeIdentifier({"vol/epsilon.md": (fabricated, "")})
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
-    assert len(inference.prompts) == 1 + identify.REASK_CEILING
+    assert identifier.calls == 1 + identify.REASK_CEILING
     assert found.telemetry.returned == 8
     assert found.telemetry.reasked == identify.REASK_CEILING
     assert found.telemetry.unresolved == 8
-    assert found.anchored_nothing
+    assert found.unanchored
 
 
 def test_telemetry_reports_what_the_cadence_bought(declared: Path):
     """§3.2: the datapoint that would move the cadence, collected because it costs nothing."""
-    inference = FakeInference(
+    identifier = FakeIdentifier(
         _ONE_FAILS,
         reask={"no such words appear in this document": (_CLOSURE_QUOTE, _CLOSURE_LABEL, _CLOSURE_TITLE)},
     )
-    telemetry = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference)).telemetry
+    telemetry = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier).telemetry
 
     assert (telemetry.returned, telemetry.resolved, telemetry.reasked, telemetry.resolved_on_reask) == (2, 1, 1, 1)
     assert "1 re-asked and 1 anchored" in telemetry.line()
@@ -1235,14 +1224,14 @@ def test_telemetry_reports_what_the_cadence_bought(declared: Path):
 
 def test_a_malformed_block_costs_that_block_and_the_document_keeps_the_others(declared: Path):
     """No call is spent on it: there is no menu that would answer a missing field."""
-    inference = FakeInference(
+    identifier = FakeIdentifier(
         {"vol/epsilon.md": (((_UNIQUENESS_QUOTE, _UNIQUENESS_LABEL, _UNIQUENESS_TITLE),), "")},
         trailing=_MALFORMED_CLAIM_BLOCK,
     )
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
     assert [claim.title for claim in found.claims] == [_UNIQUENESS_TITLE]
-    assert len(inference.prompts) == 1
+    assert identifier.calls == 1
 
 
 def test_an_answer_that_cannot_be_read_costs_the_document_s_one_allowance(declared: Path):
@@ -1251,51 +1240,50 @@ def test_an_answer_that_cannot_be_read_costs_the_document_s_one_allowance(declar
     The read refusal is already the report: it names the malformation, so
     nothing is added to it.
     """
-    inference = FakeInference(trailing=_UNCLOSED_CLAIM_BLOCK)
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    identifier = FakeIdentifier(trailing=_UNCLOSED_CLAIM_BLOCK)
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
     assert [claim.title for claim in found.claims] == [_CLOSURE_TITLE, _UNIQUENESS_TITLE]
-    assert len(inference.prompts) == 2
-    assert "never closed" in inference.prompts[1].split(_RETRY_HEADING)[1]
+    assert len(identifier.asks) == 2
+    assert "never closed" in identifier.asks[1][1]
 
 
 def test_a_second_unreadable_answer_stops_the_stage_naming_the_document(declared: Path):
-    inference = FakeInference(trailing=_UNCLOSED_CLAIM_BLOCK, on_retry_trailing=_UNCLOSED_CLAIM_BLOCK)
+    identifier = FakeIdentifier(trailing=_UNCLOSED_CLAIM_BLOCK, on_retry_trailing=_UNCLOSED_CLAIM_BLOCK)
     with pytest.raises(identify.IdentificationError) as refusal:
-        identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+        identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
     assert refusal.value.check == "answer-format"
     assert "vol/epsilon.md" in refusal.value.detail
     assert "Nothing was written for this document" in refusal.value.detail
-    assert len(inference.prompts) == 2
+    assert len(identifier.asks) == 2
 
 
 def test_a_stop_on_the_read_leaves_the_document_awaiting_with_nothing_written(declared: Path):
-    inference = FakeInference(trailing=_UNCLOSED_CLAIM_BLOCK, on_retry_trailing=_UNCLOSED_CLAIM_BLOCK)
-    report = _discover(declared, inference)
+    identifier = FakeIdentifier(trailing=_UNCLOSED_CLAIM_BLOCK, on_retry_trailing=_UNCLOSED_CLAIM_BLOCK)
+    report = _discover(declared, identifier)
 
     assert report.failed and any("answer-format" in line for line in report.lines())
     text = (declared / "kb-root" / "vol" / "epsilon.md").read_text(encoding="utf-8")
-    assert UNSCANNED_REASON in text and "claims:" not in text
+    assert BLOCKLESS_REASON in text and "claims:" not in text
     assert len(_entries(declared)) == 1, "the register carries the declared pass's entry and nothing else"
+    assert kb_pipeline.read_node_pass(declared).leaves["vol/epsilon.md"].state is kb_pipeline.ReadState.UNREAD
 
 
 def test_an_ill_formed_reason_is_replaced_and_the_run_continues(declared: Path):
     """The asymmetry: a missing sentence loses prose nobody had."""
-    empty = {"vol/zeta.md": ((), "")}
-    inference = FakeInference(empty, on_retry=empty)
     with pytest.raises(AnswerFormatError):
         # An answer with neither a claim block nor a reason block is not an
         # answer at all, so the fake cannot express this failure through the
         # composer; the reason has to be ill-formed rather than absent.
         ask.parse_identify_answer(ask.identify_answer_block(), document="vol/zeta.md")
 
-    inference = FakeInference({"vol/zeta.md": ((), UNSCANNED_REASON)})
-    found = identify.infer_claims(_reading(declared, "vol/zeta.md"), _identifier(inference))
+    identifier = FakeIdentifier({"vol/zeta.md": ((), BLOCKLESS_REASON)})
+    found = identify.infer_claims(_reading(declared, "vol/zeta.md"), identifier)
     assert found.claims == ()
     assert found.no_claim == identify.SUBSTITUTED_NO_CLAIM_REASON
-    assert found.no_claim != UNSCANNED_REASON
-    assert len(inference.prompts) == 2, "the reason costs the document's one allowance before it is replaced"
+    assert found.no_claim != BLOCKLESS_REASON
+    assert len(identifier.asks) == 2, "the reason costs the document's one allowance before it is replaced"
 
 
 #: Two answers one live document gave, in the order it gave them: one that could
@@ -1313,13 +1301,15 @@ def test_the_document_allowance_and_the_per_claim_ceiling_are_separate_budgets(d
     allowance is spent here and the whole per-claim ceiling is still available
     behind it.
     """
-    inference = ScriptedInference({"vol/epsilon.md": (_COULD_NOT_BE_READ, _STANDS)})
-    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), _identifier(inference))
+    identifier = ScriptedIdentifier({"vol/epsilon.md": (_COULD_NOT_BE_READ, _STANDS)})
+    found = identify.infer_claims(_reading(declared, "vol/epsilon.md"), identifier)
 
     assert [claim.title for claim in found.claims] == [_CLOSURE_TITLE]
-    assert len(inference.prompts) == 2
-    assert "never closed" in inference.prompts[1].split(_RETRY_HEADING)[1]
-    assert identify.CALL_BUDGET == 1 + identify.ANSWER_RETRY_BUDGET + identify.REASK_CEILING
+    assert len(identifier.reports) == 2
+    assert "never closed" in identifier.reports[1]
+    assert identify.CALL_BUDGET == (
+        1 + identify.ANSWER_RETRY_BUDGET + identify.VERDICT_RETRY_BUDGET + identify.REASK_CEILING
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1329,10 +1319,10 @@ def test_the_document_allowance_and_the_per_claim_ceiling_are_separate_budgets(d
 
 @pytest.fixture
 def discovered(declared: Path) -> Path:
-    inference = FakeInference()
-    report = _discover(declared, inference)
+    identifier = FakeIdentifier()
+    report = _discover(declared, identifier)
     assert not report.failed, report.lines()
-    assert len(inference.prompts) == 2
+    assert len(identifier.asks) == 3
     return declared
 
 
@@ -1342,11 +1332,15 @@ def test_the_run_exits_zero_and_the_runner_s_gates_are_green(discovered: Path):
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
 
 
-def test_no_document_of_a_declaring_kind_still_awaits(discovered: Path):
-    state = conform.pass_two_gate(tree.read(discovered / "kb-root"))
-    assert state.awaiting == ()
-    assert sorted(state.hosting) == ["vol/alpha.md", "vol/epsilon.md"]
-    assert state.determined == ("vol/zeta.md",)
+def test_every_leaf_is_landed_with_its_outcome(discovered: Path):
+    leaves = kb_pipeline.read_node_pass(discovered).leaves
+    assert {entry.state for entry in leaves.values()} == {kb_pipeline.ReadState.LANDED}
+    assert {path: entry.outcome for path, entry in leaves.items()} == {
+        "vol/alpha.md": kb_pipeline.LeafOutcome.MINTED,
+        "vol/epsilon.md": kb_pipeline.LeafOutcome.MINTED,
+        "vol/zeta.md": kb_pipeline.LeafOutcome.NO_CLAIM,
+    }
+    assert [claim.title for claim in leaves["vol/epsilon.md"].claims] == [_CLOSURE_TITLE, _UNIQUENESS_TITLE]
 
 
 def test_no_number_is_authored(discovered: Path):
@@ -1431,7 +1425,7 @@ def test_block_coverage_is_untouched(discovered: Path):
 def test_body_preservation_holds_over_the_discovery_run(declared: Path):
     """Every line added belongs to a frontmatter block; every line rewritten gained a marker."""
     before = _texts(declared / "kb-root")
-    assert not _discover(declared, FakeInference()).failed
+    assert not _discover(declared, FakeIdentifier()).failed
     after = _texts(declared / "kb-root")
 
     # Every line the run added or rewrote outside a frontmatter block, in both
@@ -1458,11 +1452,11 @@ def test_a_re_run_mints_nothing_and_leaves_the_tree_byte_identical(discovered: P
     registers = {
         path.name: path.read_text(encoding="utf-8") for path in (discovered / "kb-root").rglob("claim-quality.md")
     }
-    inference = FakeInference()
-    report = _discover(discovered, inference)
+    identifier = FakeIdentifier()
+    report = _discover(discovered, identifier)
 
     assert not report.failed, report.lines()
-    assert inference.prompts == [], "a determined document is not re-read"
+    assert identifier.asks == [], "a landed leaf is not re-read"
     assert _texts(discovered / "kb-root") == before
     assert {p.name: p.read_text(encoding="utf-8") for p in (discovered / "kb-root").rglob("claim-quality.md")} == (
         registers
@@ -1480,17 +1474,3 @@ def test_the_write_op_composes_every_metadata_byte(discovered: Path):
     ]
     marks = values[2].read_text(encoding="utf-8")
     assert _slice(discovered, _CLOSURE_EXTENT) in marks and "<!--" not in marks
-
-
-def test_an_identification_carrying_neither_or_both_is_refused_before_a_write(discovered: Path):
-    for wrong in (
-        identify.Identification(document="vol/zeta.md"),
-        identify.Identification(
-            document="vol/zeta.md",
-            claims=(identify.ProseClaim(document="vol/zeta.md", title="T", excerpt="e", line=4, locator="S1"),),
-            no_claim="and a reason",
-        ),
-    ):
-        with pytest.raises(write.WriteError) as refusal:
-            write.write_claims(wrong, kind="leaf", kb_root=discovered / "kb-root", scratch=_scratch(discovered))
-        assert refusal.value.check == "identification"

@@ -24,10 +24,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kb_tools import kb_schema, kb_util, verify_kb_metadata
+from kb_tools import install_location, kb_schema, kb_util, verify_kb_metadata
 
 _THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
 _CHECK_MOD = "kb_tools.verify_kb_metadata"
 _REFRESH_MOD = "kb_tools.refresh_kb_metadata"
@@ -37,13 +37,13 @@ def _run_checker(kb_root: Path, extra_args: list[str] | None = None) -> subproce
     cmd = [sys.executable, "-m", _CHECK_MOD, "--kb-root", str(kb_root)]
     if extra_args:
         cmd.extend(extra_args)
-    return subprocess.run(cmd, cwd=_REPO_ROOT, capture_output=True, text=True, check=False)
+    return subprocess.run(cmd, cwd=_PKG_PARENT, capture_output=True, text=True, check=False)
 
 
 def _run_refresh(kb_root: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", _REFRESH_MOD, "--kb-root", str(kb_root)],
-        cwd=_REPO_ROOT,
+        cwd=_PKG_PARENT,
         capture_output=True,
         text=True,
         check=False,
@@ -1674,7 +1674,7 @@ class TestMissingFrontmatterNamesAWrite(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("missing frontmatter", result.stdout)
                 self.assertIn(rel, result.stdout)
-                self.assertIn(verify_kb_metadata.SET_FRONTMATTER_CMD, result.stdout)
+                self.assertIn(verify_kb_metadata.set_frontmatter_cmd(), result.stdout)
 
     def test_the_report_never_sends_the_reader_to_refresh(self):
         """The index position is the regression: it used to be refresh-fixable."""

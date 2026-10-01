@@ -223,6 +223,44 @@ stage-arxiv-corpus *args:
 stage-arxiv-corpus-candidates *args:
     @just --set ARXIV_IDS "{{ARXIV_CANDIDATE_IDS}}" stage-arxiv-corpus {{args}}
 
+# Sibling of stage-arxiv-paper for a fixture that isn't drawn from an arXiv
+# tarball — a hand-authored consumer repo such as ModernCorp, already
+# committed under test-data/transient/. There is nothing to unpack, so this
+# carries only the re-anchor-and-reinstall half of stage-arxiv-paper: reset to
+# the `cleared` tag (the commit before any .claude install or kb-build ledger
+# commit — the same convention stage-arxiv-paper's own comment documents,
+# established here by hand once per fixture rather than by this recipe, since
+# there is no "sources as fetched" moment to tag it from automatically), drop
+# whatever was left standing above that tag, reinstall the current agent set,
+# and commit so the driver's worktree-clean preflight passes. A fixture with
+# no `cleared` tag is refused rather than guessed at: inventing one would mean
+# deciding, for a repo this recipe knows nothing about, which commit counts as
+# "before the install" — that decision belongs to whoever staged the fixture
+# by hand the first time.
+[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed .claude/agents, kb-root/, and .claude-temp/ above that tag; every --* flag forwards verbatim to the root install recipe")]
+stage-fixture dir *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{dir}}"
+    if [[ ! -d "${dir}/.git" ]]; then
+        printf 'error: %s is not a git repository — this recipe re-anchors and reinstalls an already-committed fixture, it does not create one from scratch.\n' "${dir}" >&2
+        exit 1
+    fi
+    if ! git -C "${dir}" rev-parse -q --verify cleared > /dev/null; then
+        printf 'error: %s carries no `cleared` tag (the commit before any .claude install or kb-build ledger commit) — tag one by hand before staging.\n' "${dir}" >&2
+        exit 1
+    fi
+    just guard-run-lock "${dir}"
+    printf 'staging %s: resetting to `cleared` (discards any kb-build ledger commits and the .claude/agents, kb-root/, .claude-temp/ committed or left above it), then reinstalling the current agent set.\n' "${dir}" >&2
+    git -C "${dir}" reset --hard cleared > /dev/null
+    rm -rf "${dir}/.claude-temp" "${dir}/kb-root"
+    ( cd "{{justfile_directory()}}/.." && just install "kb-testing/${dir}" {{args}} )
+    git -C "${dir}" add -A
+    git -C "${dir}" -c user.name=kb-testing -c user.email=kb-testing@invalid commit -qm "agent defs installed"
+    git -C "${dir}" tag -d staged > /dev/null 2>&1 || true
+    git -C "${dir}" tag staged
+    printf 'staged %s\n' "${dir}"
+
 # Log and bookkeeping files for kb-headless-eval live in THIS repo's
 # scratch (.claude-temp/kb-headless/, sibling of .claude/), never the
 # built KB's own .claude-temp — re-anchoring a staged paper (stage-arxiv-
@@ -775,7 +813,7 @@ kb-driver-kill:
     printf 'cleared %s\n' "${pid_file}"
 
 # Not wired into the root `just test` (that stays the fast unit run over
-# kb_tools/liaison_tools/gen-defs): this suite exercises kb-testing's own
+# kb_tools/liaison_tools/gen_defs): this suite exercises kb-testing's own
 # recipes against DATA STAGED under test-data/transient/, never fixtures
 # committed to the repo, so it is invoked deliberately rather than on every
 # unit-test pass.

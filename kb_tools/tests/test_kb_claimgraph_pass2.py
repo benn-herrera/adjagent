@@ -25,8 +25,7 @@ import pytest
 from kb_tools import kb_index_lib, kb_util, refresh_kb_metadata, verify_kb_metadata
 from kb_tools.inference import Outcome
 from kb_tools.kb_claimgraph import __main__ as cli
-from kb_tools.kb_claimgraph import ask, attribute, conform, depends, graph, inventory, report, tree, write
-from kb_tools.kb_claimgraph.assemble import UNSCANNED_REASON
+from kb_tools.kb_claimgraph import ask, assemble, attribute, conform, depends, graph, inventory, report, tree, write
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import AnswerFormatError
 from kb_tools.kb_write import render
@@ -163,8 +162,8 @@ _EPSILON = f"""{_UPLINK}
 
 # Epsilon
 
-The author marked no result here, so the declared pass writes the unscanned
-reason and the discovered pass is what would read it.
+The author marked no result here, so the declared pass writes its plain
+reason and the node pass is what would read it.
 """
 
 _TREE = {
@@ -312,7 +311,7 @@ def consumer(tmp_path: Path) -> Path:
 
 
 def _scratch(repo: Path) -> Path:
-    return repo / kb_util.SCRATCH_DIRNAME / "claimgraph"
+    return repo / kb_util.scratch_dirname() / "claimgraph"
 
 
 def test_a_build_completes_over_a_document_carrying_an_unknown_environment(consumer: Path) -> None:
@@ -339,9 +338,8 @@ def test_a_build_completes_over_a_document_carrying_an_unknown_environment(consu
     assert not report.failed, "\n".join(report.lines())
     census = [line for line in report.lines() if "stage-B-unclassified" in line]
     assert census and "Setup=1" in census[0], report.lines()
-    # Not claim-bearing, so it mints nothing and leaves the document awaiting —
-    # the omission the census line is reporting, and the state a later pass with
-    # the name classified would find.
+    # Not claim-bearing, so it mints nothing — the omission the census line is
+    # reporting, and the state a later pass with the name classified would find.
     assert "clm-" not in unfamiliar.read_text(encoding="utf-8")
 
 
@@ -390,8 +388,8 @@ def test_the_entry_condition_accepts_the_declared_pass_s_own_output(declared: Pa
     """The tree pass 1 wrote is exactly what pass 2 must admit — frontmatter and all."""
     state = conform.pass_two_gate(tree.read(declared / "kb-root"))
     assert sorted(state.hosting) == ["vol/alpha.md", "vol/beta.md", "vol/delta.md", "vol/gamma.md"]
-    assert state.awaiting == ("vol/epsilon.md",)
-    assert state.determined == ()
+    assert state.determined == ("vol/epsilon.md",)
+    assert state.undeclared == ()
 
 
 def test_the_declared_pass_s_own_gate_refuses_that_same_tree(declared: Path):
@@ -401,34 +399,23 @@ def test_the_declared_pass_s_own_gate_refuses_that_same_tree(declared: Path):
     assert refusal.value.check == "point-14"
 
 
-def test_a_document_carrying_an_authored_determination_is_refused(declared: Path):
-    """A reason somebody wrote is a finding; the unscanned reason is not, and only it resumes."""
-    leaf = declared / "kb-root" / "vol" / "epsilon.md"
-    text = leaf.read_text(encoding="utf-8")
-    assert UNSCANNED_REASON in text
-    leaf.write_text(text.replace(UNSCANNED_REASON, "This section restates a result proved in Alpha."), encoding="utf-8")
-
-    state = conform.pass_two_gate(tree.read(declared / "kb-root"))
-    assert state.determined == ("vol/epsilon.md",)
-    assert state.awaiting == ()
-
-
 @pytest.mark.parametrize(
     "fields, verdict",
     [
         ({"claims": ["clm-aaaaaa"]}, conform.Determination.HOSTS_CLAIMS),
-        ({"no-claim": UNSCANNED_REASON}, conform.Determination.AWAITING),
+        ({"no-claim": assemble.BLOCKLESS_REASON}, conform.Determination.AUTHORED_NO_CLAIM),
         ({"no-claim": "The section is a bibliography."}, conform.Determination.AUTHORED_NO_CLAIM),
         ({}, conform.Determination.UNDECLARED),
         ({"no-claim": ""}, conform.Determination.UNDECLARED),
     ],
 )
-def test_the_determination_predicate_is_the_unscanned_reason_by_identity(fields, verdict):
+def test_no_reason_is_compared_by_identity(fields, verdict):
+    """The declared pass's reason is a reason like any other: what a leaf was read to is the record's."""
     assert conform.determination(fields) is verdict
 
 
-def test_a_tree_the_declared_pass_has_not_run_over_reads_as_leaves_nobody_has_read(consumer: Path):
-    """No frontmatter is not a refusal here: it is five documents nobody has read for claims.
+def test_a_tree_the_declared_pass_has_not_run_over_reads_as_leaves_declaring_nothing(consumer: Path):
+    """No frontmatter is not a refusal here: it is five leaves declaring nothing.
 
     Which five is the tree's own answer rather than the missing frontmatter's —
     the entry point and the volume index are excluded by their path shape, the
@@ -439,7 +426,7 @@ def test_a_tree_the_declared_pass_has_not_run_over_reads_as_leaves_nobody_has_re
     """
     state = conform.pass_two_gate(tree.read(consumer / "kb-root"))
 
-    assert state.awaiting == ("vol/alpha.md", "vol/beta.md", "vol/delta.md", "vol/epsilon.md", "vol/gamma.md")
+    assert state.undeclared == ("vol/alpha.md", "vol/beta.md", "vol/delta.md", "vol/epsilon.md", "vol/gamma.md")
     assert state.hosting == ()
     assert state.determined == ()
 
@@ -1052,14 +1039,11 @@ def test_the_discovered_pass_runs_end_to_end_against_a_fake_inference(declared: 
 
 
 def test_a_run_over_a_tree_the_declared_pass_never_wrote_asks_nobody_and_authors_no_edge(consumer: Path):
-    """Nothing to attribute over, and the run is refused at the gate rather than at its own door.
+    """Refused at its own door: no node-pass record stands, so no declared pass ran.
 
-    The entry condition no longer stops here: a tree with no frontmatter is one
-    nobody has read for claims, and that state has no spelling of its own in
-    this package any more. What refuses it is the runner's verify target over
-    the tree the run leaves behind — the same frontmatter-presence check any
-    other reader of this KB would fail. Nothing is asked and no values file is
-    composed on the way there, because a tree with no claims offers no pair.
+    The source end of a reference in prose is read off the record's verdicts,
+    and the declared pass is what writes it. Nothing is asked and no values file
+    is composed on the way to the refusal.
     """
     inference = FakeInference({})
     outcome = depends.build(
@@ -1069,8 +1053,7 @@ def test_a_run_over_a_tree_the_declared_pass_never_wrote_asks_nobody_and_authors
         selector=_selector(inference),
     )
     assert outcome.failed, outcome.lines()
-    refusal = next(line for line in outcome.lines() if kb_util.verify_cmd(consumer) in line)
-    assert report.FAIL in refusal and "missing frontmatter" in refusal, outcome.lines()
+    assert any("node-pass-record" in line for line in outcome.lines()), outcome.lines()
     assert inference.prompts == []
     assert not (_scratch(consumer) / "3-add-depends-on.toml").exists()
 

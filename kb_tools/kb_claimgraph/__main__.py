@@ -16,28 +16,33 @@ import argparse
 import sys
 
 from .. import __version__, kb_pipeline, kb_util
-from . import ask, conform, depends, discover
+from . import ask, conform, depends, discover, equations
 from .build import build
 
 #: The scope vocabulary, read from the stage table rather than declared twice.
-#: What the two values distinguish is which *stage* a ``--pass 1`` invocation
+#: What the values distinguish is which *stage* a ``--pass 1`` invocation
 #: is, and that pairing is ``kb_pipeline.ClaimgraphInvocation``'s — so this
 #: module parses the flags and asks what stage they name instead of branching
 #: on numbers whose meaning is stated nowhere.
-SCOPES: tuple[str, ...] = (kb_pipeline.CLAIMGRAPH_SCOPE_BLOCK_HOSTED, kb_pipeline.CLAIMGRAPH_SCOPE_FULL)
+SCOPES: tuple[str, ...] = (
+    kb_pipeline.CLAIMGRAPH_SCOPE_BLOCK_HOSTED,
+    kb_pipeline.CLAIMGRAPH_SCOPE_FULL,
+    kb_pipeline.CLAIMGRAPH_SCOPE_EQUATIONS,
+)
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
 EXIT_USAGE = 2
 EXIT_NO_SPINE = 3
 
-#: Where the write passes' values files land — the project's scratch space, the
-#: only place an uncommitted file may sit without failing a clean-worktree gate.
-SCRATCH_RELPATH = f"{kb_util.SCRATCH_DIRNAME}/claimgraph"
+#: Where the write passes' values files land, under the project's scratch
+#: space — the only place an uncommitted file may sit without failing a
+#: clean-worktree gate.
+SCRATCH_SUBDIR = "claimgraph"
 
 #: Where the discovered pass records each ask — the prompt it put and the
 #: stream the call emitted — beside the write passes' values files.
-ASKS_RELPATH = f"{SCRATCH_RELPATH}/asks"
+ASKS_SUBDIR = "asks"
 
 #: Every pass number the stage table declares an invocation for, in order.
 #: Derived rather than typed, so a pass this tool accepts is a pass some stage
@@ -47,10 +52,13 @@ PASSES: tuple[int, ...] = tuple(
 )
 
 
-#: The two stage ids this module branches on, read off the table so a rename
-#: reaches here. The third is the else.
+#: The three stage ids this module branches on, read off the table so a rename
+#: reaches here. The fourth is the else.
 _CLAIMS_DISCOVERED = kb_pipeline.claimgraph_stage(
     which_pass=1, scope=kb_pipeline.CLAIMGRAPH_SCOPE_FULL
+).id  # type: ignore[union-attr]
+_EQUATIONS_MINTED = kb_pipeline.claimgraph_stage(
+    which_pass=1, scope=kb_pipeline.CLAIMGRAPH_SCOPE_EQUATIONS
 ).id  # type: ignore[union-attr]
 _DEPENDS_ATTRIBUTED = kb_pipeline.claimgraph_stage(which_pass=2, scope=None).id  # type: ignore[union-attr]
 
@@ -75,10 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         choices=SCOPES,
         default=kb_pipeline.CLAIMGRAPH_SCOPE_BLOCK_HOSTED,
         help=(
-            "pass 1 only — which claim sites to identify: 'block-hosted' authors the claims the author "
-            "marked over a fresh tree and is mechanical end to end; 'full' runs claim discovery over the "
-            "documents a block-hosted run left awaiting, so it takes that run's output as its input and "
-            "spends one inference per document"
+            "pass 1 only — which nodes to mint: 'block-hosted' authors the claims the author marked over a "
+            "fresh tree and is mechanical end to end; 'full' runs the node pass over every leaf the "
+            "block-hosted run recorded unread, spending one inference per leaf; 'equations' mints the "
+            "referenced equations nothing else holds, mechanically, once the node pass has judged the prose"
         ),
     )
     parser.add_argument(
@@ -109,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     if absent is not None:
         print(
             f"the claim-graph spine is not installed: {absent}. Seed it first:\n"
-            f"    {kb_util.INVOCATION} {kb_util.OP_GRAPH_INIT}",
+            f"    {kb_util.invocation()} {kb_util.OP_GRAPH_INIT}",
             file=sys.stderr,
         )
         return EXIT_NO_SPINE
@@ -138,8 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     # The seat resolves against the consuming repository's own installed agent
     # set, which is what `cwd` decides — the same root every other tool here
     # walks up to.
-    scratch = repo_root / SCRATCH_RELPATH
-    asks = repo_root / ASKS_RELPATH
+    scratch = repo_root / kb_util.scratch_dirname() / SCRATCH_SUBDIR
+    asks = scratch / ASKS_SUBDIR
     if stage.id == _DEPENDS_ATTRIBUTED:
         report = depends.build(
             kb_root=kb_root,
@@ -166,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
             scratch=scratch,
             identifier=ask.ModelIdentifier(cwd=repo_root, workspace=asks),
         )
+    elif stage.id == _EQUATIONS_MINTED:
+        report = equations.build(kb_root=kb_root, repo_root=repo_root, scratch=scratch)
     else:
         report = build(kb_root=kb_root, repo_root=repo_root, scratch=scratch)
     print("\n".join(report.lines()))

@@ -39,14 +39,13 @@ from types import MappingProxyType
 
 import pytest
 
-from kb_tools import inference, kb_index_lib, kb_pipeline, kb_util
+from kb_tools import inference, install_location, kb_index_lib, kb_pipeline, kb_util
 from kb_tools.kb_claimgraph import tree
 from kb_tools.kb_driver import barriers, baton, config, run, runlog
 from kb_tools.kb_write.render import FRONTMATTER_OPENER
 from kb_tools.tests import _fake_model as fake_model
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_INSTALLER = _REPO_ROOT / "gen-defs.py"
+_PKG_PARENT = install_location.current().agents_dir
 
 #: A whole paper in twenty lines, with its own bibliography beside it. Its
 #: deliberate properties are commented in the source; what matters here is that
@@ -75,18 +74,19 @@ def _make_fresh_consumer(root: Path, *, corpus: Path, files: Sequence[str]) -> P
     ):
         _git(root, "config", key, value)
 
-    claude = root / kb_util.CLAUDE_DIRNAME
+    claude = root / kb_util.harness_dirname()
     claude.mkdir()
     installed = subprocess.run(
-        [sys.executable, str(_INSTALLER), "install", str(claude)],
+        [sys.executable, "-m", "gen_defs", "install", str(claude)],
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
+        env={**os.environ, "PYTHONPATH": str(_PKG_PARENT)},
     )
     assert installed.returncode == 0, f"stdout:\n{installed.stdout}\nstderr:\n{installed.stderr}"
 
-    (root / ".gitignore").write_text(f"{kb_util.SCRATCH_DIRNAME}/\n", encoding="utf-8")
+    (root / ".gitignore").write_text(f"{kb_util.scratch_dirname()}/\n", encoding="utf-8")
     (root / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
     for name in files:
         shutil.copy(corpus / name, root / name)

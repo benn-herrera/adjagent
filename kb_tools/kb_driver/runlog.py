@@ -10,13 +10,14 @@ pastes from. Each records its own text in the JSONL log as evidence and each
 suppresses the console tee's copy, so the bytes reach a console exactly once.
 
 Run-directory layout — the run directory is a sibling of
-``.claude-temp/kb-build/``, not a subdirectory: that layout is a contract
+``<scratch>/kb-build/``, not a subdirectory: that layout is a contract
 governing build *artifacts*, while these are *evidence* nothing in the
-pipeline reads::
+pipeline reads. ``<scratch>`` is the project's scratch directory
+(``kb_util.scratch_dirname``, ``.claude-temp`` under Claude Code)::
 
-    <repo-root>/.claude-temp/kb-driver.lock   the run lock (one per REPO)
+    <repo-root>/<scratch>/kb-driver.lock the run lock (one per REPO)
 
-    <parent>/                            default .claude-temp/kb-driver
+    <parent>/                            default <scratch>/kb-driver
       LATEST                             (at the parent)
       <run-id>/
         run.log · run.pid · exit.json
@@ -56,7 +57,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .. import inference
+from .. import inference, kb_util
 
 _LOGGER_NAME = "kb_driver"
 
@@ -335,17 +336,12 @@ def write_exit_json(
 
 # --- the lock ---------------------------------------------------------------
 
-#: Where the driver's scratch lives inside a consuming repo. ``steps`` names a
-#: build-artifact subdirectory of the same tree; this is the tree itself, and
-#: it is spelled here because ``runlog`` is the module every other one imports.
-SCRATCH_DIRNAME = ".claude-temp"
-
 LOCK_FILENAME = "kb-driver.lock"
 
 
 def repo_lock_path(repo_root: Path) -> Path:
     """The run lock's anchor: one driver run per **repository**."""
-    return repo_root / SCRATCH_DIRNAME / LOCK_FILENAME
+    return repo_root / kb_util.scratch_dirname() / LOCK_FILENAME
 
 
 def _pid_alive(pid: int) -> bool:

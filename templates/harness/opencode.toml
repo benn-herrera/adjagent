@@ -1,0 +1,11 @@
+[harness.project-temp-dir]
+text = ".opencode-temp"
+
+[harness.project-harness-dir]
+text = ".opencode"
+
+[harness.user-harness-dir]
+text = "~/.config/opencode"
+
+[harness.agents-file]
+text = "AGENTS.md"

@@ -1,158 +1,181 @@
-"""Claim discovery — stage C-inf, over the documents the author marked nothing in.
+"""The node pass — stage C-inf, the one home for claimhood in prose.
 
 **The missing middle.** The declared pass authors the claims the author marked;
 stage D attributes dependencies over an authored graph. Between them sits the
-question neither asks: what does a document nobody marked actually state. This
-pipeline asks it, once per document, and mints a claim node per record.
+question neither asks: what does a leaf's prose state. This pipeline asks it,
+once per leaf, over the prose outside the leaf's headings and its
+claim-bearing, proof and definition blocks (:mod:`prose`) — whether or not the
+leaf hosts blocks — and
+in the same ask judges every paragraph of that prose holding a cross-reference,
+a claim or not a claim.
 
-Six stages, in order, and every one of them terminates on a comparison between
-two artifacts or on a return code:
+**The node-pass record is its scope and its checkpoint** (``kb_pipeline``). The
+declared pass lists every leaf ``unread``; this pass reads the unread ones and
+completes the ``planned`` ones, and never asks about a leaf the record holds a
+plan for. Per leaf, in this order and no other:
 
-* **C1, :mod:`conform`** — the same structural checks and the same per-document
-  partition ``--pass 2`` runs. This stage's scope is
-  :attr:`~conform.PassTwoState.awaiting` and nothing else; a document carrying a
-  ``claims:`` list or an authored reason is somebody's finding and is not this
-  pass's to reopen.
-* **C2, :mod:`inventory`** — the same scan. Three of its readings are used: that
-  the documents in scope carry no claim-bearing block (asserted rather than
-  assumed, because it is what keeps this stage and C-mech from double-counting
-  if the scope ever widens), the maths-fence extents, and — through the
-  inventory the ask is composed from — nothing else.
-* **C3 and C4, :mod:`identify`** — the ask and the checks over what comes back.
-  This is the whole of C-inf's inference.
-* **C5, :func:`write.write_claims`** — three of the write path's four passes,
-  scoped to one document. Per document, so that a stopped run resumes.
-* **C6, :mod:`gate`** — the runner's refresh and verify. Preceded by this
-  stage's own exit condition: **no document in the run's scope is left
-  unsettled**, which is a comparison over the tree the run just wrote and is
-  what says the stage finished rather than stopped quietly. A document
-  identification could anchor nothing in leaves awaiting by carrying a reason of
-  its own, so it satisfies this condition rather than halting on it — and is
-  reported by name, because a state that exits awaiting quietly is the silent
-  zero this whole pipeline exists to remove.
+1. the ask, the checks and the re-asks (:mod:`identify`);
+2. the leaf's whole outcome — its verdicts, and its claims by title and
+   locator — into the record as ``planned``;
+3. the KB writes, in one per-leaf act (:func:`write.land_leaf`), which
+   completes idempotently from the plan;
+4. the leaf marked ``landed``.
+
+So a stop anywhere costs nothing already paid for: a resume lands a planned leaf
+from its record without asking, and reads only what no plan covers.
+
+**It exits on a comparison, never on an opinion.** Every leaf landed, and every
+obligated paragraph of every leaf — recomputed over the tree the run just wrote
+— carrying exactly one verdict in the record. Whether a paragraph *is* a claim
+is never checked.
 
 **No number is authored and no edge is.** Every entry's rigor is the pending
-literal, and dependency attribution runs afterward from :mod:`depends`, over a
-graph that by then includes what this stage minted.
-
-**A run is resumable and a re-run is a partial no-op.** Discovery costs an ask
-per document, so an interrupted run is the ordinary case rather than the
-exceptional one. There is no transcript replay: a re-run costs inference again
-for every document still awaiting, and nothing for one that is not.
+literal, and dependency attribution runs afterward from :mod:`depends`.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
-from .. import kb_index_lib
-from . import conform, gate, identify, inventory, tree, write
+from .. import kb_pipeline
+from ..kb_pipeline import LeafEntry, LeafOutcome, NodePassRecord, PlannedClaim, ReadState
+from . import conform, gate, graph, identify, inventory, prose, tree, write
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
 
 class DiscoveryError(ClaimGraphError):
-    """A stage of the discovery run stopped on a comparison it makes."""
+    """A stage of the node pass stopped on a comparison it makes."""
 
 
-def _no_block_in_scope(sites: inventory.Inventory, scope: tuple[str, ...]) -> None:
-    """C2 — a document in scope hosts no author-marked block. Vacuous here, and asserted."""
-    marked = sorted(set(scope) & sites.hosting_documents())
-    if marked:
-        raise DiscoveryError(
-            "block-in-scope",
-            f"{len(marked)} document(s) both await claim identification and host an author-marked claim "
-            f"block: {marked[:5]}. The declared pass writes claims onto every such document, so this stage "
-            f"and it would each mint a claim for the same site",
-        )
-
-
-#: What "nobody has settled this document" reads as, and it is two values rather
-#: than one. A leaf declaring neither claims nor a reason — including one
-#: carrying no frontmatter block at all — enters this run's scope as
-#: ``UNDECLARED`` rather than ``AWAITING`` (:func:`conform.pass_two_gate`), and
-#: it reads ``UNDECLARED`` again where a write did not land. An exit condition
-#: asking about ``AWAITING`` alone sees such a document in neither state, so it
-#: reports the run finished over a document nobody read — the failure this
-#: condition is the whole guard against.
-_UNSETTLED: frozenset[conform.Determination] = frozenset(
-    {conform.Determination.AWAITING, conform.Determination.UNDECLARED}
-)
-
-
-def _still_awaiting(kb_root: Path, scope: tuple[str, ...]) -> tuple[str, ...]:
-    """C6's own exit condition, over the tree the run just wrote."""
-    written = tree.read(kb_root)
-    return tuple(
-        path
-        for path in scope
-        if path in written.documents
-        and conform.determination(kb_index_lib.parse_frontmatter(written.documents[path].text) or {}) in _UNSETTLED
+def _plan(found: identify.Identification) -> LeafEntry:
+    """One leaf's outcome as the record holds it, ahead of any KB write."""
+    if found.claims:
+        outcome = LeafOutcome.MINTED
+    elif found.unanchored:
+        outcome = LeafOutcome.UNANCHORED
+    elif found.no_claim is not None:
+        outcome = LeafOutcome.NO_CLAIM
+    else:
+        outcome = LeafOutcome.MINTED
+    return LeafEntry(
+        state=ReadState.PLANNED,
+        outcome=outcome,
+        reason=found.no_claim,
+        claims=tuple(PlannedClaim(title=claim.title, locator=claim.excerpt) for claim in found.claims),
+        verdicts=found.verdicts,
     )
 
 
+def _unjudged(record: NodePassRecord, documents: tree.Tree) -> list[str]:
+    """I4 over the tree the run just wrote: each leaf's obligated paragraphs against its recorded verdicts."""
+    sites = inventory.scan(documents)
+    wrong: list[str] = []
+    for path, entry in sorted(record.leaves.items()):
+        owed = {
+            paragraph.start for paragraph in prose.obligated(prose.readable(documents.documents[path], sites), sites)
+        }
+        judged = [verdict.line for verdict in entry.verdicts]
+        if sorted(judged) != sorted(owed):
+            wrong.append(
+                f"{path}: paragraphs owed a verdict begin on lines {sorted(line + 1 for line in owed)}, and the "
+                f"record judges lines {sorted(line + 1 for line in judged)}"
+            )
+    return wrong
+
+
 def build(*, kb_root: Path, repo_root: Path, scratch: Path, identifier: identify.Identifier) -> Report:
-    """Run C1 through C6 over ``kb_root``. The tree is the sole input."""
+    """Carry every leaf the record holds to landed. The record and the tree are the inputs."""
     report = Report()
 
     try:
+        record = kb_pipeline.read_node_pass(repo_root)
+        if record is None:
+            raise DiscoveryError(
+                "node-pass-record",
+                f"no node-pass record stands at {kb_pipeline.NODE_PASS_RELPATH}. The declared pass writes one "
+                f"listing every leaf it stamped, and this pass reads its scope from nothing else",
+            )
         documents = tree.read(kb_root)
-        state = conform.pass_two_gate(documents)
-        report.findings.append(
-            Finding(PASS, "stage-C1-entry", f"{len(documents.documents)} documents conform and admit this pass")
-        )
-
+        conform.pass_two_gate(documents)
         sites = inventory.scan(documents)
-        _no_block_in_scope(sites, state.awaiting)
+        authored = graph.read(documents, sites)
+        states = [entry.state for entry in record.leaves.values()]
         report.findings.append(
             Finding(
                 FACT,
-                "stage-C2-scope",
-                f"{len(state.awaiting)} documents await claim identification, none of them hosting an "
-                f"author-marked block; {len(state.hosting)} host claims and {len(state.determined)} carry an "
-                f"authored reason, and neither is this pass's to reopen",
+                "stage-C-scope",
+                f"{states.count(ReadState.UNREAD)} leaves unread, {states.count(ReadState.PLANNED)} planned and "
+                f"completed from the record without an ask, {states.count(ReadState.LANDED)} landed already",
             )
         )
 
-        minted = 0
-        anchored_nothing: list[str] = []
-        for path in state.awaiting:
-            reading = identify.reading_of(documents.documents[path], sites)
-            found = identify.infer_claims(reading, identifier)
-            # The kind is the tree's answer, not the one an earlier pass wrote
-            # down: a document in this scope may carry no `kind:` — or no
-            # frontmatter at all — and the field's absence reaches the write API
-            # as the string "None", which its closed vocabulary refuses at
-            # `set-frontmatter`, one pass after this document's register entries
-            # have been minted.
-            kind = tree.document_kind(path, has_children=bool(documents.children[path]))
-            report.findings += write.write_claims(found, kind=kind, kb_root=kb_root, scratch=scratch)
-            report.findings.append(Finding(FACT, "stage-C-inference-cost", f"{path}: {found.telemetry.line()}"))
-            minted += len(found.claims)
-            if found.anchored_nothing:
-                anchored_nothing.append(path)
+        hosted: dict[str, set[str]] = {}
+        for node in authored.nodes.values():
+            hosted.setdefault(node.document, set()).add(node.id)
 
-        if anchored_nothing:
+        asked = minted = 0
+        unanchored: list[str] = []
+        for path in sorted(record.leaves):
+            entry = record.leaves[path]
+            if entry.state is ReadState.LANDED:
+                continue
+            document = documents.documents[path]
+            if entry.state is ReadState.UNREAD:
+                reading = identify.reading_of(document, sites)
+                if not reading.render.sentences:
+                    entry = LeafEntry(state=ReadState.PLANNED, outcome=LeafOutcome.NOTHING_TO_READ)
+                else:
+                    found = identify.infer_claims(reading, identifier)
+                    asked += 1
+                    report.findings.append(Finding(FACT, "stage-C-inference-cost", f"{path}: {found.telemetry.line()}"))
+                    entry = _plan(found)
+                record = record.with_leaf(path, entry)
+                kb_pipeline.write_node_pass(repo_root, record)
+
+            elsewhere = frozenset(node_id for other, ids in hosted.items() if other != path for node_id in ids)
+            ids = write.land_leaf(
+                document=path,
+                kind=tree.document_kind(path, has_children=bool(documents.children[path])),
+                claims=[
+                    write.NewClaim(title=claim.title, rationale=write.prose_rationale(path), locator=claim.locator)
+                    for claim in entry.claims
+                ],
+                no_claim=entry.reason if entry.outcome is LeafOutcome.NO_CLAIM else None,
+                blocks={node.id: node.locator for node in authored.hosted_by(path) if node.locator is not None},
+                elsewhere=elsewhere,
+                kb_root=kb_root,
+                scratch=scratch,
+                stem=f"cinf-{path.replace('/', '_')}",
+            )
+            hosted.setdefault(path, set()).update(ids)
+            record = record.with_leaf(path, replace(entry, state=ReadState.LANDED))
+            kb_pipeline.write_node_pass(repo_root, record)
+            minted += len(ids)
+            if entry.outcome is LeafOutcome.UNANCHORED:
+                unanchored.append(path)
+
+        if unanchored:
             report.findings.append(
                 Finding(
                     FACT,
-                    "stage-C-anchored-nothing",
-                    f"{len(anchored_nothing)} of {len(state.awaiting)} document(s) end this run with zero "
-                    f"claims after identification named results in them: {anchored_nothing}. Each carries a "
-                    f"reason saying the anchoring failed, not that the document states nothing, and none of "
-                    f"them is re-read by a re-run. Read the captures before treating this tree as complete",
+                    "stage-C-unanchored",
+                    f"{len(unanchored)} leaf/leaves end this run with no claim minted after identification named "
+                    f"results in them: {unanchored}. The record says so and the KB is unchanged for them; read "
+                    f"the captures before treating this tree as complete",
                 )
             )
 
-        awaiting = _still_awaiting(kb_root, state.awaiting)
-        if awaiting:
+        wrong = _unjudged(record, tree.read(kb_root))
+        if wrong:
             raise DiscoveryError(
-                "exit-condition",
-                f"{len(awaiting)} document(s) in this run's scope still await claim identification after the "
-                f"write: {list(awaiting)[:5]}. The run stopped rather than finished",
+                "verdict-coverage",
+                f"{len(wrong)} leaf/leaves do not carry exactly one verdict per paragraph owed one: {wrong[:5]}",
             )
         report.findings.append(
             Finding(
                 PASS,
                 "stage-C-identify",
-                f"{minted} claims minted across {len(state.awaiting)} documents; none of them still awaits",
+                f"{minted} claims minted across {len(record.leaves)} leaves, {asked} of them asked this run; every "
+                f"leaf landed and every paragraph owed a verdict carries one",
             )
         )
     except ClaimGraphError as error:

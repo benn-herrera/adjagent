@@ -5,21 +5,24 @@ two artifacts or on a return code; none exits on an opinion, and none asks
 whether the work is good enough.
 
 **Mechanical end to end.** This pass identifies the claims the author marked and
-spends no inference. The two stages that do — claim discovery over the unmarked
-documents (:mod:`discover`) and dependency attribution (:mod:`depends`) — are
+spends no inference. The two stages that do — the node pass over every leaf's
+prose (:mod:`discover`) and dependency attribution (:mod:`depends`) — are
 separate entry points over this pass's output, because a failed or improved
 inference must not cost the mechanical work that preceded it and must be
-re-runnable without rebuilding the tree.
+re-runnable without rebuilding the tree. Equations are minted by a stage of
+their own after the node pass (:mod:`equations`), a reference in prose judged
+not a claim no longer counting toward one.
 
 **This pass's output is a lower bound and says so in its report.** The claims it
 authors are the ones the corpus marked; the ones it did not look for are named
-by count, and the documents carrying no author-marked block carry a reason that
-states the run's scope rather than a finding about the document — which is also
-the sentence claim discovery reads as its admission ticket.
+by count, and a leaf carrying no author-marked block carries a reason saying
+exactly that and nothing more. **It writes the node-pass record fresh**, every
+declaring leaf unread, which is the node pass's scope.
 """
 
 from pathlib import Path
 
+from .. import kb_pipeline
 from . import assemble, conform, gate, identify, inventory, tree, write
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
@@ -102,23 +105,12 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path) -> Report:
         )
 
         plan = assemble.assemble(documents, sites, claims)
-        equations = tuple(entry for entry in plan.entries if entry.equation is not None)
         report.findings.append(
             Finding(
                 PASS,
                 "stage-E-assemble",
                 f"{len(plan.entries)} register entries across {len(plan.registers())} registers, "
                 f"{len(plan.documents)} frontmatter records, {len(plan.markers)} markers",
-            )
-        )
-        report.findings.append(
-            Finding(
-                FACT,
-                "stage-E-equations",
-                f"{len(equations)} of those entries are referenced equations no claim-bearing block and no "
-                f"proof holds, across {len({entry.document for entry in equations})} documents — minted so "
-                f"that the corpus's own cross-references to them resolve, and bounded by those references: "
-                f"a labelled equation nobody cites is not among them",
             )
         )
         report.findings.append(
@@ -134,6 +126,14 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path) -> Report:
 
         written, _ = write.write(plan, kb_root=kb_root, scratch=scratch)
         report.findings += written
+
+        leaves = [record.path for record in plan.documents if record.kind in tree.DECLARING_KINDS]
+        kb_pipeline.write_node_pass(
+            repo_root, kb_pipeline.NodePassRecord(leaves={path: kb_pipeline.LeafEntry() for path in leaves})
+        )
+        report.findings.append(
+            Finding(FACT, "stage-F-node-pass", f"{len(leaves)} leaves recorded unread for the node pass")
+        )
     except ClaimGraphError as error:
         report.findings.append(error.finding())
         return report

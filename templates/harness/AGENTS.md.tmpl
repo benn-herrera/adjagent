@@ -1,7 +1,19 @@
-# Global info and directives
++++
+# not installed per project with other content. 
+# installed via specific command to specified dir with harness-specific file name.
+# _resolve is a metakey meaning the key 'text' has a value to be resolved via chunk substitution
+# because you can have multiple outputs needing resolution it is a list of elements
+[[outputs._resolve]]
+text = "@!dyn.agents-file-install-dir-arg!@/@!hrn.agents-file!@"
++++
+# @!dyn.agents-file-scope-name!@ info and directives
 
+@!dyn.existing-user-content-before-rendered-minus-h1!@
+
+ <!-- vvv-adjagent do not edit at or between marker lines. version[@!dyn.gen-short-sha!@] adjagent-vvv -->
+ 
 ## Scratch space
-**INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch — throwaway builds, probe harnesses, captured output — goes in `.claude-temp/` under the active project root (a sibling of `.claude/`, not inside it — writes under `.claude/` trip the permission system's own-settings protections). If it doesn't exist, stop and say so; don't improvise a location.
+**INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch — throwaway builds, probe harnesses, captured output — goes in `@!hrn.project-temp-dir!@/` under the active project root (a sibling of `@!hrn.project-harness-dir!@/`, not inside it — writes under `@!hrn.project-harness-dir!@/` trip the permission system's own-settings protections). If it doesn't exist, stop and say so; don't improvise a location.
 
 ## Task management
 
@@ -25,7 +37,7 @@
   artifact it drafts.
 - Coder dispatches: when the brief is fully mechanical — every edit
   enumerated, no design choice, no debugging — drop the dispatch to
-  `model: sonnet`. Otherwise the definition's pin stands.
+  `model: @!dyn.tier-medium!@`. Otherwise the definition's pin stands.
 - **Direction a sub-agent reads carries outcome and operative consequence
   only** — plus the guiding principle where one still steers open choices.
   Decision history (who ruled, when, which branches lost, the deciding
@@ -90,18 +102,7 @@ Every project defines runner targets (justfile, Makefile, package scripts) for i
 ## Memory and behavior correction
 A behavior change — yours or a dispatched agent's — is a first-class work
 item: surfaced, proposed, and landed like any other change, never a private
-adjustment made in passing. Such a change has one destination: proposed
-wording for the file that owns the behavior — the adjagent repo's
-`user-config/INSTALLED_CLAUDE.md` for every project, the project's own
-`CLAUDE.md` for one project, the agent's definition for one agent. There is no
-second destination.
-
-`~/.claude/CLAUDE.md` is not that file. It is the install target, written from
-`INSTALLED_CLAUDE.md` by `just install-claude-md`, and the reverse flow is a
-manual diff-and-adopt that nothing runs on a schedule — so a rule edited there
-is a rule no install carries anywhere. Edit it directly only for a rule about
-the sandbox the session runs in, which is specific to the live host and is
-deliberately not published.
+adjustment made in passing. Such a change belongs in `@!hrn.user-harness-dir!@/@!hrn.agents-file!@`, the project `AGENTS.md`, an agent/command/skill definition, or a project doc – in other words, somewhere permanent (preferably tracked), and scoped to the domain that needs the correction.
 
 **INVARIANT**: Never create or update a cross-session memory store — a memory
 directory, its index, or any equivalent an agent definition, a skill, or the
@@ -151,3 +152,7 @@ Read the primary sources the plan depends on — actual current files and state,
 - Minimal flattery. Focused, concise; 200 words or less unless prompted for detail. No unearned praise (e.g. "that's a sharp question" for every query) — reserve it for genuine significance.
 - Write for a reader who was not in this session: names that resolve in the repo — paths, symbols, contract terms — reach them, and labels coined in the work thread do not, so give the referent rather than the label. The referent is the more specific version, not the vaguer one, and it is what the word budget is for.
 - **ZERO SELF-BLAME LANGUAGE** - Self-blame is useless theater that fails to identify problems and prevent recurrences. Diagnostic attribution is the correct response to a mistake. Never assign blame to yourself or an agent as an entity. Identify the source of the error. If the error is systemic rather than categorical, specify the appropriate location (e.g. CLAUDE.md, agent definition, project docs, next prompt) for remediation and suggest the language or rule to effect it. If the error was categorical, i.e. asking for something models can't do or are terrible at, say so by naming the incompatible capability required by the task.
+
+ <!-- ^^^-adjagent do not edit at or between marker lines. version[@!dyn.gen-short-sha!@] adjagent-^^^ -->
+
+@!dyn.existing-user-content-after-rendered!@

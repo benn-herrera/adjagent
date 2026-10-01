@@ -11,7 +11,11 @@ marked as a block, and a referenced equation nothing in the graph holds
 first, and both become ordinary ``clm-`` entries. Where they differ is the
 marker: an equation has no line of prose to anchor one to, its position being
 the ``\\label`` inside its maths fence, so it takes none and is not counted
-toward the threshold that demands one of everything else.
+toward the threshold that demands one of everything else. **The declared pass
+arranges only the first.** An equation is minted after the node pass has judged
+the prose its references sit in (:mod:`equations`), because a reference in prose
+judged not a claim no longer counts, and :func:`equation_entries` is what that
+stage arranges them with.
 
 **Ids do not exist yet**, and cannot: an insert op mints its own id and there is
 no way to spell "depends on the third entry in this file". So a document record
@@ -46,21 +50,12 @@ REGISTER_FILENAME = "claim-quality.md"
 #: design, so they are the one entry kind not filed under a volume.
 WORKS_REGISTER = kb_index_lib.WORKS_REGISTER
 
-#: What a document with no author-marked block carries while no pass has read
-#: its prose. It states the run's scope and not a finding about the document: a
-#: reason asserting the document states no result would be a falsehood written
-#: on the strength of a stage that did not run.
-#:
-#: **Also the resumption marker**, compared by identity in
-#: :func:`conform.determination`, which is where what that costs is stated. It
-#: is one of two reserved reason literals now; the other is
-#: :data:`identify.UNANCHORED_REASON`, which is the same pattern for a run that
-#: read a document and could anchor nothing in it.
-#:
-#: Defined in ``kb_index_lib`` and named here because this is the module that
-#: writes it: the build pipeline's coverage check for claim discovery reads the
-#: same literal, and it cannot import this package.
-UNSCANNED_REASON = kb_index_lib.UNSCANNED_REASON
+#: What a leaf with no author-marked claim block carries from the declared
+#: pass. A fact about the document and nothing more: it asserts nothing about
+#: the prose and nothing about the build, and nothing compares it by identity.
+#: Which leaves a reading reached is the node-pass record's to say, never the
+#: KB's.
+BLOCKLESS_REASON = "This document carries no author-marked claim block."
 
 
 @dataclass(frozen=True)
@@ -162,8 +157,8 @@ def _equation_rationale(found: equation.ReferencedEquation) -> str:
     )
 
 
-def _equation_entries(tree: Tree, inventory: Inventory) -> tuple[Entry, ...]:
-    """One entry per referenced equation nothing else in the graph holds.
+def equation_entries(tree: Tree, referenced: Sequence[equation.ReferencedEquation]) -> tuple[Entry, ...]:
+    """One entry per referenced equation nothing else in the graph holds, as :func:`equation.unheld` found them.
 
     The title is the hosting document's own H1 and the equation's own label —
     both the author's words, and the pair unique across the corpus. A document
@@ -180,31 +175,31 @@ def _equation_entries(tree: Tree, inventory: Inventory) -> tuple[Entry, ...]:
     write time, which is what makes the comparison well-posed.
     """
     found: list[Entry] = []
-    for referenced in equation.unheld(inventory):
-        heading = tree.documents[referenced.document].heading
+    for each in referenced:
+        heading = tree.documents[each.document].heading
         if heading is not None:
             heading = render.collapse_prose(heading) or None
         if heading is None:
             raise ClaimGraphError(
                 "equation-heading",
-                f"{referenced.document} carries no H1, so the equation labelled {referenced.label!r} in it "
+                f"{each.document} carries no H1, so the equation labelled {each.label!r} in it "
                 f"has no title to be minted under. Every document of a conforming tree carries one",
             )
         found.append(
             Entry(
-                register=register_for(referenced.document),
-                title=kb_schema.equation_title(label=referenced.label, heading=heading),
-                rationale=_equation_rationale(referenced),
-                document=referenced.document,
-                locator=referenced.label,
-                equation=referenced.label,
+                register=register_for(each.document),
+                title=kb_schema.equation_title(label=each.label, heading=heading),
+                rationale=_equation_rationale(each),
+                document=each.document,
+                locator=each.label,
+                equation=each.label,
             )
         )
     return tuple(found)
 
 
 def assemble(tree: Tree, inventory: Inventory, claims: Sequence[Claim]) -> Plan:
-    """Arrange the claims, the referenced equations and the tree into the write passes' inputs."""
+    """Arrange the block-hosted claims and the tree into the write passes' inputs."""
     entries = tuple(
         Entry(
             register=register_for(claim.document),
@@ -214,7 +209,7 @@ def assemble(tree: Tree, inventory: Inventory, claims: Sequence[Claim]) -> Plan:
             locator=claim.locator,
         )
         for claim in claims
-    ) + _equation_entries(tree, inventory)
+    )
 
     hosted: dict[str, list[int]] = {}
     for position, entry in enumerate(entries):
@@ -230,20 +225,13 @@ def assemble(tree: Tree, inventory: Inventory, claims: Sequence[Claim]) -> Plan:
                 path=path,
                 kind=kind,
                 claims=positions,
-                no_claim=UNSCANNED_REASON if declares and not positions else None,
+                no_claim=BLOCKLESS_REASON if declares and not positions else None,
             )
         )
 
-    # Counted over the block-hosted entries alone, at both ends of the rule: an
-    # equation node takes no marker, so it may not push the document it lands in
-    # over the threshold that demands one of everything else either.
-    markable = {
-        path: [position for position in positions if entries[position].equation is None]
-        for path, positions in hosted.items()
-    }
     markers = tuple(
         Marker(document=path, entry=position, locator=entries[position].locator)
-        for path, positions in sorted(markable.items())
+        for path, positions in sorted(hosted.items())
         if len(positions) > 1
         for position in positions
     )

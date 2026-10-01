@@ -11,9 +11,12 @@ Root discovery is lazy and cwd-anchored: the consuming repo's root is found
 by :func:`find_repo_root`, which walks up from the current working directory
 to the first directory containing a ``.git`` entry (a directory, or the file
 a linked git worktree carries) and requires the ``kb-root/`` content tree
-beside it. Nothing is ever derived from ``__file__``: the toolchain is an
-installed copy under ``.claude/agents/``, so ``__file__`` only ever describes
-where the tools were installed, not the repo being worked on.
+beside it. The repo root is never derived from ``__file__``: that only ever
+describes where the tools were installed, not the repo being worked on. What
+``__file__`` does decide is which harness the toolchain is installed under, and
+with it every harness-named path spelled relative to the repo root: the scratch
+directory, the PYTHONPATH entry, the runner include line
+(:mod:`kb_tools.install_location`).
 
 Maintenance-command hints (:func:`refresh_cmd` / :func:`verify_cmd`) are
 detected, not configured: a ``justfile`` at the detected root selects
@@ -74,7 +77,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from kb_tools import __version__
+from kb_tools import __version__, install_location
 
 KB_DIRNAME = "kb-root"
 INDEX_DIRNAME = ".index"
@@ -87,19 +90,28 @@ CLAIMS_FILENAME = "claims.jsonl"
 CLAIM_GRAPH_FILENAME = "claim-graph.svg"
 
 # No INVARIANTS_FILENAME here: the corpus-invariant source is `invariants.md`
-# (`CLAUDE.md` is the legacy spelling), and `kb_index_lib` owns both names.
+# (`AGENTS.md` is the legacy spelling), and `kb_index_lib` owns both names.
 
-# The installed agent-set tree in a consuming repo, and the two docent
-# commands whose presence proves the install reached the commands surface.
-CLAUDE_DIRNAME = ".claude"
+# The commands surface under the installed harness directory, and the two
+# docent commands whose presence proves the install reached it.
 COMMANDS_DIRNAME = "commands"
 DOCENT_COMMAND_FILENAMES = ("kb-start.md", "kb-next.md")
 
-# The consuming project's scratch space, and the one subdirectory inside it
-# that is a KB-build artifact. Everything else under SCRATCH_DIRNAME is
-# unrelated scratch from any other agent work and carries no build meaning.
-SCRATCH_DIRNAME = ".claude-temp"
+# The one subdirectory of the consuming project's scratch space that is a
+# KB-build artifact. Everything else under the scratch directory is unrelated
+# scratch from any other agent work and carries no build meaning.
 SCRATCH_BUILD_DIRNAME = "kb-build"
+
+
+def harness_dirname() -> str:
+    """The installed harness directory's name, as the repo root holds it (``.claude``)."""
+    return install_location.current().harness_dir.name
+
+
+def scratch_dirname() -> str:
+    """The consuming project's scratch directory's name, as the repo root holds it (``.claude-temp``)."""
+    return install_location.current().scratch_dir.name
+
 
 # Maintenance-target vocabulary. The consuming project's runner (justfile or
 # Makefile) owns the target definitions; these mirror the target names so
@@ -112,23 +124,32 @@ TARGET_VERIFY = "kb-verify"
 _JUSTFILE_NAMES = ("justfile", "Justfile", ".justfile")
 _MAKEFILE_NAMES = ("Makefile", "makefile", "GNUmakefile")
 
-# The always-works raw invocation, written repo-root-relative (a consuming
-# repo has the toolchain installed at `.claude/agents`).
-_RAW_CMD = "PYTHONPATH=.claude/agents python3 -m kb_tools.{module}"
 
-#: This CLI's consumer-side invocation, up to but not including the op — the one
-#: spelling every rendered remediation hint is built from.
-#: No brief, definition or recipe hand-writes a `kb_util` command line.
-INVOCATION = _RAW_CMD.format(module="kb_util")
+def _raw_cmd(module: str) -> str:
+    """The always-works raw invocation of ``module``, written repo-root-relative."""
+    return f"PYTHONPATH={install_location.current().agents_relpath} python3 -m kb_tools.{module}"
 
-#: The driver's consumer-side invocation, up to but not including the mode. It
-#: is published here beside :data:`INVOCATION` rather than inside `kb_driver`
-#: because both are the same fact — how a consuming repo reaches an installed
-#: module — and a change to that reaches them together only while one string
-#: builds both. `kb_driver.baton`'s `THEN RUN:` lines are the consumer; the
-#: relaying session runs what they print, so a spelling without the prefix does
-#: not resolve where that session stands.
-DRIVER_INVOCATION = _RAW_CMD.format(module="kb_driver")
+
+def invocation() -> str:
+    """This CLI's consumer-side invocation, up to but not including the op.
+
+    The one spelling every rendered remediation hint is built from. No brief,
+    definition or recipe hand-writes a ``kb_util`` command line.
+    """
+    return _raw_cmd("kb_util")
+
+
+def driver_invocation() -> str:
+    """The driver's consumer-side invocation, up to but not including the mode.
+
+    Published here beside :func:`invocation` rather than inside ``kb_driver``
+    because both are the same fact — how a consuming repo reaches an installed
+    module — and a change to that reaches them together only while one function
+    builds both. ``kb_driver.baton``'s ``THEN RUN:`` lines are the consumer; the
+    relaying session runs what they print, so a spelling without the prefix does
+    not resolve where that session stands.
+    """
+    return _raw_cmd("kb_driver")
 
 
 # --- the two build front ends -------------------------------------------------
@@ -136,7 +157,7 @@ DRIVER_INVOCATION = _RAW_CMD.format(module="kb_driver")
 # `kb_docgraph` and `kb_claimgraph` are module CLIs of their own rather than ops
 # of this one (ARCHITECTURE.md, The Document Graph and The Claim Graph). Their
 # module names and their flags are single-sourced here for the reason
-# `INVOCATION` is: `kb_driver.ledger` composes the argv it runs as a subprocess,
+# `invocation()` is: `kb_driver.ledger` composes the argv it runs as a subprocess,
 # and a flag spelled where it is used is a flag renamed in one place of two.
 
 DOCGRAPH_MODULE = "kb_docgraph"
@@ -168,16 +189,19 @@ def docgraph_flags(*, sources: Sequence[str], bibliographies: Sequence[str], kb_
 # read by the driver that runs the command and by the tool that parses it back.
 # A second spelling here would be the third.
 
-# Canonical installed lines — the one line the installer manages in a
-# consuming repo's runner file; the target definitions live in the installed
-# tree's runner-snippets/ and are included from there. The non-fatal include
-# forms (`-include` / `import?`, just >= 1.33) are deliberate: an absent
-# .claude/agents must degrade to missing KB targets, never break the
-# consumer's whole runner.
-INSTALL_LINE_MAKE = "-include .claude/agents/kb_tools/runner-snippets/kb.mk"
-INSTALL_LINE_JUST = "import? '.claude/agents/kb_tools/runner-snippets/kb.just'"
 
-_INSTALL_LINES = {"just": INSTALL_LINE_JUST, "make": INSTALL_LINE_MAKE}
+def install_line(runner: str) -> str:
+    """The one line the installer manages in a consuming repo's ``runner`` file.
+
+    The target definitions live in the installed tree's ``runner-snippets/`` and
+    are included from there. The non-fatal include forms (``-include`` /
+    ``import?``, just >= 1.33) are deliberate: an absent installed tree must
+    degrade to missing KB targets, never break the consumer's whole runner.
+    """
+    snippets = f"{install_location.current().agents_relpath}/kb_tools/runner-snippets"
+    return {"just": f"import? '{snippets}/kb.just'", "make": f"-include {snippets}/kb.mk"}[runner]
+
+
 _RUNNER_PROBE_NAMES = {"just": _JUSTFILE_NAMES, "make": _MAKEFILE_NAMES}
 _RUNNER_CREATE_NAMES = {"just": "justfile", "make": "Makefile"}
 
@@ -309,7 +333,7 @@ OP_RENDER_CITATION = "render-citation"
 READ_OPS: tuple[str, ...] = (OP_RENDER_CITATION,)
 
 #: The one argument every metadata op takes, published for the same reason
-#: :data:`INVOCATION` and :data:`WRITE_OPS` are: this flag is *rendered* as well
+#: :func:`invocation` and :data:`WRITE_OPS` are: this flag is *rendered* as well
 #: as declared. :func:`_add_values_option` builds the option from it, so the
 #: third token of the sanctioned invocation moves with a rename exactly as the
 #: first two do. Hand-typing it anywhere is exactly the staleness this
@@ -416,12 +440,12 @@ def runner_cmd(target: str, module: str, repo_root: Path | None = None) -> str:
         try:
             repo_root = find_repo_root()
         except RepoRootError:
-            return _RAW_CMD.format(module=module)
+            return _raw_cmd(module)
     if _has_runner_file(repo_root, _JUSTFILE_NAMES):
         return f"just {target}"
     if _has_runner_file(repo_root, _MAKEFILE_NAMES):
         return f"make {target}"
-    return _RAW_CMD.format(module=module)
+    return _raw_cmd(module)
 
 
 def refresh_cmd(repo_root: Path | None = None) -> str:
@@ -471,7 +495,7 @@ def targets_installed(repo_root: Path, runner: str | None = None) -> bool:
     if found is None:
         return False
     kind, path = found
-    return _INSTALL_LINES[kind] in path.read_text(encoding="utf-8").splitlines()
+    return install_line(kind) in path.read_text(encoding="utf-8").splitlines()
 
 
 def install_targets(repo_root: Path, runner: str | None = None) -> str:
@@ -495,14 +519,14 @@ def install_targets(repo_root: Path, runner: str | None = None) -> str:
         path.write_text(
             f"# {_RUNNER_CREATE_NAMES[runner]} — created by the kb_tools installer.\n"
             f"# The line below pulls in the KB maintenance targets from the\n"
-            f"# installed tree at .claude/agents; add project recipes below it.\n"
+            f"# installed tree at {install_location.current().agents_relpath}; add project recipes below it.\n"
             f"\n"
-            f"{_INSTALL_LINES[runner]}\n",
+            f"{install_line(runner)}\n",
             encoding="utf-8",
         )
         return f"created {path} with the KB include line"
     kind, path = found
-    line = _INSTALL_LINES[kind]
+    line = install_line(kind)
     text = path.read_text(encoding="utf-8")
     if line in text.splitlines():
         return f"already installed: {path} contains the KB include line"
@@ -531,7 +555,7 @@ def uninstall_targets(repo_root: Path, runner: str | None = None) -> str:
     if found is None:
         return f"not installed: no runner file at {repo_root}"
     kind, path = found
-    line = _INSTALL_LINES[kind]
+    line = install_line(kind)
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     if line not in [ln.rstrip("\n") for ln in lines]:
         return f"not installed: {path} does not contain the KB include line"
@@ -660,7 +684,7 @@ def preflight_report(repo_root: Path) -> list[PreflightItem]:
     status = run_git(repo_root, "status", "--porcelain")
     items = [PreflightItem(PASS, "git-root", str(repo_root))]
 
-    commands_dir = repo_root / CLAUDE_DIRNAME / COMMANDS_DIRNAME
+    commands_dir = repo_root / harness_dirname() / COMMANDS_DIRNAME
     missing = [name for name in DOCENT_COMMAND_FILENAMES if not (commands_dir / name).is_file()]
     if missing:
         items.append(
@@ -674,31 +698,32 @@ def preflight_report(repo_root: Path) -> list[PreflightItem]:
     else:
         items.append(PreflightItem(PASS, "docent-commands", f"both present under {commands_dir}"))
 
-    scratch = repo_root / SCRATCH_DIRNAME
+    scratch_name = scratch_dirname()
+    scratch = repo_root / scratch_name
     if scratch.is_dir():
         items.append(PreflightItem(FACT, "scratch-dir", f"present: {scratch}"))
     else:
         scratch.mkdir(parents=True)
         items.append(PreflightItem(FACT, "scratch-dir", f"created: {scratch}"))
 
-    ignored = run_git(repo_root, "check-ignore", "-q", SCRATCH_DIRNAME)
+    ignored = run_git(repo_root, "check-ignore", "-q", scratch_name)
     if ignored is None or ignored.returncode not in (0, 1):
         items.append(
             PreflightItem(
                 FAIL,
                 "scratch-ignored",
-                f"could not determine ignore coverage for {SCRATCH_DIRNAME}/ — "
+                f"could not determine ignore coverage for {scratch_name}/ — "
                 f"restore: ensure git is on PATH and the root is a git worktree, then re-run",
             )
         )
     elif ignored.returncode == 0:
-        items.append(PreflightItem(PASS, "scratch-ignored", f"{SCRATCH_DIRNAME}/ is covered by gitignore rules"))
+        items.append(PreflightItem(PASS, "scratch-ignored", f"{scratch_name}/ is covered by gitignore rules"))
     else:
         items.append(
             PreflightItem(
                 FAIL,
                 "scratch-ignored",
-                f"{SCRATCH_DIRNAME}/ is not ignored — restore: append '{SCRATCH_DIRNAME}/' to "
+                f"{scratch_name}/ is not ignored — restore: append '{scratch_name}/' to "
                 f"{repo_root / '.gitignore'} and commit that change (this tool never writes "
                 f"gitignore rules or commits in your repo)",
             )
@@ -1412,9 +1437,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     advance_step_help = (
         "record one stage's ledger boundary — the same git add -A sweep, then a commit — and "
-        "print the checklist. At phase-3a it first writes the KB's readiness docs (kb-root/CLAUDE.md, "
-        "CONVENTIONS.md) when absent; no other stage writes a file. Reports without committing if the "
-        "stage is already recorded, or if a predecessor stage is not"
+        "print the checklist. At phase-3a it first writes the KB's readiness docs (kb-root/AGENTS.md, its "
+        "CLAUDE.md redirect, CONVENTIONS.md) when absent; no other stage writes a file. Reports without "
+        "committing if the stage is already recorded, or if a predecessor stage is not"
     )
     advance_step = add_parser(OP_ADVANCE_STEP, help=advance_step_help, description=advance_step_help)
     advance_step.add_argument(

@@ -6,19 +6,22 @@ Document-Tree Contract can replace the current front end without this package
 noticing, and reaching behind that contract for a fact the tree does not carry
 would destroy that property for one build's convenience.
 
-**Three pipelines, and they are separate because inference is the part that
+**Four pipelines, and they are separate because inference is the part that
 needs repeating.** :mod:`build` is the declared graph — what the author marked
-explicitly, mechanical end to end and always correct. :mod:`discover` mints the
-claims nobody marked, and :mod:`depends` attributes the dependencies between
-them; each extends its predecessor's output additively rather than rebuilding
-it. A failed or improved inferential pass must not cost the mechanical work.
+explicitly, mechanical end to end and always correct. :mod:`discover` is the
+node pass, minting the claims every leaf's prose states and judging each
+paragraph of it that holds a reference; :mod:`equations` mints the referenced
+equations the references that still count name; :mod:`depends` attributes the
+dependencies between them. Each extends its predecessor's output additively
+rather than rebuilding it, and the node set is fixed once :mod:`equations` ends.
+A failed or improved inferential pass must not cost the mechanical work.
 
 The stages, in order:
 
 * **A, :mod:`conform`** — the conformance gate. Writes nothing, stops on the
   first failed assertion naming the contract point. Its cleanliness check is
-  the declared pass's double-run guard; the discovered pass's guard is the
-  per-document entry condition beside it.
+  the declared pass's double-run guard; the node pass's guard is the read state
+  the node-pass record holds for each leaf.
 * **B, :mod:`inventory`** — the claim-site inventory: labelled blockquotes,
   display-maths fences, cross-reference anchors, rendered citations. A block is
   read by the display name its author gave it, and a name the table classifies
@@ -26,8 +29,9 @@ The stages, in order:
   it, so an unfamiliar corpus says what it was read as rather than refusing to
   build.
 * **C, :mod:`identify`** — claim identification. The block-hosted half is
-  mechanical; the half that reads unmarked documents asks through :mod:`ask`
-  and is bounded by verbatim-and-single-occurrence against the document itself.
+  mechanical; the half that reads each leaf's prose (:mod:`prose`) asks
+  through :mod:`ask` and is bounded by single occurrence against the document
+  itself and by verdict completeness against its obligated paragraphs.
 * **D, :mod:`attribute`** — dependency attribution over the graph
   :mod:`graph` reads back. Its narrowing settles an edge wherever containment
   directs one and asks nobody, so that half runs and is recorded even where no

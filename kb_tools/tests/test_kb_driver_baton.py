@@ -79,7 +79,7 @@ def test_barrier_baton_carries_question_answers_and_resume_command() -> None:
     assert f"{baton.PREFIX} ADMISSIBLE ANSWERS:" in block
     assert "just | make" in block
     assert "THEN RUN, WITH THE ANSWER SUBSTITUTED:" in block
-    assert f"{kb_util.DRIVER_INVOCATION} run --config .claude-temp/kb-build/driver-run.toml" in block
+    assert f"{kb_util.driver_invocation()} run --config .claude-temp/kb-build/driver-run.toml" in block
     assert "--decide spine-seed.runner-choice=<answer>" in block
 
 
@@ -187,7 +187,7 @@ def test_a_head_record_refusal_names_an_action_that_row_has(tmp_path: Path, caps
     assert "do not interpret it" not in card, "an enumerated code must not fall through to the fallback"
     assert "brief" not in card and "worker" not in card
     # The action: resume, once what the refusal named is there.
-    assert f"{kb_util.DRIVER_INVOCATION} run --source main.tex" in _then_run(card)
+    assert f"{kb_util.driver_invocation()} run --source main.tex" in _then_run(card)
     assert f"{baton.PREFIX}   nothing" not in card.splitlines()
     # And the refusal's own account of what is missing rides the ASK, so the
     # operator is told which output the resume is waiting on.

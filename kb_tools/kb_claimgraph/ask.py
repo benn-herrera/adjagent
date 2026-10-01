@@ -1,13 +1,21 @@
 """This package's two inferences: what is asked, how it is asked, what is read back.
 
 **Inference arrives by injection, as a seat and a prompt** —
-:class:`SeatAsk`, satisfied in production by
-:func:`kb_tools.inference.ask_seat`. That signature is the whole of this
-module's dependency on the machinery behind it: a seat name and a prompt go in,
-response text and an :class:`~kb_tools.inference.Outcome` come back, and nothing
-about argv, a subprocess, a process group or a stream format is visible here.
-The layer that satisfies it knows the agent set and nothing about this KB; the
-layer under *that* knows neither.
+:class:`SeatAsk`, satisfied in production by :func:`ask_without_tools`. That
+signature is the whole of this module's dependency on the machinery behind it:
+a seat name and a prompt go in, response text and an
+:class:`~kb_tools.inference.Outcome` come back, and nothing about argv, a
+subprocess, a process group or a stream format is visible here. The layer that
+satisfies it knows the agent set and nothing about this KB; the layer under
+*that* knows neither.
+
+**Every ask is answered from its prompt and nothing else.** Each shows the seat
+exactly the document or the candidates it is to judge, and a seat able to run
+tools reaches past that — neighbouring leaves, the sources — so its answer
+would rest on what it chose to look at. :func:`ask_without_tools` therefore
+puts every ask through :func:`kb_tools.inference.ask_reader`: the seat's
+definition body as the system prompt with the ``no-tools`` fragment after it,
+and no tool to call.
 
 **Neither ask is written here.** Both are templates under
 ``kb_driver/prompt-templates/``, filled through
@@ -66,10 +74,13 @@ candidate targets that stage D's mechanical narrowing offered it, and the
 reference lines those candidates were enumerated from. What comes back is a
 subset of the ids that were handed over.
 
-**Stage C-inf's ask is the one open-ended reading in this build.** One document,
-rendered one labelled sentence per line (:mod:`label`), and what results it
-states — each as a self-contained block carrying the **quote** the result begins
-at, the **label** of that sentence, and a **title** the seat authors.
+**Stage C-inf's ask is the one open-ended reading in this build.** One leaf's
+readable prose, rendered one labelled sentence per line (:mod:`label`) with its
+claim, proof and definition blocks shown unlabelled, and what results it states
+— each as a self-contained block carrying the **quote** the result begins at,
+the **label** of that sentence, and a **title** the seat authors — together with
+one **verdict** per paragraph owed one, named by the paragraph's label range: a
+claim block carrying a title, or a not-a-claim block carrying nothing more.
 
 **The model quotes; the tool addresses.** The quote is a lookup key and never
 content: it resolves to a sentence, and then it is discarded and the tool cuts
@@ -97,12 +108,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol
 
-from ..inference import Outcome, ask_seat
+from ..inference import Invoker, Outcome, ask_reader
 from ..kb_driver import envelope, prompt_templates
 from . import label
 from .attribute import Question
 from .graph import ClaimNode
-from .identify import Answer, Reading, Record, Trigger, Unresolved
+from .identify import Answer, Reading, Record, Trigger, Unresolved, Verdict
 from .report import AnswerFormatError, ClaimGraphError
 
 #: The block stage D's answer travels in. One JSON document between two marker
@@ -143,6 +154,30 @@ NO_CLAIM_NAME = "KB-CLAIMGRAPH-NO-CLAIM"
 NO_CLAIM_OPEN = f"<<<{NO_CLAIM_NAME}"
 NO_CLAIM_CLOSE = NO_CLAIM_NAME
 
+#: The block a leaf hosting a claim block returns where its prose adds nothing:
+#: no further result, and no paragraph judged a claim. An empty marker pair,
+#: because an answer carrying no block at all is indistinguishable from a call
+#: that said nothing, and this is what makes "nothing further" a positive
+#: assertion — the no-claim sentence's role for a leaf that may not decline.
+NOTHING_FURTHER_NAME = "KB-CLAIMGRAPH-NOTHING-FURTHER"
+NOTHING_FURTHER_OPEN = f"<<<{NOTHING_FURTHER_NAME}"
+NOTHING_FURTHER_CLOSE = NOTHING_FURTHER_NAME
+
+#: A verdict on one paragraph owed one, in two block kinds rather than one block
+#: with a verdict field: which kind a block is says claim or not-a-claim, so the
+#: title is required exactly where it is meaningful and absent everywhere else
+#: without an optional field in a closed vocabulary. ``paragraph`` is the
+#: paragraph's label range, as :meth:`identify.Reading.paragraph_ids` spells it.
+PARAGRAPH_CLAIM_NAME = "KB-CLAIMGRAPH-PARAGRAPH-CLAIM"
+PARAGRAPH_CLAIM_OPEN = f"<<<{PARAGRAPH_CLAIM_NAME}"
+PARAGRAPH_CLAIM_CLOSE = PARAGRAPH_CLAIM_NAME
+PARAGRAPH_CLAIM_FIELDS: tuple[str, ...] = ("paragraph", "title")
+
+PARAGRAPH_NOT_A_CLAIM_NAME = "KB-CLAIMGRAPH-PARAGRAPH-NOT-A-CLAIM"
+PARAGRAPH_NOT_A_CLAIM_OPEN = f"<<<{PARAGRAPH_NOT_A_CLAIM_NAME}"
+PARAGRAPH_NOT_A_CLAIM_CLOSE = PARAGRAPH_NOT_A_CLAIM_NAME
+PARAGRAPH_NOT_A_CLAIM_FIELDS: tuple[str, ...] = ("paragraph",)
+
 #: The answer a per-claim re-ask's menu must always admit: none of the sentences
 #: offered is the one the result begins at. It ends that claim as unresolved
 #: rather than re-asking, because a forced choice over a narrowed window gets
@@ -158,6 +193,8 @@ NONE_OF_THESE_CLOSE = NONE_OF_THESE_NAME
 LEVELS: tuple[envelope.Level, ...] = (
     envelope.Level("depends", ANSWER_KEYS, json=ANSWER_KEYS, prose=()),
     envelope.Level("identify claim", CLAIM_FIELDS, fields=CLAIM_FIELDS),
+    envelope.Level("identify paragraph claim", PARAGRAPH_CLAIM_FIELDS, fields=PARAGRAPH_CLAIM_FIELDS),
+    envelope.Level("identify paragraph not-a-claim", PARAGRAPH_NOT_A_CLAIM_FIELDS, fields=PARAGRAPH_NOT_A_CLAIM_FIELDS),
 )
 
 envelope.check_levels(LEVELS)
@@ -196,6 +233,12 @@ MARKER_SLOTS: Mapping[str, str] = MappingProxyType(
         "no-claim-close": NO_CLAIM_CLOSE,
         "none-of-these-open": NONE_OF_THESE_OPEN,
         "none-of-these-close": NONE_OF_THESE_CLOSE,
+        "paragraph-claim-open": PARAGRAPH_CLAIM_OPEN,
+        "paragraph-claim-close": PARAGRAPH_CLAIM_CLOSE,
+        "paragraph-not-a-claim-open": PARAGRAPH_NOT_A_CLAIM_OPEN,
+        "paragraph-not-a-claim-close": PARAGRAPH_NOT_A_CLAIM_CLOSE,
+        "nothing-further-open": NOTHING_FURTHER_OPEN,
+        "nothing-further-close": NOTHING_FURTHER_CLOSE,
     }
 )
 
@@ -223,6 +266,19 @@ CLAIM_EVIDENCE_SLOT = "claim-evidence"
 CORRECTION = "ask-correction"
 DISPLAY_MATHS = "identify-display-maths"
 NO_DISPLAY_MATHS = "identify-no-display-maths"
+
+#: The node pass's three choices. Whether the leaf has paragraphs owed a
+#: verdict, whether its answer may be a no-claim sentence — a leaf hosting a
+#: claim block may not — and, as a second alternative on the shared correction
+#: slot rather than an edit to ``ask-correction``, the re-ask naming the
+#: paragraphs the previous answer left without a verdict.
+VERDICTS_SLOT = "paragraph-verdicts"
+VERDICTS = "identify-verdicts"
+NO_VERDICTS = "identify-no-verdicts"
+NO_CLAIM_SLOT = "no-claim-sentence"
+NO_CLAIM_ADMITTED = "identify-no-claim-admitted"
+NO_CLAIM_REFUSED = "identify-no-claim-refused"
+MISSING_VERDICTS = "identify-missing-verdicts"
 
 #: Which evidence fragment each trigger's re-ask is composed from. The mapping
 #: is here and the trigger is :mod:`identify`'s, because what happened is the
@@ -257,7 +313,7 @@ class AskError(ClaimGraphError):
 class SeatAsk(Protocol):
     """One call to a named seat. The seam this package reaches inference through.
 
-    :func:`kb_tools.inference.ask_seat` is what satisfies it in production.
+    :func:`ask_without_tools` is what satisfies it in production.
     Keyword-only, deliberately: ``seat`` and ``prompt`` are two strings of the
     same type that would swap silently if either were positional.
     """
@@ -271,6 +327,37 @@ class SeatAsk(Protocol):
         capture_path: Path | None = None,
     ) -> tuple[str, Outcome]:
         """Put ``prompt`` to ``seat``; return what came back and how the call ended."""
+
+
+#: The fragment closing a claim-graph ask's system prompt, after the seat's own
+#: definition: telling the seat it has no tools.
+NO_TOOLS = "no-tools"
+
+
+def ask_without_tools(
+    *,
+    seat: str,
+    prompt: str,
+    cwd: Path | None = None,
+    capture_path: Path | None = None,
+    bare: bool = False,
+    invoker: Invoker | None = None,
+) -> tuple[str, Outcome]:
+    """The production :class:`SeatAsk`: ``prompt`` put to ``seat`` with no tools.
+
+    ``bare`` and ``invoker`` are not part of the seam: a run wanting the CLI's
+    minimal mode, or a check substituting the invoker, binds them
+    (``functools.partial``) and hands the result to a consumer as its ``ask``.
+    """
+    return ask_reader(
+        seat=seat,
+        prompt=prompt,
+        system_addendum=prompt_templates.render(prompt_templates.FRAGMENTS[NO_TOOLS], slots={}),
+        cwd=cwd,
+        bare=bare,
+        capture_path=capture_path,
+        invoker=invoker,
+    )
 
 
 def _record_ask(workspace: Path | None, stem: str, prompt: str) -> Path | None:
@@ -397,7 +484,7 @@ class ModelSelector:
         self,
         *,
         cwd: Path,
-        ask: SeatAsk = ask_seat,
+        ask: SeatAsk = ask_without_tools,
         workspace: Path | None = None,
         seat: str = SEAT,
     ) -> None:
@@ -450,8 +537,15 @@ def _fence_labels(reading: Reading, rendered: label.Render) -> list[str]:
     return [sentence.label for sentence in rendered.sentences if any(sentence.line in span for span in spans)]
 
 
-def compose_identify_prompt(reading: Reading, *, report: str | None) -> str:
-    """The prompt for one document. The document, and nothing else in the corpus.
+def _identify_correction(report: str | None, missing: Sequence[str]) -> tuple[dict[str, str], dict[str, str | None]]:
+    """The node pass's correction: the verdicts' own re-ask where paragraphs went unjudged, else the shared one."""
+    if missing:
+        return {"missing-paragraphs": ", ".join(missing)}, {CORRECTION_SLOT: MISSING_VERDICTS}
+    return _correction(report)
+
+
+def compose_identify_prompt(reading: Reading, *, report: str | None, missing: Sequence[str] = ()) -> str:
+    """The prompt for one leaf. The leaf, and nothing else in the corpus.
 
     No other document, no previous answer and no other document's answer: the
     question is what *this* file states, and anything else in front of it is a
@@ -459,17 +553,24 @@ def compose_identify_prompt(reading: Reading, *, report: str | None) -> str:
     """
     rendered = reading.render
     fenced = _fence_labels(reading, rendered)
-    slots, alternatives = _correction(report)
+    owed = tuple(reading.paragraph_ids())
+    slots, alternatives = _identify_correction(report, missing)
     return prompt_templates.render(
         IDENTIFY_TEMPLATE,
         slots={
             "document": reading.document,
             "body": rendered.text.rstrip("\n"),
             **({"fenced-labels": ", ".join(fenced)} if fenced else {}),
+            **({"obligated-paragraphs": ", ".join(owed)} if owed else {}),
             **slots,
         },
         constants=MARKER_SLOTS,
-        alternatives={DISPLAY_MATHS_SLOT: DISPLAY_MATHS if fenced else NO_DISPLAY_MATHS, **alternatives},
+        alternatives={
+            DISPLAY_MATHS_SLOT: DISPLAY_MATHS if fenced else NO_DISPLAY_MATHS,
+            VERDICTS_SLOT: VERDICTS if owed else NO_VERDICTS,
+            NO_CLAIM_SLOT: NO_CLAIM_ADMITTED if reading.may_decline else NO_CLAIM_REFUSED,
+            **alternatives,
+        },
     )
 
 
@@ -484,13 +585,16 @@ def _records_of(blocks: envelope.FieldBlocks) -> tuple[Record, ...]:
 
 
 def parse_identify_answer(text: str, *, document: str) -> Answer:
-    """The claim blocks and the reason, or :class:`~.report.AnswerFormatError`. Parse only, never quality.
+    """The records, the verdicts and the reason, or :class:`~.report.AnswerFormatError`. Parse only, never quality.
 
-    **A malformed claim block costs that block and nothing else**, so it comes
-    back in :attr:`Answer.refusals` rather than as an exception. What *is* an
+    **A malformed block costs that block and nothing else**, so it comes back
+    in :attr:`Answer.refusals` rather than as an exception. What *is* an
     exception is an answer this parse cannot read at all: a block left unclosed,
-    which swallows every block behind it, or a returned text carrying neither
-    kind of block, which is indistinguishable from a call that said nothing.
+    which swallows every block behind it; two no-claim blocks or two
+    nothing-further blocks, which are two answers; and a returned text carrying
+    no block of any kind, which is indistinguishable from a call that said
+    nothing. Every answer says something positive — a record, a verdict, a
+    no-claim sentence, or that nothing further is stated.
 
     ``document`` names the ask in a refusal and is not compared against anything
     the answer declares: there is no declaration to compare it to. The answer's
@@ -501,24 +605,49 @@ def parse_identify_answer(text: str, *, document: str) -> Answer:
     label = f"identify {document}"
     try:
         found = _claim_records(text, label=label)
+        yes = envelope.extract_field_blocks(text, name=PARAGRAPH_CLAIM_NAME, keys=PARAGRAPH_CLAIM_FIELDS, label=label)
+        no = envelope.extract_field_blocks(
+            text, name=PARAGRAPH_NOT_A_CLAIM_NAME, keys=PARAGRAPH_NOT_A_CLAIM_FIELDS, label=label
+        )
         reasons = envelope.extract_blocks(text, open_marker=NO_CLAIM_OPEN, close_marker=NO_CLAIM_CLOSE, label=label)
-        if len(reasons) > 1:
+        further = envelope.extract_blocks(
+            text, open_marker=NOTHING_FURTHER_OPEN, close_marker=NOTHING_FURTHER_CLOSE, label=label
+        )
+        for kind, bodies in ((NO_CLAIM_OPEN, reasons), (NOTHING_FURTHER_OPEN, further)):
+            if len(bodies) > 1:
+                raise envelope.ParseError(
+                    f"{label}: {len(bodies)} {kind!r} blocks. A document says this once or not at all, and two "
+                    f"of them are two answers"
+                )
+        if not reasons and not further and not any(blocks.blocks or blocks.refusals for blocks in (found, yes, no)):
             raise envelope.ParseError(
-                f"{label}: {len(reasons)} {NO_CLAIM_OPEN!r} blocks. A document states no result once or not "
-                f"at all, and two reasons are two answers"
-            )
-        if not found.blocks and not found.refusals and not reasons:
-            raise envelope.ParseError(
-                f"{label}: the returned text carries no {CLAIM_OPEN!r} block and no {NO_CLAIM_OPEN!r} block, "
-                f"so it states neither a result nor that there is none. Every answer is one or the other"
+                f"{label}: the returned text carries no {CLAIM_OPEN!r}, {PARAGRAPH_CLAIM_OPEN!r}, "
+                f"{PARAGRAPH_NOT_A_CLAIM_OPEN!r}, {NO_CLAIM_OPEN!r} or {NOTHING_FURTHER_OPEN!r} block, so it "
+                f"states nothing at all. Every answer states a result, a verdict, or that there is none"
             )
     except envelope.ParseError as error:
         raise AnswerFormatError(str(error)) from error
-    return Answer(claims=_records_of(found), no_claim=reasons[0].strip() if reasons else "", refusals=found.refusals)
+    refusals = found.refusals + yes.refusals + no.refusals
+    if further and further[0].strip():
+        refusals += (f"{label}: the {NOTHING_FURTHER_OPEN!r} block carries text; it is an empty marker pair",)
+    return Answer(
+        claims=_records_of(found),
+        verdicts=tuple(Verdict(paragraph=fields["paragraph"], title=fields["title"]) for fields in yes.blocks)
+        + tuple(Verdict(paragraph=fields["paragraph"], title=None) for fields in no.blocks),
+        no_claim=reasons[0].strip() if reasons else "",
+        nothing_further=bool(further) and not further[0].strip(),
+        refusals=refusals,
+    )
 
 
-def identify_answer_block(claims: Sequence[Record] = (), no_claim: str = "") -> str:
-    """C-inf's answer as a seat returns it: one block per claim, or the one reason block.
+def identify_answer_block(
+    claims: Sequence[Record] = (),
+    no_claim: str = "",
+    verdicts: Sequence[Verdict] = (),
+    *,
+    nothing_further: bool = False,
+) -> str:
+    """C-inf's answer as a seat returns it: one block per record and per verdict, and the reason or the empty pair.
 
     Composed rather than typed, wherever a caller needs to *state* an answer —
     the demand this format refuses to make of a model's output is one no caller
@@ -528,8 +657,20 @@ def identify_answer_block(claims: Sequence[Record] = (), no_claim: str = "") -> 
         envelope.field_block({"quote": record.quote, "label": record.label, "title": record.title}, name=CLAIM_NAME)
         for record in claims
     ]
+    blocks += [
+        (
+            envelope.field_block({"paragraph": verdict.paragraph}, name=PARAGRAPH_NOT_A_CLAIM_NAME)
+            if verdict.title is None
+            else envelope.field_block(
+                {"paragraph": verdict.paragraph, "title": verdict.title}, name=PARAGRAPH_CLAIM_NAME
+            )
+        )
+        for verdict in verdicts
+    ]
     if no_claim:
         blocks.append(f"{NO_CLAIM_OPEN}\n{no_claim}\n{NO_CLAIM_CLOSE}\n")
+    if nothing_further:
+        blocks.append(f"{NOTHING_FURTHER_OPEN}\n{NOTHING_FURTHER_CLOSE}\n")
     return "".join(blocks)
 
 
@@ -598,7 +739,7 @@ class ModelIdentifier:
         self,
         *,
         cwd: Path,
-        ask: SeatAsk = ask_seat,
+        ask: SeatAsk = ask_without_tools,
         workspace: Path | None = None,
         seat: str = SEAT,
     ) -> None:
@@ -620,10 +761,10 @@ class ModelIdentifier:
             subject=subject,
         )
 
-    def identify(self, reading: Reading, *, report: str | None) -> Answer:
+    def identify(self, reading: Reading, *, report: str | None, missing: Sequence[str] = ()) -> Answer:
         stem = reading.document.replace("/", "_")
         response = self._put_identify(
-            compose_identify_prompt(reading, report=report), subject=reading.document, stem=stem
+            compose_identify_prompt(reading, report=report, missing=missing), subject=reading.document, stem=stem
         )
         return parse_identify_answer(response, document=reading.document)
 

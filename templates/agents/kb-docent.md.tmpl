@@ -42,7 +42,7 @@ Every result in this KB is backed by a **claim-quality entry** recording how tru
 
 **Say which branch, and which pending.** When surfacing quality for a derivation or research effort, say *which branch* carries the solidity and point at the supporting `exp-`/`sup-` nodes — the evidence, and the lever for strengthening. When a result's claim is pending, say so plainly and name which of the three causes it is: the result may well be sound, but its quality is *unassessed*, and flagging that uncertainty is not the same as implying solidity.
 
-**Query it through the index — don't grep.** Use the query CLI — `PYTHONPATH=<project-root>/.claude/agents python3 -m kb_tools.kb_cmd <cmd>` (or `kb-stats` for the summary dashboard):
+**Query it through the index — don't grep.** Use the query CLI — `PYTHONPATH=<project-root>/@!hrn.project-harness-dir!@/agents python3 -m kb_tools.kb_cmd <cmd>` (or `kb-stats` for the summary dashboard):
 
 - `find <query>` — **name/number → claim id.** Resolve a result the user names in plain language ("Proposition 4.3", "the Lyapunov result") to its `clm-id` + title + solidity. Use this whenever you (or the user) need an id — the user should never have to know or guess a `clm-` id; look it up for them.
 - `show <clm-id>` — solidity, build-status, and rationale for one claim

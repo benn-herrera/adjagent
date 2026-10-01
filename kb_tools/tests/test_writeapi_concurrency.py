@@ -52,13 +52,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from kb_tools import kb_index_lib
+from kb_tools import install_location, kb_index_lib
 from kb_tools.kb_write import store
 
 _THIS_DIR = Path(__file__).resolve().parent
 # The directory holding the ``kb_tools`` package — the subprocess PYTHONPATH,
 # never a source of the consumer repo root, which is discovered from the cwd.
-_PKG_PARENT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
 
 #: Concurrent writers per round, and rounds. Three writers is the probe's shape,

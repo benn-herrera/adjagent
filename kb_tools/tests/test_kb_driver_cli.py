@@ -24,11 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_util
+from kb_tools import install_location, kb_util
 from kb_tools.kb_driver import baton, cli, config, ledger, runlog
 
 _THIS_DIR = Path(__file__).resolve().parent
-_PKG_PARENT = _THIS_DIR.parent.parent
+_PKG_PARENT = install_location.current().agents_dir
 _MINI_KB = _THIS_DIR / "fixtures" / "mini-kb"
 
 MINIMAL = """
@@ -410,11 +410,11 @@ def launchable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     guard refuses to open a build over a populated tree.
     """
     repo = _repository(tmp_path / "launchable")
-    commands = repo / kb_util.CLAUDE_DIRNAME / kb_util.COMMANDS_DIRNAME
+    commands = repo / kb_util.harness_dirname() / kb_util.COMMANDS_DIRNAME
     commands.mkdir(parents=True)
     for name in kb_util.DOCENT_COMMAND_FILENAMES:
         (commands / name).write_text(f"# {name}\n", encoding="utf-8")
-    (repo / ".gitignore").write_text(f"{kb_util.SCRATCH_DIRNAME}/\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(f"{kb_util.scratch_dirname()}/\n", encoding="utf-8")
     (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "the repository this build is opened in")
@@ -458,7 +458,7 @@ def test_the_card_a_real_run_hands_back_carries_the_flags_it_was_launched_with(
 
     out = capsys.readouterr().out
     assert code == baton.EXIT_BOUNDED, out
-    offered = [line for line in out.splitlines() if kb_util.DRIVER_INVOCATION in line]
+    offered = [line for line in out.splitlines() if kb_util.driver_invocation() in line]
     assert len(offered) == 1, out
     assert f"{config.SOURCE_FLAG} AcmeWidgets.tex" in offered[0]
     assert f"{config.RUN_DIR_FLAG} {runs}" in offered[0]
@@ -485,7 +485,7 @@ def test_every_command_a_card_offers_names_the_run_directory(tmp_path: Path) -> 
         (code, line)
         for code in baton.RUN_MODE_EXIT_CODES
         for line in baton.render(code, context).splitlines()
-        if kb_util.DRIVER_INVOCATION in line
+        if kb_util.driver_invocation() in line
     ]
 
     assert offered, "no card in the ladder offered a command"

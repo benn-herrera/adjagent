@@ -1,0 +1,16 @@
+# templates/family/qwen3.toml — Qwen-3.8 family overlay file.
+#
+# Provenance discipline (templates/family/README.md): each entry records the
+# observed behavior it corrects, against which model, and when — not what the
+# text says, but why it exists.
+
+# [tiers] names the member staffing each of the five tiers, and is the single
+# source of truth for member spelling — a [family.*.models.*] key naming a
+# member no tier reaches is a load error. Two tiers sharing a member is a
+# statement about this family's ladder, not a defect.
+[tiers]
+highest = "Qwen3.8-Flash-Next"
+high = "Qwen3.8-Flash-Next"
+medium = "Qwen3.8-27B"
+low = "Qwen3.6-35B-A3B"
+lowest = "Qwen3.6-35B-A3B"

@@ -3,10 +3,15 @@
 .claude/settings.local.json
 .claude/agents/
 .claude/commands/
+.claude/skills/
+.opencode-temp/
+.opencode/*local*
+.opencode/agents/
+.opencode/commands/
+.opencode/skills/
 __pycache__/
 .pytest_*/
 .venv/
-.venv
 mad-design/
 mad-review/
 

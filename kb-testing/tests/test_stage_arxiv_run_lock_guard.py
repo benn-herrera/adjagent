@@ -33,7 +33,6 @@ from kb_tools.kb_driver import runlog
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KB_TESTING = _REPO_ROOT / "kb-testing"
-_INSTALLER = _REPO_ROOT / "gen-defs.py"
 
 #: This suite's own scratch, wiped and rebuilt every run — never
 #: `tmp_path`/`tmp_path_factory`, which pytest anchors under the system temp
@@ -77,11 +76,12 @@ def _make_consumer(root: Path) -> Path:
     claude = root / ".claude"
     claude.mkdir()
     installed = subprocess.run(
-        [sys.executable, str(_INSTALLER), "install", str(claude)],
+        [sys.executable, "-m", "gen_defs", "install", str(claude)],
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
+        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT)},
     )
     assert installed.returncode == 0, f"stdout:\n{installed.stdout}\nstderr:\n{installed.stderr}"
     _git(root, "add", "-A")

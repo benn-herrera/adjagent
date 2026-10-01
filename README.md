@@ -12,13 +12,16 @@ Running a coding agent under your own account hands it your privileges, keys and
 
 ### Install
 
+Requires **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with the
+standard library's `tomllib`, which first shipped in 3.11.
+
 Clone this repo anywhere, then install both deployed surfaces into the consuming project — from **this** repo's root:
 
 ```sh
 just install ~/projects/foo
 ```
 
-That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` in full: every definition, the MAD design-topic set, `kb_tools/`, `liaison_tools/`, and the slash commands. The definitions are rendered by that invocation — this repo keeps no checked-in copy of them — and the tool packages are copied. Test suites and caches stay behind. Every `--*` flag after the target forwards verbatim to `gen-defs.py`, so tuning the render is one more flag, not a different command — `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family (see "Model Tuning" below).
+That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` in full: every definition, the MAD design-topic set, `kb_tools/`, `liaison_tools/`, and the slash commands. The definitions are rendered by that invocation — this repo keeps no checked-in copy of them — and the tool packages are copied. Test suites and caches stay behind. Every `--*` flag after the target forwards verbatim to `gen_defs`, so tuning the render is one more flag, not a different command — `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family (see "Model Tuning" below).
 
 The installed tree is an **artifact**: this repo is the source of truth, and re-running the install overwrites it. Don't edit files under a consuming project's `.claude/agents/` — change the template here, then re-install. Every installed file says as much in a banner of its own, which also records the hash of the content below it; an edit that breaks that hash is not lost when the re-install replaces the file, but set aside beside it as a numbered `.bak` (yours to delete). Re-installing an untouched tree changes nothing and backs up nothing.
 
@@ -30,15 +33,15 @@ ln -s <path-to-this-repo>  .claude/adjagent-repo
 
 Upgrading from the old symlink setup: remove the `.claude/agents` and `.claude/commands` symlinks and run `just install` against the project instead — that is now the only supported shape.
 
-### Operator Baseline
+### Harness Agents File
 
-The agent definitions assume a set of operator-level working rules; `user-config/` publishes that recommended baseline (`~/.claude/CLAUDE.md`) so it travels with the repo — install with `just install-claude-md`, which **merges rather than overwrites**: it recovers the published revision your live file was last integrated from out of this repo's git history, reports section by section what it found before writing a byte, keeps your own sections and edits, and keeps one rolling backup beside your file of whatever it replaces whenever it changes a byte — yours to delete. A file it cannot merge cleanly is left untouched and the baseline lands beside it as `incoming.CLAUDE.md`, for you to integrate by hand. See [user-config/README.md](user-config/README.md) for every case and for publishing changes the other way.
+The agent definitions assume a set of operator-level working rules, published as one template (`templates/harness/AGENTS.md.tmpl`) rendered per harness. Install it with `just install-agents-file <harness> <dir>`, where `<dir>` is `~/.claude`, `~/.config/opencode`, or a project root. The directives live in `AGENTS.md`: into the harness's user-global directory the install writes the file that harness reads there (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`); anywhere else it writes `<dir>/AGENTS.md`, and for a harness that reads another name it creates that file as the one-line redirect `@AGENTS.md` (Claude Code's `CLAUDE.md`), leaving an existing one alone. A `CLAUDE.md` there holding anything else is refused with nothing written — move its content into `AGENTS.md` and replace it with `@AGENTS.md` yourself. The install replaces only our block between the `adjagent` marker lines and keeps everything outside it. If the destination holds nothing but a single `@<path>` import, the install goes into that target and leaves the redirect alone; a redirect to another redirect, or to a file outside `<dir>`, is refused for you to merge by hand. A first install over a file without markers keeps that whole file above the block, so you then delete what the block now supplies. A file whose markers are malformed is refused, a write that changes the file keeps one rolling `backup.<name>` of what it replaced, and the install refuses while `templates/` has uncommitted changes.
 
 `agents/` and `commands/` are the two deployed surfaces install produces inside `<project>/.claude/`; the catalogs below name entries by where they land there — every entry lives under `agents/` unless noted as a command.
 
 ### Model Tuning
 
-Model-specific defensive text is delivered through **overlay anchors and model-family files**. A template or shared chunk may expose an `@!fam.<key>!@` anchor at a spot where an observed failure mode needs a targeted note; the namespace ahead of the key names the registered source that fills it (`fam`, the family file, is the only one registered today), and with no such source loaded, or no entry for the key, the anchor renders as nothing, so the base definitions are byte-identical to an anchor-free render. A family file — `templates/family/<family>.toml`, one per model family, schema and the two-map system in [templates/family/README.md](templates/family/README.md) — fills anchors: family-wide `text`, with per-model overrides inside the same file. Resolution, not accumulation: at most one overlay renders per anchor, model scope winning over family scope, and the filled text renders verbatim in place with no lead-in or wrapper — an author who wants one writes it into their own text. A family file can never replace, suppress, or modify base text — it only fills anchors. Tuned sets are rendered to order, typically out of repo: `gen-defs.py generate <root> --family NAME`, where `NAME` selects `templates/family/<NAME>.toml` — a bare model name is not a family name. Two independent flags carry the tuning further: `--model-tier-map` overrides which family member each tier is tuned against, `--model-pin-map` overrides that tier's rendered `model:` value; narrowed to a subset of definitions by `--agent-glob`/`--command-glob` when the whole set is not wanted. `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-map=SPEC]` applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to `gen-defs.py`.
+Model-specific defensive text is delivered through **overlay anchors and model-family files**. A template or shared chunk may expose an `@!fam.<key>!@` anchor at a spot where an observed failure mode needs a targeted note; the namespace ahead of the key names the registered source that fills it (`fam`, the family file, is the only one registered today), and with no such source loaded, or no entry for the key, the anchor renders as nothing, so the base definitions are byte-identical to an anchor-free render. A family file — `templates/family/<family>.toml`, one per model family, schema and the two-map system in [templates/family/README.md](templates/family/README.md) — fills anchors: family-wide `text`, with per-model overrides inside the same file. Resolution, not accumulation: at most one overlay renders per anchor, model scope winning over family scope, and the filled text renders verbatim in place with no lead-in or wrapper — an author who wants one writes it into their own text. A family file can never replace, suppress, or modify base text — it only fills anchors. Tuned sets are rendered to order, typically out of repo: `python3 -m gen_defs generate <root> --family NAME`, where `NAME` selects `templates/family/<NAME>.toml` — a bare model name is not a family name. Two independent flags carry the tuning further: `--model-tier-map` overrides which family member each tier is tuned against, `--model-pin-map` overrides that tier's rendered `model:` value; narrowed to a subset of definitions by `--agent-glob`/`--command-glob` when the whole set is not wanted. `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-map=SPEC] [--harness=NAME]` applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to `gen_defs`.
 
 Authoring a new family file, or extending an existing one, is repository work — see Development → Authoring Family Files.
 
@@ -235,9 +238,8 @@ This section is for working on this repository itself — the generator, its tem
 ### Repository Layout
 
 ```
-templates/      template sources (not session-visible), rendered by gen-defs.py at the repo root — see ARCHITECTURE.md
+templates/      template sources (not session-visible), rendered by the `gen_defs` package at the repo root — see ARCHITECTURE.md
 rendered/       gitignored build product — `just render [slug]` puts a render here per slot to inspect or PR-diff; see "Working In This Repo" below
-user-config/    published operator baseline — see user-config/README.md
 ROADMAP_PLANS/  tracked home for work that has some planning done but isn't ready to execute — usually, not necessarily, behind a ROADMAP.md item
 ```
 
@@ -247,7 +249,7 @@ Project docs: [THESIS.md](THESIS.md) — purpose and intent, [SPEC.md](SPEC.md) 
 
 ### Working In This Repo
 
-`just render [slug]` renders the full install product into `rendered/<slug>/` (slug defaults to `latest`). `just render reference` writes the known-good baseline to `rendered/reference/`, which nothing else writes. `just render-diff [a] [b]` compares two rendered slots — defaulting reference against latest — and reports differences without failing on them. The working sequence for a change: `just render reference` to capture the known-good state, make the edit, `just render`, then `just render-diff` to see which definitions actually changed. `just test` runs the full tooling test suite (`kb_tools` + `liaison_tools` + `gen-defs.py`, auto-provisioning a `.venv`).
+`just render [slug]` renders the full install product into `rendered/<slug>/` (slug defaults to `latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/` — Claude Code's `CLAUDE.md` by default, or another harness's with `--harness=NAME` (`--harness=opencode` gives `AGENTS.md`), which the render also forwards to its install so the slot's definitions render under the same harness. `just render reference` writes the known-good baseline to `rendered/reference/`, which nothing else writes. `just render-diff [a] [b]` compares two rendered slots — defaulting reference against latest — and reports differences without failing on them. The working sequence for a change: `just render reference` to capture the known-good state, make the edit, `just render`, then `just render-diff` to see which definitions actually changed. `just test` runs the full tooling test suite (`kb_tools` + `liaison_tools` + `gen_defs`, auto-provisioning a `.venv`).
 
 ### Authoring Family Files
 

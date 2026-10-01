@@ -30,6 +30,9 @@ text = '''@!machine-guarantees!@ When the assigned work makes agent-produced out
 [chunks.separation-of-concerns]
 text = '''**Keep units ignorant of each other's internals.** The tell: data — a return value, an argument, a file's contents — takes a form useful to exactly one counterpart. That is legitimate only where shaping is the unit's declared job (adapter, serializer, presenter, wire or storage format), and the test is not its name but whether a private change on the consumer's side would force an edit on the producer's. Otherwise the producer emits the general form and each consumer shapes it for itself; shaping that is costly or shared becomes a unit of its own that both sides name.'''
 
+[chunks.names-read-without-the-task]
+text = '''**Name what you add for its scope, not your task.** A name you introduce at file, module or package scope is read among everything else in that scope, by someone who has not seen your task: where the scope holds more than one concern, the name carries its own (`plan_claude_md_merge`, not `plan_integration`).'''
+
 [chunks.dissent]
 text = '''If you believe a directive would produce technically incorrect output, state the concern and your recommended alternative before proceeding — do not silently comply.'''
 
@@ -187,14 +190,14 @@ defaults.suppression = '''a suppression'''
 text = '''@!arg.enable!@ and treat @!arg.warnings!@ as defects; @!arg.suppression!@ carries a comment saying why.'''
 
 [chunks.new-project-setup]
-text = '''**New project setup**: creating a project from scratch means creating its task-runner entry point WITH the first code, never retrofitting it later. A `justfile` by default; a `Makefile` only where the top-level utility commands genuinely need dependency management — file targets with staleness rules, generated content that must rebuild when its sources change, recursive sub-builds (`$(MAKE) -C`). Aliasing commands is never reason enough to choose Make over just. Standard targets: `build`/`rebuild`, `test`, an integration-test target, and `generate`/`regenerate` wherever generation is a distinct step the build does not own — CMake project generation in the C++/CMake family, `go generate` codegen in Go, code/data generation in Python (Rust and Zig typically need none: `build.rs`/`build.zig` own generation). Omit a target only where the task genuinely does not exist for the project — never because wiring it up is effort. No project may ever require the agent or the developer to execute a major project-iteration task from a naked command line with correctly-recalled values: the target is the memory. Also created at project birth: `.claude-temp/`, with a `.claude-temp/` entry in the root `.gitignore` — the project's scratch space (throwaway builds, probe harnesses, captured output), pre-made so the scratch-space rule never stalls on a missing directory. It lives beside `.claude/`, never inside it — writes under `.claude/` trip the permission system's own-settings protections.'''
+text = '''**New project setup**: creating a project from scratch means creating its task-runner entry point WITH the first code, never retrofitting it later. A `justfile` by default; a `Makefile` only where the top-level utility commands genuinely need dependency management — file targets with staleness rules, generated content that must rebuild when its sources change, recursive sub-builds (`$(MAKE) -C`). Aliasing commands is never reason enough to choose Make over just. Standard targets: `build`/`rebuild`, `test`, an integration-test target, and `generate`/`regenerate` wherever generation is a distinct step the build does not own — CMake project generation in the C++/CMake family, `go generate` codegen in Go, code/data generation in Python (Rust and Zig typically need none: `build.rs`/`build.zig` own generation). Omit a target only where the task genuinely does not exist for the project — never because wiring it up is effort. No project may ever require the agent or the developer to execute a major project-iteration task from a naked command line with correctly-recalled values: the target is the memory. Also created at project birth: `@!hrn.project-temp-dir!@/`, with a `@!hrn.project-temp-dir!@/` entry in the root `.gitignore` — the project's scratch space (throwaway builds, probe harnesses, captured output), pre-made so the scratch-space rule never stalls on a missing directory. It lives beside `@!hrn.project-harness-dir!@/`, never inside it — writes under `@!hrn.project-harness-dir!@/` trip the permission system's own-settings protections.'''
 
 [chunks.new-project-runner-recipes]
 defaults.recipes = '''`fmt`, `lint` and a sanitizer build'''
 text = '''A new @!arg.language!@ project's runner carries @!arg.recipes!@ alongside that standard set.'''
 
 [chunks.project-docs-setup]
-text = '''**Project documents**: a project with a maintained contract carries the full document set — `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md` — with `ARCHITECTURE.md` citing `SPEC.md` rather than restating it, and `CONVENTIONS.md` carrying house rules and project-specific traps rather than contract. A project CLAUDE.md stays lean — only the project-specific rules that drift when the contract docs fall out of context. A vanilla project may have no CLAUDE.md and no SPEC.md; that is an acceptable state, not a defect. A project intended to be maintained also carries `ROADMAP.md` — next steps and future intent, even if one sentence ("spec implemented; no further work intended"). Future-thinking routes there, never inline in the contract docs, and ROADMAP.md is not handed to coding dispatches.'''
+text = '''**Project documents**: a project with a maintained contract carries the full document set — `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md` — with `ARCHITECTURE.md` citing `SPEC.md` rather than restating it, and `CONVENTIONS.md` carrying house rules and project-specific traps rather than contract. A project AGENTS.md stays lean — only the project-specific rules that drift when the contract docs fall out of context. A vanilla project may have no AGENTS.md and no SPEC.md; that is an acceptable state, not a defect. A project intended to be maintained also carries `ROADMAP.md` — next steps and future intent, even if one sentence ("spec implemented; no further work intended"). Future-thinking routes there, never inline in the contract docs, and ROADMAP.md is not handed to coding dispatches.'''
 
 [chunks.data-formats-scope]
 text = '''project-owned configuration and structured data files'''
@@ -468,15 +471,15 @@ A KB built by this toolchain is **two graphs over one tree of Markdown files**, 
 
 **Authored vs. derived.** Authored: leaf content, leaf frontmatter, claim-quality entry text, `depends-on` membership, and local rigor — one value, written as `confidence` on a claim and `quality` on a support. Derived by the refresh target: `solidity`, build-status, `(solidity X)` annotations, `subtree-claims:` / `subtree-experiments:`, and everything under `.index/`. A hand-edited derived field is a verifier failure. The toolchain's targets run under whichever runner the project uses — `just kb-refresh` or `make kb-refresh`, and likewise `kb-verify` (the read-only gate) and `kb-stats`.
 
-**Authored is not typed.** Every metadata byte in the KB — frontmatter blocks, register entries and their fields, in-body claim markers, edges — is composed by a `kb_util` write op from values a seat supplies. No agent in this set types one. The op surface is the CLI's own: `PYTHONPATH=<project-root>/.claude/agents python3 -m kb_tools.kb_util --help` lists every op, and `--help` on one op gives that op's invocation and its closed set of value keys — the project root being the directory that holds `kb-root/`.
+**Authored is not typed.** Every metadata byte in the KB — frontmatter blocks, register entries and their fields, in-body claim markers, edges — is composed by a `kb_util` write op from values a seat supplies. No agent in this set types one. The op surface is the CLI's own: `PYTHONPATH=<project-root>/@!hrn.project-harness-dir!@/agents python3 -m kb_tools.kb_util --help` lists every op, and `--help` on one op gives that op's invocation and its closed set of value keys — the project root being the directory that holds `kb-root/`.
 
-**Per-project facts.** What this KB distills — which corpus, and which node kinds and edge classes it populates — is pinned in `kb-root/CLAUDE.md`, in the words the build was given rather than as fields. `kb-root/CLAUDE.md` and `kb-root/CONVENTIONS.md` are the KB's orientation docs: a build seeds either one it finds absent and leaves an authored one whole, and no agent in this set authors or edits either. Neither is a corpus-invariant channel; `invariants.md` is.
+**Per-project facts.** What this KB distills — which corpus, and which node kinds and edge classes it populates — is pinned in `kb-root/AGENTS.md`, in the words the build was given rather than as fields. `kb-root/AGENTS.md` and `kb-root/CONVENTIONS.md` are the KB's orientation docs: a build seeds either one it finds absent and leaves an authored one whole, and no agent in this set authors or edits either. Neither is a corpus-invariant channel; `invariants.md` is.
 
 **Your seat**: @!arg.role!@.
 '''
 
 [chunks.kb-orientation-docs]
-text = '''Read `kb-root/CLAUDE.md` once @!arg.when!@ unless it is already in context, and `kb-root/invariants.md` — the project identity, notation table, mechanism definitions, and the framework invariant/axiom headings — once @!arg.when!@ where the tree has one.'''
+text = '''Read `kb-root/AGENTS.md` once @!arg.when!@ unless it is already in context, and `kb-root/invariants.md` — the project identity, notation table, mechanism definitions, and the framework invariant/axiom headings — once @!arg.when!@ where the tree has one.'''
 
 # The band table is a hand-kept view of `kb_schema.BUILD_BAND_LADDER`; the two
 # agree as of this writing and nothing checks that they still do.
@@ -545,7 +548,7 @@ Before reading anything, establish where the KB is. Probe in order:
 
 The `.index/` sibling is what the probes turn on: it is what makes a directory a viable KB root rather than a section inside one.
 
-From here, every file path resolves against the located **KB root**, and every tool invocation anchors to the located **project root** — `PYTHONPATH=<project-root>/.claude/agents`.'''
+From here, every file path resolves against the located **KB root**, and every tool invocation anchors to the located **project root** — `PYTHONPATH=<project-root>/@!hrn.project-harness-dir!@/agents`.'''
 
 
 # ─── Guest liaisons — the relay spine both callers share ─────────────────────
@@ -575,7 +578,7 @@ text = '''
 You communicate with the external model using the script:
 
 ```
-.claude/agents/liaison_tools/post-openai.py
+@!hrn.project-harness-dir!@/agents/liaison_tools/post-openai.py
 ```
 
 **Required environment variables** (collected during Onboarding, then set by the liaison when invoking the script):
@@ -583,7 +586,7 @@ You communicate with the external model using the script:
 - `API_KEY_FILE` — path to the file containing only the API key; the script reads the key directly so it is not exposed through argv or environment values
 - `MODEL` — model identifier (exact or unambiguous substring; the script will resolve and warn if a substring match is used)
 
-**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `.claude/agents/liaison_tools/post-openai.py`.
+**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `@!hrn.project-harness-dir!@/agents/liaison_tools/post-openai.py`.
 '''
 
 [chunks.liaison-tool-tail]
@@ -649,7 +652,7 @@ text = '''**Stop at the round cap.** One service round is one turn you deliver �
 text = '''
 ## Message File Management
 
-Maintain one JSON messages file per session. All creation and mutation of this file goes through `.claude/agents/liaison_tools/msg-util.py`:
+Maintain one JSON messages file per session. All creation and mutation of this file goes through `@!hrn.project-harness-dir!@/agents/liaison_tools/msg-util.py`:
 
 - **Initialize** at session start via `msg-util.py init` (see @!arg.init-ref!@), under the `validate` guard in **Session Files**.
 - **Append turns** — both the user side (file content returned in response to a file request, or @!arg.user-side!@) and the agent side (the external model's verbatim reply from `post-openai.py`) — via:
@@ -1000,7 +1003,7 @@ text = '''
 
 [chunks.mad-phase1-guest-and-collect]
 text = '''
-When dispatching the `guest` seat, include the @!arg.seat!@ contract path (`.claude/agents/mad/participant-contract.md`) and pass the referee-instructions file path as `REFEREE_INSTRUCTIONS_FILE`.
+When dispatching the `guest` seat, include the @!arg.seat!@ contract path (`@!hrn.project-harness-dir!@/agents/mad/participant-contract.md`) and pass the referee-instructions file path as `REFEREE_INSTRUCTIONS_FILE`.
 
 Wait for all to return before proceeding. As each seat returns, write its output verbatim to `@!arg.dir!@/<seat>-@!arg.initial!@.md` — this per-seat file is what that seat is handed back in later rounds, per **Round isolation**.
 '''
@@ -1220,6 +1223,6 @@ The @!arg.unit!@ must include, at minimum:
 
 # A bare noun-phrase list, so lead= supplies the verb and each consumer keeps
 # its own moment. Keep that value quote-free — a marker argument value cannot
-# carry a double quote (ARG, gen-defs.py).
+# carry a double quote (ARG, gen_defs/markers.py).
 [chunks.ml-technique-attacks]
 text = '''@!arg.lead!@ mechanism descriptions that are too vague to implement, justifications that smuggle the conclusion as a premise, predictions that cannot be measured or that would be true regardless of whether the mechanism worked, baselines that are not actually comparable, missing failure-mode analysis (especially silent ones), cost accounting that ignores ongoing maintenance or omits a cheaper alternative, hidden assumptions about model size / architecture / regime that the problem does not specify, and citations to prior work whose conditions do not transfer to the current problem.'''
