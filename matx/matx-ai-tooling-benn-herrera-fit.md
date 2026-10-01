@@ -1,50 +1,32 @@
 # MatX AI Tooling / Benn Herrera Fit
 
-[Benn Herrera](https://bennherrera.me)'s self-assessment of experience applicability to the problem space and requirements for the role of [Infrastructure Engineer, AI Tooling](https://jobs.ashbyhq.com/matx/f63c692f-297c-4bf1-955d-cc0e808289bf).
+[Benn Herrera](https://bennherrera.me)'s self-assessment of experience applicability to the problem space and requirements for the role of [Software Engineer, AI Tooling](https://jobs.ashbyhq.com/matx/4d6a4a63-2430-4ada-86b7-4c17cecad6b5).
 
 Authorship note: This document was hand-authored. AI was used for review, but the content is mine. -bph
 
 ## Core Requirements
 
-### Run production infrastructure somewhere dynamic; know which shortcuts you'll regret
+### Have RTL design, DV, or PD fluency, or will build it fast
 
 #### Overlap
-Significant overlap
+Will build it fast.
 
-- Geomagical 3D asset processing pipeline team
-  - Switched from stable graphics engine project to asset pipeline to help address significant overloading
-    - High demand on team for large volumes of furniture model processing (get it in the catalog ASAP!)
-    - Significant reliability issues with the pipeline itself 
-  - Initially tasked with individual module optimizations, identified brittle, unsafe conditions
-    - No ability to test from branches under deployed conditions before pushing live images (high DOA deployment rate following PR merges)
-    - Use of extremely out of date containers and software, limiting improvement paths
-    - Updated OS images and software packages, introduced image build-time testing, greatly reduced DOA deployments
-      - Imperfect solution, container build nodes were not exact match for deployed nodes, but it was a pragmatic improvement
-      - The right solution came next 
-  - Identified Dagster + Celery pipeline coordinator as key pain point - our use patterns did not match its offering
-    - Normalized to invisibility, earlier effort to convert to Temporal made a good start, but stalled due to platform team saturation
-    - Near daily breakages interrupted key processing jobs, required busy platform engineer to "turn it off and back on again"
-    - Took up the conversion effort, coordinated with teammates, accommodated in-flow feature work to ensure continuity under both coordinators
-    - Drove it to completion, eliminating near-daily interruptions of key staff
-    - With Temporal conversion came ability to test under deployed conditions on pre-merge PR branch
-    - A long-cut I very much did not regret
-  - Did actually get those module refactors done
-    - Stabilized, optimized, sanitized - as much as 8X speedup in some
-    - Eliminated fragility and maintenance opacity in others
-- Some heuristics for regrettable shortcuts
-  - The engineer's version of the trial lawyer adage "never ask a question you don't know the answer to" - never cut a corner that interferes with knowing exactly what will happen before pushing the big, red "deploy" button
-  - Anything that prevents visibility into what is actually happening after you've deployed ("It's not working right, and I have no idea why" is a terrible place to be)
-  - Anything that interferes with a minimum time control loop ("It's broken and we have the fix but it will take an hour for it to actually deploy" is another terrible place to be)
-  - Anything that prevents instant-response mitigation of problems ("If I had only followed through on adding remote feature switches the fire would be out right now...")
-  - "This C library seems to do what we need and probably won't crash in the target environment. It'll be fine..."
+- I knew nearly nothing about Linux kernel drivers on the morning of Mon 21-Sept-2026
+  - By end of day, with AI assistance, I had set up an AI tutoring dev & test workflow and started hand-coding my first driver in C (see linux-kernel-driver-sandbox in repo list)
+  - By end of the Weds session (which bled into Thursday am) I had hand-written a full stack from a complete kernel driver to userspace lib and C++ driver test plus bound the userspace lib to a scripting language with an additional test in script
+  - The device in question was QEMU's [EDU device](https://www.qemu.org/docs/master/specs/edu.html), created for supporting the Linux kernel lectures at Masaryk University. I powered through the device's full feature set in three days from a cold start.
+  - Over the next two days, I designed, and with AI coding assistance, built a code gen system for keeping the userspace lib C API, a C++ RAII wrapper, and Lua script bindings in sync from a single source of truth. That part was just fun.
+- Six months ago I knew absolutely nothing about the internals of inference beyond "it has to do with matrices". That was addressed with go-inference-lab-bench (see repo list)
+
+Upshot: learning about new things by doing them (all out) is a standard MO with an established pattern
 
 #### Delta
-- Trial by fire exposure to platform infrastructure systems, but was not key focus for an entire position
+- No direct exposure to RTL, DV, or PD.
 
 #### Questions
-- How built out is the infrastructure now? What is intended and how will this role participate?
+- Right now, too many and probably all the wrong ones. A couple days in will be another story.
 
-### Heavy coding-agent use; strong opinions on what to let them do, what not, and how to verify their work
+### Use coding agents heavily and have strong opinions on what you let them do, what you don't, and how you verify their work
 
 #### Overlap
 Extensive, recent. 
@@ -63,7 +45,7 @@ Extensive, recent.
       - Includes restrictions to prevent silent accumulation of automatic behavior mods (they are unexamined, unreviewed, and non-portable)
   - See also "Notice LLM agents asserting something confidently wrong" section below
   - See "Repos" section below, every project makes use of agentic systems
-- Agent harness used exclusively within sandbox. An unprivileged agent user runs all harness processes - see "Sandboxing" section below
+- Agent harness used exclusively within sandbox. An unprivileged agent user runs all harness processes (see agent-sandboxing/ in adjagent repo)
 - Built knowledge base agent system that distilled massive multi-volume math-heavy LaTeX corpus into navigable markdown with automated rigor tracking and maintenance tooling
   - Since creation it has been extracted, extended, generalized in kb_tools (see adjagent in repo list at end of doc)
   - Efficient context management
@@ -83,7 +65,7 @@ Extensive, recent.
 #### Questions
 - To what extent are agents used for high-correctness and security sensitive operations (e.g. driver coding)?
 
-### Built engineering workflows (methodology, flow automation, review tooling, agent harnesses) that others adopted and kept
+### Built engineering workflows (methodology, flow automation, review tooling, agent harnesses) that other engineers adopted and kept
 
 #### Overlap
 Extensive, spanning career.
@@ -108,14 +90,14 @@ Extensive, spanning career.
 - To what extent is tooling intended to be user-facing and to what extent is pure autonomy in agentic flows sought?
 - From the req it sounds like there is deep awareness that inference has categorical weaknesses that need to be designed around. What is the current organizational thinking on this or is it still an area of active discovery?
 
-### Notice LLM agents asserting something confidently wrong; modify the harness in response
+### Notice LLM agents asserting something confidently wrong and modify their harness in response
 
 #### Overlap
 Extensive and recent. This isn't just a habit, it's a formalized process.
 
 - See adjagent project in repo list at end of doc
   - Agent set rendering system for consistency of ethos and constraints across sibling and coordinated agents
-  - ~agent-user/.claude/CLAUDE.md is installed via safe-merge from adjagent/user-config/INSTALLED_CLAUDE.md (see sandboxing section below)
+  - ~agent-user/.claude/CLAUDE.md is installed via safe-merge from a generated source
 - Last 8 months of projects have been extensively working with AI and mapping its capabilities
   - Learning weaknesses, learning what to trust and what to double-check
   - Not just caching knowledge personally, but building systems, processes, and agent-facing directives around error reduction
@@ -129,7 +111,7 @@ Extensive and recent. This isn't just a habit, it's a formalized process.
 
 Examples above seen across range of vendors and models, including the bleeding edge frontier. Parameter count does not grant immunity from categorical AI tendencies.
 
-Excerpt from agent-user ~/.claude/CLAUDE.md:
+Excerpt from CLAUDE.md:
 ```
 !!! NON-MD-COMMENTARY: section below is error reduction process
 
@@ -190,59 +172,69 @@ it changes cannot be seen at its source or corrected there.
 ```
 
 #### Delta
-- None outside of reqs not visible from job posting
+- Does not overlap intersection of AI and hardware design
 
 #### Questions
 - What are the boundaries of AI usage policy and to what extent is this an area of active exploration rather than established practice?
 
+## What You'll Do Here
+
+### Close the gap where agents are worst at hardware engineering work: pair with RTL, DV, and PD engineers while they work, watch where their agents stumble, and identify and ship context, tools, or harness improvements
+
+#### Overlap
+This would be doing with other people what I've been doing for my own projects, with the twin benefits of learning and teaching (see "Notice LLM agents asserting something confidently wrong" above)
+
+#### Delta
+- Lack of experience with RTL, DV, or PD, as above 
+
+#### Questions
+- What are the hardware engineers' working setups? What does an agent session look like in their workflow?
+
+### Build tools to address problems that only exist now that agents write code, e.g. a review tool that breaks a large agent-generated diff into reviewable pieces
+
+#### Overlap
+This parallels another project - kb_tools (see in repos section under adjagent). It breaks up a LaTeX math paper into two graphs: a navigable markdown hierarchy and a claim graph of the argument within. A key element of the design is doing a mechanical pass to draft the structure followed by targeted inference asks to refine and build on the mechanically created spine. The new "system one" classifier models (JEV and open source alternatives) are highly applicable to that problem and probably the code diff analysis.
+
+#### Delta
+- Approach not yet applied to code
+
+#### Questions
+- Is the intent to prepare the diffs for purely human review or for agentic review in smaller chunks for more focused attention on details?
+
+### Build the eval loop for our AI tooling by taking bugs out of our repo's history, replaying them against different agent configurations, and using the results to decide what we adopt
+
+#### Overlap
+- The workflow of modifying agents, observing results and evolving them toward better outcomes has been interleaved in all of my projects this year.
+- If MatX uses multiple, coordinated agents and/or sibling skill-set agents, the modification of agent configurations would then involve reliably coordinated changes across the full fleet
+  - This is a problem I've been solving (see adjagent project in the repos section) 
+
+#### Delta
+- Evaluation so far has been by review and comparison, not replayed ground truth
+
+#### Questions
+- What harnesses and models are in use at MatX?
+- What providers/endpoints are being used? Self-hosted? IP protection via guaranteed privacy is an obvious top priority.
+
 ## Bonus
 
-### Operated Bazel remote execution or a remote cache
-Tangential, not directly on point.
+### Built tooling or automation for chip design flows
 
 #### Overlap
-- Extensive use and authoring of build systems across platform, OS, and vintage: Make, CMake, Gradle, Swift PM, MSBuild, more
-- Used and modified containers for CI builds
+None
 
 #### Delta
-- No actual Bazel usage
+- No chip design flow tooling experience
 
-#### Questions
-- Is there a blend of build and revision control systems in use?
-- Would agents be expected to be allowed to modify containers or CI processes?
-
-### Sandboxing and ephemeral compute for untrusted workloads
+### Are familiar with Bluespec or another high-level HDL, or with architecture and performance simulators
 
 #### Overlap
-Significant and recent.
+Slim.
 
-- Set up unprivileged agent-user, agent-group on macOS
-  - Agent-user has umask that makes all files group-writable
-  - All harness processes are launched by this agent
-  - Zero paths to executing as privileged user outside of active hacking (nothing is 100% secure)
-  - No paths on machine are writable to agent-user outside of /tmp, its home dir, and dirs given to it for coop work
-  - Agent-user possesses no ssh keys or access to repos not cloneable via public https://
-  - Primary user added to agent-group, all collaborative work done under agent-user owned directory
-  - Primary user uses agent-user shell for all coop tasks not requiring higher privs. Does repo clone/pull/push via privileged shell.
-- Professional experience with Docker and containerization
-  - Deployed containers used for CI builds
-  - Model asset processing pipelines with containerized stage execution coordinated by Temporal
-  - Local execution of container images to preview deployed behavior
-  - Container image construction-time testing to reduce DOA deployment risks
-- Personal project experience with containerization and virtual machine targets
-  - Linux device driver sandbox project (see repo list at end of doc) used podman container for Linux kernel build and staging, QEMU virtual target
-- Comprehension of containerization/virtualization risks and trade-offs - a few highlights:
-  - If guest machine is same CPU architecture, near-native speed. Emulation of non-native CPU incurs significant performance penalty
-  - 'Containerized' != 'Bulletproof' - a writable mounted host partition can still get nuked by a mishap running on the guest, especially a mishap running as guest root
-  - Passthrough access to critically useful hardware, like accelerators, can be tricky, fragile, time consuming to set up and keep working
+- Conversant with processor and accelerator architecture as it affects writing code for it
+- Have worked in a babel of programming and data languages
 
 #### Delta
-- Have not used containers as sandboxing strategy (deliberate choice for own personal use machine)
-
-#### Questions
-- What platforms and virtualization apps need to be supported? All Linux? macOS? Windows?
-- Is the focus entirely on infrastructure or will approaches be used on developer and/or researcher local work machines?
-- To what extent does the device-access-from-container-guest issue come into play?
+- No hands-on with HDLs
 
 ## Repos - Examples of process state, development, and usage
 - [adjagent](https://github.com/benn-herrera/adjagent)
@@ -264,5 +256,5 @@ Significant and recent.
   - Claude Code session sidecar for rendering LaTeX math expressions
   - Used by [Sapient Artifice](https://github.com/Sapient-Artifice) for multiple projects
 - [linux-kernel-driver-sandbox](https://github.com/benn-herrera/linux-kernel-driver-sandbox) 
-  - Self-guided learning project for developing Linux full stacks from kernel driver to bound scripting
+  - Self-guided learning project for developing Linux full stacks from kernel driver to bound scripting language
   - Latest project. Made extensive use of controlled AI collaboration to maximize human learning of key material
