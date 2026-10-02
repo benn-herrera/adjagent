@@ -151,11 +151,7 @@ Excerpt from CLAUDE.md:
 ## Memory and behavior correction
 A behavior change — yours or a dispatched agent's — is a first-class work
 item: surfaced, proposed, and landed like any other change, never a private
-adjustment made in passing. Such a change has one destination: proposed
-wording for the file that owns the behavior — the adjagent repo's
-`user-config/INSTALLED_CLAUDE.md` for every project, the project's own
-`CLAUDE.md` for one project, the agent's definition for one agent. There is no
-second destination.
+adjustment made in passing. Such a change belongs in `@!hrn.user-harness-dir!@/@!hrn.agents-file!@`, the project `AGENTS.md`, an agent/command/skill definition, or a project doc – in other words, somewhere permanent (preferably tracked), and scoped to the domain that needs the correction.
 
 [...]
 
