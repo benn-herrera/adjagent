@@ -151,7 +151,9 @@ Excerpt from CLAUDE.md:
 ## Memory and behavior correction
 A behavior change — yours or a dispatched agent's — is a first-class work
 item: surfaced, proposed, and landed like any other change, never a private
-adjustment made in passing. Such a change belongs in `~/.claude/CLAUDE.md`, the project `AGENTS.md`, an agent/command/skill definition, or a project doc – in other words, somewhere permanent (preferably tracked), and scoped to the domain that needs the correction.
+adjustment made in passing. Such a change belongs in `~/.claude/CLAUDE.md`, the project `AGENTS.md`,
+an agent/command/skill definition, or a project doc – in other words, somewhere permanent
+(preferably tracked), and scoped to the domain that needs the correction.
 
 [...]
 
