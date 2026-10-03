@@ -1,51 +1,22 @@
-"""The traversal-obligation sweep over the rendered KB agent set.
+"""The traversal-obligation sweep's mechanism, against a fixture it owns.
 
 Graph traversal sits off the inference side: coverage, tiling, containment, the
-tree diff and reachability are the validator's, proved and logged.
-That no definition still *asks a seat* to perform one of those walks is an
-exhaustiveness claim, and an exhaustiveness claim with no mechanical check is a
-wish. This file is that check.
+tree diff and reachability are the validator's, proved and logged. A sweep that
+says no definition still *asks a seat* to perform one of those walks matches
+every logical line — a paragraph or list item with its wrap undone, see
+:func:`_logical_lines` — against :data:`PATTERNS`, the four traversal-obligation
+shapes, and requires each hit to match exactly one judgment-site entry: a
+``(definition, phrase)`` key whose value says why the site's object is a
+*judgment* rather than a *resolution*. A hit with no entry is unclassified; a
+hit matching two entries is ambiguous; an entry matching no hit is stale.
 
-**How it reads.** Every line of every rendered ``kb-*`` definition is matched
-against :data:`PATTERNS` — the four traversal-obligation shapes. Each hit
-must match exactly one entry of :data:`JUDGMENT_SITES`, whose value says why the
-site's object is a *judgment* (does this index distinguish its children?) rather
-than a *resolution* (does this link resolve?). A new theater site fails by not
-being in the map; a site that leaves fails by leaving its entry stale.
-
-**Two stated bounds.**
-
-*Scope*: the KB agent set, rendered — the definitions a KB build dispatches, and
-the only ones that can carry an obligation over the KB's link graph. The same
-verbs elsewhere in ``agents/`` name other objects entirely (a derivation chain, a
-doc's reading path, ownership flow), and sweeping them would grow an allowlist
-that says nothing about this claim.
-
-*Rendering*: definitions are rendered in memory from ``templates/``, not read out
-of ``rendered/``, which is a gitignored build product that may be absent or stale.
-The templates are the source the render is a function of, so the sweep sees what
-the next render would write.
-
-The sweep's first run found one resolution-object site — the taxonomy
-architect's Review Mode navigability item — and held it in an ``OPEN_FINDINGS``
-map asserted as *still present*, so that fixing it turned this file red. It is
-fixed and the map is gone with it. A finding held that way again is
-restored from history complete with its still-present assertion: an exemption
-map that nothing asserts against would let a site out of :data:`JUDGMENT_SITES`
-silently, which is the failure this sweep exists to prevent.
+This file tests that mechanism and nothing else. Its corpus and its judgment
+sites are inline fixtures, so no template's wording, name or existence is
+something this test knows about.
 """
 
 import re
-from collections.abc import Iterator
-from functools import cache
-from pathlib import Path
-
-import pytest
-
-from gen_defs import agents_file, chunks, discovery, model_tuning, paths, rendering
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-
+from collections.abc import Iterator, Mapping
 
 #: The four shapes. ``follow`` is matched only with ``links``
 #: in reach — bare "follow" is ordinary English ("follow the canonical
@@ -57,159 +28,138 @@ PATTERNS = {
     "starting-from-any": re.compile(r"starting from any", re.IGNORECASE),
 }
 
-#: One specimen per shape, so that retiring the last shipped site of a shape
-#: retires neither its pattern nor the proof that the pattern fires. Two shapes
-#: have no site in the shipped set today: ``follow-links`` never had one, and
-#: ``starting-from-any`` had exactly one — the taxonomy architect's navigability
-#: item, since fixed and then retired with that definition.
-PATTERN_SPECIMENS = {
-    "trace": "Trace random paths, don't just inspect link lists.",
-    "walk": "Walk every up-link in the tree and confirm each one resolves.",
-    "follow-links": "Follow the down-links from each index to its children.",
-    "starting-from-any": "Starting from any leaf, can you reach entry-point?",
-}
-
-#: ``(definition, phrase) -> why the object is judgment``. The phrase is matched
-#: case-insensitively against the hit line and must identify it alone.
-JUDGMENT_SITES: dict[tuple[str, str], str] = {
-    (
-        "kb-claim-scorer.md",
-        "must trace from stated axioms",
-    ): "a derivation chain inside one cited result, not a route through the KB's link graph — "
-    "whether the stated steps carry the conclusion is the judgment this seat exists to make",
-    (
-        "kb-docent.md",
-        "trace the solidity of the chain",
-    ): "the chain is resolved by the query CLI (`deps <clm-id>`); the seat reads the returned "
-    "weakest link and judges what it means for the user's derivation",
-    (
-        "kb-maintainer.md",
-        "walk-back annotations",
-    ): "a noun — an author-adjudication marker to preserve verbatim. No traversal is asked for",
-}
+#: A line opening one of these starts a new logical line instead of continuing
+#: the paragraph above it: list item, heading, table row, quote, fence.
+_BLOCK_START = re.compile(r"(?:[-*+]\s|\d+[.)]\s|#|\||>|```)")
 
 
-@cache
-def _rendered_kb_definitions() -> tuple[tuple[str, str], ...]:
-    """Every ``kb-*`` agent definition, rendered in memory under the shipped triple."""
-    tier_map = dict(model_tuning.DEFAULT_PIN_MAP)
-    tuning = model_tuning.Tuning(
-        family=paths.FAMILY_DIR / "claude.toml",
-        tier_map=tier_map,
-        pin_map=dict(model_tuning.DEFAULT_PIN_MAP),
-        stock=model_tuning.stock_tiers({}, tier_map),
-        is_default=True,
-    )
-    binding = model_tuning.tier_binding(
-        chunks.load_chunks(),
-        pin_map=dict(model_tuning.DEFAULT_PIN_MAP),
-        harness=agents_file.load_harness(model_tuning.DEFAULT_HARNESS),
-    )
-    renders = rendering.all_renders(binding, discovery.surface_map(paths.REPO_ROOT), tuning=tuning)
-    return tuple(sorted((target.name, text) for target, text in renders if target.name.startswith("kb-")))
+def _logical_lines(text: str) -> Iterator[tuple[int, str]]:
+    """``(first line number, whitespace-normalized text)`` per paragraph, list item or block line.
+
+    A wrapped paragraph or list item is one logical line, so a verb and the
+    phrase that classifies it read the same at any wrap width. Sibling list
+    items stay apart, and headings, table rows and fenced lines take no
+    continuation, so no block lends its phrase to its neighbour.
+    """
+    start, words, accepts_continuation, in_fence = 0, [], False, False
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if accepts_continuation and stripped and not _BLOCK_START.match(stripped):
+            words.extend(stripped.split())
+            continue
+        if words:
+            yield start, " ".join(words)
+        start, words = number, stripped.split()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+        accepts_continuation = bool(stripped) and not in_fence and not stripped.startswith(("```", "#", "|"))
+    if words:
+        yield start, " ".join(words)
 
 
 def _hits(definitions: tuple[tuple[str, str], ...]) -> Iterator[tuple[str, int, str, tuple[str, ...]]]:
-    """``(definition, line number, line, the patterns it matched)`` for every hit.
-
-    Takes the definitions rather than reading them, so the same sweep runs over
-    the shipped set and over a planted one — which is what makes its teeth
-    testable instead of assumed.
-    """
+    """``(definition, first line number, logical line, the patterns it matched)`` for every hit."""
     for name, text in definitions:
-        for number, line in enumerate(text.splitlines(), start=1):
+        for number, line in _logical_lines(text):
             matched = tuple(sorted(key for key, pattern in PATTERNS.items() if pattern.search(line)))
             if matched:
                 yield name, number, line, matched
 
 
-def _entries_matching(name: str, line: str) -> list[tuple[str, str]]:
-    lowered = line.lower()
-    return [key for key in JUDGMENT_SITES if key[0] == name and key[1].lower() in lowered]
+def _sweep_report(definitions: tuple[tuple[str, str], ...], sites: Mapping[tuple[str, str], str]) -> list[str]:
+    """Every unclassified hit, ambiguous hit and stale entry, as report lines; empty means clean.
+
+    An entry belongs to its own definition and its phrase is matched
+    case-insensitively within the hit's logical line.
+    """
+    hits = list(_hits(definitions))
+    report = []
+    for name, number, line, keys in hits:
+        phrases = [phrase for site, phrase in sites if site == name and phrase.lower() in line.lower()]
+        if not phrases:
+            report.append(f"unclassified {name}:{number} [{','.join(keys)}] {line}")
+        elif len(phrases) > 1:
+            report.append(f"ambiguous {name}:{number} matches {phrases}")
+    for site, phrase in sites:
+        if not any(name == site and phrase.lower() in line.lower() for name, _, line, _ in hits):
+            report.append(f"stale {site}: {phrase!r}")
+    return report
 
 
-def _unclassified(definitions: tuple[tuple[str, str], ...]) -> list[str]:
-    """Every traversal site with no entry behind it, as report lines."""
-    return [
-        f"{name}:{number} [{','.join(keys)}] {line.strip()}"
-        for name, number, line, keys in _hits(definitions)
-        if not _entries_matching(name, line)
+FIXTURE_DEFINITIONS = (
+    (
+        "seat-a.md",
+        """\
+# Seat A
+
+When the user checks a derivation, trace the solidity of the
+chain it rests on and name the weakest link.
+
+Follow the canonical direction when naming ids.
+
+- Preserve walk-back annotations verbatim.
+- Walk every up-link in the tree and confirm each one
+  resolves.
+
+```
+trace the solidity of the chain
+walk the tree
+```
+""",
+    ),
+    (
+        "seat-b.md",
+        """\
+Follow each index's child
+links down to the leaves.
+
+Starting from any leaf, trace the solidity of the chain.
+
+Walk the proof and trace each step.
+""",
+    ),
+)
+
+FIXTURE_SITES = {
+    ("seat-a.md", "trace the solidity of the chain"): "judged, and wrapped across two lines",
+    ("seat-a.md", "walk-back annotations"): "a noun, not a traversal",
+    ("seat-b.md", "walk the proof"): "one of two entries on one logical line",
+    ("seat-b.md", "trace each step"): "the other of the two",
+    ("seat-b.md", "walk the derivation backwards"): "no site carries this phrase",
+}
+
+
+def test_hits_start_at_the_first_line_of_their_logical_line() -> None:
+    """Wrapped text is one hit at its first line; list items, fenced lines and bare "follow" are not merged in."""
+    hits = [(name, number, keys) for name, number, _, keys in _hits(FIXTURE_DEFINITIONS)]
+
+    assert hits == [
+        ("seat-a.md", 3, ("trace",)),
+        ("seat-a.md", 8, ("walk",)),
+        ("seat-a.md", 9, ("walk",)),
+        ("seat-a.md", 13, ("trace",)),
+        ("seat-a.md", 14, ("walk",)),
+        ("seat-b.md", 1, ("follow-links",)),
+        ("seat-b.md", 4, ("starting-from-any", "trace")),
+        ("seat-b.md", 6, ("trace", "walk")),
+    ]
+    assert {key for *_, keys in hits for key in keys} == PATTERNS.keys()
+
+
+def test_the_report_names_every_unjudged_ambiguous_and_stale_site() -> None:
+    """The classifier's teeth: an entry covers only its own definition, its own logical line, and one site."""
+    assert _sweep_report(FIXTURE_DEFINITIONS, FIXTURE_SITES) == [
+        "unclassified seat-a.md:9 [walk] - Walk every up-link in the tree and confirm each one resolves.",
+        "unclassified seat-a.md:14 [walk] walk the tree",
+        "unclassified seat-b.md:1 [follow-links] Follow each index's child links down to the leaves.",
+        "unclassified seat-b.md:4 [starting-from-any,trace] Starting from any leaf, trace the solidity of the chain.",
+        "ambiguous seat-b.md:6 matches ['walk the proof', 'trace each step']",
+        "stale seat-b.md: 'walk the derivation backwards'",
     ]
 
 
-def test_the_sweep_can_see() -> None:
-    """A sweep over nothing passes vacuously; this is what says it did not.
+def test_a_clean_corpus_reports_nothing() -> None:
+    """A report that is never empty is equally consistent with a classifier that flags everything."""
+    judged = (("seat-a.md", "Assist by tracing the solidity\nof the chain.\n"),)
 
-    The definition count is a floor rather than a fixture: the KB agent set is
-    three definitions today and a fourth must not require editing this line. The
-    shapes asserted here are the ones the shipped set still carries; every shape
-    is proved to fire by :func:`test_every_shape_still_fires`, so a shipped site
-    going away is a template change and not a hole in the sweep.
-    """
-    definitions = _rendered_kb_definitions()
-    matched = {key for _, _, _, keys in _hits(definitions) for key in keys}
-
-    assert len(definitions) >= 3, [name for name, _ in definitions]
-    assert all(text.strip() for _, text in definitions)
-    assert {"trace", "walk"} <= matched
-
-
-def test_every_shape_still_fires() -> None:
-    """Each pattern against a specimen of the shape it exists to catch.
-
-    A shape with no shipped site is matched by nothing in a green run, which
-    makes a pattern that stopped compiling to what it means indistinguishable
-    from a surface that is simply clean.
-    """
-    assert PATTERN_SPECIMENS.keys() == PATTERNS.keys()
-    assert [key for key, specimen in PATTERN_SPECIMENS.items() if not PATTERNS[key].search(specimen)] == []
-
-
-def test_a_planted_theater_site_fails_the_sweep() -> None:
-    """The sweep's teeth, over a definition that does not exist.
-
-    Without this, a green run above is equally consistent with a classifier that
-    matches everything. The planted line is the retired shape: an exhaustive
-    walk of the link graph, asked of a seat.
-    """
-    planted = (("kb-planted.md", "Walk every up-link in the tree and confirm each one resolves.\n"),)
-
-    assert _unclassified(planted) == [
-        "kb-planted.md:1 [walk] Walk every up-link in the tree and confirm each one resolves."
-    ]
-    # And the judgment map is not a blanket pass: an entry belongs to its own
-    # definition, so the same phrase in another file is still unclassified.
-    assert _unclassified((("kb-planted.md", "a literal sentence walk\n"),))
-
-
-def test_every_traversal_site_is_judgment_or_a_named_finding() -> None:
-    """The exhaustiveness claim itself: no unclassified traversal obligation ships."""
-    unclassified = _unclassified(_rendered_kb_definitions())
-
-    assert unclassified == [], (
-        "a traversal verb reached a rendered definition with no entry in this file. Read the "
-        "site: if its object is a judgment, add it to JUDGMENT_SITES with the reason; if its "
-        "object is resolution, it is theater the toolchain already proves — report it and fix "
-        "the template.\n" + "\n".join(unclassified)
-    )
-
-
-def test_no_traversal_site_matches_two_entries() -> None:
-    """One hit, one reason. An ambiguous phrase makes both entries unfalsifiable."""
-    ambiguous = [
-        f"{name}:{number} matches {[key[1] for key in _entries_matching(name, line)]}"
-        for name, number, line, _ in _hits(_rendered_kb_definitions())
-        if len(_entries_matching(name, line)) > 1
-    ]
-
-    assert ambiguous == []
-
-
-@pytest.mark.parametrize("key", sorted(JUDGMENT_SITES))
-def test_no_entry_is_stale(key: tuple[str, str]) -> None:
-    """An entry whose site is gone must go with it, or the map stops describing the surface."""
-    name, phrase = key
-    assert [hit for hit in _hits(_rendered_kb_definitions()) if hit[0] == name and phrase.lower() in hit[2].lower()], (
-        f"no rendered line in {name} matches {phrase!r}. If the text moved, re-judge the site and "
-        f"update the entry; if the site is gone, delete the entry."
-    )
+    assert _sweep_report(judged, {("seat-a.md", "tracing the solidity of the chain"): "judged"}) == []

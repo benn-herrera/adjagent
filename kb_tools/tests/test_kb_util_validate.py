@@ -27,8 +27,8 @@ The guard half is the row's real deliverable and is a standing assertion rather
 than a spot check. It enumerates the shipped parser's option surface — the
 top-level parser **and every subparser under it**, every flag, and for a flag
 taking a value every choice it declares — and asserts across every single
-assignment, every pair of them, and the maximal combination of all of them
-that:
+assignment ``validate-build`` declares plus one it does not, every pair of
+them, and the maximal combination of all of them that:
 
 * a planted partition violation never exits 0 and never prints the success line, and
 * the mirror: no assignment arms a shape *measurement* into a ``FAIL``.
@@ -66,6 +66,7 @@ import pytest
 
 from kb_tools import install_location, kb_util
 from kb_tools.kb_survey import validate
+from kb_tools.tests._in_process import run_main
 
 # The directory holding the `kb_tools` package — the subprocess cases' PYTHONPATH,
 # and never a way to derive a repo root.
@@ -176,12 +177,9 @@ def _write_orphan_case(tmp_path: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _cli(*argv: str) -> int:
-    """``main`` through the real argv path; an argparse usage error is its exit code."""
-    try:
-        return kb_util.main(list(argv))
-    except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
+def _cli(argv: Sequence[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """``main`` through the real argv path, in-process; an argparse usage error is its exit code."""
+    return run_main(kb_util.main, argv, cwd=cwd)
 
 
 def _finding_lines(out: str, status: str) -> list[str]:
@@ -195,10 +193,9 @@ def _finding_lines(out: str, status: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_every_printed_line_follows_the_report_convention(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_every_printed_line_follows_the_report_convention(tmp_path: Path) -> None:
     """``[survey-validate] PASS|FAIL|FACT <check> <detail>``, one line per finding."""
-    _cli(*_write_build_case(tmp_path))
-    out = capsys.readouterr().out
+    out = _cli(_write_build_case(tmp_path)).stdout
 
     for line in out.splitlines():
         tag, status, *rest = line.split()
@@ -212,17 +209,15 @@ def test_every_printed_line_follows_the_report_convention(tmp_path: Path, capsys
 # ---------------------------------------------------------------------------
 
 
-def test_a_well_formed_tree_exits_zero_with_every_check_reported(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_well_formed_tree_exits_zero_with_every_check_reported(tmp_path: Path) -> None:
     """The one check this caller can answer passes, and the other says it cannot be asked.
 
     The set assertions are what say the report claims exactly its own coverage:
     a run that reported nothing at all would exit 0 just the same, and a
     tree-diff ``PASS`` here would be a second confirmation nobody performed.
     """
-    code = _cli(*_write_build_case(tmp_path))
-    out = capsys.readouterr().out
+    result = _cli(_write_build_case(tmp_path))
+    code, out = result.returncode, result.stdout
 
     assert code == validate.EXIT_OK, out
     assert {line.split()[2] for line in _finding_lines(out, validate.PASS)} == {validate.CHECK_REACHABILITY}
@@ -230,17 +225,15 @@ def test_a_well_formed_tree_exits_zero_with_every_check_reported(
     assert "not applicable" in tree_diff
 
 
-def test_a_document_nothing_reaches_and_that_up_links_nowhere_exits_one_and_names_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_document_nothing_reaches_and_that_up_links_nowhere_exits_one_and_names_it(tmp_path: Path) -> None:
     """The op's remaining teeth, in both directions of the reachability walk.
 
     Down: no chain of down-links from the entry point arrives at it. Up: it
     carries no up-link, so nothing walks up from it either. Each is its own
     finding, and the tree that holds one is not one this op passes.
     """
-    code = _cli(*_write_orphan_case(tmp_path))
-    out = capsys.readouterr().out
+    result = _cli(_write_orphan_case(tmp_path))
+    code, out = result.returncode, result.stdout
 
     assert code == validate.EXIT_VIOLATION
     faults = [line for line in _finding_lines(out, validate.FAIL) if _ORPHAN in line]
@@ -253,16 +246,15 @@ def test_a_document_nothing_reaches_and_that_up_links_nowhere_exits_one_and_name
 # ---------------------------------------------------------------------------
 
 
-def _unfit(argv: Sequence[str], capsys: pytest.CaptureFixture[str]) -> str:
-    code = _cli(*argv)
-    captured = capsys.readouterr()
-    assert code == kb_util.EXIT_ENVIRONMENT_UNFIT
-    assert _finding_lines(captured.out, validate.FAIL) == []
-    assert captured.err.startswith(f"[{validate.TAG}] error: ")
-    return captured.err
+def _unfit(argv: Sequence[str]) -> str:
+    result = _cli(argv)
+    assert result.returncode == kb_util.EXIT_ENVIRONMENT_UNFIT
+    assert _finding_lines(result.stdout, validate.FAIL) == []
+    assert result.stderr.startswith(f"[{validate.TAG}] error: ")
+    return result.stderr
 
 
-def test_a_kb_root_that_is_not_a_directory_is_unfit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_kb_root_that_is_not_a_directory_is_unfit(tmp_path: Path) -> None:
     """The whole of the third rung now: the tree is the op's one input.
 
     A missing or unparseable manifest used to be the other two cases here, and
@@ -272,7 +264,7 @@ def test_a_kb_root_that_is_not_a_directory_is_unfit(tmp_path: Path, capsys: pyte
     argv = _write_build_case(tmp_path)
     argv[argv.index("--kb-root") + 1] = str(tmp_path / "never-built")
 
-    assert "never-built" in _unfit(argv, capsys)
+    assert "never-built" in _unfit(argv)
 
 
 # ---------------------------------------------------------------------------
@@ -289,12 +281,11 @@ def test_a_kb_root_that_is_not_a_directory_is_unfit(tmp_path: Path, capsys: pyte
         pytest.param([kb_util.OP_VALIDATE_BUILD, kb_util.OP_PREFLIGHT], id="two-ops"),
     ],
 )
-def test_a_mispaired_invocation_is_a_usage_error_and_runs_nothing(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_mispaired_invocation_is_a_usage_error_and_runs_nothing(argv: list[str]) -> None:
     """Each of these is refused by the subparser's own declarations."""
-    assert _cli(*argv) == 2
-    assert capsys.readouterr().out == ""
+    result = _cli(argv)
+    assert result.returncode == 2
+    assert result.stdout == ""
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +350,12 @@ def _surface() -> list[tuple[str, ...]]:
     :func:`kb_util.build_parser` exists: a guard that scraped help text would
     assert over a rendering of the surface instead of the surface. ``_actions``
     is argparse's only enumeration of it — the module offers no public accessor.
+    """
+    return _assignments(_parsers())
+
+
+def _assignments(parsers: Sequence[argparse.ArgumentParser]) -> list[tuple[str, ...]]:
+    """Every flag-and-value assignment ``parsers`` declare, ``--help`` and ``--version`` aside.
 
     Deduplicated, and only that: an option several subcommands both declare
     (``--kb-root``, ``--runner``) is one assignment to try, not one per
@@ -366,7 +363,7 @@ def _surface() -> list[tuple[str, ...]]:
     length.
     """
     assignments: dict[tuple[str, ...], None] = {}
-    for parser in _parsers():
+    for parser in parsers:
         for action in parser._actions:
             flags = [flag for flag in action.option_strings if flag.startswith("--")]
             if not flags or flags[0] in _TERMINATING_FLAGS:
@@ -397,13 +394,23 @@ def _downgrade_named(assignments: Sequence[tuple[str, ...]]) -> list[tuple[str, 
 
 
 def _combinations() -> list[tuple[str, ...]]:
-    """Every single assignment, every pair, and all of them at once, as argv tails."""
-    surface = _surface()
+    """Every single assignment, every pair, and all of them at once, as argv tails.
+
+    Over what ``validate-build``'s own subparser declares, plus one assignment it
+    does not. That one stands for every other: each subparser is built with
+    ``allow_abbrev=False``, so an option ``validate-build`` does not declare is
+    refused by its parser before any check runs, whichever option it is. A flag
+    declared on the op later joins the combination by being declared.
+    """
+    own = _assignments([_subparsers_action(kb_util.build_parser()).choices[kb_util.OP_VALIDATE_BUILD]])
+    declared = {assignment[0] for assignment in own}
+    foreign = next(assignment for assignment in _surface() if assignment[0] not in declared)
+    tried = [*own, foreign]
     groups: list[tuple[tuple[str, ...], ...]] = [
         (),
-        *((assignment,) for assignment in surface),
-        *itertools.combinations(surface, 2),
-        tuple(surface),
+        *((assignment,) for assignment in tried),
+        *itertools.combinations(tried, 2),
+        tuple(tried),
     ]
     return [tuple(itertools.chain.from_iterable(group)) for group in groups]
 
@@ -469,9 +476,7 @@ def test_the_guard_catches_a_downgrade_named_option_planted_on_a_subparser(
     assert {assignment[0] for assignment in _downgrade_named(_surface())} == {"--severity-floor"}
 
 
-def test_no_flag_value_or_combination_makes_a_planted_violation_exit_zero(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_no_flag_value_or_combination_makes_a_planted_violation_exit_zero(tmp_path: Path) -> None:
     """The standing guard: the planted violation reaches exit 1, or nothing ran.
 
     **Two outcomes, and the guard names both.** ``!= EXIT_OK`` was the
@@ -485,13 +490,13 @@ def test_no_flag_value_or_combination_makes_a_planted_violation_exit_zero(
     is neither.
     """
     base = _write_orphan_case(tmp_path)
-    assert _cli(*base) == validate.EXIT_VIOLATION
-    capsys.readouterr()
+    assert _cli(base).returncode == validate.EXIT_VIOLATION
 
     for tail in _combinations():
-        argv = [*base, *tail]
-        code = _cli(*argv)
-        out = capsys.readouterr().out
+        # From tmp_path, so an empty ``--kb-root`` names this test's directory
+        # rather than whatever checkout the suite happens to run from.
+        result = _cli([*base, *tail], cwd=tmp_path)
+        code, out = result.returncode, result.stdout
         reported = any(_finding_lines(out, status) for status in (validate.FAIL, validate.PASS, validate.FACT))
 
         assert f"[{validate.TAG}] {validate.PASS}: " not in out, tail

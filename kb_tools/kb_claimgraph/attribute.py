@@ -189,6 +189,21 @@ always did: the refusal spends a judgement somebody made and never stands in for
 one nobody made. Those anchors contribute to 2 settled pairs, and both of those
 are co-settled too.
 
+**The word before an anchor withholds a fallback's candidates, and only those.**
+Where the page introduces a reference as *Section 3*, *Fig. 2* or *Remark 4*
+(:func:`names_no_premise`) and the target end fell to the sole-claim route or to
+every claim a multi-claim document hosts, the pairs are not opened: what the
+author pointed at is a section or a figure, and the claims filed under it are the
+fallback's stand-in for something no premise relation can hold. The fragment
+refusal above is the same argument read off the target block; this reads it off
+the page's word, for the anchor whose fragment names no block. It is a filter and
+not a director: a pair containment settled is an edge whatever word precedes it,
+so no ``depends`` edge moves, and a fragment or label naming the claim outranks
+the word. Measured over the 54 staged kb-roots it removes 497 of 2238 candidate
+pairs and 37 of 556 questions, ``section`` carrying most of it; 25 anchors whose
+word names no premise reached the equation route — *Assumption (2.1)*, *Problem
+(3)* — and keep their pairs.
+
 The refusal these three replaced is unchanged in one place: **shared containment
 in a directory contributes no candidate on its own**, filing being a placement
 decision and not a dependency relation. Nothing above derives a candidate from
@@ -338,8 +353,9 @@ from typing import Protocol
 
 from .. import kb_index_lib, kb_pipeline
 from ..kb_write import render
-from . import prose
+from . import hand_named, prose
 from .graph import AuthoredGraph, ClaimNode
+from .hand_named import HandNamed
 from .inventory import (
     NOT_A_CLAIM_TARGET,
     PROOF_ENVIRONMENT,
@@ -358,6 +374,26 @@ from .tree import Tree, strip_markers, unquote
 BY_IDENTIFIER = "identifier"
 BY_EQUATION = "equation"
 BY_SOLE_CLAIM = "sole-claim"
+
+#: The kinds of numbered thing a document's own structure prints — a sectioning
+#: unit, a float, a footnote — as the page names them before a ``\\ref``,
+#: case-folded, abbreviations included. **None of them is a result**, so no
+#: premise relation can run to one, and an anchor the page introduces with one
+#: of these words opens no candidate pair (:func:`names_no_premise`).
+#:
+#: **A fixed list, and it has to be.** The claim side of the vocabulary is the
+#: corpus's own — its blocks' display names, classified by
+#: :data:`inventory.CLAIM_BEARING` and :data:`inventory.NOT_CLAIM_BEARING` — but
+#: these kinds are no display name: no ``\\newtheorem`` declares them, the reader
+#: renders a section as a heading and a float without its number, and the tree
+#: records the word nowhere but in the author's prose. What is listed is what
+#: LaTeX numbers structurally and what the staged corpus writes before an anchor;
+#: ``part``, ``paragraph``, ``item`` and ``line`` are left out, each being an
+#: ordinary English word that also introduces a sub-item of a result.
+STRUCTURAL_KINDS: frozenset[str] = frozenset(
+    {"section", "subsection", "subsubsection", "chapter", "appendix", "figure", "table", "footnote"}
+    | {"sec", "subsec", "ch", "chap", "app", "fig", "tab", "§", "§§"}
+)
 
 #: How many times one source is re-asked after an answer that did not parse.
 #: Spent under the ask's own refusal and nowhere else.
@@ -647,6 +683,24 @@ def _target_end(
     return tuple(targets), None
 
 
+def names_no_premise(word: str | None) -> bool:
+    """Whether the word before an anchor names a kind no premise relation can hold.
+
+    Two sources, one test. :data:`STRUCTURAL_KINDS` is the structure the page
+    prints; :data:`inventory.NOT_A_CLAIM_TARGET` is the display names somebody
+    classified as stating no result, which the target end already refuses when
+    an anchor's fragment names such a block — read here off the word, for the
+    anchor whose fragment names none. A plural is the singular's kind and a
+    trailing stop marks an abbreviation, so *Sections* and *Fig.* read as
+    *section* and *fig*.
+    """
+    if word is None:
+        return False
+    kind = word.casefold().rstrip(".")
+    vocabulary = STRUCTURAL_KINDS | NOT_A_CLAIM_TARGET
+    return kind in vocabulary or (kind.endswith("s") and kind[:-1] in vocabulary)
+
+
 def _reference_line(tree: Tree, anchor: Anchor) -> str:
     """The author's words around the anchor — its whole paragraph, collapsed to one line.
 
@@ -749,6 +803,18 @@ class Attribution:
     in ``references`` too — carried separately only so the report can name them,
     a demoted edge being indistinguishable from any other reference once it is
     written.
+
+    ``word_dropped`` is the pairs an anchor would have opened had the word
+    before it not named a kind no premise relation can hold
+    (:func:`names_no_premise`), less any pair another anchor opened or settled
+    anyway. They are in neither ``questions`` nor ``references``: the author
+    pointed at a section or a figure, and the claims it hosts are what the
+    fallback routes offered in its place.
+
+    ``hand_named`` is the candidates a claim's printed name and number produced
+    (:mod:`hand_named`), less any pair a reference already opened or settled.
+    **Candidates only**: they are in neither ``questions`` nor ``references``,
+    and wait for a classification that offers them.
     """
 
     edges: tuple[tuple[str, str], ...]
@@ -756,6 +822,8 @@ class Attribution:
     routes: Mapping[str, int]
     references: tuple[tuple[str, str], ...] = ()
     demoted: tuple[tuple[str, str], ...] = ()
+    word_dropped: tuple[tuple[str, str], ...] = ()
+    hand_named: tuple[HandNamed, ...] = ()
 
 
 def narrow(
@@ -790,6 +858,7 @@ def narrow(
 
     settled: dict[tuple[str, str], str] = {}
     pairs: dict[str, dict[str, str]] = {}
+    unopened: set[tuple[str, str]] = set()
 
     for anchor in inventory.anchors:
         if anchor.target is None:
@@ -819,6 +888,11 @@ def narrow(
             proofs.get(anchor.document, {}),
             judged(anchor),
         )
+        # The word before the anchor filters what would be asked and never what
+        # containment settles, and it gives way to a fragment or a label that
+        # named the claim itself: it speaks only where a fallback route chose the
+        # target for the author.
+        unheld = route not in (BY_IDENTIFIER, BY_EQUATION) and names_no_premise(anchor.preceding_word)
 
         for source in from_ends:
             for target in to_ends:
@@ -826,6 +900,8 @@ def narrow(
                     continue
                 if directed and route is not None:
                     settled.setdefault((source.id, target.id), route)
+                elif unheld:
+                    unopened.add((source.id, target.id))
                 else:
                     pairs.setdefault(source.id, {}).setdefault(target.id, _reference_line(tree, anchor))
 
@@ -858,12 +934,19 @@ def narrow(
                 evidence=tuple(sorted(set(open_targets.values()))),
             )
         )
+    reached = set(settled) | {(source, target) for source, enumerated in pairs.items() for target in enumerated}
     return Attribution(
         edges=tuple(sorted(pair for pair in settled if pair not in on_ring)),
         questions=tuple(asked),
         routes=routes,
         references=tuple(referenced) + demoted,
         demoted=demoted,
+        word_dropped=tuple(sorted(unopened - reached)),
+        hand_named=tuple(
+            candidate
+            for candidate in hand_named.harvest(tree, graph, inventory)
+            if (candidate.source, candidate.target) not in reached
+        ),
     )
 
 

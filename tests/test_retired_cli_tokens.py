@@ -173,7 +173,7 @@ def test_the_sweep_reaches_the_files_that_carried_the_old_surface() -> None:
         "kb_tools/runner-snippets/kb.just",
         "kb_tools/runner-snippets/kb.mk",
         "kb_tools/tests/test_kb_util.py",
-        "templates/commands/kb-build.md.tmpl",
+        "templates/commands/kb-build.tmpl.md",
         "justfile",
         "kb-testing/justfile",
         "README.md",

@@ -35,3 +35,26 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     _patch.undo()
     if _harness_root is not None:
         shutil.rmtree(_harness_root)
+
+
+@pytest.fixture
+def runner_gate() -> None:
+    """Names a test whose claim-graph pipelines reach stage G through the consuming project's runner.
+
+    A test taking it is exempt from :func:`claimgraph_gate_in_process`; it does nothing itself.
+    """
+
+
+@pytest.fixture
+def claimgraph_gate_in_process(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stage G in-process for every claim-graph pipeline this test runs, unless it takes ``runner_gate``.
+
+    Function-scoped, so a module- or session-scoped build a test requests is
+    made before this applies and keeps the runner's real gate.
+    """
+    if "runner_gate" in request.fixturenames:
+        return
+    from kb_tools.kb_claimgraph import gate
+    from kb_tools.tests._claimgraph_consumer import stage_g_in_process
+
+    monkeypatch.setattr(gate, "run", stage_g_in_process)

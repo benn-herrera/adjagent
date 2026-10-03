@@ -114,12 +114,11 @@ def claim_of(anchor: Anchor, leaf: Readable, hosted: Iterable[str]) -> str | Non
     paragraph = leaf.render.paragraph_at(anchor.line)
     if paragraph is None:
         return None
+    return next((claim_id for claim_id in hosted if marks(leaf, paragraph, claim_id)), None)
+
+
+def marks(leaf: Readable, paragraph: label.Paragraph, claim_id: str) -> bool:
+    """Whether ``claim_id``'s Tier-2 marker sits in ``paragraph`` — the paragraph that claim was minted from."""
     lines = leaf.text.splitlines()
-    return next(
-        (
-            claim_id
-            for claim_id in hosted
-            if any(compose.render_tier2_marker(claim_id) in lines[line] for line in paragraph.lines)
-        ),
-        None,
-    )
+    marker = compose.render_tier2_marker(claim_id)
+    return any(marker in lines[line] for line in paragraph.lines)

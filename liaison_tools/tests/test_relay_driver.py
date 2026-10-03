@@ -29,10 +29,11 @@ import os
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from unittest import mock
+
+from liaison_tools.tests._stub_server import serve_for_test
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPT = _THIS_DIR.parent / "relay-driver.py"
@@ -698,8 +699,8 @@ def _sse_body(text: str, prompt_tokens: int, completion_tokens: int) -> bytes:
     return body + b"data: [DONE]\n\n"
 
 
-def _start_scripted_sse_server(bodies):
-    """Serve each queued SSE body to one POST, in order; 500 when exhausted.
+def _start_scripted_sse_server(test, bodies):
+    """Serve each queued SSE body to one POST, in order, for the life of `test`; 500 when exhausted.
 
     Same http.server harness pattern as test_post_openai.py, extended to a
     scripted multi-response conversation.
@@ -723,9 +724,7 @@ def _start_scripted_sse_server(bodies):
         def log_message(self, *args):  # keep test output clean
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, queue
+    return serve_for_test(test, Handler), queue
 
 
 class TestEndToEndStubbedEndpoint(unittest.TestCase):
@@ -757,9 +756,7 @@ class TestEndToEndStubbedEndpoint(unittest.TestCase):
             _sse_body("READ: notes.txt", 42, 7),
             _sse_body("FINAL\nThe launch code is 42.", 50, 9),
         ]
-        server, queue = _start_scripted_sse_server(bodies)
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
+        server, queue = _start_scripted_sse_server(self, bodies)
         port = server.server_address[1]
 
         with tempfile.TemporaryDirectory() as tmp:

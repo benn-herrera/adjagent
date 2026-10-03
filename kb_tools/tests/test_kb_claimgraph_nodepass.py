@@ -19,9 +19,9 @@ The corpus puts each case on its own leaf:
 * **delta** hosts a lemma and nothing else to read but its heading.
 """
 
-import os
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -43,13 +43,16 @@ from kb_tools.kb_claimgraph import (
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import ClaimGraphError
 from kb_tools.kb_write import ops, render
+from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
+from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
-_PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
-
-pytestmark = pytest.mark.skipif(
-    shutil.which("just") is None,
-    reason="every stage here ends on the consuming project's runner targets",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        shutil.which("just") is None,
+        reason="every stage here ends on the consuming project's runner targets",
+    ),
+    pytest.mark.usefixtures("claimgraph_gate_in_process"),
+]
 
 _ENTRY_POINT = "# Knowledge Base\n\n- [Vol](vol/index.md)\n"
 _VOLUME_INDEX = (
@@ -192,18 +195,7 @@ def _label_opening(rendered, quote: str) -> str:
 
 @pytest.fixture
 def consumer(tmp_path: Path) -> Path:
-    repo = tmp_path / "consumer"
-    for relative, text in _TREE.items():
-        target = repo / "kb-root" / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    (repo / ".git").mkdir()
-    (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
-    installed = repo / ".claude" / "agents"
-    installed.mkdir(parents=True)
-    os.symlink(_PACKAGE_ROOT, installed / _PACKAGE_ROOT.name)
-    kb_util.install_targets(repo, "just")
-    return repo
+    return install_claimgraph_consumer(tmp_path / "consumer", _TREE)
 
 
 def _scratch(repo: Path) -> Path:
@@ -225,16 +217,30 @@ def _mint_equations(repo: Path) -> None:
     assert not report.failed, report.lines()
 
 
-@pytest.fixture
-def declared(consumer: Path) -> Path:
-    _declare(consumer)
-    return consumer
+@pytest.fixture(scope="module")
+def declared_build(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    repo = install_claimgraph_consumer(tmp_path_factory.mktemp("nodepass-declared") / "consumer", _TREE)
+    _declare(repo)
+    with held_unchanged(repo, name="nodepass declared"):
+        yield repo
 
 
 @pytest.fixture
-def discovered(declared: Path) -> Path:
-    assert _discover(declared, VerdictIdentifier()) == []
-    return declared
+def declared(declared_build: Path, tmp_path: Path) -> Path:
+    return copy_build(declared_build, tmp_path / "consumer")
+
+
+@pytest.fixture(scope="module")
+def discovered_build(declared_build: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    repo = copy_build(declared_build, tmp_path_factory.mktemp("nodepass-discovered") / "consumer")
+    assert _discover(repo, VerdictIdentifier()) == []
+    with held_unchanged(repo, name="nodepass discovered"):
+        yield repo
+
+
+@pytest.fixture
+def discovered(discovered_build: Path, tmp_path: Path) -> Path:
+    return copy_build(discovered_build, tmp_path / "consumer")
 
 
 def _read(repo: Path):
@@ -567,7 +573,7 @@ def test_an_equation_named_only_from_prose_judged_not_a_claim_is_not_minted(disc
     assert _minted(discovered) == {"eq:beta"}
 
 
-def test_with_no_verdict_every_reference_counts(declared: Path):
+def test_with_no_verdict_every_reference_counts(declared: Path, runner_gate: None):
     """A build spending no inference: the record judges nothing, and the equation set is the declared pass's old one."""
     _mint_equations(declared)
     assert _minted(declared) == {"eq:beta", "eq:gamma"}

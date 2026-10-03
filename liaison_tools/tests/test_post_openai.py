@@ -30,9 +30,10 @@ import os
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
 from pathlib import Path
+
+from liaison_tools.tests._stub_server import serve_for_test
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPT = _THIS_DIR.parent / "post-openai.py"
@@ -282,8 +283,8 @@ class TestModelErrorSniffing(unittest.TestCase):
         self.assertFalse(post_openai.is_model_error_text(raw))
 
 
-def _start_sse_server(body_bytes):
-    """Serve `body_bytes` as the response to any POST, on an ephemeral port."""
+def _start_sse_server(test, body_bytes):
+    """Serve `body_bytes` as the response to any POST, on an ephemeral port, for the life of `test`."""
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
@@ -297,9 +298,7 @@ def _start_sse_server(body_bytes):
         def log_message(self, *args):  # keep test output clean
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
+    return serve_for_test(test, Handler)
 
 
 class TestEndToEndStubbedEndpoint(unittest.TestCase):
@@ -356,10 +355,7 @@ class TestEndToEndStubbedEndpoint(unittest.TestCase):
         is False (which still computes the path so the caller can assert the
         file was NOT created). Returns (result, stats_exists, stats_text).
         """
-        server = _start_sse_server(body_bytes)
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        port = server.server_address[1]
+        port = _start_sse_server(self, body_bytes).server_address[1]
         with tempfile.TemporaryDirectory() as tmp:
             key_file = Path(tmp) / "key.txt"
             key_file.write_text("test-key\n", encoding="utf-8")
@@ -526,11 +522,7 @@ class TestRedirectIsRefused(unittest.TestCase):
     """
 
     def _start(self, handler_cls):
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        return server.server_address[1]
+        return serve_for_test(self, handler_cls).server_address[1]
 
     def setUp(self):
         self.received = []

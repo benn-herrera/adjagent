@@ -1,6 +1,6 @@
 """
 The banner is a five-line YAML-comment block naming the source template
-(`# !GENERATED! from templates/agents/<name>.md.tmpl ...`) above a `!TUNING!`
+(`# !GENERATED! from templates/agents/<name>.tmpl.md ...`) above a `!TUNING!`
 line and the body hash:
 
     #
@@ -57,14 +57,14 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .model_tuning import Tuning, map_spec
-from .paths import SHARED_CHUNKS, rel
+from .paths import SHARED_CHUNKS, TEMPLATE_SUFFIX, rel
 
 # The banner, read back out of a definition as its claim to being generated.
-# Deliberately path-agnostic: any *.md.tmpl claim marks the file as generated,
+# Deliberately path-agnostic: any template claim marks the file as generated,
 # which is the whole question write safety and the install's prune ask of it.
 # Whether the claimed template still exists is nobody's question here — a
 # definition no template declares is retired by the prune, not by a verdict.
-BANNER_CLAIM = re.compile(r"^# !GENERATED! from (\S+\.md\.tmpl)\b", re.MULTILINE)
+BANNER_CLAIM = re.compile(rf"^# !GENERATED! from (\S+{re.escape(TEMPLATE_SUFFIX)})\b", re.MULTILINE)
 # The banner's hash line and the line that closes the block around it: the
 # hash of everything after it, and the marker for where "everything after it"
 # begins. Matching both together means one search locates the claim and the

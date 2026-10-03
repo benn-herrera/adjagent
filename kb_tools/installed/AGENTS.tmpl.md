@@ -1,0 +1,35 @@
+# {project-name} knowledge base
+
+This tree is a knowledge base with a verified claim graph over it. It has agents. Use them.
+
+- **To read it** — `/kb-start` for a new topic, `/kb-next` to switch topics, run from the project
+  root or from this KB root, and do not change directory once a session is under way. The docent
+  navigates the hierarchy, tracks what has been covered, and pulls only what the question needs. Do
+  not walk the tree yourself: it is built to be navigated, and reading it breadth-first spends
+  context the answer never needed.
+- **To change anything in it** — dispatch `kb-maintainer`. It calls the toolchain's metadata write
+  ops, wires the claim graph, and runs the refresh-then-verify loop that has to end green.
+- **Do not edit files here directly.** Every structured field was written by a tool from supplied
+  values, and much of what looks editable is derived and regenerated. An edit made outside the
+  maintainer is either overwritten or caught as drift.
+
+## What this KB distills
+
+{scope-pin}
+
+That is this KB's scope, in the words the build was given: which corpus it distills, and which node
+kinds and edge classes it populates. A leaf built from the corpus is a verbatim, mechanical
+rendering of it — nothing here rewrites source text in place, so there is no version of that text
+for the corpus and the KB to disagree over. Text a maintainer adds directly — a summary, a
+rationale, an analysis — lives in its own place in the tree; it was never a distillation of the
+corpus, so it is the KB's own word, not a claim about what the corpus says. For live node and edge
+counts — what is in the graph right now, as against what this KB is for — run the project's
+`kb-stats` target.
+
+Corpus invariants — notation and cross-cutting definitions — live in `invariants.md` beside this
+file. Read it before reasoning about anything here. Where there is no such file this corpus declares
+none, and nothing here is waiting on it.
+
+`CONVENTIONS.md` beside this file is the full contract: what is authored versus derived, how
+metadata gets written, how citations must be formed, and what to do when the gate goes red. Read it
+before any work on this KB beyond reading.

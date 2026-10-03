@@ -89,9 +89,13 @@ its filetype admits:
                              frontmatter, which would present it as a
                              definition
     .py .sh .toml .mk .just  `#` comment lines at the top, below a shebang
+    *.tmpl.md                a template (kb_tools/installed/): every byte is
+                             payload for a file a build writes from it, so a
+                             banner would ship inside that file — copied
+                             verbatim, like the row below
     any other suffix         no comment syntax to carry a banner: the file is
                              copied verbatim, and --verbose names it (which
-                             files those are follows from their suffix alone,
+                             files those are follows from their name alone,
                              so a clean install does not report it)
 
 Third-party source vendored into a shipped package under a `_vendor/`
@@ -122,7 +126,7 @@ from .discovery import COMMAND_SURFACE
 from .errors import InputError
 from .generation import generate
 from .model_tuning import OverlaySource, TierBinding, Tuning, map_spec
-from .paths import REPO_ROOT, rel
+from .paths import REPO_ROOT, TEMPLATE_SUFFIX, rel
 from .product import assert_install_root, package_pairs, replace_package_destinations
 from .pruning import prune_stale
 from .rendering import all_renders
@@ -145,7 +149,13 @@ EXEC_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
 def bannerable(source: Path) -> bool:
     """Does this file's type admit a comment the !INSTALLED! banner can live
-    in? (Whether it *needs* one is install_content's question.)"""
+    in? (Whether it *needs* one is install_content's question.)
+
+    A template (`*.tmpl.md`) does not, whatever its final suffix: every byte of
+    it is payload for a file another tool writes from it, so a banner stamped
+    in would ship inside that file."""
+    if source.name.endswith(TEMPLATE_SUFFIX):
+        return False
     return source.suffix == MARKDOWN_SUFFIX or source.suffix in HASH_COMMENT_SUFFIXES
 
 
@@ -238,7 +248,7 @@ def install(
     smap: dict[str, tuple[Path, Path]],
     *,
     root: Path,
-    overlays: OverlaySource = None,
+    overlays: OverlaySource,
     source_root: Path = REPO_ROOT,
     verbose: bool = False,
     tuning: Tuning,
@@ -341,12 +351,12 @@ def install(
         # triple and the tier resolver reach it — arguments this function was
         # itself handed, and which a call site that dropped them would turn
         # into a tree of definitions tuned differently from what their own
-        # banners claim, or a whole-tree MISTUNED verdict on a correct install.
+        # banners claim.
         integrity = quiet_pass(
             lambda: generate(binding, smap, overlays=overlays, tuning=tuning, verbose=verbose),
             verbose=verbose,
         )
-        renders = all_renders(binding, smap, overlays, tuning=tuning)
+        renders = all_renders(binding, smap, overlays=overlays, tuning=tuning)
         for target, _ in renders:
             for surface, (_, out_dir) in smap.items():
                 if target.is_relative_to(out_dir):
@@ -389,7 +399,7 @@ def install(
     whole = f"; replaced whole, local edits included: {', '.join(wiped)}" if wiped else ""
     print(f"installed: {counts} → {rel(root)}{whole}{tuned}")
     if verbose and unbannered:
-        print(f"unbannered (type admits no comment): {len(unbannered)} file(s) — " + ", ".join(unbannered))
+        print(f"unbannered (type admits no banner):{len(unbannered)} file(s) — " + ", ".join(unbannered))
     if verbose and unstamped:
         print(f"unstamped (vendored third-party source): {len(unstamped)} file(s) — " + ", ".join(unstamped))
     if verbose and stale.foreign:

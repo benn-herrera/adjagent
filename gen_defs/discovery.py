@@ -219,7 +219,7 @@ def template_targets(
 
     Discovery recurses through each surface's template tree (an absent tree is
     tolerated), and a template's relative subpath is mirrored into its surface:
-    templates/agents/mad/participant-contract.md.tmpl has output directory
+    templates/agents/mad/participant-contract.tmpl.md has output directory
     agents/mad/. Placement is declared by the filesystem and nothing else.
 
     `globs` drops a template none of whose declared outputs are selected; a

@@ -96,7 +96,7 @@ def generate(
     binding: TierBinding,
     smap: dict[str, tuple[Path, Path]],
     *,
-    overlays: OverlaySource = None,
+    overlays: OverlaySource,
     globs: GlobMap | None = None,
     verbose: bool = False,
     tuning: Tuning,
@@ -110,7 +110,7 @@ def generate(
         print(f"  ERROR      no templates found under {rel(TEMPLATES_DIR)}/")
         return False
 
-    pairs = all_renders(binding, smap, overlays, globs, tuning=tuning)
+    pairs = all_renders(binding, smap, overlays=overlays, globs=globs, tuning=tuning)
     # The output root itself was asserted to exist when the surface map was
     # built. Everything below it — each surface directory, and the mirrored
     # subdirectories under those — is created as needed.

@@ -54,10 +54,11 @@ def frontmatter_pin(text: str) -> str | None:
 def output_tier(probe_text: str) -> str | None:
     """The output's own tier, read out of a DISCOVERY render's frontmatter pin.
 
-    Three legal readings, and only the first is a tier: the sentinel the probe
+    Three readings, and only the first is a tier: the sentinel the probe
     binding put there; a literal pin, which comes back as itself and declares
-    no tier; and no pin site at all. None is not a failed resolution — it is a
-    property of the output's type (or of a pin site not yet tokenized).
+    no tier; and no pin site at all. Both of the last two return None here, and
+    they part at assert_tiered: an output with no pin site is a property of its
+    type and renders, while a literal pin resolves no tier and is refused.
     """
     pin = frontmatter_pin(probe_text)
     if pin is None or not pin.startswith(TIER_SENTINEL):
@@ -149,7 +150,7 @@ def render_template(
     out_dir: Path,
     *,
     surface: str,
-    overlays: OverlaySource = None,
+    overlays: OverlaySource,
     tuning: Tuning,
 ) -> list[tuple[Path, str]]:
     """Render every definition a template declares, banner stamped into each.
@@ -190,9 +191,9 @@ def render_template(
 def all_renders(
     binding: TierBinding,
     smap: dict[str, tuple[Path, Path]],
-    overlays: OverlaySource = None,
-    globs: GlobMap | None = None,
     *,
+    overlays: OverlaySource,
+    globs: GlobMap | None = None,
     tuning: Tuning,
 ) -> list[tuple[Path, str]]:
     """Every (target, rendered text) pair across every template, sorted — the

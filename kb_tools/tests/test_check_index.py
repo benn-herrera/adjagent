@@ -24,30 +24,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kb_tools import install_location, kb_schema, kb_util, verify_kb_metadata
+from kb_tools import kb_schema, kb_util, refresh_kb_metadata, verify_kb_metadata
+from kb_tools.tests._in_process import run_main
 
 _THIS_DIR = Path(__file__).resolve().parent
-_PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
-_CHECK_MOD = "kb_tools.verify_kb_metadata"
-_REFRESH_MOD = "kb_tools.refresh_kb_metadata"
 
 
 def _run_checker(kb_root: Path, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
-    cmd = [sys.executable, "-m", _CHECK_MOD, "--kb-root", str(kb_root)]
-    if extra_args:
-        cmd.extend(extra_args)
-    return subprocess.run(cmd, cwd=_PKG_PARENT, capture_output=True, text=True, check=False)
+    """The verifier's entry point, in-process; its process boundary is ``test_kb_util``'s to cover."""
+    return run_main(verify_kb_metadata.main, ["--kb-root", str(kb_root), *(extra_args or [])])
 
 
 def _run_refresh(kb_root: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", _REFRESH_MOD, "--kb-root", str(kb_root)],
-        cwd=_PKG_PARENT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    return run_main(refresh_kb_metadata.main, ["--kb-root", str(kb_root)])
 
 
 def _materialize_fixture(parent: Path) -> Path:

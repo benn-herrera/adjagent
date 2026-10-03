@@ -4,7 +4,7 @@
 opening the JSON itself. This file is the check for that: it reads
 ``templates/`` rather than ``rendered/``, since the templates are the source a
 render is a function of and ``rendered/`` is a gitignored build product that
-may be absent or stale — the same bound ``test_traversal_sweep.py`` states.
+may be absent or stale.
 
 There is no per-seat view assertion here: the one seat that worked from the
 manifest by verb (``render-manifest section-index``) was ``kb-latex-specialist``,
@@ -40,7 +40,7 @@ def test_no_agent_definition_sends_a_seat_to_the_manifest_file() -> None:
     manifest path gets the verb too, or this is a rule that held once.
     """
     definitions = tuple(
-        (template.name, template.read_text(encoding="utf-8")) for template in sorted(_TEMPLATES.glob("*.md.tmpl"))
+        (template.name, template.read_text(encoding="utf-8")) for template in sorted(_TEMPLATES.glob("*.tmpl.md"))
     )
 
     assert len(definitions) >= len(_SEATS)
@@ -49,6 +49,6 @@ def test_no_agent_definition_sends_a_seat_to_the_manifest_file() -> None:
 
 def test_the_file_guard_has_teeth() -> None:
     """A green sweep over a surface that never carried the string proves nothing on its own."""
-    assert _seats_sent_to_the_file((("kb-planted.md.tmpl", f"Read `{_MANIFEST_FILENAME}` first.\n"),)) == [
-        "kb-planted.md.tmpl"
+    assert _seats_sent_to_the_file((("kb-planted.tmpl.md", f"Read `{_MANIFEST_FILENAME}` first.\n"),)) == [
+        "kb-planted.tmpl.md"
     ]

@@ -12,9 +12,9 @@ end. What survives here is everything downstream of an already-built tree:
   a defect in a tool or in what was authored.
 * **``overview-drafted`` writes the overview document and ``phase-5`` reviews
   it.** Two stages and two boundaries, because each spends a model call and
-  neither may pay for the other's failure. The review side is a fixed sequence
-  — one review, then one revision answering its findings — and no severity the
-  reviewer returns fails the stage.
+  neither may pay for the other's failure. The review side is opt-in
+  (``--doc-audit``) and a fixed sequence — one review, then one revision
+  answering its findings — and no severity the reviewer returns fails the stage.
 
 The fixture's ``repo`` starts at the state the pandoc pipeline hands off: a KB
 spine, with every domain's leaves already distilled (:func:`distilled`) by the
@@ -332,8 +332,11 @@ def drive(
     stages: Sequence[str],
     decisions: Mapping[str, str] = (),
     ops: run.LedgerOps | None = None,
+    doc_audit: bool = True,
 ) -> run.Result:
+    """One run over ``stages``. ``doc_audit`` defaults on, because most cases here are the audit's."""
     body = ["[run]", f"sources = {json.dumps(list(SOURCES))}", 'permission_mode = "acceptEdits"']
+    body.append(f"doc_audit = {json.dumps(doc_audit)}")
     for pair, answer in dict(decisions).items():
         stage, _, kind = pair.rpartition(".")
         body += ["", f'[barriers."{stage}"."{kind}"]', f'decision = "{answer}"']
@@ -512,6 +515,44 @@ def test_the_stage_assembles_the_overview_document_reviews_it_and_records(
     # The counts the seat was never asked for: this corpus has no claims, and
     # the document says so because the index does.
     assert f"{len(DOMAINS) * LEAVES_PER_DOMAIN} documents" in document
+
+
+def test_a_build_not_asked_for_the_audit_is_complete_after_the_draft(
+    repo: Path, tmp_path: Path, templates: Path
+) -> None:
+    """The audit is opt-in: without the flag the draft is the last call and its boundary the last record."""
+    distilled(repo)
+    fake = FakeLedger(recorded=RECORDED_THROUGH_3A)
+    script = phase_5_script()
+
+    result = drive(
+        repo_root=repo,
+        tmp_path=tmp_path,
+        templates=templates,
+        script=script,
+        fake=fake,
+        stages=META_STAGES,
+        doc_audit=False,
+    )
+
+    assert result.exit_code == baton.EXIT_OK
+    assert script.order == ["ov.docs"]
+    assert fake.recorded[-1] == "overview-drafted"
+    assert "phase-5" not in fake.recorded
+
+
+def test_the_audit_runs_alone_over_a_build_already_complete(repo: Path, tmp_path: Path, templates: Path) -> None:
+    """Asked for after the fact, the audit is the one unrecorded stage, so nothing is rebuilt."""
+    distilled(repo)
+    fake = FakeLedger(recorded=(*RECORDED_THROUGH_3A, "overview-drafted"))
+    (kb_util.kb_root(repo) / kb_pipeline.OVERVIEW_DOC).write_text("# Overview\n", encoding="utf-8")
+    script = phase_5_script()
+
+    result = drive(repo_root=repo, tmp_path=tmp_path, templates=templates, script=script, fake=fake, stages=META_STAGES)
+
+    assert result.exit_code == baton.EXIT_OK
+    assert script.order == ["p5.review", "p5.fix"]
+    assert fake.recorded[-1] == "phase-5"
 
 
 @pytest.mark.parametrize("verdict", [CLEAN, CARRIED, CRITICAL], ids=["clean", "carried", "critical"])

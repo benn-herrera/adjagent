@@ -9,15 +9,15 @@ root the invocation names (ROOT, `cli` module docstring; `generate` and
 this repository keeps no rendered tree of its own for a render to default
 into):
 
-    templates/agents/<name>.md.tmpl    + templates/shared-chunks.toml -> ROOT/agents/<name>.md
-    templates/commands/<name>.md.tmpl  + templates/shared-chunks.toml -> ROOT/commands/<name>.md
+    templates/agents/<name>.tmpl.md    + templates/shared-chunks.toml -> ROOT/agents/<name>.md
+    templates/commands/<name>.tmpl.md  + templates/shared-chunks.toml -> ROOT/commands/<name>.md
 
 Discovery is RECURSIVE within each surface tree, and a template's path is
 MIRRORED into its surface — the relative subpath of the template is the
 relative subpath of its output. The filesystem is the whole declaration;
 there is no metadata key for placement:
 
-    templates/agents/mad/participant-contract.md.tmpl -> ROOT/agents/mad/participant-contract.md
+    templates/agents/mad/participant-contract.tmpl.md -> ROOT/agents/mad/participant-contract.md
 
 Every other mechanism — chunks, variants, markers, overlay anchors,
 multi-output fences, banners, write safety, and numbered backups — applies

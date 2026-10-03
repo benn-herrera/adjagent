@@ -1,14 +1,15 @@
 """D7: staging refuses to destroy a live driver run's workspace.
 
 ``stage-arxiv-paper`` (``kb-testing/justfile``) resets a staged paper to its
-``cleared`` tag and ``rm -rf``s ``.claude-temp/`` and ``kb-root/``
+``cleared`` tag and ``rm -rf``s its scratch directory and ``kb-root/``
 unconditionally before every restage, and ``stage-arxiv-corpus`` reaches that
 per id. If a driver run is live in the repository being restaged, this
 destroys the tree it is building and whatever inference it already spent,
 silently. ``guard-run-lock`` — a private recipe factored out of
-``stage-arxiv-paper`` so any future recipe that wipes ``.claude-temp/`` or
-``kb-root/`` can call it too — asks first, through ``kb_util``'s read-only
-``show-run-lock`` op (D13), and refuses on a live holder.
+``stage-arxiv-paper`` so any future recipe that wipes that scratch directory
+or ``kb-root/`` can call it too — asks first, through the read-only
+``show-run-lock`` op (D13) of the ``kb_util`` installed there under whichever
+harness installed it, and refuses on a live holder.
 
 Liveness has exactly one definition, ``kb_driver.runlog.lock_state``, and
 these tests never judge a pid themselves: each one only fabricates the lock
@@ -25,14 +26,17 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
+from kb_tools import install_location
 from kb_tools.kb_driver import runlog
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KB_TESTING = _REPO_ROOT / "kb-testing"
+_HARNESS_FILES = _REPO_ROOT / "templates" / "harness"
 
 #: This suite's own scratch, wiped and rebuilt every run — never
 #: `tmp_path`/`tmp_path_factory`, which pytest anchors under the system temp
@@ -57,13 +61,18 @@ def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
 
-def _make_consumer(root: Path) -> Path:
-    """A committed repository with the toolchain installed — what `guard-run-lock` reads.
+def _harness_dir(harness: str) -> str:
+    """The project harness directory ``harness`` installs into, from the file the recipes read it from."""
+    text = (_HARNESS_FILES / f"{harness}.toml").read_text(encoding="utf-8")
+    return tomllib.loads(text)["harness"]["project-harness-dir"]["text"]
+
+
+def _make_consumer(root: Path, *, harness: str) -> Path:
+    """A committed repository with the toolchain installed under ``harness`` — what `guard-run-lock` reads.
 
     Built directly with the installer rather than through arXiv staging: the
-    guard's contract is about the lock file at this tree's own
-    `.claude-temp/kb-driver.lock`, not about how the tree came to hold
-    `.claude/agents/kb_tools`.
+    guard's contract is about the lock file in this tree's own scratch
+    directory, not about how the tree came to hold its installed `kb_tools`.
     """
     root.mkdir(parents=True)
     _git(root, "init", "-q")
@@ -73,10 +82,10 @@ def _make_consumer(root: Path) -> Path:
         ("commit.gpgsign", "false"),
     ):
         _git(root, "config", key, value)
-    claude = root / ".claude"
-    claude.mkdir()
+    harness_root = root / _harness_dir(harness)
+    harness_root.mkdir()
     installed = subprocess.run(
-        [sys.executable, "-m", "gen_defs", "install", str(claude)],
+        [sys.executable, "-m", "gen_defs", "install", str(harness_root), "--harness", harness],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -87,6 +96,18 @@ def _make_consumer(root: Path) -> Path:
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "toolchain installed")
     return root
+
+
+def _repo_lock_path(repo: Path, *, harness: str) -> Path:
+    """``runlog.repo_lock_path`` as answered by ``repo``'s copy installed under ``harness`` — the one ``guard-run-lock`` asks.
+
+    The in-process ``runlog`` is the source tree's, which sits under no harness
+    directory, so ``install_location.current`` is pointed at that copy for the call.
+    """
+    location = install_location.locate(repo / _harness_dir(harness) / "agents" / "kb_tools" / "install_location.py")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(install_location, "current", lambda: location)
+        return runlog.repo_lock_path(repo)
 
 
 def _run_guard(dir_: Path) -> subprocess.CompletedProcess:
@@ -102,12 +123,12 @@ def _run_guard(dir_: Path) -> subprocess.CompletedProcess:
 
 @pytest.fixture(scope="module")
 def consumer() -> Path:
-    return _make_consumer(_SCRATCH / "consumer")
+    return _make_consumer(_SCRATCH / "consumer", harness="claude")
 
 
 @pytest.fixture()
 def lock_path(consumer: Path) -> Path:
-    path = runlog.repo_lock_path(consumer)
+    path = _repo_lock_path(consumer, harness="claude")
     yield path
     path.unlink(missing_ok=True)
 
@@ -133,17 +154,41 @@ def test_guard_proceeds_on_a_stale_lock(consumer: Path, lock_path: Path) -> None
     assert result.returncode == 0, result.stderr
 
 
-def test_guard_refuses_on_a_live_lock_naming_the_holder(consumer: Path, lock_path: Path) -> None:
+def _hold_live_lock(lock_path: Path, *, run_id: str) -> None:
     """The pytest process's own pid stands in for a live driver run — it is alive for the test's duration."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(
-        json.dumps({"pid": os.getpid(), "run_id": "live-run-id", "started": "2026-09-01T00:00:00+00:00"}),
+        json.dumps({"pid": os.getpid(), "run_id": run_id, "started": "2026-09-01T00:00:00+00:00"}),
         encoding="utf-8",
     )
+
+
+def test_guard_refuses_on_a_live_lock_naming_the_holder(consumer: Path, lock_path: Path) -> None:
+    _hold_live_lock(lock_path, run_id="live-run-id")
     result = _run_guard(consumer)
     assert result.returncode != 0
     assert str(os.getpid()) in result.stderr
     assert "live-run-id" in result.stderr
+
+
+def test_guard_refuses_a_live_lock_under_a_non_default_harness() -> None:
+    """A toolchain installed with `--harness=opencode` is found and asked, not mistaken for no toolchain at all."""
+    consumer = _make_consumer(_SCRATCH / "opencode-consumer", harness="opencode")
+    _hold_live_lock(_repo_lock_path(consumer, harness="opencode"), run_id="opencode-live-run")
+    result = _run_guard(consumer)
+    assert result.returncode != 0
+    assert str(os.getpid()) in result.stderr
+    assert "opencode-live-run" in result.stderr
+
+
+def test_guard_refuses_a_dir_holding_toolchains_under_two_harnesses() -> None:
+    """Which copy a run there was launched against cannot be told, so neither copy's answer is taken."""
+    root = _SCRATCH / "two-harnesses"
+    for harness in ("claude", "opencode"):
+        (root / _harness_dir(harness) / "agents" / "kb_tools").mkdir(parents=True)
+    result = _run_guard(root)
+    assert result.returncode != 0
+    assert "more than one harness" in result.stderr
 
 
 #: Enough of an installed `kb_util` to prove the point: an argparse op
@@ -170,8 +215,8 @@ if __name__ == "__main__":
 
 
 def _make_stale_toolchain_dir(root: Path) -> Path:
-    """A directory whose `.claude/agents/kb_tools` cannot answer `show-run-lock` at all."""
-    package = root / ".claude" / "agents" / "kb_tools"
+    """A directory whose installed `kb_tools` cannot answer `show-run-lock` at all."""
+    package = root / _harness_dir("claude") / "agents" / "kb_tools"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "kb_util.py").write_text(_STALE_KB_UTIL_SOURCE, encoding="utf-8")
@@ -238,32 +283,32 @@ def test_stage_arxiv_paper_refuses_to_restage_over_a_live_run_and_proceeds_once_
     first = stage()
     assert first.returncode == 0, first.stderr
     paper_dir = stage_dir / fake_id
-    assert (paper_dir / ".claude" / "agents" / "kb_tools").is_dir()
+    assert (paper_dir / _harness_dir("claude") / "agents" / "kb_tools").is_dir()
 
     # Evidence a live build would be writing, which the destructive branch
-    # (git reset --hard cleared; rm -rf .claude-temp kb-root) would otherwise
-    # erase unconditionally.
+    # (git reset --hard cleared; rm -rf of the scratch directory and kb-root)
+    # would otherwise erase unconditionally. The lock lives in that scratch
+    # directory.
+    lock_path = _repo_lock_path(paper_dir, harness="claude")
+    scratch = lock_path.parent
     (paper_dir / "kb-root").mkdir()
     (paper_dir / "kb-root" / "marker.txt").write_text("evidence", encoding="utf-8")
-    (paper_dir / ".claude-temp").mkdir()
-    (paper_dir / ".claude-temp" / "run.log").write_text("in-progress build\n", encoding="utf-8")
-
-    lock_path = runlog.repo_lock_path(paper_dir)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(json.dumps({"pid": os.getpid(), "run_id": "arxiv-live-run"}), encoding="utf-8")
+    scratch.mkdir()
+    (scratch / "run.log").write_text("in-progress build\n", encoding="utf-8")
+    _hold_live_lock(lock_path, run_id="arxiv-live-run")
 
     refused = stage()
     assert refused.returncode != 0
     assert str(os.getpid()) in refused.stderr
     assert "arxiv-live-run" in refused.stderr
     assert (paper_dir / "kb-root" / "marker.txt").exists()
-    assert (paper_dir / ".claude-temp" / "run.log").exists()
+    assert (scratch / "run.log").exists()
 
     lock_path.unlink()
     proceeded = stage()
     assert proceeded.returncode == 0, proceeded.stderr
     assert not (paper_dir / "kb-root" / "marker.txt").exists()
-    assert not (paper_dir / ".claude-temp" / "run.log").exists()
+    assert not (scratch / "run.log").exists()
 
 
 def _configured_arxiv_ids() -> tuple[str, ...]:

@@ -829,6 +829,43 @@ def _seed_runner(repo_root: Path, runner: str | None) -> str | None:
     return DEFAULT_RUNNER
 
 
+@dataclass(frozen=True)
+class KbVerifyCodes:
+    """The three verifiers' return codes from one :func:`run_kb_verify`."""
+
+    links: int
+    metadata: int
+    citations: int
+
+    @property
+    def failed(self) -> bool:
+        """The worst outcome wins: any one verifier red is the whole gate red."""
+        return bool(self.links or self.metadata or self.citations)
+
+    def detail(self) -> str:
+        """All three codes, so a red report shows which verifiers ran and not only the one that failed."""
+        return f"links rc={self.links}, metadata rc={self.metadata}, citations rc={self.citations}"
+
+
+def run_kb_verify(repo_root: Path, *, skip_frontmatter_presence: bool) -> KbVerifyCodes:
+    """md-links, then kb-metadata, then citations, in-process, every one run whatever the one before returned.
+
+    The in-process statement of the runner's ``kb-verify`` target; the runner
+    snippets are its shell statement. ``skip_frontmatter_presence`` excludes
+    that one metadata check and is ``graph-init``'s alone (:func:`graph_init_kb`).
+    """
+    # Local import: the verifiers import this module.
+    from kb_tools import verify_citations, verify_kb_metadata, verify_md_links
+
+    kb = str(kb_root(repo_root))
+    links = verify_md_links.main(["--root", str(repo_root)])
+    metadata = verify_kb_metadata.main(
+        ["--kb-root", kb, *(["--skip-frontmatter-presence"] if skip_frontmatter_presence else [])]
+    )
+    citations = verify_citations.main(["--kb-root", kb])
+    return KbVerifyCodes(links=links, metadata=metadata, citations=citations)
+
+
 #: This seeder's report-line tag, one word so a reader scanning a mixed
 #: transcript can tell its lines from ``preflight``'s, which run inside them.
 GRAPH_INIT_TAG = f"[{OP_GRAPH_INIT}]"
@@ -872,7 +909,7 @@ def graph_init_kb(repo_root: Path, runner: str | None = None) -> int:
     # Local import: refresh/verify import this module, so importing them at
     # module scope would be circular. They are the same code the runner
     # targets wrap — and those targets do not exist until the step below.
-    from kb_tools import refresh_kb_metadata, verify_citations, verify_kb_metadata, verify_md_links
+    from kb_tools import refresh_kb_metadata
 
     # Fused, not recommended: an agent that skips `preflight` entirely still
     # cannot mis-seed, which is what makes the prose ordering between the two
@@ -917,14 +954,9 @@ def graph_init_kb(repo_root: Path, runner: str | None = None) -> int:
     # complete" to "the spine is correctly installed over the tree that is
     # there," not what the check itself asserts elsewhere.
     print(f"{GRAPH_INIT_TAG} verify: (frontmatter presence excluded from this pass — see NOTE below)")
-    links_rc = verify_md_links.main(["--root", str(repo_root)])
-    metadata_rc = verify_kb_metadata.main(["--kb-root", kb, "--skip-frontmatter-presence"])
-    citations_rc = verify_citations.main(["--kb-root", kb])
-    if links_rc or metadata_rc or citations_rc:
-        to_stderr(
-            f"{GRAPH_INIT_TAG} verify FAILED (links rc={links_rc}, metadata rc={metadata_rc}, "
-            f"citations rc={citations_rc})."
-        )
+    verified = run_kb_verify(repo_root, skip_frontmatter_presence=True)
+    if verified.failed:
+        to_stderr(f"{GRAPH_INIT_TAG} verify FAILED ({verified.detail()}).")
         return 1
 
     scope = (

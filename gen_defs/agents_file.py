@@ -2,7 +2,7 @@
 The harness agents file — one template, rendered per harness, and installed by
 block replacement.
 
-templates/harness/AGENTS.md.tmpl is the operator agents file every supported
+templates/harness/AGENTS.tmpl.md is the operator agents file every supported
 harness reads (Claude Code's CLAUDE.md, opencode's AGENTS.md). It is not a
 surface: discovery never reaches templates/harness/, `install` never renders
 it, and it carries no banner. One harness file per harness supplies the values

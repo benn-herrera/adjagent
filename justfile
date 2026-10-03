@@ -36,9 +36,11 @@ default:
 # make the params positional would make the command line worse, not better. The
 # one flag this recipe intercepts is `--subdir=X`, because it addresses this
 # recipe's own target-composition, not gen_defs: read only when it is the
-# *first* flag, stripped before the rest forwards. Absent, subdir defaults
-# to `.claude`; `--subdir=` (empty value) installs directly into <target>.
-[doc("install into <project>/<subdir>/; <project> is the first non-flag argument; [--subdir=<subdir>] defaults to .claude/")]
+# *first* flag, stripped before the rest forwards. Absent, subdir defaults to
+# the project-harness-dir of the harness named by `--harness=NAME` (default
+# claude), read from templates/harness/<NAME>.toml; `--harness` still forwards
+# to gen_defs. `--subdir=` (empty value) installs directly into <target>.
+[doc("install into <project>/<subdir>/; <project> is the first non-flag argument; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
 install target *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -48,14 +50,20 @@ install target *args:
     # everything else keeps its order and forwards.
     positional=("{{target}}" {{args}})
     target=""
-    subdir=".claude"
+    subdir=""
+    have_subdir=""
+    harness="claude"
     args=()
     for arg in ${positional[@]+"${positional[@]}"}; do
         if [[ -z "${target}" && "${arg}" != --* ]]; then
             target="${arg}"
         elif [[ "${#args[@]}" -eq 0 && "${arg}" == --subdir=* ]]; then
             subdir="${arg#--subdir=}"
+            have_subdir=1
         else
+            if [[ "${arg}" == --harness=* ]]; then
+                harness="${arg#--harness=}"
+            fi
             args+=("${arg}")
         fi
     done
@@ -69,18 +77,67 @@ install target *args:
         printf '%s\n' "error: target project root '${target}' does not exist — create the project first" >&2
         exit 1
     fi
+    if [[ -z "${have_subdir}" ]]; then
+        subdir="$("{{just_executable()}}" --justfile "{{justfile()}}" _harness-value "${harness}" project-harness-dir)"
+    fi
     root="${target}${subdir:+/${subdir}}"
     mkdir -p "${root}"
     # ${arr[@]+...} guard: expanding an empty array trips `set -u` on the
     # bash 3.2 that macOS ships at /bin/bash.
     PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install "${root}" ${args[@]+"${args[@]}"}
 
+# The one reader of templates/harness/<harness>.toml for recipes: prints the
+# `text` of table [harness.<key>], with a leading `~` expanded to $HOME. An
+# unknown harness fails listing the available harness files.
+[private]
+_harness-value harness key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{PROJECT_ROOT}}/templates/harness"
+    if [[ ! -f "${dir}/${1}.toml" ]]; then
+        available="$(cd "${dir}" && printf '%s ' *.toml)"
+        printf "error: unknown harness '%s' — available harness files: %s\n" "${1}" "${available}" >&2
+        exit 1
+    fi
+    value="$(sed -n '/^\[harness\.'"${2}"'\]/,/^\[/s/^text = "\(.*\)"$/\1/p' "${dir}/${1}.toml")"
+    if [[ -z "${value}" ]]; then
+        printf "error: harness '%s' defines no [harness.%s] text\n" "${1}" "${2}" >&2
+        exit 1
+    fi
+    printf '%s\n' "${value/#\~/${HOME}}"
+
 # A thin invocation on purpose: every protection the agents-file install
 # carries — block-only replacement, malformed-marker refusal, dirty-templates
-# refusal, the rolling backup — lives in gen_defs/agents_file.py.
-[doc("install the harness agents file for <harness> (claude, opencode) into <dir> — e.g. ~/.claude, ~/.config/opencode, or a project root — replacing only the adjagent block and keeping everything outside it")]
-install-agents-file harness dir:
-    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install-agents-file "$1" "$2"
+# refusal, the rolling backup — lives in gen_defs/agents_file.py. The one thing
+# done here is naming the harness when the caller omits it: the one whose
+# user-harness-dir is DIR (resolved to an absolute path). Zero or several
+# matches fail rather than guess — a project root matches none, so it takes an
+# explicit harness.
+[doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode) is inferred when <dir> is a harness's user directory and required otherwise")]
+install-agents-file dir harness="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="${1}"
+    harness="${2}"
+    if [[ -z "${harness}" ]]; then
+        # pwd -P so a symlinked path compares equal to its target.
+        function resolve() { (cd "${1}" 2>/dev/null && pwd -P) || printf '%s\n' "${1}"; }
+        want="$(resolve "${dir}")"
+        matches=()
+        for file in "{{PROJECT_ROOT}}"/templates/harness/*.toml; do
+            name="$(basename "${file}" .toml)"
+            user_dir="$("{{just_executable()}}" --justfile "{{justfile()}}" _harness-value "${name}" user-harness-dir)"
+            if [[ "$(resolve "${user_dir}")" == "${want}" ]]; then
+                matches+=("${name}")
+            fi
+        done
+        if [[ "${#matches[@]}" -ne 1 ]]; then
+            printf '%s\n' "error: cannot infer the harness for '${dir}' (${#matches[@]} harnesses use it as their user directory) — pass it explicitly, e.g. just install-agents-file ${dir} <harness>" >&2
+            exit 1
+        fi
+        harness="${matches[0]}"
+    fi
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install-agents-file "${harness}" "${dir}"
 
 
 ##
@@ -203,14 +260,15 @@ render-diff a="reference" b="latest":
 # above), so the pytest arguments that follow it start at $2 — `"${@:2}"`
 # forwards them to pytest as the separate words `just` received them as,
 # not as a re-split string, so `-k "a and b"` survives as one argument.
-[doc("[dev] run tooling python tests: no argument runs all three (kb_tools + liaison_tools + gen_defs); a surface argument (kb_tools, liaison_tools, gen_defs) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
+[doc("[dev] run tooling python tests: no argument runs all four (kb_tools + liaison_tools + gen_defs + dupe_sweep); a surface argument (kb_tools, liaison_tools, gen_defs, dupe_sweep) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
 test surface="" *pytest_args: _venv
     PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -m pytest {{ \
-      if surface == "" { "kb_tools/tests liaison_tools/tests tests" } \
+      if surface == "" { "kb_tools/tests liaison_tools/tests tests devtools/tests" } \
       else if surface == "kb_tools" { "kb_tools/tests" } \
       else if surface == "liaison_tools" { "liaison_tools/tests" } \
       else if surface == "gen_defs" { "tests" } \
-      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen_defs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
+      else if surface == "dupe_sweep" { "devtools/tests" } \
+      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen_defs, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }} "${@:2}"
 
 # The one writer of kb_tools/tests/fixtures/graph/mini-kb.svg is
@@ -236,8 +294,8 @@ format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
-        black_isort_paths=(kb_tools liaison_tools tests gen_defs dupe_sweep.py)
-        flake8_paths=(kb_tools liaison_tools gen_defs dupe_sweep.py tests)
+        black_isort_paths=(kb_tools liaison_tools tests gen_defs devtools)
+        flake8_paths=(kb_tools liaison_tools gen_defs devtools tests)
     else
         black_isort_paths=("$@")
         flake8_paths=("$@")
@@ -257,12 +315,111 @@ format-python *paths: _venv
 # be claiming it. Read the output, or hand it to a seat that will.
 #
 # Stdlib only under the system python3, like every other tool here, with
-# PYTHONPATH pointed at this tree because the sweep is imported as a top-level
-# module. `--rev` sweeps a past tree, which is how the known-answer run is made.
+# PYTHONPATH at the repository root, the one import path every recipe uses:
+# the sweep reads gen_defs's path constants, so the root must be on the path
+# whatever else is. `--rev` sweeps a past tree.
 [doc("[dev] list duplicated-prose candidates across templates/ — chunk bodies and template inline prose; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-prose *args:
-    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m dupe_sweep prose "$@"
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep prose "$@"
 
 [doc("[dev] list one-idea-two-places candidates across kb_tools/ — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-python *args:
-    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m dupe_sweep python "$@"
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep python "$@"
+
+
+# test-changed: run only the test surfaces a change touches.
+#
+# Changed paths are the uncommitted tree (`git status`: staged, unstaged and
+# untracked, both sides of a rename) plus, when <base> is given, everything
+# committed since it (`git diff base...HEAD`). Each path selects the surface
+# its prefix names in TEST_SURFACE_MAP below; a path matching no row (docs,
+# plans, scratch, kb-testing) selects nothing. There are no cross-surface
+# "just in case" rows. The one exception is the runner itself: `justfile` and
+# `python.just` select every surface, because a change to the `test` recipe
+# cannot be validated by skipping it. With nothing selected, it says so and
+# exits zero without running tests. Git is only read.
+#
+# One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
+# ending in `/` matches everything under it.
+TEST_SURFACE_MAP := "
+gen_defs/ gen_defs
+templates/ gen_defs
+tests/ gen_defs
+devtools/ dupe_sweep
+kb_tools/ kb_tools
+liaison_tools/ liaison_tools
+justfile ALL
+python.just ALL
+"
+
+[doc("[dev] run only the test surfaces a change touches: uncommitted changes plus, with <base>, commits since <base>; prints each chosen surface and the paths that chose it, and runs none when nothing maps to a surface")]
+test-changed base="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{PROJECT_ROOT}}"
+    base="${1}"
+    all_surfaces=(kb_tools liaison_tools gen_defs dupe_sweep)
+    rows="{{TEST_SURFACE_MAP}}"
+
+    changed=()
+    # -z: NUL-separated, unquoted paths; a rename or copy entry (R/C in either
+    # status column) is followed by its source path as a separate entry.
+    # Both sides count — the source leaving a surface is a change to it.
+    while IFS= read -r -d '' entry; do
+        changed+=("${entry:3}")
+        if [[ "${entry:0:1}" == [RC] || "${entry:1:1}" == [RC] ]]; then
+            IFS= read -r -d '' source
+            changed+=("${source}")
+        fi
+    done < <(git status --porcelain -z --untracked-files=all)
+    if [[ -n "${base}" ]]; then
+        if ! git rev-parse --verify --quiet "${base}^{commit}" > /dev/null; then
+            printf '%s\n' "error: base '${base}' is not a commit" >&2
+            exit 1
+        fi
+        while IFS= read -r -d '' path; do
+            changed+=("${path}")
+        done < <(git diff --name-only --no-renames -z "${base}...HEAD")
+    fi
+
+    # "<surface> <path>" lines, one per (surface, changed path) match.
+    hits=""
+    for path in ${changed[@]+"${changed[@]}"}; do
+        while read -r prefix surface; do
+            [[ -n "${prefix}" ]] || continue
+            if [[ "${path}" == "${prefix}" || ( "${prefix}" == */ && "${path}" == "${prefix}"* ) ]]; then
+                if [[ "${surface}" == ALL ]]; then
+                    for each in "${all_surfaces[@]}"; do
+                        hits+="${each} ${path}"$'\n'
+                    done
+                else
+                    hits+="${surface} ${path}"$'\n'
+                fi
+            fi
+        done <<< "${rows}"
+    done
+
+    chosen=()
+    for surface in "${all_surfaces[@]}"; do
+        matched="$(printf '%s' "${hits}" | sed -n "s/^${surface} //p" | sort -u)"
+        if [[ -n "${matched}" ]]; then
+            chosen+=("${surface}")
+            printf '%s\n' "${surface}:"
+            printf '%s\n' "${matched}" | sed 's/^/  /'
+        fi
+    done
+    if [[ "${#chosen[@]}" -eq 0 ]]; then
+        printf '%s\n' "no test surface touched by the changed paths; nothing to run"
+        exit 0
+    fi
+
+    failed=()
+    for surface in "${chosen[@]}"; do
+        if ! "{{just_executable()}}" --justfile "{{justfile()}}" test "${surface}"; then
+            failed+=("${surface}")
+        fi
+    done
+    if [[ "${#failed[@]}" -gt 0 ]]; then
+        printf '%s\n' "FAILED surfaces: ${failed[*]}" >&2
+        exit 1
+    fi

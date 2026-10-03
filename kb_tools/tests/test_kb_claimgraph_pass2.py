@@ -14,10 +14,10 @@ That is what makes the last stage's targets the real ones rather than a
 justfile this file invented.
 """
 
-import os
 import re
 import shutil
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -29,15 +29,18 @@ from kb_tools.kb_claimgraph import ask, assemble, attribute, conform, depends, g
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import AnswerFormatError
 from kb_tools.kb_write import render
-
-_PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
+from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
+from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
 # The last stage reaches the KB through the consuming project's runner targets,
 # which is the mechanism and not a detail this file may route around.
-pytestmark = pytest.mark.skipif(
-    shutil.which("just") is None,
-    reason="the discovered pass's last stage runs the consuming project's runner targets",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        shutil.which("just") is None,
+        reason="the discovered pass's last stage runs the consuming project's runner targets",
+    ),
+    pytest.mark.usefixtures("claimgraph_gate_in_process"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -293,28 +296,14 @@ class ScriptedInference:
 @pytest.fixture
 def consumer(tmp_path: Path) -> Path:
     """A repo carrying the tree, the installed package and the real runner targets."""
-    repo = tmp_path / "consumer"
-    for relative, text in _TREE.items():
-        target = repo / "kb-root" / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    # The runner targets resolve the repository root the way every tool in this
-    # toolchain does — a .git beside a kb-root/ — so the marker is what makes
-    # this a repository to them, not a convenience of the fixture.
-    (repo / ".git").mkdir()
-    (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
-    installed = repo / ".claude" / "agents"
-    installed.mkdir(parents=True)
-    os.symlink(_PACKAGE_ROOT, installed / _PACKAGE_ROOT.name)
-    kb_util.install_targets(repo, "just")
-    return repo
+    return install_claimgraph_consumer(tmp_path / "consumer", _TREE)
 
 
 def _scratch(repo: Path) -> Path:
     return repo / kb_util.scratch_dirname() / "claimgraph"
 
 
-def test_a_build_completes_over_a_document_carrying_an_unknown_environment(consumer: Path) -> None:
+def test_a_build_completes_over_a_document_carrying_an_unknown_environment(consumer: Path, runner_gate: None) -> None:
     """The property a sweep over an unfamiliar corpus depends on: a build, not a stop.
 
     Driven through the whole declared pass rather than through stage B alone,
@@ -351,12 +340,19 @@ def test_the_calibrated_corpus_reports_no_unclassified_name(consumer: Path) -> N
     assert census and "none" in census[0], report.lines()
 
 
-@pytest.fixture
-def declared(consumer: Path) -> Path:
-    """``consumer`` after the declared pass has run and its gates are green."""
-    outcome = build(kb_root=consumer / "kb-root", repo_root=consumer, scratch=_scratch(consumer))
+@pytest.fixture(scope="module")
+def declared_build(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    repo = install_claimgraph_consumer(tmp_path_factory.mktemp("pass2-declared") / "consumer", _TREE)
+    outcome = build(kb_root=repo / "kb-root", repo_root=repo, scratch=_scratch(repo))
     assert not outcome.failed, outcome.lines()
-    return consumer
+    with held_unchanged(repo, name="pass2 declared"):
+        yield repo
+
+
+@pytest.fixture
+def declared(declared_build: Path, tmp_path: Path) -> Path:
+    """This test's own copy of ``consumer`` after the declared pass has run and its gates are green."""
+    return copy_build(declared_build, tmp_path / "consumer")
 
 
 def _selector(inference: ask.SeatAsk, *, cwd: Path = Path(".")) -> ask.ModelSelector:
@@ -1004,7 +1000,7 @@ def test_the_ask_names_one_seat_and_asks_it_everything(declared: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_the_discovered_pass_runs_end_to_end_against_a_fake_inference(declared: Path):
+def test_the_discovered_pass_runs_end_to_end_against_a_fake_inference(declared: Path, runner_gate: None):
     """Pass 1's output in, edges authored through the write API, the runner's gates green."""
     inference = FakeInference(
         {

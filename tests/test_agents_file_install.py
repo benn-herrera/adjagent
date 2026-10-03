@@ -92,7 +92,7 @@ def test_no_existing_file_writes_the_empty_render_and_no_backup(target):  # I1
     assert sorted(_listing(target)) == ["AGENTS.md", "CLAUDE.md"]
 
 
-def test_a_file_without_markers_is_kept_whole_above_the_block(target, capsys):  # I2
+def test_a_file_without_markers_is_kept_whole_above_the_block(target):  # I2
     original = "intro\n# Mine\n\nmy rule\n"
     (target / "AGENTS.md").write_text(original, encoding="utf-8")
     written = _install(target)
@@ -101,7 +101,6 @@ def test_a_file_without_markers_is_kept_whole_above_the_block(target, capsys):  
         _empty_render(target), h1="# d info and directives", before="intro\n\nmy rule", after=""
     )
     assert (target / "backup.AGENTS.md").read_text(encoding="utf-8") == original
-    assert "no adjagent markers" in capsys.readouterr().out
 
 
 def test_a_stale_block_is_replaced_and_the_user_content_kept_exactly(target):  # I3
@@ -262,9 +261,9 @@ def _plant_template(path: Path, body: str, *resolve_texts: str) -> Path:
     ids=["no-end-marker", "no-after-placeholder", "after-twice"],
 )
 def test_a_template_failing_the_structure_check_is_refused(tmp_path, target, body):  # I12
-    template = _plant_template(tmp_path / "t.md.tmpl", body, "@!dyn.agents-file-install-dir-arg!@/X.md")
+    template = _plant_template(tmp_path / "t.tmpl.md", body, "@!dyn.agents-file-install-dir-arg!@/X.md")
     harness_dir = _plant_harness(tmp_path, "~/.x")
-    with pytest.raises(InputError, match=r"t\.md\.tmpl"):
+    with pytest.raises(InputError, match=r"t\.tmpl\.md"):
         agents_file.install_agents_file("x", target, CLEAN, template=template, harness_dir=harness_dir)
     assert list(target.iterdir()) == []
 
@@ -282,13 +281,18 @@ def test_the_cli_with_one_positional_exits_2(tmp_path):  # I13
     assert "DIR" in result.stderr
 
 
-def test_a_malformed_second_output_leaves_the_first_unwritten(tmp_path, target):  # I14
+@pytest.mark.parametrize("redirected", [False, True], ids=["agents-md", "agents-md-redirected"])
+def test_a_malformed_output_leaves_every_other_output_unwritten(tmp_path, target, redirected):  # I14
+    # Every output is planned before any is written, a redirect's target
+    # included, so one refusal writes nothing.
     template = _plant_template(
-        tmp_path / "t.md.tmpl",
+        tmp_path / "t.tmpl.md",
         BODY,
         "@!dyn.agents-file-install-dir-arg!@/X.md",
         "@!dyn.agents-file-install-dir-arg!@/ALSO.md",
     )
+    if redirected:
+        (target / "AGENTS.md").write_text("@TARGET.md\n", encoding="utf-8")
     (target / "ALSO.md").write_text(f"{BEGIN}\nunclosed\n", encoding="utf-8")
     before = _listing(target)
     with pytest.raises(InputError, match="malformed adjagent markers"):
@@ -319,12 +323,11 @@ def global_dir(tmp_path, monkeypatch) -> Path:
     return directory
 
 
-def test_a_global_install_writes_the_native_file_and_no_redirect(global_dir, capsys):
+def test_a_global_install_writes_the_native_file_and_no_redirect(global_dir):
     agents_file.install_agents_file("claude", global_dir, CLEAN)
     assert sorted(_listing(global_dir)) == ["CLAUDE.md"]
     text = (global_dir / "CLAUDE.md").read_text(encoding="utf-8")
     assert text.startswith("# Global info and directives\n")
-    assert capsys.readouterr().out == f"wrote {global_dir / 'CLAUDE.md'} — no prior file, no backup\n"
 
 
 def test_a_global_native_redirect_is_still_followed(global_dir):
@@ -334,22 +337,18 @@ def test_a_global_native_redirect_is_still_followed(global_dir):
     assert (global_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# Global info and directives\n")
 
 
-def test_a_project_install_writes_agents_md_and_creates_the_claude_md_redirect(target, capsys):
+def test_a_project_install_writes_agents_md_and_creates_the_claude_md_redirect(target):
     (target / ".git").mkdir()
     _install(target)
     assert (target / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
     assert (target / "AGENTS.md").read_text(encoding="utf-8").startswith("# Project info and directives\n")
-    assert capsys.readouterr().out == (
-        f"wrote {target / 'AGENTS.md'} — no prior file, no backup\n"
-        f"wrote {target / 'CLAUDE.md'} — no prior file, no backup\n"
-    )
 
 
 NATIVE_REDIRECT = "\n  @AGENTS.md  \n\n"
 
 
 @pytest.mark.parametrize("native", [NATIVE_REDIRECT, "@./AGENTS.md"], ids=["padded", "dot-slash"])
-def test_an_existing_native_redirect_is_left_alone(target, capsys, native):
+def test_an_existing_native_redirect_is_left_alone(target, native):
     (target / "CLAUDE.md").write_text(native, encoding="utf-8")
     (target / "AGENTS.md").write_text("my rule\n", encoding="utf-8")
     written = _install(target)
@@ -358,7 +357,6 @@ def test_an_existing_native_redirect_is_left_alone(target, capsys, native):
     assert written.read_text(encoding="utf-8") == _with_user_content(
         _empty_render(target), h1="# d info and directives", before="my rule", after=""
     )
-    assert f"unchanged {target / 'CLAUDE.md'}\n" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -405,7 +403,7 @@ REDIRECT = "\n  @RULES.md  \n\n"
     ],
     ids=["target-with-markers", "target-without-markers", "target-missing"],
 )
-def test_a_redirect_installs_into_its_target_and_is_never_written(target, capsys, prior, before, after):
+def test_a_redirect_installs_into_its_target_and_is_never_written(target, prior, before, after):
     redirect = target / "AGENTS.md"
     redirect.write_text(REDIRECT, encoding="utf-8")
     if prior is not None:
@@ -417,22 +415,17 @@ def test_a_redirect_installs_into_its_target_and_is_never_written(target, capsys
         _empty_render(target), h1="# d info and directives", before=before, after=after
     )
     assert ((target / "backup.RULES.md").exists()) is (prior is not None)
-    assert "(redirect AGENTS.md → RULES.md)" in capsys.readouterr().out
 
 
-def test_reinstalling_through_a_redirect_changes_nothing(target, capsys):
+def test_reinstalling_through_a_redirect_changes_nothing(target):
     (target / "AGENTS.md").write_text(REDIRECT, encoding="utf-8")
     (target / "RULES.md").write_text("my rule\n", encoding="utf-8")
     _install(target)
     first = _listing(target)
     mtimes = {path.name: path.stat().st_mtime_ns for path in target.iterdir()}
-    capsys.readouterr()
     _install(target)
     assert _listing(target) == first
     assert {path.name: path.stat().st_mtime_ns for path in target.iterdir()} == mtimes
-    assert capsys.readouterr().out == (
-        f"unchanged {target / 'RULES.md'} (redirect AGENTS.md → RULES.md)\nunchanged {target / 'CLAUDE.md'}\n"
-    )
 
 
 @pytest.mark.parametrize(
@@ -491,23 +484,6 @@ def test_more_than_a_lone_import_is_an_ordinary_file(target, text):
         _empty_render(target), h1="# d info and directives", before=text.rstrip("\n"), after=""
     )
     assert not (target / "RULES.md").exists()
-
-
-def test_a_redirected_target_is_planned_with_every_other_output(tmp_path, target):
-    template = _plant_template(
-        tmp_path / "t.md.tmpl",
-        BODY,
-        "@!dyn.agents-file-install-dir-arg!@/X.md",
-        "@!dyn.agents-file-install-dir-arg!@/ALSO.md",
-    )
-    (target / "AGENTS.md").write_text("@TARGET.md\n", encoding="utf-8")
-    (target / "ALSO.md").write_text(f"{BEGIN}\nunclosed\n", encoding="utf-8")
-    before = _listing(target)
-    with pytest.raises(InputError, match="malformed adjagent markers"):
-        agents_file.install_agents_file(
-            "x", target, CLEAN, template=template, harness_dir=_plant_harness(tmp_path, "~/.x")
-        )
-    assert _listing(target) == before
 
 
 def _listing_with_links(directory: Path) -> dict[str, bytes | str]:

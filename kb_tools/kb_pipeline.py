@@ -37,7 +37,7 @@ from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 
-from kb_tools import install_location, kb_index_lib, kb_util
+from kb_tools import install_location, kb_index_lib, kb_links, kb_schema, kb_util
 from kb_tools.kb_survey.manifest import write_text_atomic
 
 # Exit codes. 0/2 keep kb_util's meanings (success; environment unfit, which
@@ -538,23 +538,16 @@ def _check_verify_gates(ctx: CheckContext) -> CoverageReport:
     matching what is authored — which is the same question its own tool exits
     on, asked here by the ledger rather than taken on the tool's word.
     """
-    # Local import: these modules import kb_util, which imports this one only
-    # from its CLI dispatch. Kept local for the same reason kb_util does.
-    from kb_tools import verify_citations, verify_kb_metadata, verify_md_links
-
-    kb = str(kb_util.kb_root(ctx.repo_root))
-    links_rc = verify_md_links.main(["--root", str(ctx.repo_root)])
-    metadata_rc = verify_kb_metadata.main(["--kb-root", kb])
-    citations_rc = verify_citations.main(["--kb-root", kb])
+    verified = kb_util.run_kb_verify(ctx.repo_root, skip_frontmatter_presence=False)
     # One unit and not three: a partial verify is not partial progress.
     return CoverageReport.declared(
         (
             CoverageUnit(
                 id="verify-gates",
                 source=kb_util.verify_cmd(ctx.repo_root),
-                satisfied=not (links_rc or metadata_rc or citations_rc),
+                satisfied=not verified.failed,
                 asserts_own_work=False,
-                detail=f"links rc={links_rc}, metadata rc={metadata_rc}, citations rc={citations_rc}",
+                detail=verified.detail(),
             ),
         ),
         degenerate=True,
@@ -632,6 +625,11 @@ AGENTS_DIR_FIELD = "{agents-dir}"
 #: the pin carries one.
 SCOPE_PIN_FIELD = "{scope-pin}"
 
+#: The claim graph's node-kind roster, for a template that states it. Filled
+#: from :data:`kb_schema.NODE_KINDS` so the stamped document carries no second
+#: spelling of the vocabulary.
+NODE_KINDS_FIELD = "{node-kinds}"
+
 #: What fills :data:`SCOPE_PIN_FIELD` on a build that was given no charter. A
 #: charter is optional (SPEC.md, The Driver's Contract), so this is a legitimate
 #: build and not a failure — but the pin is the charter's text, and a build with
@@ -660,13 +658,15 @@ INSTALLED_DIR = "installed"
 
 
 def installed_template(name: str) -> Path:
-    """The packaged source for the KB document ``name``, under ``kb_tools/installed/``.
+    """The packaged source for the KB document ``name``, under ``kb_tools/installed/``:
+    ``AGENTS.md`` is read from ``AGENTS.tmpl.md``.
 
     ``__file__`` is the right anchor here and only here: these are package
     resources, so they live wherever kb_tools was installed. Repo and KB paths
     stay cwd-anchored.
     """
-    return Path(__file__).resolve().parent / INSTALLED_DIR / f"{name}.tmpl"
+    stem = Path(name).with_suffix("").name
+    return Path(__file__).resolve().parent / INSTALLED_DIR / f"{stem}{kb_links.DOCUMENT_TEMPLATE_SUFFIX}"
 
 
 def scope_pin_text(repo_root: Path) -> str:
@@ -705,7 +705,9 @@ def stamp_readiness_docs(ctx: CheckContext) -> list[str]:
     (:func:`kb_index_lib.unmigrated_agents_file`). ``{project-name}`` is
     substituted from the repo directory name, ``{agents-dir}`` from the
     installed location, and ``{scope-pin}`` from the build's charter — the
-    per-project facts these otherwise canned documents carry.
+    per-project facts these otherwise canned documents carry — and
+    ``{node-kinds}`` from :data:`kb_schema.NODE_KINDS`, a toolchain fact the
+    template would otherwise spell a second time.
 
     **Why the pin lands here and not when the build opens.** ``kb-root/`` holds
     nothing outside ``.index/`` until the document graph writes the tree, so a
@@ -739,6 +741,7 @@ def stamp_readiness_docs(ctx: CheckContext) -> list[str]:
         fields = {
             PROJECT_NAME_FIELD: ctx.repo_root.name,
             AGENTS_DIR_FIELD: install_location.current().agents_relpath,
+            NODE_KINDS_FIELD: ", ".join(f"`{kind}`" for kind in kb_schema.NODE_KINDS),
         }
         if SCOPE_PIN_FIELD in text:
             fields[SCOPE_PIN_FIELD] = scope_pin_text(ctx.repo_root)
@@ -834,6 +837,11 @@ class Stage:
     stages that do form one contiguous run, and ``kb_index_lib.scan_authored_ids``
     keeps the same keys across every stage after it: the node set is fixed
     before any edge is drawn over it.
+
+    ``opt_in`` marks a stage a build does not owe: a ledger recording every
+    other stage is complete with this one unrecorded, and a walk reaches it
+    only when the run asks for it. It is recorded like any other stage when it
+    does run, so a ledger that holds it says the audit happened.
     """
 
     id: str
@@ -845,6 +853,7 @@ class Stage:
     work_is_inference: bool = False
     claimgraph_invocation: ClaimgraphInvocation | None = None
     mints_nodes: bool = False
+    opt_in: bool = False
 
 
 # The frozen vocabulary. Ids are a cross-team contract — templates elsewhere
@@ -928,15 +937,22 @@ STAGES: tuple[Stage, ...] = (
         coverage=_check_meta_docs,
         work_is_inference=True,
     ),
+    # Opt-in: the review's findings come back build after build from the
+    # toolchain's own skeleton text, which no per-KB revision can change, so
+    # its worth is as an occasional audit of what those documents claim.
     Stage(
         "phase-5",
-        "meta-documentation",
+        "document audit",
         coverage=_check_meta_docs,
         work_is_inference=True,
+        opt_in=True,
     ),
 )
 
 STAGE_IDS: tuple[str, ...] = tuple(stage.id for stage in STAGES)
+#: The stages a build owes. Every one recorded is a complete build, whatever
+#: opt-in stage stands unrecorded behind them.
+REQUIRED_STAGES: tuple[Stage, ...] = tuple(stage for stage in STAGES if not stage.opt_in)
 _STAGE_BY_ID = {stage.id: stage for stage in STAGES}
 _ID_WIDTH = max(len(stage_id) for stage_id in STAGE_IDS)
 FIRST_STAGE_ID = STAGES[0].id
@@ -1031,12 +1047,14 @@ def recorded_charter(repo_root: Path) -> str | None:
 
 
 def current_stage(recorded: set[str]) -> Stage | None:
-    """The stage to act on — the first unrecorded one — or None when complete.
+    """The stage to act on — the first unrecorded one a build owes — or None when complete.
 
-    One definition serves the checklist's ``[*]`` marker and the zero-argument
-    coverage read alike, so the two can never point at different stages.
+    One definition serves the checklist's ``[*]`` marker, the zero-argument
+    coverage read and the completion verdict alike, so they can never disagree
+    about where a build stands. An opt-in stage is never in flight: a build
+    that has not asked for it is not waiting on it.
     """
-    return next((stage for stage in STAGES if stage.id not in recorded), None)
+    return next((stage for stage in REQUIRED_STAGES if stage.id not in recorded), None)
 
 
 def checklist_lines(recorded: set[str]) -> list[str]:
@@ -1055,20 +1073,24 @@ def checklist_lines(recorded: set[str]) -> list[str]:
             marker = "*"
         else:
             marker = " "
-        lines.append(f"[{marker}] {stage.id:<{_ID_WIDTH}}  {stage.display}")
+        lines.append(f"[{marker}] {stage.id:<{_ID_WIDTH}}  {stage.display}{' (opt-in)' if stage.opt_in else ''}")
     return lines
 
 
 def status_line(recorded: set[str]) -> str:
-    """The one-line verdict naming which of the three world-states holds."""
-    count = len(recorded)
+    """The one-line verdict naming which of the three world-states holds.
+
+    The count is over the stages this ledger owes or holds: an opt-in stage
+    nobody asked for is not a stage the build is short of.
+    """
     if FIRST_STAGE_ID not in recorded:
         state = "not started"
-    elif count == len(STAGES):
+    elif current_stage(recorded) is None:
         state = "complete"
     else:
         state = "in progress"
-    return f"{_TAG} status: {state} ({count} of {len(STAGES)} stages recorded)"
+    counted = sum(1 for stage in STAGES if not stage.opt_in or stage.id in recorded)
+    return f"{_TAG} status: {state} ({len(recorded)} of {counted} stages recorded)"
 
 
 def _print_report(
@@ -1316,8 +1338,8 @@ def show_stage_status(repo_root: Path, stage_id: str | None) -> int:
         in_flight = current_stage(recorded_stages(repo_root))
         if in_flight is None:
             print(
-                f"{STAGE_STATUS_TAG} {FACT} complete — all {len(STAGES)} stages are recorded; "
-                f"--stage names one to inspect"
+                f"{STAGE_STATUS_TAG} {FACT} complete — all {len(REQUIRED_STAGES)} stages a build owes are "
+                f"recorded; --stage names one to inspect"
             )
             return EXIT_OK
         stage = in_flight
@@ -1388,7 +1410,7 @@ def advance_step(repo_root: Path, stage_id: str, note: str | None = None, no_inf
 
     if stage.id in recorded:
         banner = (
-            "process already complete" if len(recorded) == len(STAGES) else f"stage '{stage.id}' is already recorded"
+            "process already complete" if current_stage(recorded) is None else f"stage '{stage.id}' is already recorded"
         )
         print(f"{_TAG} {banner} — nothing committed.")
         _print_report(recorded)

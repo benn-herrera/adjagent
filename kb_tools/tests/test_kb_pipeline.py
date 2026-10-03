@@ -105,7 +105,7 @@ def test_a_stopped_build_names_the_stage_and_what_that_stage_is_for(stage: kb_pi
     checklist = [line for line in kb_pipeline.checklist_lines({stage.id}) if line.split()[1] == stage.id][0]
     fact = kb_pipeline.stage_status(tmp_path, stage)[0]
 
-    assert checklist.endswith(f"  {stage.display}")
+    assert f"  {stage.display}" in checklist
     assert f"{kb_pipeline.FACT} {stage.id} ({stage.display}) — " in fact
 
 

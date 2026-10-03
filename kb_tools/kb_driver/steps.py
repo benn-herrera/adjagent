@@ -13,7 +13,7 @@ raise. What it must not hold: subprocess calls, file writes, or template text.
 Stage order comes from ``kb_pipeline`` and is never restated here.
 
 **Scope**: the rows below cover every stage of the pipeline, and a run walks all
-of them. :data:`TABLE_STAGE_IDS` is sliced from ``kb_pipeline.STAGE_IDS`` so it
+of them but an opt-in stage it did not ask for (``run.Runner.run``). :data:`TABLE_STAGE_IDS` is sliced from ``kb_pipeline.STAGE_IDS`` so it
 cannot disagree with the stage vocabulary about order or membership.
 
 Executing a row is the run loop's job. This module is a table.
@@ -279,8 +279,8 @@ def _through(stage: str) -> tuple[str, ...]:
     return kb_pipeline.STAGE_IDS[: kb_pipeline.STAGE_IDS.index(stage) + 1]
 
 
-#: Every stage this table holds rows for, and every stage a run walks — the
-#: whole pipeline. ``_through(_PHASE_5)`` rather than ``kb_pipeline.STAGE_IDS``
+#: Every stage this table holds rows for, and every stage a run may walk — the
+#: whole pipeline, opt-in stages included. ``_through(_PHASE_5)`` rather than ``kb_pipeline.STAGE_IDS``
 #: directly, so that a stage appended to the vocabulary after ``phase-5``
 #: arrives here as a row this table is missing rather than as a stage the walk
 #: silently claims to cover.
@@ -511,6 +511,9 @@ STEPS: tuple[Step, ...] = (
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
     # --- phase-5 — the review of what was drafted, and the one revision -------
+    # Opt-in (`kb_pipeline.Stage.opt_in`): walked only by a run given
+    # `--doc-audit`, and a build is complete without it.
+    #
     # **A fixed sequence, not a loop.** The review runs, the revision answers
     # what it wrote, and the stage records: nothing re-reviews, nothing counts,
     # and no severity the reviewer returns fails the stage. The two rows are one

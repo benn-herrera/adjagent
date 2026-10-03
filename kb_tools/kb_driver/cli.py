@@ -123,6 +123,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "dropped says so.",
     )
     p_run.add_argument(
+        config.DOC_AUDIT_FLAG,
+        action="store_true",
+        help="Also run the document audit: one review of the KB's README.md and CONVENTIONS.md and one "
+        "revision answering it, after the build's last stage. A build is complete without it. Over a KB "
+        "whose build is already complete, the audit runs alone, with no rebuild; once recorded it does "
+        "not run again.",
+    )
+    p_run.add_argument(
         config.THROUGH_FLAG,
         default=None,
         metavar="<stage>",
@@ -151,6 +159,8 @@ def _run_overrides(args: argparse.Namespace) -> dict[str, object]:
     # passed carries anything, which is this function's rule throughout.
     if args.no_inference:
         overrides["no_inference"] = True
+    if args.doc_audit:
+        overrides["doc_audit"] = True
     if args.through is not None:
         overrides["through"] = args.through
     return overrides

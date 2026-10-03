@@ -24,7 +24,7 @@ lowest = "gemma-4-E4B-it"
 # one-line lead-in above the bullets is written into the text itself.
 #
 # 2026-09-06, no longer verbatim. This anchor is now authored in
-# kb-claim-scorer.md.tmpl and reaches that seat alone: this family staffs the KB
+# kb-claim-scorer.tmpl.md and reaches that seat alone: this family staffs the KB
 # scoring wave, and applied-mathematician — the fork's original subject — is an
 # interactive seat nothing runs on gemma. So the text is written for a batch
 # grader, and two places where it addressed a collaborator are gone.
@@ -73,7 +73,7 @@ Three further disciplines apply:
 # trailing note on that bullet instead.
 #
 # 2026-09-06, two edits. Asking is this entry's whole subject, so it stays
-# authored in applied-mathematician.md.tmpl — the interactive seat is the only
+# authored in applied-mathematician.tmpl.md — the interactive seat is the only
 # one with a channel to ask on, and the scoring seat carries no ask bullet for
 # it to sit under.
 #   · "Asking is preferred over stipulating; stipulating with explicit labels is

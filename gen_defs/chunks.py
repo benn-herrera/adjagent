@@ -47,6 +47,8 @@ def load_chunks() -> dict[str, dict]:
             chunk["variants"][variant] = text.strip("\n")
         if "text" not in chunk and "variants" not in chunk:
             raise InputError(f"chunk '{name}' has neither text nor variants")
+        if "text" in chunk and "variants" in chunk:
+            raise InputError(f"chunk '{name}' has both text and variants — a chunk is one or the other")
     return chunks
 
 

@@ -233,7 +233,7 @@ from enum import Enum
 from typing import Protocol, TypeVar
 
 from .report import ClaimGraphError
-from .tree import ANCHOR_RE, Document, Tree, anchor_labels, resolve, strip_markers, unquote
+from .tree import ANCHOR_RE, LIST_SEPARATOR, Document, Tree, anchor_labels, resolve, strip_markers, unquote
 
 #: Display names whose blocks state a result, case-folded. Every member is a
 #: display name a surveyed corpus declares.
@@ -325,6 +325,11 @@ CLASSIFIED: frozenset[str] = CLAIM_BEARING | NOT_CLAIM_BEARING
 LABEL_LINE_RE = re.compile(
     r'^>\s*(?:<span id="(?P<identifier>[^"]*)">)?' r"\*\*(?P<environment>[A-Za-z]+(?: [A-Za-z]+)*)\*\*(?:</span>)?\s*$"
 )
+
+#: What a block's display line opens with: the environment's printed word and
+#: number in bold, captured without the emphasis — ``**Lemma 3**`` reads
+#: ``Lemma 3``. Point 12 renders the optional argument after it.
+PRINTED_NAME_RE = re.compile(r"\*\*([^*]+)\*\*")
 
 #: Point 9's fence, over blockquote-stripped text. The info string is ``math``
 #: and the spelling carries the space.
@@ -457,6 +462,44 @@ class Anchor:
     #: The environment of the labelled block it sits inside, or ``None`` for one
     #: in surrounding prose.
     hosting_environment: str | None
+    #: The word the page shows immediately before the anchor, as the page
+    #: spells it — ``Lemma``, ``Section``, ``Fig.``, ``by`` — or ``None`` where
+    #: nothing precedes it. An anchor continuing a printed list (*Sections <a>4</a>
+    #: and <a>5</a>*) carries the word the list opened with (:func:`_preceding_word`).
+    #:
+    #: **What the author typed, not what LaTeX generated.** A ``\\ref`` renders
+    #: only the number, so the noun before it is the author's own; a cleveref
+    #: command generates its noun at typesetting and pandoc renders the number
+    #: alone, so a ``\\cref`` carries whatever word the author wrote ahead of the
+    #: command — usually *by* or *in*, never the kind of what it names.
+    preceding_word: str | None
+
+
+#: The last word ahead of a position: a run of non-space characters, past any
+#: whitespace and opening bracket between it and the anchor — so *(Theorem <a*
+#: reads ``Theorem``. Searched over a short window ending at the anchor, the
+#: window being longer than any word and nothing before it bearing on the answer.
+_PRECEDING_WORD_RE = re.compile(r"([^\s(\[]+)[\s(\[]*\Z")
+_PRECEDING_WINDOW = 80
+
+#: A list separator standing alone between one anchor element and the next.
+_LIST_GAP_RE = re.compile(LIST_SEPARATOR)
+
+_ANCHOR_CLOSE = "</a>"
+
+
+def _preceding_word(text: str, start: int, previous: tuple[int, str | None] | None) -> str | None:
+    """The word before the anchor opening at ``start``, carried across a printed list.
+
+    ``previous`` is the end of the anchor element before this one and the word
+    it carried. Where only a list separator stands between the two, this anchor
+    continues that list and the word is the list's: the *and* in *Lemmas <a>2</a>
+    and <a>3</a>* is not what names the second lemma.
+    """
+    if previous is not None and _LIST_GAP_RE.fullmatch(text, previous[0], start):
+        return previous[1]
+    found = _PRECEDING_WORD_RE.search(text, max(0, start - _PRECEDING_WINDOW), start)
+    return found.group(1) if found is not None else None
 
 
 #: A proof's opening emphasis run — ``*Proof.*``, or ``*Proof of Theorem <a
@@ -662,7 +705,7 @@ def _optional_argument(display: str) -> tuple[str, str] | None:
     non-greedy because a title may carry parentheses of its own, and it stops at
     the sentence period the reader writes after the closing bracket.
     """
-    head = re.match(r"\*\*([^*]+)\*\*", display)
+    head = PRINTED_NAME_RE.match(display)
     if head is None:
         return None
     cursor = head.end()
@@ -695,8 +738,10 @@ def _printed_name(display: str) -> str | None:
     sentence period the reader writes after the word is taken with it, the way
     it is taken after a title's closing bracket above.
     """
-    head = re.match(r"\*\*[^*]+\*\*\.?", display)
-    return head.group() if head is not None else None
+    head = PRINTED_NAME_RE.match(display)
+    if head is None:
+        return None
+    return display[: head.end() + display.startswith(".", head.end())]
 
 
 def _plain(span: str) -> str:
@@ -866,11 +911,15 @@ def _anchors(document: Document, blocks: Sequence[Block], tree: Tree) -> list[An
     """
     text = unquote(strip_markers(document.text))
     found: list[Anchor] = []
+    previous: tuple[int, str | None] | None = None
     for match in ANCHOR_RE.finditer(text):
         number = text.count("\n", 0, match.start())
         path, _, fragment = match.group(1).partition("#")
         landed = resolve(document.path, path) if path else None
         hosting = next((block.environment for block in blocks if block.start <= number < block.end), None)
+        word = _preceding_word(text, match.start(), previous)
+        closes = text.find(_ANCHOR_CLOSE, match.end())
+        previous = (closes + len(_ANCHOR_CLOSE) if closes >= 0 else match.end(), word)
         found += [
             Anchor(
                 document=document.path,
@@ -881,6 +930,7 @@ def _anchors(document: Document, blocks: Sequence[Block], tree: Tree) -> list[An
                 fragment=fragment,
                 label=label,
                 hosting_environment=hosting,
+                preceding_word=word,
             )
             for label in anchor_labels(match.group(2), match.group(3))
         ]

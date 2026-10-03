@@ -540,26 +540,27 @@ def test_decide_pair_is_checked_against_the_registry() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key", ["no_inference"])
+@pytest.mark.parametrize("key", ["no_inference", "doc_audit"])
 def test_each_mode_flag_defaults_off_and_is_carried_through(tmp_path: Path, key: str) -> None:
     assert getattr(config.load(_write(tmp_path, MINIMAL)).run, key) is False
     assert getattr(config.load(_write(tmp_path, MINIMAL), run_overrides={key: True}).run, key) is True
     assert getattr(config.load(_write(tmp_path, MINIMAL + f"{key} = true\n")).run, key) is True
 
 
-def test_the_mode_flag_is_rendered_into_the_resume_line_and_the_bound_is_not() -> None:
+def test_the_mode_flags_are_rendered_into_the_resume_line_and_the_bound_is_not() -> None:
     """What a resume must keep, and what it must drop.
 
-    A resume dropping the mode flag would change the build half way through,
-    spending the calls it was told to do without. A resume keeping the bound
-    would stop in the same place forever, which is what resuming is for.
+    A resume dropping a mode flag would change the build half way through,
+    spending the calls it was told to do without or completing without the
+    audit it was asked for. A resume keeping the bound would stop in the same
+    place forever, which is what resuming is for.
     """
     line = config.invocation(
         None,
-        {"sources": ("a.tex",), "no_inference": True, "through": "start"},
+        {"sources": ("a.tex",), "no_inference": True, "doc_audit": True, "through": "start"},
     )
 
-    assert line == f"--source a.tex {config.NO_INFERENCE_FLAG}"
+    assert line == f"--source a.tex {config.NO_INFERENCE_FLAG} {config.DOC_AUDIT_FLAG}"
     assert config.THROUGH_FLAG not in line
 
 

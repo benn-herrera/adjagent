@@ -21,7 +21,9 @@ Gating:
   citation flips the exit code, regardless of which file it originates from —
   there is no warn-only tier. (Crawl exclusions in `kb_links.SKIP_DIRS` /
   `kb_links.SKIP_SEGMENT_RUNS` still apply — those trees, e.g. test fixtures with
-  deliberately broken links, are never scanned at all.)
+  deliberately broken links, are never scanned at all — and so does
+  `kb_links.DOCUMENT_TEMPLATE_SUFFIX`, a template's links resolving only where a
+  build stamps it.)
 
 Skipped targets (never classified broken):
   - targets ending in `.tex` (a LaTeX source is a derived build artifact,
@@ -43,7 +45,6 @@ import logging
 import re
 import sys
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 # Route KB path construction through the kb_util module.
@@ -144,7 +145,7 @@ def load_known_ids(repo_root: Path) -> set[str] | None:
     return ids
 
 
-def _exists_case_sensitively(resolved: Path, repo_root: Path) -> bool:
+def _exists_case_sensitively(resolved: Path, repo_root: Path, listings: dict[Path, frozenset[str]]) -> bool:
     """True if `resolved` exists AND every path segment matches its real name.
 
     macOS ships a case-INSENSITIVE filesystem, so ``Path.exists()`` answers True
@@ -156,6 +157,10 @@ def _exists_case_sensitively(resolved: Path, repo_root: Path) -> bool:
     Only the segments BELOW ``repo_root`` are checked: everything above it came
     from ``repo_root.resolve()``, which is the authoritative spelling, and
     listing ancestors up to ``/`` would be both slow and permission-fragile.
+
+    ``listings`` holds the directories already listed, by path, and is filled
+    here. It belongs to one scan: a listing kept past the scan that read it is
+    stale the moment a file is written into that directory.
     """
     if not resolved.exists():
         return False
@@ -166,7 +171,9 @@ def _exists_case_sensitively(resolved: Path, repo_root: Path) -> bool:
     current = repo_root
     for part in rel.parts:
         try:
-            if part not in _listdir(current):
+            if current not in listings:
+                listings[current] = frozenset(entry.name for entry in current.iterdir())
+            if part not in listings[current]:
                 return False
         except OSError:
             return False
@@ -174,19 +181,21 @@ def _exists_case_sensitively(resolved: Path, repo_root: Path) -> bool:
     return True
 
 
-@lru_cache(maxsize=None)
-def _listdir(directory: Path) -> frozenset[str]:
-    """Real entry names of `directory` (cached; one scan per directory per run)."""
-    return frozenset(entry.name for entry in directory.iterdir())
-
-
 def _raw_targets(line: str) -> list[str]:
     """Every link destination declared on `line`, inline and reference-style."""
     return [m.group(1) for m in kb_links.LINK_RE.finditer(line)] + kb_links.REF_DEF_RE.findall(line)
 
 
-def check_links(md_file: Path, body: str, repo_root: Path) -> list[Finding]:
-    """Extract links from a code-stripped body and classify broken ones."""
+def check_links(
+    md_file: Path, body: str, repo_root: Path, listings: dict[Path, frozenset[str]] | None = None
+) -> list[Finding]:
+    """Extract links from a code-stripped body and classify broken ones.
+
+    ``listings`` is the scan's own directory-listing cache, shared across the
+    files of one scan so each directory is listed once; ``None`` lists afresh.
+    """
+    if listings is None:
+        listings = {}
     findings: list[Finding] = []
     for lineno, line in enumerate(body.splitlines(), 1):
         for raw_target in _raw_targets(line):
@@ -207,7 +216,7 @@ def check_links(md_file: Path, body: str, repo_root: Path) -> list[Finding]:
                 is_intra = True
             except ValueError:
                 is_intra = False
-            if _exists_case_sensitively(resolved, repo_root):
+            if _exists_case_sensitively(resolved, repo_root, listings):
                 continue
             kind = "broken intra" if is_intra else "broken inter"
             findings.append(Finding(md_file, lineno, kind, raw_target))
@@ -229,6 +238,7 @@ def check_ids(md_file: Path, body: str, known_ids: set[str]) -> list[Finding]:
 
 def scan(repo_root: Path, check_ids_enabled: bool) -> list[Finding]:
     known_ids = load_known_ids(repo_root) if check_ids_enabled else None
+    listings: dict[Path, frozenset[str]] = {}
     findings: list[Finding] = []
     for md_file in iter_markdown_files(repo_root):
         try:
@@ -237,7 +247,7 @@ def scan(repo_root: Path, check_ids_enabled: bool) -> list[Finding]:
             logger.warning("could not read %s: %s", md_file, exc)
             continue
         body = strip_code(text)
-        findings.extend(check_links(md_file, body, repo_root))
+        findings.extend(check_links(md_file, body, repo_root, listings))
         if known_ids is not None:
             findings.extend(check_ids(md_file, body, known_ids))
     return findings

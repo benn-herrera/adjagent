@@ -161,13 +161,6 @@ def _broken(tmp_path: Path, body: str) -> list[str]:
     vml = _load_module()
     md = tmp_path / "doc.md"
     md.write_text(body, encoding="utf-8")
-    # The tree is built per-test, so a cached directory listing must never carry
-    # over. getattr keeps this helper runnable against a tree that predates the
-    # cache, so these tests fail there on a WRONG ANSWER rather than on a
-    # missing attribute (which would prove nothing about behaviour).
-    listdir = getattr(vml, "_listdir", None)
-    if listdir is not None:
-        listdir.cache_clear()
     return [f.target for f in vml.check_links(md, vml.strip_code(body), tmp_path)]
 
 
@@ -206,6 +199,19 @@ def test_case_only_difference_is_broken_on_every_platform(tmp_path: Path) -> Non
     # The correctly-spelled sibling still resolves — the check is case-exact,
     # not a blanket rejection of anything with a capital in it.
     assert _broken(tmp_path, "[x](sub/plain.md)\n") == []
+
+
+def test_a_file_written_between_two_scans_in_one_process_is_found_by_the_second(tmp_path: Path) -> None:
+    """A directory listing lives for one scan: the second scan reads the directory as it now stands."""
+    vml = _load_module()
+    _tree(tmp_path)
+    # The link to plain.md is what makes the first scan list sub/ at all.
+    (tmp_path / "doc.md").write_text("[x](sub/plain.md)\n[y](sub/later.md)\n", encoding="utf-8")
+    assert [f.target for f in vml.scan(tmp_path, check_ids_enabled=False)] == ["sub/later.md"]
+
+    (tmp_path / "sub" / "later.md").write_text("# t\n", encoding="utf-8")
+
+    assert vml.scan(tmp_path, check_ids_enabled=False) == []
 
 
 def test_reference_style_definitions_are_checked(tmp_path: Path) -> None:

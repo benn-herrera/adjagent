@@ -33,8 +33,8 @@ INSTALL_EXCLUDED_SUFFIX = ".bak"
 # Matched by NAME at any depth, never by placement or suffix. `README.md` is
 # deliberately absent: it is the one name in that vocabulary a package writes
 # for its consumer rather than its maintainer, so a package that grows one is
-# shipping it on purpose. `.tmpl` files are payload rather than documentation —
-# kb_tools/installed/CONVENTIONS.md.tmpl is written into a consuming project's
+# shipping it on purpose. Templates are payload rather than documentation —
+# kb_tools/installed/CONVENTIONS.tmpl.md is written into a consuming project's
 # own KB by a build — and match nothing here.
 INSTALL_EXCLUDED_DOCS = frozenset(
     {
@@ -151,23 +151,18 @@ def assert_install_root(root: Path, *, source_root: Path = REPO_ROOT) -> None:
 
 def package_destinations(smap: dict[str, tuple[Path, Path]]) -> list[tuple[str, Path, Path]]:
     """(source directory in this repository, ROOT-relative destination key,
-    absolute destination under ROOT) for every SHIPPED_PACKAGES row whose
-    owning surface is in `smap`.
+    absolute destination under ROOT) for every SHIPPED_PACKAGES row.
 
     Where a package LANDS is read off its row and never off where its source
     sits (SHIPPED_PACKAGES), and this is the single place that reading happens:
     package_pairs copies into these directories, replace_package_destinations
-    empties them first, and the stale-output prune steps around them. A row
-    whose surface `smap` does not cover is dropped, so
-    a narrowed run delivers — and reasons about — no package on the surface it
-    is not covering.
+    empties them first, and the stale-output prune steps around them.
     """
     found = []
     for source_rel, dest_rel in SHIPPED_PACKAGES:
         destination = Path(dest_rel)
         surface, *below = destination.parts
-        if surface in smap:
-            found.append((source_rel, destination, smap[surface][1].joinpath(*below)))
+        found.append((source_rel, destination, smap[surface][1].joinpath(*below)))
     return found
 
 
@@ -183,9 +178,6 @@ def package_pairs(smap: dict[str, tuple[Path, Path]], *, source_root: Path = REP
     install's accounting — the per-surface counts, the report, a consuming
     project's tree — invariant under a change to where a package's source
     sits, which is the whole point of SHIPPED_PACKAGES.
-
-    A package row is delivered only when the surface owning its destination is
-    in `smap`, so `--surfaces commands` installs no agent-side package.
     """
     found: list[tuple[str, Path, Path]] = []
     for source_rel, key_root, destination in package_destinations(smap):

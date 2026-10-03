@@ -31,7 +31,7 @@ Flags common to generate and install:
 partial install is a future feature.
 
 `install-agents-file HARNESS DIR` takes none of the flags above: it renders
-templates/harness/AGENTS.md.tmpl for one harness and installs it into DIR by
+templates/harness/AGENTS.tmpl.md for one harness and installs it into DIR by
 block replacement (`agents_file` module docstring).
 
 `dev` is internal and unsupported: it is absent from the main help, and
@@ -226,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     agents_file = dev_verbs.add_parser(
         "render-agents-file",
         allow_abbrev=False,
-        help="render templates/harness/AGENTS.md.tmpl for one harness to the file OUT",
+        help="render templates/harness/AGENTS.tmpl.md for one harness to the file OUT",
         description="Render the harness agents file for HARNESS (templates/harness/<HARNESS>.toml) "
         "to the file OUT, stamped with this repository's short revision (suffixed **dirty** while "
         "templates/ has uncommitted changes). An OUT that already exists with different content "
@@ -241,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
         "install-agents-file",
         allow_abbrev=False,
         help="install the harness agents file into DIR (a harness's user-global directory, or a project root)",
-        description="Render templates/harness/AGENTS.md.tmpl for HARNESS and install it into DIR, replacing "
+        description="Render templates/harness/AGENTS.tmpl.md for HARNESS and install it into DIR, replacing "
         "only the block between the adjagent marker lines. In the harness's user-global directory the file is "
         "the harness's own agents-file name; anywhere else it is AGENTS.md, and a harness reading another "
         "name gets that file as the one-line redirect '@AGENTS.md' — created when absent, left alone when "

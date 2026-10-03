@@ -167,18 +167,18 @@ def test_the_template_sweep_reaches_the_shipped_surfaces() -> None:
     swept = set(_text_files(_TEMPLATE_ROOTS))
 
     for relative in (
-        "templates/agents/kb-maintainer.md.tmpl",
-        "templates/commands/kb-build.md.tmpl",
+        "templates/agents/kb-maintainer.tmpl.md",
+        "templates/commands/kb-build.tmpl.md",
         "templates/shared-chunks.toml",
-        "kb_tools/installed/CONVENTIONS.md.tmpl",
-        "kb_tools/installed/AGENTS.md.tmpl",
+        "kb_tools/installed/CONVENTIONS.tmpl.md",
+        "kb_tools/installed/AGENTS.tmpl.md",
     ):
         assert _REPO_ROOT / relative in swept, relative
 
 
 @pytest.mark.parametrize("token", steps.METADATA_MARKER_TOKENS)
 def test_a_planted_marker_in_a_template_tree_is_caught(tmp_path: Path, token: str) -> None:
-    (tmp_path / "leak.md.tmpl").write_text(f"Write {token} clm-xxxxxx --> under the heading.\n", encoding="utf-8")
+    (tmp_path / "leak.tmpl.md").write_text(f"Write {token} clm-xxxxxx --> under the heading.\n", encoding="utf-8")
 
     assert [finding for finding in scan_templates((tmp_path,)) if finding.endswith(token)]
 

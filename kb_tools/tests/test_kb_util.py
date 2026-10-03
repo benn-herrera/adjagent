@@ -11,28 +11,34 @@ wins over Makefile; raw ``python3 -m kb_tools....`` when neither exists).
 
 The end-to-end cases build a synthetic consumer repo in a tmp tree (fake
 ``.git`` + a copy of the ``mini-kb`` fixture as ``kb-root/``) and run the
-entry points via subprocess with the cwd inside that repo — no ``--kb-root``
-override — proving the walk-up discovery works through the module boundary.
+entry points with the cwd inside that repo — no ``--kb-root`` override. The
+CLI runs in-process (``_in_process.run_main``); the cases whose subject is the
+process boundary — imports with no root, root discovery from a child's nested
+cwd, an exit status out of a real process, and one op through ``python -m
+kb_tools.kb_util`` — still spawn one.
 """
 
 import argparse
+import importlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import pytest
 
-from kb_tools import install_location, kb_pipeline, kb_util
+from kb_tools import install_location, kb_pipeline, kb_schema, kb_util, refresh_kb_metadata, verify_citations
 from kb_tools.kb_driver import baton, runlog
 from kb_tools.kb_survey import manifest as survey_manifest
 from kb_tools.kb_survey import skeleton as survey_skeleton
+from kb_tools.tests._in_process import run_main
 from kb_tools.tests._manifests import surveyed_manifest
+from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
 _THIS_DIR = Path(__file__).resolve().parent
 # The directory containing the ``kb_tools`` package — used only to point the
@@ -274,22 +280,23 @@ _MAKEFILE_BODY = "# project rules\n\nhello:\n\techo hi\n"
 
 
 def _run_installer(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    """Invoke the installer CLI as a subprocess with the cwd inside a fixture tree."""
-    return subprocess.run(
-        [sys.executable, "-m", "kb_tools.kb_util", *args],
-        cwd=cwd,
+    """Invoke the ``kb_util`` CLI in-process with the cwd inside a fixture tree."""
+    return run_main(kb_util.main, args, cwd=cwd)
+
+
+def test_install_appends_include_line_to_existing_justfile(tmp_path: Path) -> None:
+    """Through ``python -m kb_tools.kb_util``: the one op this file runs as the shipped module, out of a process."""
+    repo = _make_repo(tmp_path / "consumer")
+    (repo / "justfile").write_text(_JUSTFILE_BODY, encoding="utf-8")
+    # cwd nested inside the tree: the installer discovers the root by walk-up.
+    result = subprocess.run(
+        [sys.executable, "-m", "kb_tools.kb_util", "install-targets"],
+        cwd=repo / "kb-root",
         env=_subprocess_env(),
         capture_output=True,
         text=True,
         check=False,
     )
-
-
-def test_install_appends_include_line_to_existing_justfile(tmp_path: Path) -> None:
-    repo = _make_repo(tmp_path / "consumer")
-    (repo / "justfile").write_text(_JUSTFILE_BODY, encoding="utf-8")
-    # cwd nested inside the tree: the installer discovers the root by walk-up.
-    result = _run_installer(repo / "kb-root", "install-targets")
     assert result.returncode == 0, result.stderr
     assert "installed" in result.stdout
     text = (repo / "justfile").read_text(encoding="utf-8")
@@ -971,29 +978,6 @@ def _record(repo: Path, stage_id: str) -> subprocess.CompletedProcess:
     return _op(repo, "advance-step", "--stage", stage_id)
 
 
-def _advance_through(repo: Path, last_stage: str) -> None:
-    """Record every stage up to and including ``last_stage``.
-
-    Lays the artifacts down first: every stage past ``start`` now refuses to
-    record without them, which is the point of the postconditions. Refreshes
-    once after that: ``phase-3a``'s coverage check runs the real verify gates
-    against ``.index/`` as it stands on disk, and nothing in ``advance-step``
-    itself refreshes it first — that is ``kb-refresh``'s job, run here as the
-    walk's own driver would run it before the gate.
-    """
-    _lay_down_artifacts(repo)
-    subprocess.run(
-        [sys.executable, "-m", "kb_tools.refresh_kb_metadata"],
-        cwd=repo,
-        env=_subprocess_env(),
-        capture_output=True,
-        check=True,
-    )
-    for stage_id in kb_pipeline.STAGE_IDS[: kb_pipeline.STAGE_IDS.index(last_stage) + 1]:
-        result = _record(repo, stage_id)
-        assert result.returncode == 0, f"{stage_id}: {result.stdout}\n{result.stderr}"
-
-
 # --- the stage table is the single source ---------------------------------
 
 
@@ -1032,15 +1016,15 @@ def test_show_status_reports_not_started(tmp_path: Path) -> None:
     assert {marker for marker, _ in _checklist(result.stdout)} == {" "}
 
 
-def test_show_status_reports_in_progress_with_a_resume_marker(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, "start")
+def test_show_status_reports_in_progress_with_a_resume_marker(branch_at: Callable[[str], Path]) -> None:
+    repo = branch_at("start")
 
     result = _op(repo, "show-status")
 
     assert result.returncode == 0, result.stderr
     assert "in progress" in result.stdout
-    assert f"1 of {len(kb_pipeline.STAGES)}" in result.stdout
+    # The opt-in audit is not a stage an unaudited build is short of.
+    assert f"1 of {len(kb_pipeline.REQUIRED_STAGES)}" in result.stdout
     markers = dict((stage_id, marker) for marker, stage_id in _checklist(result.stdout))
     assert markers["start"] == "x"
     # The first unrecorded stage is where a resuming agent picks up.
@@ -1128,9 +1112,8 @@ def test_start_build_refuses_a_second_start(tmp_path: Path) -> None:
 # --- advance-step ---------------------------------------------------------
 
 
-def test_advance_step_records_a_boundary_commit(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, _predecessor_of("phase-3a"))
+def test_advance_step_records_a_boundary_commit(branch_at: Callable[[str], Path]) -> None:
+    repo = branch_at(_predecessor_of("phase-3a"))
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
 
@@ -1138,10 +1121,9 @@ def test_advance_step_records_a_boundary_commit(tmp_path: Path) -> None:
     assert _subjects(repo)[-1] == "kb-build: phase-3a | validation gate"
 
 
-def test_advance_step_commits_even_when_nothing_changed(tmp_path: Path) -> None:
+def test_advance_step_commits_even_when_nothing_changed(branch_at: Callable[[str], Path]) -> None:
     """The boundary is the point, not the diff: --allow-empty fallback."""
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, _predecessor_of("phase-3a"))
+    repo = branch_at(_predecessor_of("phase-3a"))
     before = _commit_count(repo)
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
@@ -1150,9 +1132,8 @@ def test_advance_step_commits_even_when_nothing_changed(tmp_path: Path) -> None:
     assert _commit_count(repo) == before + 1
 
 
-def test_advance_step_sweeps_worktree_changes_into_the_boundary(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, "phase-3a")
+def test_advance_step_sweeps_worktree_changes_into_the_boundary(branch_at: Callable[[str], Path]) -> None:
+    repo = branch_at("phase-3a")
     (repo / "kb-root" / "extra-note.md").write_text(
         f"<!-- kb-frontmatter\n{_FRONTMATTER[survey_skeleton.NodeKind.LEAF]}\n-->\n\n# Extra\n\nContent.\n",
         encoding="utf-8",
@@ -1170,9 +1151,8 @@ def test_advance_step_sweeps_worktree_changes_into_the_boundary(tmp_path: Path) 
     assert not any(name.startswith(kb_util.scratch_dirname()) for name in tracked)
 
 
-def test_advance_step_records_a_note_in_the_commit_body(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, _predecessor_of("phase-3a"))
+def test_advance_step_records_a_note_in_the_commit_body(branch_at: Callable[[str], Path]) -> None:
+    repo = branch_at(_predecessor_of("phase-3a"))
 
     result = _op(repo, "advance-step", "--stage", "phase-3a", "--note", "gate green on the first pass")
 
@@ -1183,9 +1163,8 @@ def test_advance_step_records_a_note_in_the_commit_body(tmp_path: Path) -> None:
     assert "gate green on the first pass" in body
 
 
-def test_advance_step_is_idempotent_per_stage(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, "phase-3a")
+def test_advance_step_is_idempotent_per_stage(branch_at: Callable[[str], Path]) -> None:
+    repo = branch_at("phase-3a")
     before = _commit_count(repo)
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
@@ -1196,9 +1175,8 @@ def test_advance_step_is_idempotent_per_stage(tmp_path: Path) -> None:
     assert _checklist(result.stdout)
 
 
-def test_advance_step_refuses_an_out_of_order_stage(tmp_path: Path) -> None:
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, "start")
+def test_advance_step_refuses_an_out_of_order_stage(branch_at: Callable[[str], Path]) -> None:
+    repo = branch_at("start")
     before = _commit_count(repo)
 
     result = _op(repo, "advance-step", "--stage", "phase-5")
@@ -1221,35 +1199,45 @@ def test_advance_step_refuses_an_out_of_order_stage(tmp_path: Path) -> None:
 _PIN_CHARTER = "This KB distills the Ave corpus: the governance-bifurcation papers and nothing else.\n"
 
 
-def _charter_build_repo(root: Path, charter: str | None = _PIN_CHARTER) -> Path:
-    """A pipeline repo advanced to just before ``phase-3a``, carrying ``charter``.
+@pytest.fixture
+def pinned_charter(branch_at: Callable[[str], Path]) -> Path:
+    """The walk just before ``phase-3a``, its recorded charter carrying :data:`_PIN_CHARTER`.
 
-    ``charter`` of ``None`` opens the build with no ``--charter`` at all, which
-    is the legitimate charterless build rather than an error.
+    Rewriting the charter after the build opened on it is the same build as
+    opening on that text: the stamp reads the charter file when it stamps, not
+    when the build opens.
     """
-    repo = _pipeline_repo(root)
-    _lay_down_artifacts(repo)
-    if charter is not None:
-        (repo / "docs" / "charter.md").write_text(charter, encoding="utf-8")
-    subprocess.run(
-        [sys.executable, "-m", "kb_tools.refresh_kb_metadata"],
-        cwd=repo,
-        env=_subprocess_env(),
-        capture_output=True,
-        check=True,
-    )
-    opened = _op(repo, "start-build", *(("--charter", "docs/charter.md") if charter is not None else ()))
-    assert opened.returncode == 0, opened.stderr
-    for stage_id in kb_pipeline.STAGE_IDS[1 : kb_pipeline.STAGE_IDS.index("phase-3a")]:
-        result = _op(repo, "advance-step", "--stage", stage_id)
-        assert result.returncode == 0, f"{stage_id}: {result.stdout}\n{result.stderr}"
+    repo = branch_at(_predecessor_of("phase-3a"))
+    (repo / "docs" / "charter.md").write_text(_PIN_CHARTER, encoding="utf-8")
     # The stamp is only-if-absent, and this document is the one it must write.
     (repo / "kb-root" / kb_pipeline.SCOPE_PIN_DOC).unlink(missing_ok=True)
     return repo
 
 
-def test_scope_pin_reaches_the_document_that_claims_to_carry_it(tmp_path: Path) -> None:
-    repo = _charter_build_repo(tmp_path / "consumer")
+@pytest.fixture(scope="session")
+def charterless_walk(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """A second seeded repo, opened with no ``--charter`` and walked to just before ``phase-3a``.
+
+    The legitimate charterless build. The session's to read; :func:`no_charter` is a test's copy.
+    """
+    repo = _seeded_build_repo(tmp_path_factory.mktemp("charterless") / "walk")
+    opened = _op(repo, "start-build")
+    assert opened.returncode == 0, opened.stderr
+    for stage_id in kb_pipeline.STAGE_IDS[1 : kb_pipeline.STAGE_IDS.index("phase-3a")]:
+        result = _op(repo, "advance-step", "--stage", stage_id)
+        assert result.returncode == 0, f"{stage_id}: {result.stdout}\n{result.stderr}"
+    with held_unchanged(repo, name="charterless walk"):
+        yield repo
+
+
+@pytest.fixture
+def no_charter(charterless_walk: Path, tmp_path: Path) -> Path:
+    """This test's own copy of :func:`charterless_walk`."""
+    return copy_build(charterless_walk, tmp_path / "without-charter")
+
+
+def test_scope_pin_reaches_the_document_that_claims_to_carry_it(pinned_charter: Path) -> None:
+    repo = pinned_charter
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
 
@@ -1261,8 +1249,8 @@ def test_scope_pin_reaches_the_document_that_claims_to_carry_it(tmp_path: Path) 
     assert kb_pipeline.PROJECT_NAME_FIELD not in stamped
 
 
-def test_the_stamp_writes_the_claude_md_redirect_and_the_installed_agents_dir(tmp_path: Path) -> None:
-    repo = _charter_build_repo(tmp_path / "consumer")
+def test_the_stamp_writes_the_claude_md_redirect_and_the_installed_agents_dir(pinned_charter: Path) -> None:
+    repo = pinned_charter
     (repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC).unlink(missing_ok=True)
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
@@ -1271,11 +1259,13 @@ def test_the_stamp_writes_the_claude_md_redirect_and_the_installed_agents_dir(tm
     assert (repo / "kb-root" / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
     conventions = (repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC).read_text(encoding="utf-8")
     assert "PYTHONPATH=<project-root>/.claude/agents python3 -m kb_tools.kb_util --help" in conventions
+    assert all(f"`{kind}`" in conventions for kind in kb_schema.NODE_KINDS)
+    assert kb_pipeline.NODE_KINDS_FIELD not in conventions
 
 
-def test_the_stamp_refuses_a_claude_md_that_is_not_the_redirect(tmp_path: Path) -> None:
+def test_the_stamp_refuses_a_claude_md_that_is_not_the_redirect(pinned_charter: Path) -> None:
     """A pre-split KB's full CLAUDE.md is the operator's to move, never converted here."""
-    repo = _charter_build_repo(tmp_path / "consumer")
+    repo = pinned_charter
     (repo / "kb-root" / "CLAUDE.md").write_text("# Old orientation\n\nProject notes.\n", encoding="utf-8")
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
@@ -1292,22 +1282,15 @@ def test_refresh_and_verify_refuse_an_unmigrated_claude_md(tmp_path: Path, modul
     kb.mkdir()
     (kb / "CLAUDE.md").write_text("### INVARIANT-S1: an old home for invariants\n", encoding="utf-8")
 
-    result = subprocess.run(
-        [sys.executable, "-m", f"kb_tools.{module}", "--kb-root", str(kb)],
-        cwd=tmp_path,
-        env=_subprocess_env(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_main(importlib.import_module(f"kb_tools.{module}").main, ["--kb-root", str(kb)], cwd=tmp_path)
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "is not the one-line redirect" in result.stderr
 
 
-def test_charterless_build_states_the_absence_as_the_pin(tmp_path: Path) -> None:
+def test_charterless_build_states_the_absence_as_the_pin(no_charter: Path) -> None:
     """A charter is optional, so the document says there is none rather than standing blank."""
-    repo = _charter_build_repo(tmp_path / "consumer", charter=None)
+    repo = no_charter
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
 
@@ -1317,7 +1300,7 @@ def test_charterless_build_states_the_absence_as_the_pin(tmp_path: Path) -> None
     assert kb_pipeline.SCOPE_PIN_FIELD not in stamped
 
 
-def test_readiness_stamp_does_not_change_the_kb_root_state(tmp_path: Path) -> None:
+def test_readiness_stamp_does_not_change_the_kb_root_state(pinned_charter: Path) -> None:
     """The constraint the pin's placement answers to.
 
     ``pre.kb-root`` refuses a fresh build over a populated ``kb-root/`` by
@@ -1325,7 +1308,7 @@ def test_readiness_stamp_does_not_change_the_kb_root_state(tmp_path: Path) -> No
     guard refuse the build that performed the write. Stamping at the validation
     gate cannot: the tree is already populated by then.
     """
-    repo = _charter_build_repo(tmp_path / "consumer")
+    repo = pinned_charter
     before = kb_util.kb_root_state(repo)
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
@@ -1352,20 +1335,17 @@ def test_a_build_open_pin_write_would_have_changed_the_kb_root_state(tmp_path: P
     assert kb_util.kb_root_state(repo) == kb_util.KB_ROOT_POPULATED
 
 
-def test_recorded_charter_reads_the_start_boundary(tmp_path: Path) -> None:
+def test_recorded_charter_reads_the_start_boundary(tmp_path: Path, pinned_charter: Path, no_charter: Path) -> None:
     """The ledger is where the charter's path durably stands, and an absence is stated there too."""
-    with_charter = _charter_build_repo(tmp_path / "with-charter")
-    without = _charter_build_repo(tmp_path / "without-charter", charter=None)
-
-    assert kb_pipeline.recorded_charter(with_charter) == "docs/charter.md"
-    assert kb_pipeline.recorded_charter(without) is None
+    assert kb_pipeline.recorded_charter(pinned_charter) == "docs/charter.md"
+    assert kb_pipeline.recorded_charter(no_charter) is None
     # An unopened build has no boundary to read, and names no charter either.
     assert kb_pipeline.recorded_charter(_pipeline_repo(tmp_path / "unopened")) is None
 
 
-def test_stamp_refuses_a_recorded_charter_that_is_no_longer_on_disk(tmp_path: Path) -> None:
+def test_stamp_refuses_a_recorded_charter_that_is_no_longer_on_disk(pinned_charter: Path) -> None:
     """Writing the stated absence over a charter the ledger names would put a lie in the pin."""
-    repo = _charter_build_repo(tmp_path / "consumer")
+    repo = pinned_charter
     (repo / "docs" / "charter.md").unlink()
 
     result = _op(repo, "advance-step", "--stage", "phase-3a")
@@ -1389,13 +1369,8 @@ def _seeded_build_repo(root: Path) -> Path:
     repo = _git_repo(root, files=_with_tree(justfile=_JUSTFILE_BODY))
     assert _run_installer(repo, "graph-init").returncode == 0
     _lay_down_artifacts(repo)
-    subprocess.run(
-        [sys.executable, "-m", "kb_tools.refresh_kb_metadata"],
-        cwd=repo,
-        env=_subprocess_env(),
-        capture_output=True,
-        check=True,
-    )
+    refreshed = run_main(refresh_kb_metadata.main, [], cwd=repo)
+    assert refreshed.returncode == 0, refreshed.stdout + refreshed.stderr
     _git_commit_all(repo)
     return repo
 
@@ -1411,7 +1386,7 @@ class Rung:
 
 
 @pytest.fixture(scope="session")
-def ladder(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Rung]:
+def ladder(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Rung]]:
     """One seeded repo walked through every stage, snapshotted at each boundary.
 
     Two costs are paid once here. Seeding the spine is a git init, an ``init``
@@ -1440,7 +1415,8 @@ def ladder(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Rung]:
         tree = root / "after" / stage_id
         shutil.copytree(repo, tree)
         rungs[stage_id] = Rung(stage_id=stage_id, record=record, status=_op(repo, "show-status"), tree=tree)
-    return rungs
+    with held_unchanged(root, name="ladder"):
+        yield rungs
 
 
 @pytest.fixture
@@ -1453,9 +1429,7 @@ def branch_at(ladder: dict[str, Rung], tmp_path: Path) -> Callable[[str], Path]:
     """
 
     def branch(stage_id: str) -> Path:
-        target = tmp_path / f"after-{stage_id}"
-        shutil.copytree(ladder[stage_id].tree, target)
-        return target
+        return copy_build(ladder[stage_id].tree, tmp_path / f"after-{stage_id}")
 
     return branch
 
@@ -1649,15 +1623,14 @@ def test_show_status_omits_the_unseeded_note_once_the_spine_exists(tmp_path: Pat
     assert "not seeded yet" not in result.stdout
 
 
-def test_checklist_block_stays_contiguous_and_uniquely_parseable(tmp_path: Path) -> None:
+def test_checklist_block_stays_contiguous_and_uniquely_parseable(branch_at: Callable[[str], Path]) -> None:
     """Status, note and refusal lines must not leak into a checklist parse.
 
     ``kb_driver.checklist`` lifts the block out of the render with this regex
     and nothing else, so a second line matching it is a stage the driver reads
     that the ledger never recorded.
     """
-    repo = _pipeline_repo(tmp_path / "consumer")
-    _advance_through(repo, "start")
+    repo = branch_at("start")
 
     lines = _op(repo, "show-status").stdout.splitlines()
 
@@ -1972,9 +1945,7 @@ def test_the_read_reports_phase_5s_one_unit_covered_and_then_missing(branch_at: 
     # The tool resolves its root from the working directory, so the paths it
     # prints are that resolution's, not the fixture path's spelling of it.
     kb = repo.resolve() / "kb-root"
-    fact = (
-        f"{kb_pipeline.STAGE_STATUS_TAG} {kb_pipeline.FACT} phase-5 (meta-documentation) — 1 coverage unit(s) declared"
-    )
+    fact = f"{kb_pipeline.STAGE_STATUS_TAG} {kb_pipeline.FACT} phase-5 (document audit) — 1 coverage unit(s) declared"
 
     covered = _op(repo, "show-stage-status", "--stage", "phase-5")
 
@@ -2014,33 +1985,37 @@ def test_the_read_renders_no_checklist(branch_at: Callable[[str], Path]) -> None
 
 def test_the_zero_argument_read_is_the_stage_the_checklist_stars(branch_at: Callable[[str], Path]) -> None:
     """One ``current_stage`` decision behind the marker and this read."""
-    repo = branch_at(_predecessor_of("phase-5"))
+    repo = branch_at(_predecessor_of("overview-drafted"))
     starred = [stage_id for marker, stage_id in _checklist(_op(repo, "show-status").stdout) if marker == "*"]
 
     asked = _op(repo, "show-stage-status")
 
     assert asked.returncode == 0, asked.stderr
-    assert starred == ["phase-5"]
+    assert starred == ["overview-drafted"]
     assert _stage_status_lines(asked.stdout) == _stage_status_lines(
-        _op(repo, "show-stage-status", "--stage", "phase-5").stdout
+        _op(repo, "show-stage-status", "--stage", "overview-drafted").stdout
     )
 
 
 def test_a_complete_build_names_no_stage_and_does_not_fall_back_to_the_last(branch_at: Callable[[str], Path]) -> None:
-    """Every stage recorded is an answer, not a stage to report on.
+    """Every stage a build owes recorded is an answer, not a stage to report on.
 
     Falling back to the final stage would answer a question nobody asked and
-    read as though phase-5 were still in flight.
+    read as though it were still in flight. The opt-in audit standing
+    unrecorded behind the build does not make it incomplete: nobody asked for it.
     """
-    repo = branch_at(kb_pipeline.STAGE_IDS[-1])
+    repo = branch_at(kb_pipeline.REQUIRED_STAGES[-1].id)
+    status = _op(repo, "show-status").stdout
 
     asked = _op(repo, "show-stage-status")
 
+    assert "status: complete" in status
+    assert "*" not in {marker for marker, _ in _checklist(status)}
     assert asked.returncode == 0, asked.stderr
     lines = _stage_status_lines(asked.stdout)
     assert len(lines) == 1
     assert lines[0].startswith(f"{kb_pipeline.STAGE_STATUS_TAG} {kb_pipeline.FACT} ")
-    assert f"all {len(kb_pipeline.STAGES)} stages are recorded" in lines[0]
+    assert f"all {len(kb_pipeline.REQUIRED_STAGES)} stages a build owes are recorded" in lines[0]
     assert "--stage" in lines[0]
     # And it is not the last stage's report wearing a different opening line.
     assert lines != _stage_status_lines(_op(repo, "show-stage-status", "--stage", kb_pipeline.STAGE_IDS[-1]).stdout)
@@ -2560,15 +2535,8 @@ def _citation_kb(tmp_path: Path) -> Path:
 
 
 def _verify_citations(repo: Path) -> subprocess.CompletedProcess:
-    """The gate, through its own shipped CLI."""
-    return subprocess.run(
-        [sys.executable, "-m", "kb_tools.verify_citations", "--kb-root", str(repo / "kb-root")],
-        cwd=repo,
-        env=_subprocess_env(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """The gate, through its own CLI's entry point."""
+    return run_main(verify_citations.main, ["--kb-root", str(repo / "kb-root")], cwd=repo)
 
 
 _CITATION_VALUES = """\

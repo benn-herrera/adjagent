@@ -54,17 +54,23 @@ and by ``phase-3a``'s verify coverage.
 **No stage repairs a gate.** ``phase-3a`` runs the three verifiers and either
 records or stops: what each of them compares is one mechanically-produced
 artifact against another, so a red one is a defect in a tool or in what was
-authored and there is nothing for a seat to remediate in the KB. ``phase-5``
-is a fixed sequence over the documents ``overview-drafted`` wrote and its
-boundary committed — one review, then one revision answering it
-(:meth:`Runner._p5_review_and_fix`). **No severity fails the stage**: every
-finding the reviewer sorted is reported by :meth:`Runner._report_review`, the
-revision answers what it can, and the stage records.
+authored and there is nothing for a seat to remediate in the KB. ``phase-5``,
+walked only under ``--doc-audit``, is a fixed sequence over the documents
+``overview-drafted`` wrote and its boundary committed — one review, then one
+revision answering it (:meth:`Runner._p5_review_and_fix`). **No severity fails
+the stage**: every finding the reviewer sorted is reported by
+:meth:`Runner._report_review`, the revision answers what it can, and the stage
+records.
 
 **Scope**: the walk covers :data:`steps.TABLE_STAGE_IDS` — every stage of the
-pipeline. ``execute`` still takes the stage list, because a test that means to
-exercise one stage's rows should not have to walk every other stage to reach
-them; exit 0 means every stage walked is recorded.
+pipeline — less an opt-in stage (``kb_pipeline.Stage.opt_in``) the run did not
+ask for with ``--doc-audit``. ``execute`` still takes the stage list, because a
+test that means to exercise one stage's rows should not have to walk every
+other stage to reach them; exit 0 means every stage walked is recorded. Asked
+for over a ledger whose build is already complete, the audit is the one stage
+left unrecorded, so the run walks it alone: an audit of a built KB needs no
+rebuild. A ledger that records it has had its audit, and a second run walks
+nothing.
 
 **One flag bounds the walk, and a bounded run is not a failed one.**
 ``--through`` names the last stage to walk, cut in :meth:`Runner._walk`.
@@ -90,7 +96,7 @@ from types import MappingProxyType
 
 from .. import inference, kb_pipeline, kb_readme, kb_util
 from . import barriers, baton, call, checklist, envelope, ledger, runlog, steps
-from .config import NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig
+from .config import DOC_AUDIT_FLAG, NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig
 
 _log = runlog.logger("run")
 
@@ -399,6 +405,12 @@ class Runner:
         for stage in self.stages:
             if stage in self._recorded:
                 _log.info("stage is already recorded; skipping it", extra={"context": {"stage": stage}})
+                continue
+            if kb_pipeline.stage_by_id(stage).opt_in and not self.config.run.doc_audit:
+                _log.info(
+                    f"{stage} is an opt-in audit this run did not ask for; pass `{DOC_AUDIT_FLAG}` to run it",
+                    extra={"context": {"stage": stage}},
+                )
                 continue
             walk = self._walk()
             if stage not in walk:

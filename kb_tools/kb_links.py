@@ -37,6 +37,11 @@ SKIP_SEGMENT_RUNS: tuple[tuple[str, ...], ...] = (
     (".claude", "worktrees"),
 )
 
+# A document template (kb_tools/installed/<NAME>.tmpl.md) is never crawled: its
+# relative links are written for the KB a build stamps it into, so where it
+# sits they resolve to nothing. The stamped document is crawled instead.
+DOCUMENT_TEMPLATE_SUFFIX = ".tmpl.md"
+
 # A link's text, allowing one level of nested brackets. `[^\]]*` — the obvious
 # spelling — cannot match `["the rule [see note] applies"](target.md)`, and a
 # link the regex cannot see is a link no gate checks: the citation becomes
@@ -134,8 +139,11 @@ def _contains_run(parts: tuple[str, ...], run: tuple[str, ...]) -> bool:
 
 
 def iter_markdown_files(root: Path):
-    """Yield every ``.md`` file under ``root``, skipping SKIP_DIRS at any depth."""
+    """Yield every ``.md`` file under ``root`` that is not a document template,
+    skipping SKIP_DIRS at any depth."""
     for path in sorted(root.rglob("*.md")):
+        if path.name.endswith(DOCUMENT_TEMPLATE_SUFFIX):
+            continue
         parts = path.relative_to(root).parts
         if any(part in SKIP_DIRS for part in parts):
             continue

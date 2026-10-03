@@ -49,12 +49,13 @@ would walk a different build than the file asks for. ``[barriers]`` is checked
 differently because it is the one section with a vocabulary to check
 against — the registry's own registered pairs, below.
 
-**One field says what a run is made of; one bounds how far it goes.**
+**Two fields say what a run is made of; one bounds how far it goes.**
 ``no_inference`` drops every row that would cost a model call, row by row, and
-the walk carries on past them to a finished build. ``through`` names the last
+the walk carries on past them to a finished build. ``doc_audit`` adds the
+opt-in stages a build otherwise completes without. ``through`` names the last
 stage to walk, by stage id or by the stage's own display name, resolved here to
-an id so nothing downstream deals in two spellings. The first is rendered back
-into the resume line and the second is not.
+an id so nothing downstream deals in two spellings. The first two are rendered
+back into the resume line and the third is not.
 
 A stage id containing a dot must be quoted in TOML — e.g. ``[barriers."phase-1.5".some-kind]``
 — because TOML reads an unquoted dot as another level of table nesting. No
@@ -94,6 +95,11 @@ PERMISSION_MODE_FLAG = "--permission-mode"
 # Spelled once in `kb_util`, because the driver passes the same flag through to
 # `advance-step`, where the stage table decides what it excuses.
 NO_INFERENCE_FLAG = kb_util.NO_INFERENCE_FLAG
+
+# The opt-in audit: walk the stages `kb_pipeline.Stage.opt_in` marks, which a
+# build otherwise completes without. Rendered back into the resume line, so a
+# run stopped inside the audit resumes into it rather than out of it.
+DOC_AUDIT_FLAG = "--doc-audit"
 
 # The one flag that bounds an invocation rather than specifying the build, and
 # so the one this module does not render back: see :func:`invocation`.
@@ -187,6 +193,9 @@ class RunSection:
     #: (``steps.applies``) and the walk continues past it, so this specifies
     #: what the build is made of rather than bounding how far it goes.
     no_inference: bool = False
+    #: Walk the opt-in audit of the build's own documents as well, after the
+    #: build's last stage — or alone, over a ledger whose build is complete.
+    doc_audit: bool = False
     #: The last stage this invocation walks, as a **resolved stage id** — the
     #: display name a caller may have written is resolved at load, so nothing
     #: downstream deals in anything but ids. Empty is the whole build.
@@ -559,9 +568,10 @@ def invocation(
     hand the operator an invocation that stops in the same place forever.
     Resuming past a bound is the point of resuming.
 
-    **The mode flag is rendered, for the mirror-image reason.** It says what
-    this build is made of, so a resume that dropped it would change the build
-    half way through, running the very rows the build was told to do without.
+    **The mode flags are rendered, for the mirror-image reason.** They say what
+    this build is made of, so a resume that dropped one would change the build
+    half way through — running the very rows the build was told to do without,
+    or completing without the audit it was asked for.
     """
     overrides = run_overrides or {}
     parts: list[str] = []
@@ -577,6 +587,8 @@ def invocation(
         parts += [RUN_DIR_FLAG, named_parent]
     if overrides.get("no_inference"):
         parts.append(NO_INFERENCE_FLAG)
+    if overrides.get("doc_audit"):
+        parts.append(DOC_AUDIT_FLAG)
     return shlex.join(parts)
 
 
@@ -617,6 +629,7 @@ def load(
         charter_file=Path(_str_field(run_raw, "charter_file", section="run", default=kb_pipeline.CHARTER_RELPATH)),
         runner=None if runner is None else _str_field(run_raw, "runner", section="run", choices=RUNNERS),
         no_inference=_bool_field(run_raw, "no_inference", section="run", default=False),
+        doc_audit=_bool_field(run_raw, "doc_audit", section="run", default=False),
         through=_stage_field(run_raw, "through", section="run", flag=THROUGH_FLAG),
     )
     _refuse_unknown_keys(run_raw, section="run")

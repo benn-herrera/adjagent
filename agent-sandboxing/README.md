@@ -11,8 +11,8 @@ you to the agent shell.
 It is built against accidents, not malice. Most agent mishaps come from underspecified tasking
 meeting over-privileged execution: a deleted directory, a force-push, a command run with the wrong
 account's reach. With no credentials and no write access outside the projects tree, those stay
-small. It is not hardened against an agent working to get around it and does not try to be.
-This is a skating helmet with elbow and knee guards, not plate mail.
+small. It is not hardened against an agent working to get around it and does not try to be. This is
+a skating helmet with elbow and knee guards, not plate mail.
 
 ## CAVEATS and tradeoffs
 
@@ -48,9 +48,9 @@ This is a skating helmet with elbow and knee guards, not plate mail.
 - **No credentials for the agent.** No ssh keys, no `gh` login, no cloud login. A read-only deploy
   key is the most it gets.
 - **Network git is yours, everything else is the agent's.** Your `git` function passes `clone`,
-  `fetch`, `pull`, `push`, `status`, and `lfs` (plus `help`, `version` and `--version`) through and refuses the rest
-  (`status`, `log`, `commit`, ...), which is done from the agent shell. `command git` is the
-  deliberate way past it.
+  `fetch`, `pull`, `push`, `status`, and `lfs` (plus `help`, `version` and `--version`) through and
+  refuses the rest (`status`, `log`, `commit`, ...), which is done from the agent shell.
+  `command git` is the deliberate way past it.
 
 ## macOS checklist
 
@@ -67,60 +67,48 @@ Done once per machine unless marked as done once per clone.
    sudo dscl . -append /Groups/agent-group GroupMembership <you>
    ```
    Do not make `agent-group` your own primary group.
-2. Let the agent run your utility scripts in `~/.local/bin` without reaching your data.
-   `~/.local/state` is application state, not tooling, and is closed after opening the rest.
-   ```
-   chmod 751 ~
-   chmod -R go+rX ~/.local
-   chmod 700 ~/.local/state
-   ```
-   Anything else under `~/.local` the agent should not read, such as a script in `bin/` that prints
-   a credential or an application's private data under `share/`, goes `chmod 700` the same way.
-3. Password-free identity switch. `sudo visudo -f /etc/sudoers.d/me-to-agent-user`:
+2. Password-free identity switch. `sudo visudo -f /etc/sudoers.d/me-to-agent-user`:
    ```
    <you> ALL=(agent-user) NOPASSWD: ALL
    <you> ALL=(root) NOPASSWD: /usr/bin/su - agent-user, /usr/bin/su - agent-user -c *
    Defaults>agent-user umask=0002, umask_override
    ```
    The `Defaults` line keeps `audo` output group-writable; `audo umask` should print `0002`.
-4. Append `privileged-user/dotzshrc` to your `~/.zshrc` (or source it from there). Add a decoy alias
+3. Append `privileged-user/dotzshrc` to your `~/.zshrc` (or source it from there). Add a decoy alias
    for each agent CLI you use. `sudo -u agent-user claude` does not work (sudo is not a full
    identity switch); use `au`.
-5. Agent dotfiles: copy `agent-user/dotzshenv` to `~agent-user/.zshenv` and `agent-user/dotzshrc` to
+4. Agent dotfiles: copy `agent-user/dotzshenv` to `~agent-user/.zshenv` and `agent-user/dotzshrc` to
    `~agent-user/.zshrc`. `.zshenv` puts Homebrew and your `~/.local/bin` on the agent's path, wires
    up cargo, pyenv and nvm from the agent's own home for any it installs there, and sets
    `umask 002`. Edit one line: `SB_OWNER_HOME` in `setup-env` is your home; `PROJECTS_DIR` derives
    from it. `.zshrc` defines `cdp` for that tree and `cd`s to the directory `au` was run from. Trim
    the rest to taste.
-6. Your own umask is 002 in any shell you run git in; otherwise files a pull rewrites in the tree
-   come back not group-writable.
-7. Give yourself the agent's home and port existing agent state.
+5. Give yourself the agent's home and port existing agent state.
    ```
    sudo -u agent-user chmod -R g+rwX ~agent-user
    cp -r ~/.claude ~agent-user/.claude && sudo chown -R agent-user:agent-group ~agent-user/.claude
-   sudo cp ~/.gitconfig ~agent-user/ && sudo chown agent-user:agent-group ~agent-user/.gitconfig
+   cp ~/.gitconfig ~agent-user/ && sudo chown agent-user:agent-group ~agent-user/.gitconfig
    ```
    Do not copy `~/.ssh`, and do not log the agent in to `gh`, `gcloud` or any other backend. Signed
    commits are not supported: the agent holds no signing key, so remove `commit.gpgsign` and
    `user.signingkey` from its copy of `.gitconfig` or every agent commit fails.
-8. Git configuration, run as both you and `agent-user`. `command git` bypasses the `git` function
+6. Git configuration, run as both you and `agent-user`. `command git` bypasses the `git` function
    from step 4, which refuses everything but network operations:
    ```
    command git config --global core.sharedRepository group
    command git config --global --replace-all safe.directory '<projects-dir>/*'
    ```
-9. Projects tree. Not `$HOME` itself and not `Documents/` or another special-access directory; a
-   subdirectory such as `~/projects` is fine.
+7. Projects tree. Not `$HOME` itself and not `Documents/` or another special-access directory; a
+   subdirectory such as `~agent-user/projects` is good. Everything under projects should be shared.
+   if you're moving projects, transfer ownership (`aushare` defined in privileged-user/dotzshrc)
    ```
-   cd <projects-dir> && sudo chgrp -R agent-group . && chmod -R g+rwX .
+   cd <projects-dir> && aushare -g .
    ```
    Outside this tree, `/tmp`, its own `$TMPDIR` and its own home, the machine is read-only to the
    agent.
-10. Git LFS, if you use it: `git lfs install` (global, never `--local`, which puts filter commands
-    in `.git/config`) as you, and `git lfs install --skip-repo` as the agent.
-11. Per clone, as you: `git clone <url>` inside the projects tree. The tree's group and your umask
-    make it shared; nothing else is needed.
-12. Tell the agent (last section) and use it:
+8. Per clone, as you: `git clone <url>` inside the projects tree, `aushare -g <clone-dir>`
+   gives repo to agent-user:agent-group
+9. Tell the agent (last section) and use it:
     ```
     me@mac ~ % cd ~/projects/some-repo
     me@mac some-repo % au
@@ -142,38 +130,34 @@ Same shape; the platform commands differ. Not yet exercised by the author (YMMV)
    To keep it off the login screen, with AccountsService:
    `sudo sh -c 'printf "[User]\nSystemAccount=true\n" > /var/lib/AccountsService/users/agent-user'`.
    Log out and in again for the new group membership to take effect.
-2. Tooling reach as in macOS step 2, plus `chmod 700 ~/.local/share/keyrings`: the recursive `chmod`
-   opens it along with the rest of `share/`.
-3. Sudoers, `sudo visudo -f /etc/sudoers.d/me-to-agent-user`:
+2. Sudoers, `sudo visudo -f /etc/sudoers.d/me-to-agent-user`:
    ```
    <you> ALL=(agent-user) NOPASSWD: ALL
    <you> ALL=(root) NOPASSWD: /bin/su - agent-user
    Defaults>agent-user umask=0002, umask_override
    ```
    Check the `su` path with `command -v su`; sudoers needs the exact one.
-4. `privileged-user/dotzshrc` in your shell rc (`~/.bashrc` if your shell is bash) as on macOS.
-5. Agent dotfiles: the same two files, translated to the agent's login shell (`.bashrc` and
+3. `privileged-user/dotzshrc` in your shell rc (`~/.bashrc` if your shell is bash) as on macOS.
+4. Agent dotfiles: the same two files, translated to the agent's login shell (`.bashrc` and
    `.profile`, or zsh if installed) with the Homebrew paths dropped. `umask 002` and the `cd` to the
    `au` directory are the lines that matter.
-6. Your umask is 002 in any shell you run git in.
-7. Agent home and state as on macOS (`sudo -u agent-user chmod -R g+rwX ~agent-user`; copy `.claude`
+5. Agent home and state as on macOS (`sudo -u agent-user chmod -R g+rwX ~agent-user`; copy `.claude`
    and `.gitconfig`; never `.ssh` or a logged-in `gh`).
-8. Git configuration for both accounts, as on macOS.
-9. Projects tree: Linux does not inherit a directory's group by default, so set setgid on the tree
+6. Git configuration for both accounts, as on macOS.
+8. Projects tree: Linux does not inherit a directory's group by default, so set setgid on the tree
    as well:
    ```
-   cd <projects-dir> && sudo chgrp -R agent-group . && chmod -R g+rwX . && find . -type d -exec chmod g+s {} +
+   cd <projects-dir> && aushare -g . && find . -type d -exec chmod g+s {} +
    ```
-10. Git LFS as on macOS.
-11. Per clone and daily use as on macOS.
-12. Display: X11 with a permissive `xhost` lets another local user open windows; Wayland does not by
-    default. Leave it that way.
-13. Tell the agent (last section) before first use, as on macOS.
+9. Per clone as on macOS.
+10. Display: X11 with a permissive `xhost` lets another local user open windows; Wayland does not by
+    default. Your call on whether to allow agent access to your display.
+11. Tell the agent (last section) before first use, as on macOS.
 
 
 ## Telling the agent
 
-Add to `~agent-user/.claude/CLAUDE.md` (create if absent):
+Add to `~agent-user/.claude/CLAUDE.md` or `~agent-user/.opencode/AGENTS.md` (create if absent):
 
 ```
 ## Sandbox discipline

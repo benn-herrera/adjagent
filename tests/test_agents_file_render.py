@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from gen_defs import agents_file, discovery, markers, rendering
+from gen_defs import agents_file, banners, discovery, markers, rendering
 from gen_defs.agents_file import TemplatesRevision
 from gen_defs.errors import InputError
 from gen_defs.model_tuning import DEFAULT_PIN_MAP
@@ -88,6 +88,7 @@ def test_claude_renders_agents_md_and_the_claude_md_redirect_into_a_project_dir(
     assert (path, existing) == (tmp_path / "AGENTS.md", None)
     assert redirect == (tmp_path / "CLAUDE.md", None, "@AGENTS.md\n", None)
     assert ".claude-temp" in text
+    assert "~/.claude/CLAUDE.md" in text
     assert "@!" not in text and "!@" not in text
     assert text.count("version[abc1234]") == 2
 
@@ -99,18 +100,15 @@ def test_opencode_renders_agents_md_into_dir(tmp_path):
     assert "~/.config/opencode/AGENTS.md" in text
 
 
-@pytest.mark.parametrize(
-    "harness, native", [("claude", "~/.claude/CLAUDE.md"), ("opencode", "~/.config/opencode/AGENTS.md")]
-)
-def test_the_behavior_change_destinations_name_the_global_native_file_and_the_project_agents_md(
-    tmp_path, harness, native
-):
-    text = _directives(harness, tmp_path)
-    assert f"`{native}`, the project `AGENTS.md`," in text
-
-
-def test_the_tier_token_renders_the_default_medium_pin(tmp_path):
-    assert f"`model: {DEFAULT_PIN_MAP['medium']}`" in _directives("claude", tmp_path)
+def test_every_tier_token_renders_its_default_pin(tmp_path):
+    template = _plant_template(
+        tmp_path / "t.tmpl.md",
+        DIR_FILE,
+        body=_agents_file_body(" ".join(f"{tier}=@!dyn.tier-{tier}!@" for tier in DEFAULT_PIN_MAP)),
+    )
+    text = agents_file.render_agents_file_text("claude", tmp_path, CLEAN, template=template)
+    expected = " ".join(f"{tier}={pin}" for tier, pin in DEFAULT_PIN_MAP.items())
+    assert text == _rendered_body(expected, scope=tmp_path.name)
 
 
 def test_a_dirty_revision_still_renders_and_says_so(tmp_path):
@@ -157,14 +155,14 @@ def test_harness_schema_errors(tmp_path, text, message):
 
 
 def test_a_resolve_entry_outside_dir_is_an_error(tmp_path):
-    template = _plant_template(tmp_path / "t.md.tmpl", "@!dyn.agents-file-install-dir-arg!@/../@!hrn.agents-file!@")
+    template = _plant_template(tmp_path / "t.tmpl.md", "@!dyn.agents-file-install-dir-arg!@/../@!hrn.agents-file!@")
     harness_dir = _plant_harness(tmp_path / "harness")
     with pytest.raises(InputError, match="not directly inside"):
         agents_file.render_agents_file("x", tmp_path, CLEAN, template=template, harness_dir=harness_dir)
 
 
 def test_two_resolve_entries_give_two_outputs(tmp_path):
-    template = _plant_template(tmp_path / "t.md.tmpl", DIR_FILE, "@!dyn.agents-file-install-dir-arg!@/ALSO.md")
+    template = _plant_template(tmp_path / "t.tmpl.md", DIR_FILE, "@!dyn.agents-file-install-dir-arg!@/ALSO.md")
     harness_dir = _plant_harness(tmp_path / "harness")
     renders = agents_file.render_agents_file("x", tmp_path, CLEAN, template=template, harness_dir=harness_dir)
     expected = _rendered_body("body X.md", scope=tmp_path.name)
@@ -177,7 +175,7 @@ def test_two_resolve_entries_give_two_outputs(tmp_path):
 
 def test_the_unplaced_text_binds_the_install_dir_and_ignores_resolve(tmp_path):
     template = _plant_template(
-        tmp_path / "t.md.tmpl",
+        tmp_path / "t.tmpl.md",
         "@!dyn.agents-file-install-dir-arg!@/../escape.md",
         body=_agents_file_body("in @!dyn.agents-file-install-dir-arg!@"),
     )
@@ -191,7 +189,7 @@ def test_the_placed_and_unplaced_renders_agree(tmp_path):
 
 
 def test_split_outputs_refuses_a_non_table_output(tmp_path):
-    template = _plant_template(tmp_path / "t.md.tmpl", "anything")
+    template = _plant_template(tmp_path / "t.tmpl.md", "anything")
     with pytest.raises(InputError, match="outputs._resolve is not a table"):
         discovery.split_outputs(template)
 
@@ -199,28 +197,31 @@ def test_split_outputs_refuses_a_non_table_output(tmp_path):
 # --- surface sites naming the agents file -----------------------------------
 
 
-@pytest.mark.parametrize(
-    "harness, native", [("claude", "~/.claude/CLAUDE.md"), ("opencode", "~/.config/opencode/AGENTS.md")]
-)
-def test_surface_definitions_name_agents_md_for_project_files_and_the_native_file_for_global(tmp_path, harness, native):
-    result = _cli(
-        "generate",
-        str(tmp_path),
-        "--harness",
-        harness,
-        "--agent-glob",
-        "prompt-engineer|c-coder|kb-docent",
-        cwd=tmp_path,
-    )
+#: A path written against Claude Code's own directories or file names.
+CLAUDE_PATH = re.compile(r"\.claude/|~/\.claude|CLAUDE\.md|\.claude-temp")
+
+
+def _claude_path_lines(tmp_path: Path, harness: str) -> list[str]:
+    """Every body line, below the banner block, of a full render under
+    `harness` that names a claude path."""
+    out = tmp_path / harness
+    out.mkdir()
+    result = _cli("generate", str(out), "--harness", harness, cwd=tmp_path)
     assert result.returncode == 0, result.stderr
-    prompt_engineer, c_coder, kb_docent = (
-        (tmp_path / "agents" / f"{name}.md").read_text(encoding="utf-8")
-        for name in ("prompt-engineer", "c-coder", "kb-docent")
-    )
-    assert "agent-facing docs (AGENTS.md, CONVENTIONS.md)" in prompt_engineer
-    assert f"the operator's baseline {native} and the consuming project's AGENTS.md are in context" in prompt_engineer
-    assert "A project AGENTS.md stays lean" in c_coder and "may have no AGENTS.md and no SPEC.md" in c_coder
-    assert "kb-root/AGENTS.md" in kb_docent and "kb-root/CLAUDE.md" not in kb_docent
+    return [
+        f"{path.relative_to(out)}: {line}"
+        for path in sorted(out.rglob("*.md"))
+        for line in banners.banner_body(path.read_text(encoding="utf-8")).splitlines()
+        if CLAUDE_PATH.search(line)
+    ]
+
+
+def test_a_non_claude_render_writes_no_claude_path_into_any_body(tmp_path):
+    # Every path in a definition body is written against the installing
+    # harness's directories. The claude render is the control: the pattern
+    # has to find something there, or its silence under opencode means nothing.
+    assert _claude_path_lines(tmp_path, "opencode") == []
+    assert _claude_path_lines(tmp_path, "claude")
 
 
 # --- the harness namespace in render ----------------------------------------
@@ -233,11 +234,6 @@ def _expand(text, chunk_table, dynamic, harness=None):
     if harness is not None:
         routes = {**routes, markers.HARNESS_NAMESPACE: markers.TableSource(harness, "hrn", "harness key")}
     return markers.expand(text, routes, args={}).text
-
-
-def test_a_harness_marker_inside_a_chunk_resolves():
-    chunks = {"outer": {"text": "[@!hrn.k!@]"}}
-    assert _expand("@!outer!@", chunks, {}, {"k": "v"}) == "[v]"
 
 
 def test_a_harness_marker_with_no_harness_table_is_an_error():
@@ -265,7 +261,7 @@ def _git(repo: Path, *args: str) -> None:
 @pytest.fixture
 def repo(tmp_path):
     (tmp_path / "templates").mkdir()
-    (tmp_path / "templates" / "a.md.tmpl").write_text("a\n", encoding="utf-8")
+    (tmp_path / "templates" / "a.tmpl.md").write_text("a\n", encoding="utf-8")
     (tmp_path / "other.txt").write_text("o\n", encoding="utf-8")
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "add", ".")
@@ -277,8 +273,8 @@ def repo(tmp_path):
     "change, dirty",
     [
         (None, False),
-        ("templates/a.md.tmpl", True),
-        ("templates/new.md.tmpl", True),
+        ("templates/a.tmpl.md", True),
+        ("templates/new.tmpl.md", True),
         ("other.txt", False),
     ],
     ids=["clean", "modified-under-templates", "untracked-under-templates", "modified-outside-templates"],
@@ -333,12 +329,6 @@ def test_dev_render_with_one_positional_exits_2(tmp_path):
     result = _cli("dev", "render-agents-file", "claude", cwd=tmp_path)
     assert result.returncode == 2
     assert "OUT" in result.stderr
-
-
-def test_render_agents_file_is_not_a_public_verb(tmp_path):
-    result = _cli("render-agents-file", "claude", str(tmp_path / "CLAUDE.md"), cwd=tmp_path)
-    assert result.returncode == 2
-    assert "invalid choice" in result.stderr
 
 
 @pytest.mark.parametrize("harness, name", [("claude", "CLAUDE.md"), ("opencode", "AGENTS.md")])

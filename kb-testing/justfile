@@ -81,12 +81,44 @@ prep-test-data-arxiv ids=ARXIV_IDS:
 prep-test-data-arxiv-candidates:
     @just prep-test-data-arxiv "{{ARXIV_CANDIDATE_IDS}}"
 
+# A staged repository may have been installed under any harness, so this file
+# spells no harness directory of its own: every one comes from
+# templates/harness/<name>.toml, through the root justfile's reader.
+[private]
+_harness-names:
+    @for file in "{{PROJECT_ROOT}}"/templates/harness/*.toml; do basename "${file}" .toml; done
+
+[private]
+_harness-value harness key:
+    @"{{just_executable()}}" --justfile "{{PROJECT_ROOT}}/justfile" _harness-value "{{harness}}" "{{key}}"
+
+# Several installed copies fail rather than pick one: a caller could not tell
+# which copy a driver run there was launched against.
+[private]
+[doc("print [harness.<key>] of the one harness whose kb_tools repo has installed (<repo>/<project-harness-dir>/agents/kb_tools); nothing if none is installed; fails if several are")]
+_installed-harness-value repo key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    found=()
+    for name in $(just _harness-names); do
+        harness_dir="$(just _harness-value "${name}" project-harness-dir)"
+        if [[ -d "{{repo}}/${harness_dir}/agents/kb_tools" ]]; then
+            found+=("${name}")
+        fi
+    done
+    if [[ "${#found[@]}" -gt 1 ]]; then
+        printf 'error: %s holds an installed kb_tools under more than one harness (%s) — cannot tell which one a run there uses; remove all but one.\n' "{{repo}}" "${found[*]}" >&2
+        exit 1
+    fi
+    if [[ "${#found[@]}" -eq 1 ]]; then
+        just _harness-value "${found[0]}" "{{key}}"
+    fi
+
 # Read-only ask, factored out of stage-arxiv-paper so any future recipe that
-# `rm -rf`s a `.claude-temp/` or `kb-root/` under a staged repository owes the
-# same check and can call this one rather than pasting it. `dir`'s own
-# `.claude/agents/kb_tools` is what a driver run there would have been
-# launched against (the PYTHONPATH pattern every driver-invoking recipe in
-# this file already uses), so that installed copy is asked, not this
+# `rm -rf`s a scratch directory or `kb-root/` under a staged repository owes
+# the same check and can call this one rather than pasting it. `dir`'s own
+# installed `kb_tools`, under whichever harness installed it, is what a driver
+# run there would have been launched against, so that copy is asked, not this
 # repository's own.
 #
 # Liveness has one definition and it lives in `kb_driver.runlog` — this
@@ -107,16 +139,17 @@ prep-test-data-arxiv-candidates:
 # asking the CLI's own public error-reporting shape, not a second definition
 # of anything `kb_driver.runlog` owns.
 [private]
-[doc("refuse if a live driver run holds dir's run lock, naming the holder; silent no-op on a stale or absent lock, on a dir with no toolchain installed yet, or on a toolchain too old to recognise show-run-lock")]
+[doc("refuse if a live driver run holds dir's run lock, naming the holder, or if dir holds toolchains under more than one harness; silent no-op on a stale or absent lock, on a dir with no toolchain installed yet, or on a toolchain too old to recognise show-run-lock")]
 guard-run-lock dir: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     dir="{{dir}}"
-    if [[ ! -d "${dir}/.claude/agents/kb_tools" ]]; then
+    harness_dir="$(just _installed-harness-value "${dir}" project-harness-dir)"
+    if [[ -z "${harness_dir}" ]]; then
         exit 0
     fi
     set +e
-    output="$(cd "${dir}" && PYTHONPATH=.claude/agents "{{VENV_PYTHON}}" -m kb_tools.kb_util show-run-lock 2>&1)"
+    output="$(cd "${dir}" && PYTHONPATH="${harness_dir}/agents" "{{VENV_PYTHON}}" -m kb_tools.kb_util show-run-lock 2>&1)"
     rc=$?
     set -e
     if [[ "${rc}" -ne 0 ]]; then
@@ -168,12 +201,13 @@ stage-arxiv-paper id *args:
     # every restage of a paper starts from bytes git has already vouched for.
     if [[ -d "${dir}/.git" ]] && git -C "${dir}" rev-parse -q --verify cleared > /dev/null; then
         # Asked before either destructive step: the reset below would remove
-        # `dir`'s own `.claude/agents/kb_tools` (committed only at the `staged`
+        # `dir`'s own installed `kb_tools` (committed only at the `staged`
         # tag, which `cleared` predates), and the `rm -rf` would destroy the
         # very run evidence a live build is writing.
         just guard-run-lock "${dir}"
+        scratch="$(just _installed-harness-value "${dir}" project-temp-dir)"
         git -C "${dir}" reset --hard cleared > /dev/null
-        rm -rf "${dir}/.claude-temp" "${dir}/kb-root"
+        rm -rf ${scratch:+"${dir}/${scratch}"} "${dir}/kb-root"
     else
         rm -rf "${dir}"
         mkdir -p "${dir}"
@@ -183,7 +217,13 @@ stage-arxiv-paper id *args:
             gunzip -c "${tarball}" > "${dir}/paper.tex"
         fi
         printf 'default:\n\t@echo %s\n\ntest:\n\t@echo tests passed.\n' "{{id}}" > "${dir}/Makefile"
-        printf '.claude-temp/\n__pycache__/\n' > "${dir}/.gitignore"
+        # Every harness's scratch, since `cleared` predates the choice of one.
+        ignored=()
+        for name in $(just _harness-names); do
+            scratch="$(just _harness-value "${name}" project-temp-dir)"
+            ignored+=("${scratch}/")
+        done
+        printf '%s\n' "${ignored[@]}" '__pycache__/' > "${dir}/.gitignore"
         git -C "${dir}" init -q
         git -C "${dir}" add -A
         git -C "${dir}" -c user.name=arxiv -c user.email=arxiv@invalid commit -qm "sources as fetched"
@@ -227,7 +267,7 @@ stage-arxiv-corpus-candidates *args:
 # tarball — a hand-authored consumer repo such as ModernCorp, already
 # committed under test-data/transient/. There is nothing to unpack, so this
 # carries only the re-anchor-and-reinstall half of stage-arxiv-paper: reset to
-# the `cleared` tag (the commit before any .claude install or kb-build ledger
+# the `cleared` tag (the commit before any agent-set install or kb-build ledger
 # commit — the same convention stage-arxiv-paper's own comment documents,
 # established here by hand once per fixture rather than by this recipe, since
 # there is no "sources as fetched" moment to tag it from automatically), drop
@@ -237,7 +277,7 @@ stage-arxiv-corpus-candidates *args:
 # deciding, for a repo this recipe knows nothing about, which commit counts as
 # "before the install" — that decision belongs to whoever staged the fixture
 # by hand the first time.
-[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed .claude/agents, kb-root/, and .claude-temp/ above that tag; every --* flag forwards verbatim to the root install recipe")]
+[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed agent set, kb-root/, and scratch directory above that tag; every --* flag forwards verbatim to the root install recipe")]
 stage-fixture dir *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -247,13 +287,14 @@ stage-fixture dir *args:
         exit 1
     fi
     if ! git -C "${dir}" rev-parse -q --verify cleared > /dev/null; then
-        printf 'error: %s carries no `cleared` tag (the commit before any .claude install or kb-build ledger commit) — tag one by hand before staging.\n' "${dir}" >&2
+        printf 'error: %s carries no `cleared` tag (the commit before any agent-set install or kb-build ledger commit) — tag one by hand before staging.\n' "${dir}" >&2
         exit 1
     fi
     just guard-run-lock "${dir}"
-    printf 'staging %s: resetting to `cleared` (discards any kb-build ledger commits and the .claude/agents, kb-root/, .claude-temp/ committed or left above it), then reinstalling the current agent set.\n' "${dir}" >&2
+    scratch="$(just _installed-harness-value "${dir}" project-temp-dir)"
+    printf 'staging %s: resetting to `cleared` (discards any kb-build ledger commits and the installed agent set, kb-root/ and scratch directory committed or left above it), then reinstalling the current agent set.\n' "${dir}" >&2
     git -C "${dir}" reset --hard cleared > /dev/null
-    rm -rf "${dir}/.claude-temp" "${dir}/kb-root"
+    rm -rf ${scratch:+"${dir}/${scratch}"} "${dir}/kb-root"
     ( cd "{{justfile_directory()}}/.." && just install "kb-testing/${dir}" {{args}} )
     git -C "${dir}" add -A
     git -C "${dir}" -c user.name=kb-testing -c user.email=kb-testing@invalid commit -qm "agent defs installed"
@@ -263,7 +304,7 @@ stage-fixture dir *args:
 
 # Log and bookkeeping files for kb-headless-eval live in THIS repo's
 # scratch (.claude-temp/kb-headless/, sibling of .claude/), never the
-# built KB's own .claude-temp — re-anchoring a staged paper (stage-arxiv-
+# built KB's own scratch directory — re-anchoring a staged paper (stage-arxiv-
 # paper's `git reset --hard cleared` path) wipes that on every restage,
 # which would destroy an in-flight run's evidence.
 KB_HEADLESS_DIR := justfile_directory() / ".." / ".claude-temp" / "kb-headless"
@@ -387,7 +428,7 @@ KB_DRIVER_ARXIV_CANDIDATE_DIR := justfile_directory() / ".." / ".claude-temp" / 
 # staged directory name; the two must agree on this mapping since this
 # recipe never stages anything itself, only reads what stage-arxiv-paper
 # already wrote.
-[doc("run a --no-inference kb_driver build over one staged arXiv paper; resolves --source from 00README.json's toplevel entry or, failing that, a lone \\documentclass file; writes a status file under KB_DRIVER_ARXIV_DIR/status/ that no-inference-kb-driver-arxiv-corpus reads to tally outcomes — exit code is advisory (0 built, 2 the source could not be resolved or the paper isn't staged, anything else the driver's own exit code)")]
+[doc("run a --no-inference kb_driver build over one staged arXiv paper; resolves --source from 00README.json's toplevel entry or, failing that, a lone \\documentclass file; writes a status file under KB_DRIVER_ARXIV_DIR/status/ that no-inference-kb-driver-arxiv-corpus reads to tally outcomes — exit code is advisory (0 built, 2 the source could not be resolved or the paper isn't staged, 1 also when the paper holds no single installed kb_tools, anything else the driver's own exit code)")]
 no-inference-kb-driver-arxiv-paper id: _venv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -449,6 +490,13 @@ no-inference-kb-driver-arxiv-paper id: _venv
     fi
     printf 'resolved {{id}} via %s: %s\n' "${rule}" "${source}"
 
+    if ! harness_dir="$(just _installed-harness-value "${dir}" project-harness-dir)" || [[ -z "${harness_dir}" ]]; then
+        reason="${dir} holds no single installed kb_tools — restage it with \`just stage-arxiv-paper {{id}}\`"
+        printf 'result=failed\nrule=%s\nsource=%s\nreason=%s\n' "${rule}" "${source}" "${reason}" > "${status_file}"
+        printf 'failed {{id}}: %s\n' "${reason}" >&2
+        exit 1
+    fi
+
     log_file="${log_dir}/${id_safe}.console.log"
     run_dir_parent="{{KB_DRIVER_ARXIV_DIR}}/runs/${id_safe}"
     mkdir -p "${run_dir_parent}"
@@ -457,7 +505,7 @@ no-inference-kb-driver-arxiv-paper id: _venv
     # unguided paper hits is exactly what this sweep cannot know in advance.
     set +e
     ( cd "${dir}" && \
-      PYTHONPATH=.claude/agents \
+      PYTHONPATH="${harness_dir}/agents" \
       "{{VENV_PYTHON}}" -m kb_tools.kb_driver run \
         --source "${source}" \
         --no-inference \
@@ -696,6 +744,14 @@ kb-driver-arxiv-corpus: _venv
         fi
         printf 'resolved %s via %s: %s\n' "${id}" "${rule}" "${source}"
 
+        if ! harness_dir="$(just _installed-harness-value "${dir}" project-harness-dir)" || [[ -z "${harness_dir}" ]]; then
+            reason="${dir} holds no single installed kb_tools — restage it with \`just stage-arxiv-paper ${id}\`"
+            printf 'result=failed\nrule=%s\nsource=%s\nreason=%s\n' "${rule}" "${source}" "${reason}" > "${status_dir}/${id_safe}.status"
+            printf 'failed %s: %s\n' "${id}" "${reason}" >&2
+            failed+=("${id}")
+            continue
+        fi
+
         log_file="${log_dir}/${id_safe}.console.log"
         run_dir_parent="${run_dir_root}/${id_safe}"
         mkdir -p "${run_dir_parent}"
@@ -707,7 +763,7 @@ kb-driver-arxiv-corpus: _venv
         # suspends it around no-inference-kb-driver-arxiv-paper.
         set +e
         ( cd "${dir}" && \
-          PYTHONPATH=.claude/agents \
+          PYTHONPATH="${harness_dir}/agents" \
           "{{VENV_PYTHON}}" -m kb_tools.kb_driver run \
             --source "${source}" \
             --run-dir "${run_dir_parent}" \
@@ -812,6 +868,92 @@ kb-driver-kill:
     rm -f "${pid_file}"
     printf 'cleared %s\n' "${pid_file}"
 
+# Detached, one slot: the pid file and console log sit directly in
+# KB_DRIVER_LIVE_DIR and the driver's run-dir parent is KB_DRIVER_LIVE_DIR/runs
+# (it writes LATEST there), which is exactly what kb-driver-harvest and
+# kb-driver-kill read — so a second launch while one is alive is refused rather
+# than allowed to orphan the first's pid.
+#
+# A fixture records no source list. The sources are the top-level `.tex` files
+# holding `\documentclass` — the same rule no-inference-kb-driver-arxiv-paper's
+# fallback applies, here without the lone-file restriction, because a fixture
+# like ModernCorp is several documents. Files only `\input` into another
+# (AppendixA/B) carry none and are not sources. Read after restaging, so the
+# list is of the tree the driver will see. `LC_ALL=C` fixes the order.
+#
+# `--` splits the trailing arguments: before it, flags for stage-fixture (and
+# through it the root install recipe); after it, flags for `kb_driver run`.
+# Neither side's flags are enumerated here, so neither can drift from its owner.
+# The env file is sourced only inside the launched subshell and is never read
+# or printed by this recipe.
+[doc("restage a hand-staged fixture, then launch a with-inference kb_driver build over it detached (pid file, console log and run dir under KB_DRIVER_LIVE_DIR, so kb-driver-harvest/-kill apply) and return; env_file (required) is sourced into the driver's environment only; sources are the fixture's top-level .tex files holding \\documentclass; usage: kb-driver-fixture dir env_file [stage-fixture flags] [-- kb_driver run flags], e.g. `kb-driver-fixture test-data/transient/ModernCorp <env> --family=qwen3 -- --through document-graph`")]
+kb-driver-fixture dir env_file *args: _venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="${1}"
+    env_file="${2}"
+    shift 2
+    stage_args=()
+    driver_args=()
+    while [[ "$#" -gt 0 && "${1}" != "--" ]]; do
+        stage_args+=("${1}")
+        shift
+    done
+    if [[ "$#" -gt 0 ]]; then
+        shift
+        driver_args=("$@")
+    fi
+    # just runs a recipe from the justfile's directory, so a relative path a
+    # caller typed is relative to where they typed it, not to here.
+    [[ "${env_file}" = /* ]] || env_file="{{invocation_directory()}}/${env_file}"
+    if [[ ! -f "${env_file}" || ! -r "${env_file}" ]]; then
+        printf 'error: env file %s is not a readable file.\n' "${env_file}" >&2
+        exit 1
+    fi
+    pid_file="{{KB_DRIVER_LIVE_DIR}}/driver.pid"
+    if [[ -f "${pid_file}" ]] && kill -0 "$(cat "${pid_file}")" 2>/dev/null; then
+        printf 'error: live driver run (pid %s) holds %s — `just kb-driver-kill` it first.\n' "$(cat "${pid_file}")" "${pid_file}" >&2
+        exit 1
+    fi
+
+    just stage-fixture "${dir}" ${stage_args[@]+"${stage_args[@]}"}
+
+    sources=()
+    while IFS= read -r tex; do
+        if grep -qF '\documentclass' "${dir}/${tex}"; then
+            sources+=(--source "${tex}")
+        fi
+    done < <(cd "${dir}" && LC_ALL=C find . -maxdepth 1 -name '*.tex' -type f | sed 's|^\./||' | LC_ALL=C sort)
+    if [[ "${#sources[@]}" -eq 0 ]]; then
+        printf 'error: %s holds no top-level .tex file with \\documentclass — nothing to build.\n' "${dir}" >&2
+        exit 1
+    fi
+    harness_dir="$(just _installed-harness-value "${dir}" project-harness-dir)"
+    if [[ -z "${harness_dir}" ]]; then
+        printf 'error: %s holds no installed kb_tools after staging.\n' "${dir}" >&2
+        exit 1
+    fi
+
+    run_parent="{{KB_DRIVER_LIVE_DIR}}/runs"
+    log_file="{{KB_DRIVER_LIVE_DIR}}/console.log"
+    mkdir -p "${run_parent}"
+    # `exec` makes the backgrounded subshell the driver itself, so $! is the
+    # driver's pid and not a wrapper's that outlives it.
+    (
+        cd "${dir}"
+        set -a
+        . "${env_file}"
+        set +a
+        PYTHONPATH="${harness_dir}/agents" exec nohup "{{VENV_PYTHON}}" -m kb_tools.kb_driver run \
+            "${sources[@]}" --run-dir "${run_parent}" ${driver_args[@]+"${driver_args[@]}"} \
+            < /dev/null > "${log_file}" 2>&1
+    ) &
+    printf '%s\n' "$!" > "${pid_file}"
+    printf 'launched pid %s over %s (%s)\n' "$!" "${dir}" "${sources[*]}"
+    printf 'watch:   tail -f %s\n' "${log_file}"
+    printf 'run dir: %s (LATEST names the run)\n' "${run_parent}"
+    printf 'then:    just kb-driver-harvest | just kb-driver-kill\n'
+
 # Not wired into the root `just test` (that stays the fast unit run over
 # kb_tools/liaison_tools/gen_defs): this suite exercises kb-testing's own
 # recipes against DATA STAGED under test-data/transient/, never fixtures
@@ -858,7 +1000,7 @@ measure-kb-roots script *args: _venv
 #
 # Stdlib only, under the system python3 the way a consumer runs it, but with
 # PYTHONPATH pointed at THIS tree rather than the consumer's installed
-# .claude/agents: the renderer under test is the working copy.
+# copy: the renderer under test is the working copy.
 #
 # `"${@:2}"` and not `"$@"`: this file's own `set positional-arguments :=
 # true` (line 2) makes $1 `repo` itself, so passing the whole list would hand
@@ -952,3 +1094,41 @@ measure-sheet +pairs:
         resolved+=("${label}=${sheet}")
     done
     python3 "{{justfile_directory()}}/tools/measure-sheet.py" "${resolved[@]}"
+
+# The finished build whose recorded claim-graph asks the two recipes below
+# replay and compare. Both run with PYTHONPATH at its own installed copy,
+# so the seat, the no-tools fragment and the answer parses are
+# the toolchain copy that build ran — not this tree's, which moves on.
+ASK_REPLAY_FIXTURE := justfile_directory() / "test-data" / "transient" / "ModernCorp"
+
+[private]
+[doc("print ASK_REPLAY_FIXTURE's installed agents directory, the PYTHONPATH entry for its kb_tools; fails if it has none")]
+_ask-replay-agents-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    harness_dir="$(just _installed-harness-value "{{ASK_REPLAY_FIXTURE}}" project-harness-dir)"
+    if [[ -z "${harness_dir}" ]]; then
+        printf 'error: %s has no installed kb_tools under any harness — stage it first.\n' "{{ASK_REPLAY_FIXTURE}}" >&2
+        exit 1
+    fi
+    printf '%s\n' "{{ASK_REPLAY_FIXTURE}}/${harness_dir}/agents"
+
+[doc("replay ASK_REPLAY_FIXTURE's recorded claim-graph asks against the model a liaison env file names, into .claude-temp/ask-replay/<model>/; resumable; trailing args forward (--concurrency N, --timeout S, --ask STEM)")]
+replay-claimgraph-asks env_file *args: _venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env_file="{{env_file}}"
+    # just runs a recipe from the justfile's directory, so a relative path a
+    # caller typed is relative to where they typed it, not to here.
+    [[ "${env_file}" = /* ]] || env_file="{{invocation_directory()}}/${env_file}"
+    agents_dir="$(just _ask-replay-agents-dir)"
+    PYTHONPATH="${agents_dir}" "{{VENV_PYTHON}}" "{{justfile_directory()}}/tools/replay-claimgraph-asks.py" \
+        --fixture "{{ASK_REPLAY_FIXTURE}}" --env-file "${env_file}" "${@:2}"
+
+[doc("compare replayed claim-graph asks (model directories under .claude-temp/ask-replay/) with ASK_REPLAY_FIXTURE's own answers; writes summary.md and disagreements.tsv beside them")]
+compare-claimgraph-asks +models: _venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    agents_dir="$(just _ask-replay-agents-dir)"
+    PYTHONPATH="${agents_dir}" "{{VENV_PYTHON}}" "{{justfile_directory()}}/tools/compare-claimgraph-asks.py" \
+        --fixture "{{ASK_REPLAY_FIXTURE}}" "$@"

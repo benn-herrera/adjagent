@@ -1,18 +1,97 @@
 # CONVENTIONS – Adjagent
 
-House rules and project-specific traps only. Doc-structure conventions and general engineering ethos live in operator config (the harness agents file, `templates/harness/AGENTS.md.tmpl`), not here.
+House rules and project-specific traps only. Doc-structure conventions and general engineering ethos
+live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl.md`), not here.
 
-- **Chunk single-sourcing.** Text shared by two or more definitions lives in exactly one `[chunks.*]` entry in `shared-chunks.toml`. A template never pastes a paraphrase of shared text inline — reference the chunk, or add a variant if the shared text needs a per-agent difference.
-- **A checkpoint is not complete until the sweep has run.** `just sweep-prose` and `just sweep-python` enumerate what no single file can report — one sentence inline in seven templates, one concept with two implementations, one constant with two definitions — because a rule honoured completely inside one file is still broken across two. They emit candidates and never verdicts, so the run is not finished when they exit zero; it is finished when someone has read the list and said which pairs are one idea.
-- **Every template identifier is strict kebab, in every template system.** `[a-z][a-z0-9]*(-[a-z0-9]+)*` — letter-led segments joined by single hyphens; no leading digit, no leading or trailing hyphen, no doubled hyphen, no underscore. Chunk and marker names, namespaces, family anchor keys, chunk-argument keys, prompt-template slots. Each system spells the class in its own constant; none imports another. The reason to have one class at all is that these templates are read and increasingly written by models, and a reviewer of either surface should not have to hold two grammars — the same argument that put both systems on the `@!` … `!@` delimiter pair.
-  - **A namespace sits ahead of the name, outside the class, and routes rather than describes.** Both systems run on it. A prompt-template slot spelled `@!dyn.<name>!@` is filled from the caller's per-call data and one spelled `@!<name>!@` from the composer's own sources, each from nowhere else (`kb_tools/ARCHITECTURE.md`, the `prompt_templates.py` row). A generator marker spelled `@!<name>!@` is a chunk, `@!arg.<name>!@` the value its call site bound, `@!dyn.<name>!@` an invocation parameter, `@!fam.<key>!@` the family overlay, `@!hrn.<key>!@` the harness file — each from nowhere else (`ARCHITECTURE.md`, Template System). The `.` is what keeps them apart — never admit it to the identifier class, and a namespace can never be mistaken for a name nor a name claim a namespace. Two consequences the generator's own history earned: a namespace earns its place by deciding where a value comes from, and one that only labels what a name already says is a second grammar for nothing; and where the namespace decides, **nothing needs reserving and no source needs precedence** — a collision between two sources is unrepresentable rather than arbitrated. The prefix goes where a value is **consumed**, never where it is bound: an argument's call site and its defaults table are already unambiguous by position. A fence metakey (`_resolve`) is underscore-led on purpose, outside the identifier class, so it can never be read as an output name — the same reasoning that keeps `.` out of the class.
-- **Never comment in a rendered body.** A template or chunk body becomes an agent's system prompt; maintainer commentary there ships into every dispatch and is read by every seat.
-- **The harness agents file changes by explicit act, in either direction.** Publish by hand: edit `templates/harness/AGENTS.md.tmpl`, then commit. Adopt with `just install-agents-file <harness> <dir>`, which replaces only the block between the `adjagent` marker lines and refuses while `templates/` is dirty. Your own rules go outside the markers, because inside is replaced on every install. Machine-local sections (an auth sandbox, host-specific paths) live outside the block in the live file and are never published.
-- **Obviated code is deleted, not parked.** When a change makes code unnecessary, it goes in the same change — not commented out, not left unreferenced behind a "maybe someday", not kept as a second implementation nobody calls. Git holds it, and a commit message naming what replaced it is a better record than a dead module. The cost of keeping it is paid by everyone after: a reader can't tell live from vestigial, an agent reads it as current, and `tests/test_orphan_name_sweep.py` makes every unreferenced module-level name someone's problem to classify. A plan for rebuilding it later is cheap and belongs in `ROADMAP_PLANS/`; the code itself is not.
-- **Partly-planned work that isn't ready to execute lives in `ROADMAP_PLANS/`, not in scratch.** `mad-design/` and the repository's other scratch trees are gitignored, so a plan parked there is one power-cycle from gone. A plan worth keeping moves to `ROADMAP_PLANS/`, which is tracked. It's good practice for such a plan to correspond to a `ROADMAP.md` item, but that is a habit, not a rule — nothing requires or checks it.
+- **Chunk single-sourcing.** Text shared by two or more definitions lives in exactly one
+  `[chunks.*]` entry in `shared-chunks.toml`. A template never pastes a paraphrase of shared text
+  inline — reference the chunk, or add a variant if the shared text needs a per-agent difference.
+- **A checkpoint is not complete until the sweep has run.** `just sweep-prose` and
+  `just sweep-python` enumerate what no single file can report — one sentence inline in seven
+  templates, one concept with two implementations, one constant with two definitions — because a
+  rule honoured completely inside one file is still broken across two. They emit candidates and
+  never verdicts, so the run is not finished when they exit zero; it is finished when someone has
+  read the list and said which pairs are one idea.
+- **The gate after a change is `just test-changed [base]`.** It runs only the test surfaces the
+  change touches (the mapping lives in the justfile's `TEST_SURFACE_MAP`); bare `just test` is the
+  full run. Cross-surface coupling is either removed or explicitly accepted as a risk — never paid
+  for by running unrelated surfaces. The accepted exception today:
+  `kb_tools/tests/test_kb_driver_head.py` runs the real generator install, so a generator change can
+  break it unnoticed until the `kb_tools` surface next runs.
+- **Every template identifier is strict kebab, in every template system.**
+  `[a-z][a-z0-9]*(-[a-z0-9]+)*` — letter-led segments joined by single hyphens; no leading digit, no
+  leading or trailing hyphen, no doubled hyphen, no underscore. Chunk and marker names, namespaces,
+  family anchor keys, chunk-argument keys, prompt-template slots. Each system spells the class in
+  its own constant; none imports another. The reason to have one class at all is that these
+  templates are read and increasingly written by models, and a reviewer of either surface should not
+  have to hold two grammars — the same argument that put both systems on the `@!` … `!@` delimiter
+  pair.
+  - **A namespace sits ahead of the name, outside the class, and routes rather than describes.**
+    Both systems run on it. A prompt-template slot spelled `@!dyn.<name>!@` is filled from the
+    caller's per-call data and one spelled `@!<name>!@` from the composer's own sources, each from
+    nowhere else (`kb_tools/ARCHITECTURE.md`, the `prompt_templates.py` row). A generator marker
+    spelled `@!<name>!@` is a chunk, `@!arg.<name>!@` the value its call site bound,
+    `@!dyn.<name>!@` an invocation parameter, `@!fam.<key>!@` the family overlay, `@!hrn.<key>!@`
+    the harness file — each from nowhere else (`ARCHITECTURE.md`, Template System). The `.` is what
+    keeps them apart — never admit it to the identifier class, and a namespace can never be mistaken
+    for a name nor a name claim a namespace. Two consequences the generator's own history earned: a
+    namespace earns its place by deciding where a value comes from, and one that only labels what a
+    name already says is a second grammar for nothing; and where the namespace decides, **nothing
+    needs reserving and no source needs precedence** — a collision between two sources is
+    unrepresentable rather than arbitrated. The prefix goes where a value is **consumed**, never
+    where it is bound: an argument's call site and its defaults table are already unambiguous by
+    position. A fence metakey (`_resolve`) is underscore-led on purpose, outside the identifier
+    class, so it can never be read as an output name — the same reasoning that keeps `.` out of the
+    class.
+- **Never comment in a rendered body.** A template or chunk body becomes an agent's system prompt;
+  maintainer commentary there ships into every dispatch and is read by every seat.
+- **The harness agents file changes by explicit act, in either direction.** Publish by hand: edit
+  `templates/harness/AGENTS.tmpl.md`, then commit. Adopt with
+  `just install-agents-file <dir> [harness]`, which replaces only the block between the `adjagent`
+  marker lines and refuses while `templates/` is dirty. Your own rules go outside the markers,
+  because inside is replaced on every install. Machine-local sections (an auth sandbox,
+  host-specific paths) live outside the block in the live file and are never published.
+- **Obviated code is deleted, not parked.** When a change makes code unnecessary, it goes in the
+  same change — not commented out, not left unreferenced behind a "maybe someday", not kept as a
+  second implementation nobody calls. Git holds it, and a commit message naming what replaced it is
+  a better record than a dead module. The cost of keeping it is paid by everyone after: a reader
+  can't tell live from vestigial, an agent reads it as current, and
+  `tests/test_orphan_name_sweep.py` makes every unreferenced module-level name someone's problem to
+  classify. A plan for rebuilding it later is cheap and belongs in `ROADMAP_PLANS/`; the code itself
+  is not.
+- **Partly-planned work that isn't ready to execute lives in `ROADMAP_PLANS/`, not in scratch.**
+  `mad-design/` and the repository's other scratch trees are gitignored, so a plan parked there is
+  one power-cycle from gone. A plan worth keeping moves to `ROADMAP_PLANS/`, which is tracked. It's
+  good practice for such a plan to correspond to a `ROADMAP.md` item, but that is a habit, not a
+  rule — nothing requires or checks it.
+  - **A plan leaves `ROADMAP_PLANS/` when it is finished, abandoned or superseded — in the same
+    change.** A superseding plan first absorbs every section, decision and piece of evidence it
+    still relies on, stated as its own, and cites nothing in the plan it replaces; then the old plan
+    is deleted. A plan still on disk reads as work waiting to be done.
+- **`.md` files wrap at 100 columns** — the project documents (`THESIS.md`, `SPEC.md`,
+  `ARCHITECTURE.md`, `CONVENTIONS.md`, `ROADMAP.md`, READMEs), the planning documents
+  (`ACTIVE_PLAN.md`, everything in `ROADMAP_PLANS/`), and every template (`.tmpl.md`). Prose and
+  list items break at 100, list continuations indented under their bullet. Headings, table rows and
+  URLs that cannot break stay whole.
+  - **Exception: the two marker lines in `templates/harness/AGENTS.tmpl.md`**
+    (`<!-- vvv-adjagent … -->` and `<!-- ^^^-adjagent … -->`) stay on one line each. The installer
+    recognizes them line by line, so a wrapped marker breaks every later install; they run past 100
+    in the template only because `@!dyn.gen-short-sha!@` renders as seven characters.
 
 ## Adding Templates and Promoting Definitions
 
-Mechanism — markers, variants, overlay anchors, the write-safety table — lives in the `gen_defs` module docstrings: `markers.py`, `chunks.py`, `model_tuning.py`, `generation.py`. This section is procedure only.
+Mechanism — markers, variants, overlay anchors, the write-safety table — lives in the `gen_defs`
+module docstrings: `markers.py`, `chunks.py`, `model_tuning.py`, `generation.py`. This section is
+procedure only.
 
-- **New template, de novo.** Create `templates/agents/<path>/<name>.md.tmpl` (or the same under `templates/commands/`). Placement is the whole declaration: a template's path within its surface tree is its output's path within `agents/` or `commands/`, nesting included, and a template's existence is its enrollment — there is no list to join. The body is the definition as it should render — frontmatter (an agents template must open with one), then content, with shared spans as chunk markers — optionally preceded by a `+++ ... +++` TOML fence declaring multiple outputs, the parameters that differ between them, and maintainer comments. The render creates the output and stamps its banner. An agents template's body must hold SPEC.md's Guest-Extraction Contract when it renders a dispatchable definition — a template directly under `templates/agents/`. Nested deeper, the obligation reaches only `mad/participant-contract.md.tmpl`, which exists to be extracted; a `mad/design-topics/` methodology topic is outside it.
+- **New template, de novo.** Create `templates/agents/<path>/<name>.tmpl.md` (or the same under
+  `templates/commands/`). Placement is the whole declaration: a template's path within its surface
+  tree is its output's path within `agents/` or `commands/`, nesting included, and a template's
+  existence is its enrollment — there is no list to join. The body is the definition as it should
+  render — frontmatter (an agents template must open with one), then content, with shared spans as
+  chunk markers — optionally preceded by a `+++ ... +++` TOML fence declaring multiple outputs, the
+  parameters that differ between them, and maintainer comments. The render creates the output and
+  stamps its banner. An agents template's body must hold SPEC.md's Guest-Extraction Contract when it
+  renders a dispatchable definition — a template directly under `templates/agents/`. Nested deeper,
+  the obligation reaches only `mad/participant-contract.tmpl.md`, which exists to be extracted; a
+  `mad/design-topics/` methodology topic is outside it.

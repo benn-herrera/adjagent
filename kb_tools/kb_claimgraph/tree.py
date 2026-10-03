@@ -122,6 +122,13 @@ CLEVEREF_REFERENCE_TYPES: frozenset[str] = frozenset({"ref+label", "ref+Label"})
 
 _LABEL_SEPARATOR = ","
 
+#: What a page writes between two items of one printed list — *Lemmas 2 and 3*,
+#: *Sections 4, 5, and 7*, *Theorems 1–3* — as a regular-expression fragment.
+#: Two readings walk such a list: the word before an anchor carries across one
+#: (:mod:`inventory`), and a claim named by hand yields one candidate per item
+#: (:mod:`hand_named`). One spelling, so the two agree on where a list ends.
+LIST_SEPARATOR = r"\s*(?:,\s*(?:(?:and|or)\s+)?|\s(?:and|or)\s+|(?:&|–|—|--)\s*)"
+
 
 def anchor_labels(reference_type: str, label: str) -> tuple[str, ...]:
     """The labels one anchor names — several only where a cleveref named several.

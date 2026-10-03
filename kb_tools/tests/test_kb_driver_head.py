@@ -209,7 +209,7 @@ def lamb(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, run.Result]:
 
 
 def test_the_head_walks_a_repository_that_holds_only_its_sources(lamb: tuple[Path, run.Result]) -> None:
-    """Every stage recorded, from a repository with no KB in it — and the worktree clean after.
+    """Every stage a build owes recorded, from a repository with no KB in it — and the worktree clean after.
 
     The ordering rule, observed: each boundary sweeps what its stage wrote. It
     is what lets the seed run at all — its preflight refuses a dirty worktree,
@@ -219,7 +219,7 @@ def test_the_head_walks_a_repository_that_holds_only_its_sources(lamb: tuple[Pat
     consumer, result = lamb
 
     assert result.exit_code == baton.EXIT_OK, result.detail
-    assert kb_pipeline.recorded_stages(consumer) == set(kb_pipeline.STAGE_IDS)
+    assert kb_pipeline.recorded_stages(consumer) == {stage.id for stage in kb_pipeline.REQUIRED_STAGES}
     assert kb_util.document_tree_present(consumer)
     assert (kb_util.kb_root(consumer) / kb_util.INDEX_DIRNAME).is_dir()
     assert kb_util.targets_installed(consumer)
@@ -356,7 +356,7 @@ class Resumption:
 
 @pytest.fixture(scope="module")
 def resumption(tmp_path_factory: pytest.TempPathFactory) -> Resumption:
-    """A build bounded at the head's end, then continued by a second invocation."""
+    """A build bounded at the head's end, then continued by a second invocation that asks for the audit."""
     root = tmp_path_factory.mktemp("resumed")
     consumer = _make_fresh_consumer(root / "consumer", corpus=_LAMB, files=(*LAMB_SOURCES, "lamb.bib", "stray.bib"))
     opened = _walk_head(
@@ -373,7 +373,7 @@ def resumption(tmp_path_factory: pytest.TempPathFactory) -> Resumption:
         consumer,
         root / "runs",
         stages=kb_pipeline.STAGE_IDS,
-        overrides={"sources": LAMB_SOURCES},
+        overrides={"sources": LAMB_SOURCES, "doc_audit": True},
         run_id="20260901T120000-2",
         invoker=invoker,
     )

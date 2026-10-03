@@ -185,6 +185,22 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path, selector: attribute.
             )
         )
         report.findings.append(
+            Finding(
+                FACT,
+                "stage-D-word-filtered",
+                f"{len(narrowed.word_dropped)} candidate pairs never opened: the word before the anchor names a "
+                f"section, a figure or another kind no premise relation can hold, and no other reference opens them",
+            )
+        )
+        report.findings.append(
+            Finding(
+                FACT,
+                "stage-D-hand-named",
+                f"{len(narrowed.hand_named)} candidate pairs where a claim's body names another by its printed name "
+                f"and number with no reference; held for classification, neither asked about nor recorded",
+            )
+        )
+        report.findings.append(
             _unasked_finding(offered=offered, sources=len(narrowed.questions), asked=selector is not None)
         )
 

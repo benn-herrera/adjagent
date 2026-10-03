@@ -27,8 +27,8 @@ The tree below is written to put each of those on a different document, so a
 failure names which one.
 """
 
-import os
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -36,8 +36,8 @@ import pytest
 from kb_tools import kb_index_lib, kb_schema, kb_util, verify_kb_metadata
 from kb_tools.kb_claimgraph import attribute, equation, equations, graph, inventory, tree
 from kb_tools.kb_claimgraph.build import build
-
-_PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
+from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
+from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
 pytestmark = pytest.mark.skipif(
     shutil.which("just") is None,
@@ -183,31 +183,26 @@ _TREE = {
 }
 
 
-@pytest.fixture
-def declared(tmp_path: Path) -> Path:
-    """A consuming repo carrying the tree, after the declared pass and the equations stage have run green.
-
-    No node pass between them: its record lists every leaf unread, so every
-    reference counts — a build spending no inference.
-    """
-    repo = tmp_path / "consumer"
-    for relative, text in _TREE.items():
-        target = repo / "kb-root" / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    (repo / ".git").mkdir()
-    (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
-    installed = repo / ".claude" / "agents"
-    installed.mkdir(parents=True)
-    os.symlink(_PACKAGE_ROOT, installed / _PACKAGE_ROOT.name)
-    kb_util.install_targets(repo, "just")
-
+@pytest.fixture(scope="module")
+def declared_build(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    repo = install_claimgraph_consumer(tmp_path_factory.mktemp("equations-declared") / "consumer", _TREE)
     scratch = repo / kb_util.scratch_dirname() / "claimgraph"
     outcome = build(kb_root=repo / "kb-root", repo_root=repo, scratch=scratch)
     assert not outcome.failed, outcome.lines()
     minted = equations.build(kb_root=repo / "kb-root", repo_root=repo, scratch=scratch)
     assert not minted.failed, minted.lines()
-    return repo
+    with held_unchanged(repo, name="equations declared"):
+        yield repo
+
+
+@pytest.fixture
+def declared(declared_build: Path, tmp_path: Path) -> Path:
+    """This test's own copy of the consumer after the declared pass and the equations stage have run green.
+
+    No node pass between them: its record lists every leaf unread, so every
+    reference counts — a build spending no inference.
+    """
+    return copy_build(declared_build, tmp_path / "consumer")
 
 
 def _read(repo: Path):

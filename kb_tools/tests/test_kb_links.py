@@ -140,6 +140,16 @@ def test_iter_markdown_files_skips_skip_dirs(tmp_path: Path) -> None:
     assert found == {"keep.md"}
 
 
+def test_iter_markdown_files_skips_document_templates(tmp_path: Path) -> None:
+    # A template's links resolve where a build stamps it, not where it sits.
+    (tmp_path / "installed").mkdir()
+    (tmp_path / "installed" / "README.tmpl.md").write_text("[a](AGENTS.md)", encoding="utf-8")
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+
+    found = {p.relative_to(tmp_path).as_posix() for p in kb_links.iter_markdown_files(tmp_path)}
+    assert found == {"README.md"}
+
+
 def test_verifier_imports_shared_primitives() -> None:
     """The verifier uses the single shared copy, not a private duplicate."""
     vml = _load_verifier()

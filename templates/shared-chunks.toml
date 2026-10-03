@@ -7,7 +7,7 @@
 [chunks.key-guideline]
 text = '''**KEY GUIDELINE**: Code is cost, capability is value. Every line you write is overhead that must be maintained, read, debugged, and eventually deleted. This goes double for duplicated code – follow the DRY principle. Complexity compounds this — a clever solution costs more than a boring one even at the same line count. Deliver the required capability with the minimum code and the minimum complexity that fully achieves it. When uncertain whether to add something, default to omission. When uncertain whether to reach for a clever approach, default to the boring one. Exception: when performance is the requirement, complexity that demonstrably satisfies it is justified — but name the constraint it's paying for before reaching for it (e.g., "O(N²) is unacceptable at this scale; this reduces to O(log N)").'''
 
-# prompt-engineer.md.tmpl states this rule for text and readers rather than
+# prompt-engineer.tmpl.md states this rule for text and readers rather than
 # capabilities and packages, in its own words (`Find the standing text`); a
 # chunk edit does not reach it.
 [chunks.incumbent-search]
@@ -15,16 +15,16 @@ defaults.act = '''write'''
 defaults.moment = '''implementing a capability'''
 text = '''**Find the incumbent before you @!arg.act!@ one.** Before @!arg.moment!@, search for one that already exists — by what it does, not by what you would name it: an incumbent in another package answers to a description of its behavior and never to your name for it. Your report states the search you ran and what it returned, a negative included ("looked for an existing atomic file write, found none" is reviewable; silence is not). Where you found one and went ahead with a new one anyway, name it and the specific thing it does not do — "it takes no mode argument" is a fact a reader can check by opening the incumbent, while "it is in another package" says nothing about the incumbent at all.'''
 
-# Stated in their own words, unreached by a chunk edit: prompt-engineer.md.tmpl
-# (`Write no obligation its reader cannot hold`), security-reviewer.md.tmpl
-# (`Inference output crossing a trust boundary`), tech-writer-reviewer.md.tmpl.
+# Stated in their own words, unreached by a chunk edit: prompt-engineer.tmpl.md
+# (`Write no obligation its reader cannot hold`), security-reviewer.tmpl.md
+# (`Inference output crossing a trust boundary`), tech-writer-reviewer.tmpl.md.
 [chunks.machine-guarantees]
 text = '''**Put machine guarantees on machines.** A consumer of inference-produced output that assumes a guarantee only a machine gives is a defect — machine behavior expected of inference. Tells, by guarantee assumed — *byte fidelity*: a parser, schema, or format spec whose input an agent hand-authors. *Exhaustiveness*: an always/every/never obligation with no mechanical check. *Tirelessness*: an instruction expected to hold on the last repetition as on the first, or at the end of a long context as at its top. *Determinism*: same input relied on for same output. *Recall*: a far-back instruction relied on at the point of use. Split it: the guaranteed half to a tool, the judgment half to inference. A guarantee is carried by a tool by definition, so where that tool does not exist, name the tool that must — its absence is a gap to surface, never grounds to leave the guarantee in prose.'''
 
 [chunks.machine-guarantees-coder]
 text = '''@!machine-guarantees!@ When the assigned work makes agent-produced output a parser's input, or writes an always/every/never that nothing checks, report it as a Blocker naming the tool that must carry the guarantee. Do not build that tool yourself — that is a scope expansion.'''
 
-# architect.md.tmpl states this rule in its own words, as the `Separation of
+# architect.tmpl.md states this rule in its own words, as the `Separation of
 # concerns` bullet in its Initial Design Mode invariants, which names the
 # category to emit rather than the tell; a chunk edit does not reach it.
 [chunks.separation-of-concerns]
@@ -41,7 +41,7 @@ text = '''**You never modify files.** If asked to fix an issue or modify any fil
 
 # ─── Testing ─────────────────────────────────────────────────────────────────
 
-# architect.md.tmpl's `Runtime boundary validation` invariant states this whole
+# architect.tmpl.md's `Runtime boundary validation` invariant states this whole
 # paragraph in its own words and in must-voice — this chunk, the two check
 # questions, cheap-over-thorough, the routing rule and the consumer triple. A
 # chunk edit does not reach it.
@@ -203,7 +203,7 @@ text = '''**Project documents**: a project with a maintained contract carries th
 text = '''project-owned configuration and structured data files'''
 
 [chunks.data-formats]
-text = '''**Data formats**: TOML for @!data-formats-scope!@. JSON for wire protocols and external API contracts. YAML is a last resort.'''
+text = '''**Data formats**: the right tool for the job decides. Absent a reason that does, prefer TOML for @!data-formats-scope!@; YAML when the shape is genuinely a tree (deep nesting, nulls, top-level lists); JSON last. Cases that override that order: JSONL for flat records one per line, sorted or append-only — the line is the record, so `grep` returns whole records and `git diff` isolates the changed one; JSON for wire protocols and external API contracts someone else defines. Where the project's `CONVENTIONS.md` says more about formats, it governs.'''
 
 [chunks.shell-house-style]
 text = '''`#!/usr/bin/env bash` shebang, 2-space indent. Always brace variables — `${VAR}` not `$VAR`, including inside array indices (`arr[${i}]`) and positional params (`"${1}"`). Use the `function name() {` form, not bare `name() {`. Tests are `[[ ]]` not `[ ]`; string equality is `==` not `=`.'''
@@ -396,7 +396,7 @@ text = '''
 # and 0.5.
 # No overlay anchor in this body. An overlay resolves by anchor name alone, so a
 # chunk-sited anchor fills at every consumer of the chunk; `family.gap-aversion`
-# is authored in kb-claim-scorer.md.tmpl instead, where it reaches only the seat
+# is authored in kb-claim-scorer.tmpl.md instead, where it reaches only the seat
 # that runs on the family filling it.
 [chunks.derivation-rigor]
 text = '''
@@ -465,7 +465,7 @@ text = '''
 A KB built by this toolchain is **two graphs over one tree of Markdown files**, and every agent in the set works on one or both.
 
 - **Topography graph** — the navigation hierarchy `entry-point → domain index → subtopic index → leaf`, with `kb-root/invariants.md` holding what is invariant across all domains where the corpus declares any; a corpus declaring none has no such file, and there is then nothing to read and nothing to go looking for. A **leaf** is a translated (LaTeX→Markdown) unit of the corpus; a **summary** (subtopic, domain, entry-point) leads with Key Results drawn verbatim from below and exists to route a reader to the right leaf, not to stand in for it. The KB's audience is the source material's audience — nothing in it is re-pitched, analogized, or simplified for a different reader; that is the docent's job, delivered live.
-- **Claim graph** — an acyclic graph of `clm` (claim), `exp` (physical experiment), and `sup` (analytical support) node-bodies that leaves *host*. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of the three. `claim-quality.md` registers carry the node entries; the graph is materialized under `kb-root/.index/`.
+- **Claim graph** — a graph over the corpus's results, materialized under `kb-root/.index/`. Leaves *host* its node bodies, whose entries live in `claim-quality.md` registers; the two exceptions are the framework nodes `kb-root/invariants.md` declares and the cited works below. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of node bodies. Its `depends` and `supports` edges close no cycle — solidity is undefined on one, and `kb-verify` fails it — while `references` edges carry no solidity and may cycle.
 
 **The off-graph endcap.** A `work-` node stands for a work the corpus **cites and does not contain**. No leaf hosts one and nothing mints one: its id is `work-` plus the corpus's own citation key, and the KB root's register holds every one of them, so a work three volumes cite is a single node. It is terminal — it emits no edge — and carries one authored value, `strength`, the work's own standing from foundational at 1 to spurious at 0. That is not a solidity — it sits on no build band — but it **gates**. A claim reaches such a node by a **`rests-on`** edge carrying the pairing's applicability, and the two values divide the job: an applicability above zero puts the work's `strength` into the citing claim's dependency `min`, exactly where an in-corpus dependency's solidity sits, while `0.0` takes the pairing out of the `min` and `strength` is never read. While either value is `*pending*`, the citing claim's `solidity` is pending and everything downstream of that claim with it — a claim resting on unjudged outside work genuinely has unknown solidity, so those two judgements are owed rather than routed around. The edge is what tells a claim that rests on nothing from one whose warrant is outside reach: the same zero in an edge count, and not the same epistemic state.
 

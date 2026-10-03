@@ -27,11 +27,11 @@ snippet, imported by the line the installer writes, over the installed package.
 That is what makes the last stage's targets the real ones.
 """
 
-import os
 import re
 import shutil
 import tomllib
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -44,13 +44,16 @@ from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import AnswerFormatError
 from kb_tools.kb_driver import envelope
 from kb_tools.kb_write import ops, render
+from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
+from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
-_PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
-
-pytestmark = pytest.mark.skipif(
-    shutil.which("just") is None,
-    reason="claim discovery's last stage runs the consuming project's runner targets",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        shutil.which("just") is None,
+        reason="claim discovery's last stage runs the consuming project's runner targets",
+    ),
+    pytest.mark.usefixtures("claimgraph_gate_in_process"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -351,30 +354,26 @@ class ScriptedIdentifier:
 
 @pytest.fixture
 def consumer(tmp_path: Path) -> Path:
-    repo = tmp_path / "consumer"
-    for relative, text in _TREE.items():
-        target = repo / "kb-root" / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    (repo / ".git").mkdir()
-    (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
-    installed = repo / ".claude" / "agents"
-    installed.mkdir(parents=True)
-    os.symlink(_PACKAGE_ROOT, installed / _PACKAGE_ROOT.name)
-    kb_util.install_targets(repo, "just")
-    return repo
+    return install_claimgraph_consumer(tmp_path / "consumer", _TREE)
 
 
 def _scratch(repo: Path) -> Path:
     return repo / kb_util.scratch_dirname() / "claimgraph"
 
 
-@pytest.fixture
-def declared(consumer: Path) -> Path:
-    """``consumer`` after the declared pass has run and its gates are green."""
-    outcome = build(kb_root=consumer / "kb-root", repo_root=consumer, scratch=_scratch(consumer))
+@pytest.fixture(scope="module")
+def declared_build(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    repo = install_claimgraph_consumer(tmp_path_factory.mktemp("cinf-declared") / "consumer", _TREE)
+    outcome = build(kb_root=repo / "kb-root", repo_root=repo, scratch=_scratch(repo))
     assert not outcome.failed, outcome.lines()
-    return consumer
+    with held_unchanged(repo, name="cinf declared"):
+        yield repo
+
+
+@pytest.fixture
+def declared(declared_build: Path, tmp_path: Path) -> Path:
+    """This test's own copy of ``consumer`` after the declared pass has run and its gates are green."""
+    return copy_build(declared_build, tmp_path / "consumer")
 
 
 def _identifier(inference: ask.SeatAsk, *, cwd: Path = Path(".")) -> ask.ModelIdentifier:
@@ -1317,13 +1316,20 @@ def test_the_document_allowance_and_the_per_claim_ceiling_are_separate_budgets(d
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def discovered(declared: Path) -> Path:
+@pytest.fixture(scope="module")
+def discovered_build(declared_build: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    repo = copy_build(declared_build, tmp_path_factory.mktemp("cinf-discovered") / "consumer")
     identifier = FakeIdentifier()
-    report = _discover(declared, identifier)
+    report = _discover(repo, identifier)
     assert not report.failed, report.lines()
     assert len(identifier.asks) == 3
-    return declared
+    with held_unchanged(repo, name="cinf discovered"):
+        yield repo
+
+
+@pytest.fixture
+def discovered(discovered_build: Path, tmp_path: Path) -> Path:
+    return copy_build(discovered_build, tmp_path / "consumer")
 
 
 def test_the_run_exits_zero_and_the_runner_s_gates_are_green(discovered: Path):
@@ -1422,7 +1428,7 @@ def test_block_coverage_is_untouched(discovered: Path):
     assert len(claims) == 1
 
 
-def test_body_preservation_holds_over_the_discovery_run(declared: Path):
+def test_body_preservation_holds_over_the_discovery_run(declared: Path, runner_gate: None):
     """Every line added belongs to a frontmatter block; every line rewritten gained a marker."""
     before = _texts(declared / "kb-root")
     assert not _discover(declared, FakeIdentifier()).failed

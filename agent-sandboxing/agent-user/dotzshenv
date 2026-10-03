@@ -33,17 +33,12 @@ function init-nvm() {
 }
 
 function setup-env() {
-  # the privileged user this sandbox serves: home holds the owner's utility
-  # scripts (.local/bin), PROJECTS_DIR is the tree the agent may write.
-  # toolchains live under the agent's own home, installed by the agent; the
-  # init-* functions above wire up cargo, pyenv and nvm where present.
-  export SB_OWNER_HOME="/Users/<you>"
-  export PROJECTS_DIR="${SB_OWNER_HOME}/projects"
+  export PROJECTS_DIR="${HOME}/projects"
   init-brew
   init-nvm
   init-cargo
   init-pyenv
-  pre-path "${SB_OWNER_HOME}/.local/bin"
+  pre-path "${HOME}/.local/bin"
 
   # allow group writability. primary user of agent has agent-group membership and should not have to
   # resort to sudo to modify or execute agent-created files.

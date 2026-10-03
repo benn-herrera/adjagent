@@ -252,7 +252,7 @@ def test_every_seat_the_step_table_holds_is_a_shipped_definition() -> None:
     assert _AGENT_TEMPLATES.is_dir(), f"no agent template tree at {_AGENT_TEMPLATES}"
     from gen_defs.discovery import split_outputs
 
-    shipped = {name for template in _AGENT_TEMPLATES.rglob("*.md.tmpl") for name in split_outputs(template)[0]}
+    shipped = {name for template in _AGENT_TEMPLATES.rglob("*.tmpl.md") for name in split_outputs(template)[0]}
 
     missing = sorted(_declared_seats() - shipped)
 
