@@ -1,9 +1,9 @@
 """The harness agents-file install: block replacement into a directory the
 operator names.
 
-Every test installs into a directory under `tmp_path` with an injected
-revision, so no outcome depends on this repository's git state, and nothing
-here reads or writes a harness's live configuration directory.
+Every test installs into a directory under `tmp_path` with injected
+templates status, so no outcome depends on this repository's git state, and
+nothing here reads or writes a harness's live configuration directory.
 """
 
 import os
@@ -14,13 +14,10 @@ from pathlib import Path
 import pytest
 
 from gen_defs import agents_file
-from gen_defs.agents_file import TemplatesRevision
 from gen_defs.errors import InputError
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-CLEAN = TemplatesRevision(sha="abc1234", dirty=())
-LATER = TemplatesRevision(sha="def5678", dirty=())
-
+#: Marker lines as an earlier revision wrote them, carrying a `version[<sha>]`.
 BEGIN = "<!-- vvv-adjagent do not edit. version[0000000] adjagent-vvv -->"
 END = "<!-- ^^^-adjagent do not edit. version[0000000] adjagent-^^^ -->"
 
@@ -43,8 +40,8 @@ text = "X.md"
 #: A minimal valid agents-file body.
 BODY = (
     "# @!dyn.agents-file-scope-name!@\n\n@!dyn.existing-user-content-before-rendered-minus-h1!@\n\n"
-    "<!-- vvv-adjagent version[@!dyn.gen-short-sha!@] adjagent-vvv -->\nblock\n"
-    "<!-- ^^^-adjagent version[@!dyn.gen-short-sha!@] adjagent-^^^ -->\n\n"
+    "<!-- vvv-adjagent do not edit. adjagent-vvv -->\nblock\n"
+    "<!-- ^^^-adjagent do not edit. adjagent-^^^ -->\n\n"
     "@!dyn.existing-user-content-after-rendered!@\n"
 )
 
@@ -56,15 +53,15 @@ def target(tmp_path) -> Path:
     return directory
 
 
-def _install(directory: Path, revision: TemplatesRevision = CLEAN, **kwargs) -> Path:
+def _install(directory: Path, **kwargs) -> Path:
     """Install the claude agents file into `directory`, which is not the
     harness's user-global directory, so the directives land in AGENTS.md."""
-    agents_file.install_agents_file("claude", directory, revision, **kwargs)
+    agents_file.install_agents_file("claude", directory, dirty_templates=(), **kwargs)
     return directory / "AGENTS.md"
 
 
 def _empty_render(directory: Path) -> str:
-    return agents_file.render_agents_file_text("claude", directory, CLEAN)
+    return agents_file.render_agents_file_text("claude", directory)
 
 
 def _with_user_content(empty: str, *, h1: str, before: str, after: str) -> str:
@@ -73,10 +70,6 @@ def _with_user_content(empty: str, *, h1: str, before: str, after: str) -> str:
     head, rest = empty.split(f"{h1}\n\n\n\n", 1)
     assert head == "" and rest.endswith("adjagent-^^^ -->\n\n\n")
     return f"{h1}\n\n{before}\n\n{rest[:-1]}{after}\n"
-
-
-def _marker_lines(text: str) -> list[str]:
-    return [line for line in text.split("\n") if "-adjagent" in line]
 
 
 def _listing(directory: Path) -> dict[str, bytes]:
@@ -212,7 +205,7 @@ def test_the_scope_name(tmp_path, monkeypatch, case, scope):  # I9
     elif case == "unreadable-git-file":
         (directory / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
     harness_dir = _plant_harness(tmp_path, user_harness_dir)
-    agents_file.install_agents_file("x", directory, CLEAN, harness_dir=harness_dir)
+    agents_file.install_agents_file("x", directory, dirty_templates=(), harness_dir=harness_dir)
     directives = "X.md" if scope == "Global" else "AGENTS.md"
     assert (directory / directives).read_text(encoding="utf-8").startswith(f"# {scope} info and directives\n")
 
@@ -292,11 +285,11 @@ def test_a_submodule_without_origin_takes_its_own_directory_name(tmp_path):
 # --- refusals ----------------------------------------------------------------
 
 
-def test_a_dirty_revision_is_refused_before_anything_is_written(target):  # I10
+def test_dirty_templates_are_refused_before_anything_is_written(target):  # I10
     (target / "CLAUDE.md").write_text("mine\n", encoding="utf-8")
     before = _listing(target)
     with pytest.raises(InputError, match="uncommitted changes"):
-        _install(target, TemplatesRevision(sha="abc1234", dirty=(" M templates/x",)))
+        agents_file.install_agents_file("claude", target, dirty_templates=(" M templates/x",))
     assert _listing(target) == before
 
 
@@ -323,7 +316,7 @@ def _plant_template(path: Path, body: str, *resolve_texts: str) -> Path:
 @pytest.mark.parametrize(
     "body",
     [
-        BODY.replace("<!-- ^^^-adjagent version[@!dyn.gen-short-sha!@] adjagent-^^^ -->\n", ""),
+        BODY.replace("<!-- ^^^-adjagent do not edit. adjagent-^^^ -->\n", ""),
         BODY.replace("@!dyn.existing-user-content-after-rendered!@", "after"),
         BODY.replace(
             "@!dyn.existing-user-content-after-rendered!@",
@@ -336,7 +329,7 @@ def test_a_template_failing_the_structure_check_is_refused(tmp_path, target, bod
     template = _plant_template(tmp_path / "t.tmpl.md", body, "@!dyn.agents-file-install-dir-arg!@/X.md")
     harness_dir = _plant_harness(tmp_path, "~/.x")
     with pytest.raises(InputError, match=r"t\.tmpl\.md"):
-        agents_file.install_agents_file("x", target, CLEAN, template=template, harness_dir=harness_dir)
+        agents_file.install_agents_file("x", target, dirty_templates=(), template=template, harness_dir=harness_dir)
     assert list(target.iterdir()) == []
 
 
@@ -369,7 +362,7 @@ def test_a_malformed_output_leaves_every_other_output_unwritten(tmp_path, target
     before = _listing(target)
     with pytest.raises(InputError, match="malformed adjagent markers"):
         agents_file.install_agents_file(
-            "x", target, CLEAN, template=template, harness_dir=_plant_harness(tmp_path, "~/.x")
+            "x", target, dirty_templates=(), template=template, harness_dir=_plant_harness(tmp_path, "~/.x")
         )
     assert _listing(target) == before
 
@@ -377,10 +370,59 @@ def test_a_malformed_output_leaves_every_other_output_unwritten(tmp_path, target
 def test_the_backup_rolls_to_the_previous_install(target):  # I15
     (target / "AGENTS.md").write_text("mine\n", encoding="utf-8")
     first = _install(target).read_text(encoding="utf-8")
-    second = _install(target, LATER).read_text(encoding="utf-8")
-    assert second != first
-    assert (target / "backup.AGENTS.md").read_text(encoding="utf-8") == first
-    assert _marker_lines(second) and all("version[def5678]" in line for line in _marker_lines(second))
+    edited = _edit_block(first)
+    (target / "AGENTS.md").write_text(edited, encoding="utf-8")
+    second = _install(target).read_text(encoding="utf-8")
+    assert second == first
+    assert (target / "backup.AGENTS.md").read_text(encoding="utf-8") == edited
+
+
+def _edit_block(text: str) -> str:
+    """`text` with a line added just inside its begin marker line."""
+    return text.replace("adjagent-vvv -->\n", "adjagent-vvv -->\nhand edit\n", 1)
+
+
+def _with_hashed_markers(text: str) -> str:
+    """`text` with its marker lines as an earlier revision wrote them."""
+    return text.replace(" adjagent-vvv -->", " version[abc1234] adjagent-vvv -->").replace(
+        " adjagent-^^^ -->", " version[abc1234**dirty**] adjagent-^^^ -->"
+    )
+
+
+def test_reinstalling_identical_content_writes_nothing_and_says_unchanged(target, capsys):
+    agents = _install(target)
+    before = _listing(target)
+    mtime = agents.stat().st_mtime_ns
+    capsys.readouterr()
+    _install(target)
+    assert _listing(target) == before
+    assert agents.stat().st_mtime_ns == mtime
+    assert capsys.readouterr().out.splitlines() == [f"unchanged {agents}", f"unchanged {target / 'CLAUDE.md'}"]
+
+
+@pytest.mark.parametrize(
+    "prior",
+    [None, "block", "h1", "trailing-blank-lines", "hashed-markers"],
+    ids=["no-file", "block-content", "outside-h1", "outside-blank-lines", "hashed-markers"],
+)
+def test_any_difference_is_written(target, capsys, prior):
+    agents = target / "AGENTS.md"
+    if prior is not None:
+        rendered = _install(target).read_text(encoding="utf-8")
+        agents.write_text(
+            {
+                "block": _edit_block(rendered),
+                "h1": rendered.replace("# d info and directives", "# My title", 1),
+                "trailing-blank-lines": rendered + "\n\n",
+                "hashed-markers": _with_hashed_markers(_edit_block(rendered)),
+            }[prior],
+            encoding="utf-8",
+        )
+        capsys.readouterr()
+    _install(target)
+    assert agents.read_text(encoding="utf-8") == agents_file.render_agents_file_text("claude", target)
+    assert "version[" not in agents.read_text(encoding="utf-8")
+    assert capsys.readouterr().out.startswith(f"wrote {agents}")
 
 
 # --- where the directives land ----------------------------------------------------
@@ -396,7 +438,7 @@ def global_dir(tmp_path, monkeypatch) -> Path:
 
 
 def test_a_global_install_writes_the_native_file_and_no_redirect(global_dir):
-    agents_file.install_agents_file("claude", global_dir, CLEAN)
+    agents_file.install_agents_file("claude", global_dir, dirty_templates=())
     assert sorted(_listing(global_dir)) == ["CLAUDE.md"]
     text = (global_dir / "CLAUDE.md").read_text(encoding="utf-8")
     assert text.startswith("# Global info and directives\n")
@@ -404,7 +446,7 @@ def test_a_global_install_writes_the_native_file_and_no_redirect(global_dir):
 
 def test_a_global_native_redirect_is_still_followed(global_dir):
     (global_dir / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
-    agents_file.install_agents_file("claude", global_dir, CLEAN)
+    agents_file.install_agents_file("claude", global_dir, dirty_templates=())
     assert (global_dir / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
     assert (global_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# Global info and directives\n")
 
@@ -448,7 +490,7 @@ def test_a_native_file_with_content_is_refused_and_nothing_written(target, nativ
 
 def test_an_opencode_project_install_writes_agents_md_and_no_redirect(target):
     (target / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
-    agents_file.install_agents_file("opencode", target, CLEAN)
+    agents_file.install_agents_file("opencode", target, dirty_templates=())
     assert sorted(_listing(target)) == [".git", "AGENTS.md"]
     assert (target / "AGENTS.md").read_text(encoding="utf-8").startswith("# d info and directives\n")
 

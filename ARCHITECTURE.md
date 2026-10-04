@@ -31,7 +31,7 @@ gen_defs/               the generator package, run as `python3 -m gen_defs` — 
     product.py          what the install product holds: shipped-package table, exclusion vocabulary, destinations, copy set, root guard
     installation.py     the `install` verb
     pruning.py          install's stale-output sweep
-    agents_file.py      the harness agents file: harness files, the templates revision, its render, the `install-agents-file` verb, and the `dev` subcommands behind the `render-agents-file` recipe
+    agents_file.py      the harness agents file: harness files, the templates status probe, its render, the `install-agents-file` verb, and the `dev` subcommands behind the `render-agents-file` recipe
     cli.py              argparse surface and dispatch
 devtools/               repository-maintenance tooling — project space, never installed; imported from the repository root as `devtools.*`
   dupe_sweep/           the duplication sweep, run as `python3 -m devtools.dupe_sweep` — enumerates one-idea-two-places candidates over templates/ and kb_tools/ (justfile `sweep-prose` / `sweep-python`, CONVENTIONS.md)
@@ -162,7 +162,7 @@ maps them); this section does not restate it and is a map into them.
     `hrn.project-temp-dir`, `hrn.user-harness-dir`/`hrn.agents-file`), never as Claude Code's
     literals; a project's agents file is the literal `AGENTS.md` under every harness (SPEC.md,
     Harness Agents File). The agents-file render also binds `dyn.agents-file-install-dir-arg`,
-    `dyn.gen-short-sha`, `dyn.agents-file-scope-name`, and the two user-content parameters
+    `dyn.agents-file-scope-name`, and the two user-content parameters
     `dyn.existing-user-content-before-rendered-minus-h1` and
     `dyn.existing-user-content-after-rendered` beside the five tier tokens, which it pins from the
     default pin map; operator-supplied values — the two user-content parameters, DIR, the scope

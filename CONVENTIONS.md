@@ -73,10 +73,6 @@ live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl
   (`ACTIVE_PLAN.md`, everything in `ROADMAP_PLANS/`), and every template (`.tmpl.md`). Prose and
   list items break at 100, list continuations indented under their bullet. Headings, table rows and
   URLs that cannot break stay whole.
-  - **Exception: the two marker lines in `templates/harness/AGENTS.tmpl.md`**
-    (`<!-- vvv-adjagent … -->` and `<!-- ^^^-adjagent … -->`) stay on one line each. The installer
-    recognizes them line by line, so a wrapped marker breaks every later install; they run past 100
-    in the template only because `@!dyn.gen-short-sha!@` renders as seven characters.
 
 ## Adding Templates and Promoting Definitions
 

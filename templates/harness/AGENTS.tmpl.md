@@ -10,7 +10,7 @@ text = "@!dyn.agents-file-install-dir-arg!@/@!hrn.agents-file!@"
 
 @!dyn.existing-user-content-before-rendered-minus-h1!@
 
- <!-- vvv-adjagent do not edit at or between marker lines. version[@!dyn.gen-short-sha!@] adjagent-vvv -->
+ <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->
  
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —
@@ -175,6 +175,6 @@ blocker needing user intervention during planning, never as a mid-run discovery.
   project's own terms, and takes neither the figure nor a name drawn from it unless the user asks
   for that wording.
 
- <!-- ^^^-adjagent do not edit at or between marker lines. version[@!dyn.gen-short-sha!@] adjagent-^^^ -->
+ <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->
 
 @!dyn.existing-user-content-after-rendered!@

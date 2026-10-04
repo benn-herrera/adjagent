@@ -57,7 +57,7 @@ from .agents_file import (
     agents_file_name,
     install_agents_file,
     load_harness,
-    probe_templates_revision,
+    probe_dirty_templates,
     render_agents_file_text,
     write_agents_file_renders,
 )
@@ -228,8 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
         help="render templates/harness/AGENTS.tmpl.md for one harness to the file OUT",
         description="Render the harness agents file for HARNESS (templates/harness/<HARNESS>.toml) "
-        "to the file OUT, stamped with this repository's short revision (suffixed **dirty** while "
-        "templates/ has uncommitted changes). An OUT that already exists with different content "
+        "to the file OUT, uncommitted template changes included. An OUT that already exists with different content "
         "is refused and nothing is written; identical content is left alone.",
     )
     agents_file.add_argument("harness", metavar="HARNESS", help="the harness name: claude, opencode, ...")
@@ -271,7 +270,7 @@ def main() -> None:
         if args.verb == "install-agents-file":
             # No surfaces and no tuning triple; it has no verdict case, so it
             # exits 0 here or 2 through the InputError handler.
-            install_agents_file(args.harness, args.dir, probe_templates_revision())
+            install_agents_file(args.harness, args.dir, dirty_templates=probe_dirty_templates())
             sys.exit(0)
         if args.verb == "dev":
             if args.dev_verb in (None, "help"):
@@ -279,10 +278,7 @@ def main() -> None:
             elif args.dev_verb == "agents-file-for-harness":
                 print(agents_file_name(args.name))
             else:
-                revision = probe_templates_revision()
-                if revision.dirty:
-                    print(f"templates/ has uncommitted changes — rendering as revision {revision.value}")
-                text = render_agents_file_text(args.harness, args.out.parent, revision)
+                text = render_agents_file_text(args.harness, args.out.parent)
                 write_agents_file_renders([(args.out, text)])
             sys.exit(0)
 

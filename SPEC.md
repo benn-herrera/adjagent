@@ -235,8 +235,9 @@ another name gets that file as the one-line redirect `@AGENTS.md`, created when 
 alone when already present. A file of that other name holding anything else is refused with nothing
 written: moving its content into `AGENTS.md` is the operator's act, never the install's.
 
-The installed file carries the repository's content as **one delimited block**, whose begin and end
-lines name the source revision for information only. Installation replaces that block wholesale and
+The installed file carries the repository's content as **one delimited block**, recognised by the
+fixed ends of its begin and end lines, so a block written by any earlier revision is still found.
+Installation replaces that block wholesale and
 owns nothing outside it. Text above and below the block is the operator's, returned verbatim except
 for leading and trailing blank lines; the title line is the repository's. An existing file without a
 block is kept entire above it as the operator's own. A file whose markers are not exactly one

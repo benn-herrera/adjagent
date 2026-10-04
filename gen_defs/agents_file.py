@@ -33,14 +33,10 @@ Global scope (Install, below). `_resolve` is underscore-led so it
 can never be read as an output name; a surface template carrying it is refused
 by split_outputs.
 
-The render binds five invocation parameters of its own, beside the five tier
+The render binds four invocation parameters of its own, beside the five tier
 tokens (pinned by DEFAULT_PIN_MAP; the agents file takes no tuning flags):
 
     @!dyn.agents-file-install-dir-arg!@   DIR, as given
-    @!dyn.gen-short-sha!@                 this repository's short HEAD sha,
-                                          suffixed **dirty** while templates/
-                                          carries staged, unstaged or
-                                          untracked changes
     @!dyn.agents-file-scope-name!@        `Global` when DIR is the harness's
                                           [harness.user-harness-dir];
                                           otherwise, when DIR/.git exists (a
@@ -56,8 +52,8 @@ tokens (pinned by DEFAULT_PIN_MAP; the agents file takes no tuning flags):
                                           the user's own text above and below
                                           the block — see Install, below
 
-The revision is probed by the CLI and passed in, so the render's output never
-depends on the state of the repository a test runs in.
+The install's dirty-templates refusal reads paths the CLI probes and passes in,
+so no outcome depends on the state of the repository a test runs in.
 
 Install
 -------
@@ -81,8 +77,8 @@ wholesale and owns nothing outside it.
 A marker line is recognised by its ends alone, with surrounding whitespace
 stripped: a begin line starts `<!-- vvv-adjagent` and ends `adjagent-vvv -->`,
 an end line starts `<!-- ^^^-adjagent` and ends `adjagent-^^^ -->`. What sits
-between — the `version[<sha>]` revision included — is information only and
-never compared, so a block written by any earlier revision is still found. A
+between is never compared, so a block written by any earlier revision — one
+whose marker lines carry a `version[<sha>]` included — is still found. A
 file is valid with no marker lines at all, or with exactly one begin line
 followed by exactly one end line; any other count or order is malformed and
 refused, and nothing is written.
@@ -111,12 +107,12 @@ expansion records — so an empty span still counts. A template that does not is
 refused. The `_resolve` paths render without the user-content parameters.
 
 Every output is planned — read, split, rendered — before any is written, and a
-refusal anywhere writes nothing. Refused: a dirty templates revision; an
-output path, or the `backup.<name>` beside it, that is a symlink or exists as
-anything but a regular file; an existing file that is not UTF-8 or is
-malformed. Each output is then written by case: identical text writes nothing
-and reports `unchanged`; a missing file is written; any other write first
-copies the prior file's bytes to `backup.<name>` beside it, the one rolling
+refusal anywhere writes nothing. Refused: templates/ carrying staged, unstaged
+or untracked changes; an output path, or the `backup.<name>` beside it, that is
+a symlink or exists as anything but a regular file; an existing file that is
+not UTF-8 or is malformed. Each output is then written by case: identical text
+writes nothing and reports `unchanged`; a missing file is written; any other
+write first copies the prior file's bytes to `backup.<name>` beside it, the one rolling
 backup, overwritten by the next write that changes the file. A file that had
 no markers is reported as kept whole above the block, its duplicated rules now
 the user's to delete.
@@ -139,8 +135,8 @@ Dev render
 renders with both user-content spans empty, the install directory bound to
 OUT's parent, and writes the text to the file OUT, whose parent must already
 exist. An OUT already holding different text is refused and nothing is
-written: this verb never overwrites, identical text is left alone, and a dirty
-templates revision still renders. Its sanctioned caller is the private
+written: this verb never overwrites, identical text is left alone, and
+uncommitted template changes still render. Its sanctioned caller is the private
 `render-agents-file` just recipe, whose name and arguments are the stable
 interface; this verb behind it may change.
 """
@@ -151,7 +147,6 @@ import re
 import shutil
 import subprocess
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -175,9 +170,7 @@ from .rendering import routing_table
 HARNESS_TABLE = "harness"
 HARNESS_SUFFIX = ".toml"
 RESOLVE_METAKEY = "_resolve"
-DIRTY_SUFFIX = "**dirty**"
 INSTALL_DIR_PARAMETER = "agents-file-install-dir-arg"
-SHORT_SHA_PARAMETER = "gen-short-sha"
 SCOPE_NAME_PARAMETER = "agents-file-scope-name"
 BEFORE_CONTENT_PARAMETER = "existing-user-content-before-rendered-minus-h1"
 AFTER_CONTENT_PARAMETER = "existing-user-content-after-rendered"
@@ -196,19 +189,6 @@ REDIRECT_PREFIX = "@"
 # Where the directives live outside Global scope, whatever the harness reads.
 STANDARD_AGENTS_FILE = "AGENTS.md"
 NATIVE_REDIRECT = f"{REDIRECT_PREFIX}{STANDARD_AGENTS_FILE}\n"
-
-
-@dataclass(frozen=True)
-class TemplatesRevision:
-    """The repository revision a render comes from: the short HEAD sha, and
-    the paths under templates/ that differ from it."""
-
-    sha: str
-    dirty: tuple[str, ...]
-
-    @property
-    def value(self) -> str:
-        return f"{self.sha}{DIRTY_SUFFIX}" if self.dirty else self.sha
 
 
 def load_harness(name: str, harness_dir: Path = HARNESS_DIR) -> DynamicMap:
@@ -308,22 +288,18 @@ def agents_file_scope_name(user_harness_dir: str, directory: Path) -> str:
     return directory.resolve().name
 
 
-def _git(repo: Path, *args: str) -> str:
+def probe_dirty_templates(repo: Path = REPO_ROOT) -> tuple[str, ...]:
+    """Every line `git status --porcelain` reports under `repo`'s templates/ —
+    untracked included, since an untracked template changes the render as
+    much as a modified one."""
+    args = ("status", "--porcelain", "--", "templates")
     try:
-        return subprocess.run(
+        out = subprocess.run(
             ["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8", check=True
         ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise InputError(f"cannot read the templates revision of {repo}: git {' '.join(args)} failed — {exc}") from exc
-
-
-def probe_templates_revision(repo: Path = REPO_ROOT) -> TemplatesRevision:
-    """The short HEAD sha of `repo`, and every path `git status` reports under
-    its templates/ — untracked included, since an untracked template changes
-    the render as much as a modified one."""
-    sha = _git(repo, "rev-parse", "--short=7", "HEAD").strip()
-    dirty = tuple(line for line in _git(repo, "status", "--porcelain", "--", "templates").splitlines() if line)
-    return TemplatesRevision(sha=sha, dirty=dirty)
+        raise InputError(f"cannot read the templates status of {repo}: git {' '.join(args)} failed — {exc}") from exc
+    return tuple(line for line in out.splitlines() if line)
 
 
 def _is_marker_line(line: str, marker: tuple[str, str]) -> bool:
@@ -390,7 +366,7 @@ class _Bindings(NamedTuple):
     harness: DynamicMap
 
 
-def _agents_file_bindings(harness: str, directory: Path, revision: TemplatesRevision, harness_dir: Path) -> _Bindings:
+def _agents_file_bindings(harness: str, directory: Path, harness_dir: Path) -> _Bindings:
     """The bindings for one harness, with the agents-file install directory
     bound to `directory`, which must exist."""
     if not directory.is_dir():
@@ -401,7 +377,6 @@ def _agents_file_bindings(harness: str, directory: Path, revision: TemplatesRevi
     dynamic: DynamicMap = {
         **tier_binding(chunks, pin_map=DEFAULT_PIN_MAP).real,
         INSTALL_DIR_PARAMETER: Verbatim(str(directory)),
-        SHORT_SHA_PARAMETER: revision.value,
         SCOPE_NAME_PARAMETER: Verbatim(agents_file_scope_name(user_harness_dir, directory)),
     }
     return _Bindings(chunks, dynamic, values)
@@ -446,7 +421,6 @@ def _agents_file_body(bindings: _Bindings, *, template: Path, harness: str, befo
 def render_agents_file_text(
     harness: str,
     directory: Path,
-    revision: TemplatesRevision,
     *,
     template: Path = AGENTS_FILE_TEMPLATE,
     harness_dir: Path = HARNESS_DIR,
@@ -454,7 +428,7 @@ def render_agents_file_text(
     """The agents file for one harness, as it reads when installed in
     `directory` with no user content. The fence's `_resolve` entries are not
     consulted: the caller names where the text goes."""
-    bindings = _agents_file_bindings(harness, directory, revision, harness_dir)
+    bindings = _agents_file_bindings(harness, directory, harness_dir)
     return _agents_file_body(bindings, template=template, harness=harness)
 
 
@@ -578,7 +552,6 @@ def _native_redirect_plan(native: Path) -> AgentsFilePlan:
 def render_agents_file(
     harness: str,
     directory: Path,
-    revision: TemplatesRevision,
     *,
     template: Path = AGENTS_FILE_TEMPLATE,
     harness_dir: Path = HARNESS_DIR,
@@ -589,7 +562,7 @@ def render_agents_file(
     content carried into the new text. Outside Global scope a native-file
     output goes to AGENTS.md instead, and its native file is planned last as
     the redirect to it. Reads, and writes nothing."""
-    bindings = _agents_file_bindings(harness, directory, revision, harness_dir)
+    bindings = _agents_file_bindings(harness, directory, harness_dir)
     native_name = _required_harness_value(bindings.harness, AGENTS_FILE_KEY, harness=harness)
     relocate = native_name != STANDARD_AGENTS_FILE and not _is_user_harness_dir(
         bindings.harness[USER_HARNESS_DIR_KEY], directory
@@ -617,19 +590,20 @@ def render_agents_file(
 def install_agents_file(
     harness: str,
     directory: Path,
-    revision: TemplatesRevision,
     *,
+    dirty_templates: tuple[str, ...],
     template: Path = AGENTS_FILE_TEMPLATE,
     harness_dir: Path = HARNESS_DIR,
 ) -> None:
     """Install one harness's agents file into `directory` by block replacement,
-    refusing a dirty revision, and planning every output before writing any."""
-    if revision.dirty:
+    refusing while `dirty_templates` (probe_dirty_templates) names any path,
+    and planning every output before writing any."""
+    if dirty_templates:
         raise InputError(
-            f"templates/ has uncommitted changes ({', '.join(revision.dirty)}) — commit them before installing; "
+            f"templates/ has uncommitted changes ({', '.join(dirty_templates)}) — commit them before installing; "
             "nothing written"
         )
-    plans = render_agents_file(harness, directory, revision, template=template, harness_dir=harness_dir)
+    plans = render_agents_file(harness, directory, template=template, harness_dir=harness_dir)
     for path, existing, text, redirect in plans:
         via = ""
         if redirect is not None:

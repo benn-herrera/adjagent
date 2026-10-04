@@ -1,10 +1,9 @@
 """The harness agents-file render: the `hrn.` namespace, the harness file
-schema, the `_resolve` fence, the templates revision, and the dev render's
+schema, the `_resolve` fence, the templates status probe, and the dev render's
 write refusal. The install is tested in test_agents_file_install.py.
 
-Render tests use the real template and harness files with an injected
-revision, so no outcome depends on this repository's git state; the revision
-probe is exercised against a git repository built under `tmp_path`. Nothing
+Render tests use the real template and harness files, and no outcome depends
+on this repository's git state; the templates status probe is exercised against a git repository built under `tmp_path`. Nothing
 here reads or writes a harness's live configuration directory.
 """
 
@@ -17,12 +16,10 @@ from pathlib import Path
 import pytest
 
 from gen_defs import agents_file, banners, discovery, markers, rendering
-from gen_defs.agents_file import TemplatesRevision
 from gen_defs.errors import InputError
 from gen_defs.model_tuning import DEFAULT_PIN_MAP
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-CLEAN = TemplatesRevision(sha="abc1234", dirty=())
 
 #: A minimal harness file: every key the real template reads.
 HARNESS = """
@@ -45,19 +42,16 @@ def _agents_file_body(middle: str) -> str:
     and one marker pair around `middle`."""
     return (
         "# @!dyn.agents-file-scope-name!@\n\n@!dyn.existing-user-content-before-rendered-minus-h1!@\n\n"
-        "<!-- vvv-adjagent version[@!dyn.gen-short-sha!@] adjagent-vvv -->\n"
+        "<!-- vvv-adjagent adjagent-vvv -->\n"
         f"{middle}\n"
-        "<!-- ^^^-adjagent version[@!dyn.gen-short-sha!@] adjagent-^^^ -->\n\n"
+        "<!-- ^^^-adjagent adjagent-^^^ -->\n\n"
         "@!dyn.existing-user-content-after-rendered!@\n"
     )
 
 
 def _rendered_body(middle: str, *, scope: str) -> str:
-    """What _agents_file_body renders to with empty user content and CLEAN."""
-    return (
-        f"# {scope}\n\n\n\n<!-- vvv-adjagent version[abc1234] adjagent-vvv -->\n{middle}\n"
-        "<!-- ^^^-adjagent version[abc1234] adjagent-^^^ -->\n\n\n"
-    )
+    """What _agents_file_body renders to with empty user content."""
+    return f"# {scope}\n\n\n\n<!-- vvv-adjagent adjagent-vvv -->\n{middle}\n" "<!-- ^^^-adjagent adjagent-^^^ -->\n\n\n"
 
 
 def _plant_template(path: Path, *resolve_texts: str, body: str = _agents_file_body("body @!hrn.agents-file!@")) -> Path:
@@ -78,23 +72,26 @@ DIR_FILE = "@!dyn.agents-file-install-dir-arg!@/@!hrn.agents-file!@"
 # --- the real template and harness files ------------------------------------
 
 
-def _directives(harness: str, directory: Path, revision: TemplatesRevision = CLEAN) -> str:
+def _directives(harness: str, directory: Path) -> str:
     """The rendered text of the plan that carries the directives — the first."""
-    return agents_file.render_agents_file(harness, directory, revision)[0].text
+    return agents_file.render_agents_file(harness, directory)[0].text
 
 
 def test_claude_renders_agents_md_and_the_claude_md_redirect_into_a_project_dir(tmp_path):
-    [(path, existing, text, _), redirect] = agents_file.render_agents_file("claude", tmp_path, CLEAN)
+    [(path, existing, text, _), redirect] = agents_file.render_agents_file("claude", tmp_path)
     assert (path, existing) == (tmp_path / "AGENTS.md", None)
     assert redirect == (tmp_path / "CLAUDE.md", None, "@AGENTS.md\n", None)
     assert ".claude-temp" in text
     assert "~/.claude/CLAUDE.md" in text
     assert "@!" not in text and "!@" not in text
-    assert text.count("version[abc1234]") == 2
+    assert [line for line in text.split("\n") if "-adjagent" in line] == [
+        " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->",
+        " <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->",
+    ]
 
 
 def test_opencode_renders_agents_md_into_dir(tmp_path):
-    [(path, _, text, _)] = agents_file.render_agents_file("opencode", tmp_path, CLEAN)
+    [(path, _, text, _)] = agents_file.render_agents_file("opencode", tmp_path)
     assert path == tmp_path / "AGENTS.md"
     assert ".opencode-temp" in text
     assert "~/.config/opencode/AGENTS.md" in text
@@ -106,25 +103,19 @@ def test_every_tier_token_renders_its_default_pin(tmp_path):
         DIR_FILE,
         body=_agents_file_body(" ".join(f"{tier}=@!dyn.tier-{tier}!@" for tier in DEFAULT_PIN_MAP)),
     )
-    text = agents_file.render_agents_file_text("claude", tmp_path, CLEAN, template=template)
+    text = agents_file.render_agents_file_text("claude", tmp_path, template=template)
     expected = " ".join(f"{tier}={pin}" for tier, pin in DEFAULT_PIN_MAP.items())
     assert text == _rendered_body(expected, scope=tmp_path.name)
 
 
-def test_a_dirty_revision_still_renders_and_says_so(tmp_path):
-    dirty = TemplatesRevision(sha="abc1234", dirty=("?? templates/harness/",))
-    assert dirty.value == "abc1234**dirty**"
-    assert _directives("claude", tmp_path, dirty).count("version[abc1234**dirty**]") == 2
-
-
 def test_an_unknown_harness_lists_the_available_ones(tmp_path):
     with pytest.raises(InputError, match=r"unknown harness 'nope'.*claude, opencode"):
-        agents_file.render_agents_file("nope", tmp_path, CLEAN)
+        agents_file.render_agents_file("nope", tmp_path)
 
 
 def test_a_missing_dir_is_an_error(tmp_path):
     with pytest.raises(InputError, match="not an existing directory"):
-        agents_file.render_agents_file("claude", tmp_path / "absent", CLEAN)
+        agents_file.render_agents_file("claude", tmp_path / "absent")
 
 
 # --- planted harness files and templates ------------------------------------
@@ -135,7 +126,7 @@ def test_a_harness_missing_a_key_the_template_reads_is_an_error(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     with pytest.raises(InputError, match=r"unknown harness key 'project-temp-dir'.*agents-file, other"):
-        agents_file.render_agents_file("x", out, CLEAN, harness_dir=harness_dir)
+        agents_file.render_agents_file("x", out, harness_dir=harness_dir)
     assert list(out.iterdir()) == []
 
 
@@ -158,13 +149,13 @@ def test_a_resolve_entry_outside_dir_is_an_error(tmp_path):
     template = _plant_template(tmp_path / "t.tmpl.md", "@!dyn.agents-file-install-dir-arg!@/../@!hrn.agents-file!@")
     harness_dir = _plant_harness(tmp_path / "harness")
     with pytest.raises(InputError, match="not directly inside"):
-        agents_file.render_agents_file("x", tmp_path, CLEAN, template=template, harness_dir=harness_dir)
+        agents_file.render_agents_file("x", tmp_path, template=template, harness_dir=harness_dir)
 
 
 def test_two_resolve_entries_give_two_outputs(tmp_path):
     template = _plant_template(tmp_path / "t.tmpl.md", DIR_FILE, "@!dyn.agents-file-install-dir-arg!@/ALSO.md")
     harness_dir = _plant_harness(tmp_path / "harness")
-    renders = agents_file.render_agents_file("x", tmp_path, CLEAN, template=template, harness_dir=harness_dir)
+    renders = agents_file.render_agents_file("x", tmp_path, template=template, harness_dir=harness_dir)
     expected = _rendered_body("body X.md", scope=tmp_path.name)
     assert renders == [
         (tmp_path / "AGENTS.md", None, expected, None),
@@ -180,12 +171,12 @@ def test_the_unplaced_text_binds_the_install_dir_and_ignores_resolve(tmp_path):
         body=_agents_file_body("in @!dyn.agents-file-install-dir-arg!@"),
     )
     harness_dir = _plant_harness(tmp_path / "harness")
-    text = agents_file.render_agents_file_text("x", tmp_path, CLEAN, template=template, harness_dir=harness_dir)
+    text = agents_file.render_agents_file_text("x", tmp_path, template=template, harness_dir=harness_dir)
     assert text == _rendered_body(f"in {tmp_path}", scope=tmp_path.name)
 
 
 def test_the_placed_and_unplaced_renders_agree(tmp_path):
-    assert agents_file.render_agents_file_text("claude", tmp_path, CLEAN) == _directives("claude", tmp_path)
+    assert agents_file.render_agents_file_text("claude", tmp_path) == _directives("claude", tmp_path)
 
 
 def test_split_outputs_refuses_a_non_table_output(tmp_path):
@@ -247,7 +238,7 @@ def test_a_harness_namespace_is_not_an_overlay():
         _expand("@!hrn.missing!@", {}, {}, {"k": "v"})
 
 
-# --- the templates revision --------------------------------------------------
+# --- the templates status ----------------------------------------------------
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -279,18 +270,15 @@ def repo(tmp_path):
     ],
     ids=["clean", "modified-under-templates", "untracked-under-templates", "modified-outside-templates"],
 )
-def test_the_revision_probe(repo, change, dirty):
+def test_the_dirty_templates_probe(repo, change, dirty):
     if change is not None:
         (repo / change).write_text("changed\n", encoding="utf-8")
-    revision = agents_file.probe_templates_revision(repo)
-    assert len(revision.sha) == 7 and all(c in "0123456789abcdef" for c in revision.sha)
-    assert bool(revision.dirty) is dirty
-    assert revision.value == (f"{revision.sha}**dirty**" if dirty else revision.sha)
+    assert bool(agents_file.probe_dirty_templates(repo)) is dirty
 
 
-def test_the_revision_probe_outside_a_repository_is_an_error(tmp_path):
-    with pytest.raises(InputError, match="cannot read the templates revision"):
-        agents_file.probe_templates_revision(tmp_path)
+def test_the_dirty_templates_probe_outside_a_repository_is_an_error(tmp_path):
+    with pytest.raises(InputError, match="cannot read the templates status"):
+        agents_file.probe_dirty_templates(tmp_path)
 
 
 # --- writing -----------------------------------------------------------------
