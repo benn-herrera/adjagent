@@ -197,8 +197,8 @@ def _plant_harness(tmp_path: Path, user_harness_dir: str) -> Path:
     [
         ("global-absolute", "Global"),
         ("global-home", "Global"),
-        ("git-directory", "Project"),
-        ("git-file", "Project"),
+        ("unreadable-git-directory", "proj"),
+        ("unreadable-git-file", "proj"),
         ("plain", "proj"),
     ],
 )
@@ -207,14 +207,86 @@ def test_the_scope_name(tmp_path, monkeypatch, case, scope):  # I9
     directory.mkdir(parents=True)
     user_harness_dir = str(tmp_path / "home/.x") if case == "global-absolute" else "~/.x"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    if case == "git-directory":
+    if case == "unreadable-git-directory":
         (directory / ".git").mkdir()
-    elif case == "git-file":
+    elif case == "unreadable-git-file":
         (directory / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
     harness_dir = _plant_harness(tmp_path, user_harness_dir)
     agents_file.install_agents_file("x", directory, CLEAN, harness_dir=harness_dir)
     directives = "X.md" if scope == "Global" else "AGENTS.md"
     assert (directory / directives).read_text(encoding="utf-8").startswith(f"# {scope} info and directives\n")
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _repo(path: Path, *remotes: tuple[str, str]) -> Path:
+    """A fresh repository at `path` with one empty commit and `remotes`."""
+    path.mkdir(parents=True)
+    _git(path, "init", "--quiet")
+    _git(path, "commit", "--quiet", "--allow-empty", "-m", "c")
+    for name, url in remotes:
+        _git(path, "remote", "add", name, url)
+    return path
+
+
+@pytest.mark.parametrize(
+    "url, name",
+    [
+        ("git@github.com:owner/name.git", "name"),
+        ("git@host:name.git", "name"),
+        ("https://github.com/owner/name.git", "name"),
+        ("https://github.com/owner/name/", "name"),
+        ("ssh://git@host:22/owner/name.git", "name"),
+        ("/srv/repos/name.git/", "name"),
+        ("../name", "name"),
+    ],
+)
+def test_repository_name_from_url(url, name):
+    assert agents_file.repository_name_from_url(url) == name
+
+
+def test_project_scope_is_the_origin_repository_name(tmp_path):
+    # Cloned into a differently-named directory: origin wins over the directory.
+    repo = _repo(tmp_path / "checkout", ("origin", "git@github.com:owner/scp-name.git"))
+    assert agents_file.agents_file_scope_name("~/.x", repo) == "scp-name"
+    _git(repo, "remote", "set-url", "origin", "https://github.com/owner/https-name.git")
+    assert agents_file.agents_file_scope_name("~/.x", repo) == "https-name"
+
+
+def test_a_clone_takes_its_origin_name_not_its_directory(tmp_path):
+    source = _repo(tmp_path / "upstream")
+    _git(tmp_path, "clone", "--quiet", str(source), "elsewhere")
+    assert agents_file.agents_file_scope_name("~/.x", tmp_path / "elsewhere") == "upstream"
+
+
+@pytest.mark.parametrize("remotes", [(), (("upstream", "https://host/owner/other.git"),)], ids=["none", "not-origin"])
+def test_project_scope_without_origin_is_the_directory_name(tmp_path, remotes):
+    repo = _repo(tmp_path / "local-name", *remotes)
+    assert agents_file.agents_file_scope_name("~/.x", repo) == "local-name"
+
+
+def test_a_linked_worktree_without_origin_takes_the_main_checkout_name(tmp_path):
+    main = _repo(tmp_path / "main-checkout")
+    _git(main, "worktree", "add", "--quiet", "--detach", str(tmp_path / "linked"))
+    assert (tmp_path / "linked" / ".git").is_file()
+    assert agents_file.agents_file_scope_name("~/.x", tmp_path / "linked") == "main-checkout"
+
+
+def test_a_submodule_without_origin_takes_its_own_directory_name(tmp_path):
+    library = _repo(tmp_path / "library")
+    superproject = _repo(tmp_path / "super")
+    _git(superproject, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", str(library), "sub-dir")
+    submodule = superproject / "sub-dir"
+    _git(submodule, "remote", "remove", "origin")
+    assert (submodule / ".git").is_file()
+    assert agents_file.agents_file_scope_name("~/.x", submodule) == "sub-dir"
 
 
 # --- refusals ----------------------------------------------------------------
@@ -341,7 +413,7 @@ def test_a_project_install_writes_agents_md_and_creates_the_claude_md_redirect(t
     (target / ".git").mkdir()
     _install(target)
     assert (target / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
-    assert (target / "AGENTS.md").read_text(encoding="utf-8").startswith("# Project info and directives\n")
+    assert (target / "AGENTS.md").read_text(encoding="utf-8").startswith("# d info and directives\n")
 
 
 NATIVE_REDIRECT = "\n  @AGENTS.md  \n\n"
@@ -378,7 +450,7 @@ def test_an_opencode_project_install_writes_agents_md_and_no_redirect(target):
     (target / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
     agents_file.install_agents_file("opencode", target, CLEAN)
     assert sorted(_listing(target)) == [".git", "AGENTS.md"]
-    assert (target / "AGENTS.md").read_text(encoding="utf-8").startswith("# Project info and directives\n")
+    assert (target / "AGENTS.md").read_text(encoding="utf-8").startswith("# d info and directives\n")
 
 
 def test_agents_md_redirecting_back_to_an_absent_native_file_is_refused(target):

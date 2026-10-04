@@ -43,9 +43,14 @@ tokens (pinned by DEFAULT_PIN_MAP; the agents file takes no tuning flags):
                                           untracked changes
     @!dyn.agents-file-scope-name!@        `Global` when DIR is the harness's
                                           [harness.user-harness-dir];
-                                          otherwise `Project` when DIR/.git
-                                          exists (a file or a directory);
-                                          otherwise DIR's own name
+                                          otherwise, when DIR/.git exists (a
+                                          file or a directory), the project's
+                                          name: its `origin` remote's
+                                          repository name, else the main
+                                          checkout's directory name (when the
+                                          git common dir is a `.git`), else
+                                          DIR's own name; otherwise DIR's own
+                                          name
     @!dyn.existing-user-content-before-rendered-minus-h1!@
     @!dyn.existing-user-content-after-rendered!@
                                           the user's own text above and below
@@ -141,6 +146,7 @@ interface; this verb behind it may change.
 """
 
 import itertools
+import os
 import re
 import shutil
 import subprocess
@@ -180,7 +186,6 @@ AGENTS_FILE_KEY = "agents-file"
 # The harness key naming the harness's user-global directory.
 USER_HARNESS_DIR_KEY = "user-harness-dir"
 GLOBAL_SCOPE_NAME = "Global"
-PROJECT_SCOPE_NAME = "Project"
 BACKUP_PREFIX = "backup."
 # (prefix, suffix) of a marker line, whitespace-stripped.
 BEGIN_MARKER = ("<!-- vvv-adjagent", "adjagent-vvv -->")
@@ -250,14 +255,56 @@ def _is_user_harness_dir(user_harness_dir: str, directory: Path) -> bool:
     return Path(user_harness_dir).expanduser().resolve() == directory.resolve()
 
 
+def _read_checkout_git(directory: Path, *args: str) -> str | None:
+    """The stripped output of `git -C directory ARGS`, or None when git fails
+    or prints nothing. Discovery stops at `directory`, so a `.git` git cannot
+    read there never falls through to a repository above it."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(directory), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+            env={**os.environ, "GIT_CEILING_DIRECTORIES": str(directory.resolve().parent)},
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out or None
+
+
+def repository_name_from_url(url: str) -> str:
+    """The last path component of a git remote URL — scp-style, https, ssh or
+    a local path — without a trailing `/` or `.git`; empty when there is none."""
+    path = url.strip().rstrip("/").removesuffix(".git").rstrip("/")
+    return re.split(r"[/:]", path)[-1]
+
+
+def _project_name(directory: Path) -> str:
+    """The name of the git checkout at `directory`: its `origin` remote's
+    repository name, else the main checkout's directory name (so a linked
+    worktree takes its project's; only when the common dir is a `.git`, which
+    a submodule's `.git/modules/<name>` is not), else the directory's own name."""
+    url = _read_checkout_git(directory, "remote", "get-url", "origin")
+    if url is not None and (name := repository_name_from_url(url)):
+        return name
+    common_dir = _read_checkout_git(directory, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common_dir is not None and Path(common_dir).name == ".git":
+        return Path(common_dir).parent.name
+    return directory.resolve().name
+
+
 def agents_file_scope_name(user_harness_dir: str, directory: Path) -> str:
     """What the agents file in `directory` is scoped to: `Global` for the
-    harness's user-global directory, `Project` for a git checkout (a `.git`
-    file is a worktree or a submodule), otherwise the directory's own name."""
+    harness's user-global directory; for a git checkout (`directory/.git`
+    exists — a `.git` file is a worktree or a submodule) the project's name,
+    from its `origin` remote, else its main checkout's directory (when the git
+    common dir is a `.git`), else `directory`'s own name; otherwise the directory's own name. A git read
+    that fails falls through to the next source and never raises."""
     if _is_user_harness_dir(user_harness_dir, directory):
         return GLOBAL_SCOPE_NAME
     if (directory / ".git").exists():
-        return PROJECT_SCOPE_NAME
+        return _project_name(directory)
     return directory.resolve().name
 
 
