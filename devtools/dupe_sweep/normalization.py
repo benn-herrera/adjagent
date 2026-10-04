@@ -2,6 +2,8 @@
 
 Every text becomes its lower-cased alphanumeric words — case, punctuation,
 markup and where the text wrapped all vanish — each remembering its source line.
+A prose text also loses its articles, so a passage differing only in "the" for
+"a" is still one passage; docstring and comment sentences keep theirs.
 """
 
 import re
@@ -12,6 +14,8 @@ from .clustering import Unit
 
 _MARKER = re.compile(r"@![^!]*!@")
 _WORD = re.compile(r"[a-z0-9]+")
+#: Matched before punctuation goes, so only a standalone article is removed.
+_ARTICLE = re.compile(r"\b(?:a|an|the)\b", re.IGNORECASE)
 
 
 def prose_tokens(text: str) -> tuple[str, ...]:
@@ -42,7 +46,7 @@ class ProseText:
 
 
 def prose_text(path: str, label: str, body: str, *, line_of: Callable[[int], int]) -> ProseText:
-    """`body`'s words outside fenced code blocks, each sited by `line_of(0-based line offset)`."""
+    """`body`'s words outside fenced code blocks, articles dropped, each sited by `line_of(0-based line offset)`."""
     words: list[str] = []
     lines: list[int] = []
     fenced = False
@@ -50,7 +54,7 @@ def prose_text(path: str, label: str, body: str, *, line_of: Callable[[int], int
         if line.lstrip().startswith("```"):
             fenced = not fenced
         elif not fenced:
-            for word in prose_tokens(line):
+            for word in prose_tokens(_ARTICLE.sub(" ", line)):
                 words.append(word)
                 lines.append(line_of(offset))
     return ProseText(path, label, tuple(words), tuple(lines))

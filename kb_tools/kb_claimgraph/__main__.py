@@ -17,18 +17,20 @@ import sys
 from functools import partial
 
 from .. import __version__, inference, kb_pipeline, kb_util
-from . import ask, conform, depends, discover, equations
+from . import ask, conform, depends, discover, equations, unmarked
 from .build import build
 
 #: The scope vocabulary, read from the stage table rather than declared twice.
-#: What the values distinguish is which *stage* a ``--pass 1`` invocation
-#: is, and that pairing is ``kb_pipeline.ClaimgraphInvocation``'s — so this
-#: module parses the flags and asks what stage they name instead of branching
-#: on numbers whose meaning is stated nowhere.
-SCOPES: tuple[str, ...] = (
-    kb_pipeline.CLAIMGRAPH_SCOPE_BLOCK_HOSTED,
-    kb_pipeline.CLAIMGRAPH_SCOPE_FULL,
-    kb_pipeline.CLAIMGRAPH_SCOPE_EQUATIONS,
+#: What the values distinguish is which *stage* an invocation of a pass is,
+#: and that pairing is ``kb_pipeline.ClaimgraphInvocation``'s — so this module
+#: parses the flags and asks what stage they name instead of branching on
+#: numbers whose meaning is stated nowhere.
+SCOPES: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        stage.claimgraph_invocation.scope
+        for stage in kb_pipeline.STAGES
+        if stage.claimgraph_invocation and stage.claimgraph_invocation.scope
+    )
 )
 
 EXIT_OK = 0
@@ -53,15 +55,21 @@ PASSES: tuple[int, ...] = tuple(
 )
 
 
-#: The three stage ids this module branches on, read off the table so a rename
-#: reaches here. The fourth is the else.
+#: The stage ids this module branches on, read off the table so a rename
+#: reaches here. The declared pass is the else.
 _CLAIMS_DISCOVERED = kb_pipeline.claimgraph_stage(
     which_pass=1, scope=kb_pipeline.CLAIMGRAPH_SCOPE_FULL
 ).id  # type: ignore[union-attr]
 _EQUATIONS_MINTED = kb_pipeline.claimgraph_stage(
     which_pass=1, scope=kb_pipeline.CLAIMGRAPH_SCOPE_EQUATIONS
 ).id  # type: ignore[union-attr]
+_REFERENCES_FOUND = kb_pipeline.claimgraph_stage(
+    which_pass=2, scope=kb_pipeline.CLAIMGRAPH_SCOPE_UNMARKED
+).id  # type: ignore[union-attr]
 _DEPENDS_ATTRIBUTED = kb_pipeline.claimgraph_stage(which_pass=2, scope=None).id  # type: ignore[union-attr]
+
+#: The stages whose whole work is a reading a model performs: no part of them asks nobody.
+_READING_ONLY = (_CLAIMS_DISCOVERED, _REFERENCES_FOUND)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,19 +83,22 @@ def main(argv: list[str] | None = None) -> int:
         default=PASSES[0],
         help=(
             "which pass to run: 1 authors the declared graph — the claims the author marked — over a fresh "
-            "tree, and is mechanical end to end; 2 authors the discovered graph's dependency edges over "
+            "tree, and is mechanical end to end; 2 finds and classifies the discovered graph's edges over "
             "pass 1's output, and spends inference"
         ),
     )
     parser.add_argument(
         "--scope",
         choices=SCOPES,
-        default=kb_pipeline.CLAIMGRAPH_SCOPE_BLOCK_HOSTED,
+        default=None,
         help=(
-            "pass 1 only — which nodes to mint: 'block-hosted' authors the claims the author marked over a "
-            "fresh tree and is mechanical end to end; 'full' runs the node pass over every leaf the "
-            "block-hosted run recorded unread, spending one letter ask per paragraph it reads; 'equations' mints the "
-            "referenced equations nothing else holds, mechanically, once the node pass has judged the prose"
+            "which stage of the pass to run. Pass 1, which nodes to mint (default 'block-hosted'): "
+            "'block-hosted' authors the claims the author marked over a fresh tree and is mechanical end to end; "
+            "'full' runs the node pass over every leaf the block-hosted run recorded unread, spending one letter "
+            "ask per paragraph it reads; 'equations' mints the referenced equations nothing else holds, "
+            "mechanically, once the node pass has judged the prose. Pass 2: 'unmarked' asks of each shortlisted "
+            "pair of claims whether the source's text points at the target with no cross-reference; with no "
+            "scope, pass 2 classifies every edge candidate and writes the edges"
         ),
     )
     parser.add_argument(
@@ -97,8 +108,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "spend no model call: run only the part of this invocation that asks nobody anything. Pass 2 "
             "records the edges containment settles and leaves the pairs it did not as open and unrecorded; "
-            "the declared pass is mechanical already and is unchanged by it; claim discovery has no such "
-            "part and is refused"
+            "the declared pass is mechanical already and is unchanged by it; claim discovery and the "
+            "unmarked-reference asks have no such part and are refused"
         ),
     )
     arguments = parser.parse_args(argv)
@@ -127,11 +138,13 @@ def main(argv: list[str] | None = None) -> int:
     # composed the same flags from. A pass number branches nothing here: the
     # stage decides, and a combination no stage declares is a usage error rather
     # than a silent fall-through to the mechanical pass.
-    scope = arguments.scope if arguments.which_pass == PASSES[0] else None
+    scope = arguments.scope
+    if scope is None and arguments.which_pass == PASSES[0]:
+        scope = kb_pipeline.CLAIMGRAPH_SCOPE_BLOCK_HOSTED
     stage = kb_pipeline.claimgraph_stage(which_pass=arguments.which_pass, scope=scope)
     if stage is None:
         print(
-            f"--pass {arguments.which_pass} with --scope {arguments.scope} is no stage of the build; "
+            f"--pass {arguments.which_pass} with --scope {scope} is no stage of the build; "
             f"the invocations this tool runs are "
             f"{', '.join(' '.join(s.claimgraph_invocation.flags) for s in kb_pipeline.STAGES if s.claimgraph_invocation)}",
             file=sys.stderr,
@@ -144,13 +157,13 @@ def main(argv: list[str] | None = None) -> int:
         + (f"; runs over what {precondition.id} left" if precondition else "")
     )
 
-    # Refused rather than run empty: every claim discovery mints comes out of a
-    # reading a model performs, so there is no half of it that asks nobody. A
-    # run of it under the flag would mint nothing and then fail its own exit
-    # condition, reporting a corpus fault for a wiring one.
-    if stage.id == _CLAIMS_DISCOVERED and arguments.no_inference:
+    # Refused rather than run empty: everything these stages record comes out of
+    # a reading a model performs, so there is no half of either that asks
+    # nobody. A run of one under the flag would record nothing and then fail its
+    # own exit condition, reporting a corpus fault for a wiring one.
+    if stage.id in _READING_ONLY and arguments.no_inference:
         print(
-            f"{kb_util.NO_INFERENCE_FLAG} names no run of {stage.display}: every claim it mints comes "
+            f"{kb_util.NO_INFERENCE_FLAG} names no run of {stage.display}: everything it records comes "
             f"from a reading a model performs, so it has no part that asks nobody. A build spending "
             f"none omits this stage rather than running it.",
             file=sys.stderr,
@@ -160,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     scratch = repo_root / kb_util.scratch_dirname() / SCRATCH_SUBDIR
     asks = scratch / ASKS_SUBDIR
     reader = partial(ask.ask_without_tools, captures=asks)
-    if stage.id in (_DEPENDS_ATTRIBUTED, _CLAIMS_DISCOVERED) and not arguments.no_inference:
+    if stage.id in (_DEPENDS_ATTRIBUTED, *_READING_ONLY) and not arguments.no_inference:
         try:
             inference.check_environment()
         except ValueError as refusal:
@@ -175,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             reader=None if arguments.no_inference else reader,
             asks=asks,
         )
+    elif stage.id == _REFERENCES_FOUND:
+        report = unmarked.build(kb_root=kb_root, repo_root=repo_root, reader=reader, record_dir=asks)
     elif stage.id == _CLAIMS_DISCOVERED:
         report = discover.build(kb_root=kb_root, repo_root=repo_root, scratch=scratch, reader=reader, record_dir=asks)
     elif stage.id == _EQUATIONS_MINTED:

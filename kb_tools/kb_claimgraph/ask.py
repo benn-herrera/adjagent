@@ -1,15 +1,18 @@
 """This package's asks: what is asked, how it is asked, and the reader that asks it.
 
 **Every claim-graph ask is a letter ask**: one decision, answered with one
-letter from a closed set (:mod:`letters`). Two kinds. A **paragraph** ask puts
+letter from a closed set (:mod:`letters`). Three kinds. A **paragraph** ask puts
 one paragraph of a leaf to the reader — does it state a result — with the leaf as
 :mod:`label` renders it for context; its group is the leaf. A **classify** ask
 puts one edge candidate — is the source *supported by* it, *in support of* it,
 or does it merely *mention* it — with the source claim and the passages its
-references sit in for context; its group is the source claim.
+references sit in for context; its group is the source claim. An **unmarked**
+ask puts one shortlisted pair — does the source claim's text point at the
+candidate's result with no cross-reference — with the source's leaf and its
+statement for context; its group is the source claim.
 
 **One letter-to-meaning table per kind** (:class:`ParagraphLetter`,
-:class:`ClassifyLetter`). A question offering fewer meanings withholds their
+:class:`ClassifyLetter`, :class:`UnmarkedLetter`). A question offering fewer meanings withholds their
 letters and never relabels the rest, so a letter means one thing in every ask
 of its kind. The letters reach a template only as composer constants
 (:data:`LETTER_SLOTS`): a template spelling one would be a second definition of
@@ -21,7 +24,7 @@ of its group, so every ask of a group opens with the same bytes and a server
 can serve that prefix from cache. A re-ask is the same prompt with a correction
 after the question — ``letter-correction``, carrying what came back, cut to
 :data:`RETURNED_MAX_CHARS` — so it shares the whole prefix too. No prompt is
-written here: both are templates under ``kb_driver/prompt-templates/``, and
+written here: each is a template under ``kb_driver/prompt-templates/``, and
 this module hands the composer values and the names of the alternatives it
 chose.
 
@@ -105,7 +108,14 @@ class ClassifyLetter(StrEnum):
     MENTION = "C"
 
 
-#: The letters as both letter templates and their fragments name them.
+class UnmarkedLetter(StrEnum):
+    """The unmarked ask's letters: does the source claim's text point at the candidate's result."""
+
+    POINTS = "A"
+    DOES_NOT = "B"
+
+
+#: The letters as the letter templates and their fragments name them.
 LETTER_SLOTS: Mapping[str, str] = MappingProxyType(
     {
         "letter-claim": ParagraphLetter.CLAIM,
@@ -113,11 +123,13 @@ LETTER_SLOTS: Mapping[str, str] = MappingProxyType(
         "letter-supported-by": ClassifyLetter.SUPPORTED_BY,
         "letter-in-support-of": ClassifyLetter.IN_SUPPORT_OF,
         "letter-mention": ClassifyLetter.MENTION,
+        "letter-points": UnmarkedLetter.POINTS,
+        "letter-does-not-point": UnmarkedLetter.DOES_NOT,
     }
 )
 
 LETTER_TEMPLATES: Mapping[Kind, str] = MappingProxyType(
-    {Kind.PARAGRAPH: "paragraph.tmpl.md", Kind.CLASSIFY: "classify.tmpl.md"}
+    {Kind.PARAGRAPH: "paragraph.tmpl.md", Kind.CLASSIFY: "classify.tmpl.md", Kind.UNMARKED: "unmarked.tmpl.md"}
 )
 
 #: Each kind's per-item slots, as a template spells them. Everything before the
@@ -132,6 +144,7 @@ ITEM_SLOTS: Mapping[Kind, tuple[str, ...]] = MappingProxyType(
             "classify-options",
             "correction",
         ),
+        Kind.UNMARKED: ("dyn.candidate-line", "dyn.candidate-text", "correction"),
     }
 )
 
@@ -152,11 +165,21 @@ CLASSIFY_OPTIONS: Mapping[frozenset[ClassifyLetter], str] = MappingProxyType(
 RETURNED_MAX_CHARS = 400
 
 
-def _letter_correction(returned: str | None) -> tuple[dict[str, str], dict[str, str | None]]:
-    """A first ask's empty correction, or the re-ask's carrying what came back, cut short."""
+def _letter_prompt(
+    kind: Kind, slots: Mapping[str, str], returned: str | None, *, alternatives: Mapping[str, str] | None = None
+) -> str:
+    """One letter ask of ``kind`` over ``slots``: a first ask's correction empty, a re-ask's carrying the reply cut short."""
     if returned is None:
-        return {}, {CORRECTION_SLOT: None}
-    return {"returned": returned.strip()[:RETURNED_MAX_CHARS]}, {CORRECTION_SLOT: LETTER_CORRECTION}
+        correction: dict[str, str] = {}
+        chosen: str | None = None
+    else:
+        correction, chosen = {"returned": returned.strip()[:RETURNED_MAX_CHARS]}, LETTER_CORRECTION
+    return prompt_templates.render(
+        LETTER_TEMPLATES[kind],
+        slots={**slots, **correction},
+        constants=LETTER_SLOTS,
+        alternatives={**(alternatives or {}), CORRECTION_SLOT: chosen},
+    )
 
 
 @dataclass(frozen=True)
@@ -176,18 +199,15 @@ class ParagraphItem:
 
 
 def _paragraph_prompt(group: ParagraphGroup, item: ParagraphItem, returned: str | None) -> str:
-    slots, alternatives = _letter_correction(returned)
-    return prompt_templates.render(
-        LETTER_TEMPLATES[Kind.PARAGRAPH],
-        slots={
+    return _letter_prompt(
+        Kind.PARAGRAPH,
+        {
             "document": group.document,
             "body": group.body.rstrip("\n"),
             "paragraph": item.paragraph,
             "paragraph-text": item.text.rstrip("\n"),
-            **slots,
         },
-        constants=LETTER_SLOTS,
-        alternatives=alternatives,
+        returned,
     )
 
 
@@ -223,20 +243,18 @@ def _classify_prompt(
     numbers: Mapping[str, int],
     offered: tuple[ClassifyLetter, ...],
 ) -> str:
-    slots, alternatives = _letter_correction(returned)
-    return prompt_templates.render(
-        LETTER_TEMPLATES[Kind.CLASSIFY],
-        slots={
+    return _letter_prompt(
+        Kind.CLASSIFY,
+        {
             "claim-line": _claim_line(group.source),
             "claim-text": group.statement.rstrip("\n"),
             "reference-lines": "\n".join(f"P{number}: {passage}" for passage, number in numbers.items()),
             "candidate-line": _claim_line(item.target),
             "candidate-text": item.statement.rstrip("\n"),
             "candidate-passages": ", ".join(f"P{number}" for number in sorted({numbers[p] for p in item.passages})),
-            **slots,
         },
-        constants=LETTER_SLOTS,
-        alternatives={CLASSIFY_OPTIONS_SLOT: CLASSIFY_OPTIONS[frozenset(offered)], **alternatives},
+        returned,
+        alternatives={CLASSIFY_OPTIONS_SLOT: CLASSIFY_OPTIONS[frozenset(offered)]},
     )
 
 
@@ -254,6 +272,45 @@ def classify_asks(group: ClassifyGroup, items: Sequence[ClassifyItem]) -> tuple[
         compose = partial(_classify_prompt, group, item, numbers=numbers, offered=offered)
         asks.append(LetterItem(item.target.id, offered, compose))
     return tuple(asks)
+
+
+@dataclass(frozen=True)
+class UnmarkedGroup:
+    """A source claim with its statement, and the leaf it is stated in: its path and its :func:`label.render` body."""
+
+    document: str
+    body: str
+    source: ClaimNode
+    statement: str
+
+
+@dataclass(frozen=True)
+class UnmarkedItem:
+    """One shortlisted target, and its statement."""
+
+    target: ClaimNode
+    statement: str
+
+
+def _unmarked_prompt(group: UnmarkedGroup, item: UnmarkedItem, returned: str | None) -> str:
+    return _letter_prompt(
+        Kind.UNMARKED,
+        {
+            "document": group.document,
+            "body": group.body.rstrip("\n"),
+            "claim-line": _claim_line(group.source),
+            "claim-text": group.statement.rstrip("\n"),
+            "candidate-line": _claim_line(item.target),
+            "candidate-text": item.statement.rstrip("\n"),
+        },
+        returned,
+    )
+
+
+def unmarked_asks(group: UnmarkedGroup, items: Sequence[UnmarkedItem]) -> tuple[LetterItem, ...]:
+    """One source claim's unmarked asks, each named by its target's id and offered both letters."""
+    offered = tuple(UnmarkedLetter)
+    return tuple(LetterItem(item.target.id, offered, partial(_unmarked_prompt, group, item)) for item in items)
 
 
 #: Characters a capture's file name keeps from the ask it is named after.

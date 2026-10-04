@@ -5,7 +5,7 @@ copies of one sentence once lived in seven agent templates, and a pass that cann
 surface a duplicate somebody already found by hand is not working whatever else it
 reports. :data:`KNOWN_ANSWER_TREE` restates that shape as a fixture, with copies the
 pass must not read planted beside the ones it must. The prose detector's recall
-bound — every shared run of fifteen words, shorter ones by alignment — is stated as
+bound — every shared run of fifteen non-article words, shorter ones by alignment — is stated as
 a table in :func:`test_a_short_run_is_found_only_when_a_stride_head_falls_inside_it`.
 
 Corpus-shaped cases pass a `{path: source}` mapping straight to the extractors
@@ -146,7 +146,7 @@ def known_answer_clusters(monkeypatch) -> list[clustering.Cluster]:
 
 
 def cluster_of(found: list[clustering.Cluster], sentence: str) -> clustering.Cluster:
-    wanted = normalization.prose_tokens(sentence)
+    wanted = prose(sentence).words
     matching = [cluster for cluster in found if cluster.representative.tokens == wanted]
     assert len(matching) == 1, f"no single candidate for {sentence!r}"
     return matching[0]
@@ -155,14 +155,14 @@ def cluster_of(found: list[clustering.Cluster], sentence: str) -> clustering.Clu
 def test_the_known_seven_way_duplicate_is_found(known_answer_clusters):
     found = cluster_of(known_answer_clusters, KNOWN_ANSWER_SENTENCE)
     assert sorted(member.site for member, _ in found.members) == KNOWN_ANSWER_SITES
-    wanted = normalization.prose_tokens(KNOWN_ANSWER_SENTENCE)
+    wanted = prose(KNOWN_ANSWER_SENTENCE).words
     assert all(member.tokens == wanted for member, _ in found.members), "every site must be the whole sentence"
 
 
 def test_a_sentence_wrapped_at_a_different_column_at_each_site_is_one_candidate(known_answer_clusters):
     found = cluster_of(known_answer_clusters, WRAPPED_SENTENCE)
     assert sorted(member.site for member, _ in found.members) == WRAPPED_SITES
-    wanted = normalization.prose_tokens(WRAPPED_SENTENCE)
+    wanted = prose(WRAPPED_SENTENCE).words
     assert all(member.tokens == wanted for member, _ in found.members), "every site must be the whole sentence"
 
 
@@ -183,10 +183,23 @@ def test_a_shared_run_is_one_passage_whatever_its_wrap_punctuation_and_case():
         ),
     ]
     found = overlaps(*texts)
-    assert found == [(Span(0, 3, 25), Span(1, 0, 22))]
+    assert found == [(Span(0, 3, 24), Span(1, 0, 21))]
     assert sites(texts, found) == [["a.tmpl.md:3", "b.tmpl.md:1"]]
-    assert window_index.overlap_clusters(texts, found)[0].representative.tokens == normalization.prose_tokens(
-        WRAPPED_SENTENCE
+    assert window_index.overlap_clusters(texts, found)[0].representative.tokens == prose(WRAPPED_SENTENCE).words
+
+
+def test_passages_differing_only_in_their_articles_are_one_passage():
+    texts = [
+        prose(
+            "Notes first.\nThe bound holds for the window that a stride head opens in an index of every text.",
+            path="a",
+        ),
+        prose("A bound holds for a window that the stride head opens in the index of every text. Done.", path="b"),
+    ]
+    found = overlaps(*texts, min_tokens=WINDOW)
+    assert found == [(Span(0, 2, 15), Span(1, 0, 13))]
+    assert window_index.overlap_clusters(texts, found)[0].representative.text == (
+        "bound holds for window that stride head opens in index of every text"
     )
 
 
@@ -304,8 +317,22 @@ def test_exact_cores_merge_across_a_small_gap_while_the_pair_keeps_its_coverage(
 
 def test_fenced_code_is_not_prose_and_later_lines_keep_their_numbers():
     text = prose("A sentence.\n```sh\njust install target\n```\nAnother sentence.")
-    assert text.words == ("a", "sentence", "another", "sentence")
-    assert text.lines == (1, 1, 5, 5)
+    assert text.words == ("sentence", "another", "sentence")
+    assert text.lines == (1, 5, 5)
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("A rule, an idea and THE check.", ("rule", "idea", "and", "check")),
+        # Demonstratives carry meaning and stay.
+        ("These rules and this check, those and that.", tuple("these rules and this check those and that".split())),
+        # An article's letters inside a word are part of the word.
+        ("Analysis of data, then theory and anathema.", tuple("analysis of data then theory and anathema".split())),
+    ],
+)
+def test_only_standalone_articles_leave_a_prose_text(line, expected):
+    assert prose(line).words == expected
 
 
 # ── the metric ───────────────────────────────────────────────────────────────

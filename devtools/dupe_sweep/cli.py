@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-words",
         type=int,
-        help="shortest passage reported, in words (prose, default 12; runs under 8 are never found)"
+        help="shortest passage reported, in non-article words (prose, default 10; runs under 8 are never found)"
         " / shortest function compared, in AST nodes (python, default 30)",
     )
     parser.add_argument(

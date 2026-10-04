@@ -10,7 +10,7 @@ and, from a reader that can give one, a probability per label. What the reply
 thing that stops a group: a reply that carries no offered letter is re-asked
 once and then left without one, for the caller to give its stated default.
 
-**What prompts say is not here.** :mod:`ask` composes both kinds and hands each
+**What prompts say is not here.** :mod:`ask` composes every kind and hands each
 item over as a :class:`LetterItem` whose ``compose`` turns "what came back last
 time" (``None`` on a first ask) into the prompt. The re-ask is therefore the
 first prompt with a correction after its question, sharing its whole prefix.
@@ -45,10 +45,11 @@ DEFAULT_READER_CONCURRENCY = 4
 
 
 class Kind(StrEnum):
-    """The two letter asks: a paragraph of the node pass, an edge candidate of classification."""
+    """The letter asks: a paragraph of the node pass, an edge candidate of classification, an unmarked pair."""
 
     PARAGRAPH = "paragraph"
     CLASSIFY = "classify"
+    UNMARKED = "unmarked"
 
 
 @dataclass(frozen=True)

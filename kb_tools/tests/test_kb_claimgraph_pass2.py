@@ -37,6 +37,7 @@ from kb_tools.kb_claimgraph import (
     letters,
     report,
     tree,
+    unmarked,
     write,
 )
 from kb_tools.kb_claimgraph.build import build
@@ -899,6 +900,72 @@ def test_b_writes_the_edge_target_to_source_and_no_reference(declared: Path, run
     references = _register_references(declared)
     assert (ids["Alpha result"], ids["Beta lemma"]) not in references
     assert (ids["Beta lemma"], ids["Alpha result"]) not in references
+
+
+def _record_unmarked(declared: Path, letters_by_title: dict[tuple[str, str], str | None]) -> dict[str, str]:
+    """Land an unmarked record answering each ``(source title, target title)`` pair; ``None`` is a default."""
+    _, _, authored = _read(declared)
+    ids = _titles(authored)
+    entries = {
+        (ids[source], ids[target]): kb_pipeline.CandidateEntry(
+            offered=tuple(ask.UnmarkedLetter),
+            letter=letter,
+            outcome=kb_pipeline.ClassifyOutcome.ANSWERED if letter else kb_pipeline.ClassifyOutcome.DEFAULTED,
+        )
+        for (source, target), letter in letters_by_title.items()
+    }
+    kb_pipeline.write_unmarked(declared, kb_pipeline.UnmarkedRecord(planned=tuple(entries)).with_entries(entries))
+    return ids
+
+
+def test_an_unmarked_yes_is_a_candidate_offered_its_class_s_letters_drafted_mention(declared: Path):
+    """Only ``A`` yields; the candidate it yields is classed by its pair, its passage the source's own text.
+
+    Delta states its result and points at Beta's nowhere in markup, so the
+    pair is no candidate until the record says the text points there.
+    """
+    ids = _record_unmarked(
+        declared,
+        {
+            ("Delta result", "Beta lemma"): ask.UnmarkedLetter.POINTS,
+            ("Beta lemma", "Delta result"): ask.UnmarkedLetter.DOES_NOT,
+            ("Delta result", "Gamma two"): None,
+        },
+    )
+    documents, sites, authored = _read(declared)
+    before = attribute.narrow(documents, authored, sites)
+    yes = (ids["Delta result"], ids["Beta lemma"])
+    assert yes not in _pairs(before)
+
+    after = attribute.narrow(documents, authored, sites, unmarked=unmarked.found(kb_pipeline.read_unmarked(declared)))
+
+    assert _pairs(after) == _pairs(before) | {yes}
+    found = _candidate(after, *yes)
+    assert set(found.offered) == attribute.OFFERED[attribute.CandidateClass.CLAIM_TO_CLAIM]
+    assert found.draft is attribute.Relation.MENTION
+    assert found.harvests == {attribute.Harvest.UNMARKED}
+    (passage,) = found.passages
+    assert "Delta stands on its own." in passage, "the claim's own text"
+    assert "Section 1" not in passage, "and not the prose around it"
+    defaulted_pair = _candidate(after, ids["Delta result"], ids["Gamma two"])
+    assert defaulted_pair.harvests == {attribute.Harvest.REFERENCE}, "a default adds no provenance"
+
+
+def test_an_unmarked_yes_answered_b_writes_target_to_source_and_is_counted_by_harvest(
+    declared: Path, runner_gate: None
+):
+    """The yes is classified like any candidate: *in support of* lands Beta → Delta in Beta's entry."""
+    ids = _record_unmarked(declared, {("Delta result", "Beta lemma"): ask.UnmarkedLetter.POINTS})
+    reader = FakeReader(declared, {("Delta result", "Beta lemma"): ask.ClassifyLetter.IN_SUPPORT_OF})
+
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
+
+    assert not outcome.failed, outcome.lines()
+    assert (ids["Beta lemma"], ids["Delta result"]) in _register_edges(declared)
+    assert (ids["Delta result"], ids["Beta lemma"]) not in _register_edges(declared)
+    assert (ids["Delta result"], ids["Beta lemma"]) not in _register_references(declared)
+    counted = next(line for line in outcome.lines() if "stage-D-candidates" in line)
+    assert "unmarked 1" in counted, counted
 
 
 def test_a_malformed_reply_is_re_asked_once_then_takes_the_draft_named_on_the_report(declared: Path):

@@ -17,12 +17,12 @@ from .report import render_clusters, render_constants, render_header
 from .shapes import shape_units
 from .window_index import overlap_clusters, overlaps
 
-#: Defaults per pass, tuned on this tree for a list short enough to read. Twelve
-#: words is about the shortest passage whose repetition is a statement rather
-#: than a turn of phrase. Thirty AST nodes is roughly ten lines, and a structural
+#: Defaults per pass, tuned on this tree for a list short enough to read. Ten
+#: non-article words (a, an, the are not counted) is about the shortest passage
+#: whose repetition is a statement rather than a turn of phrase. Thirty AST nodes is roughly ten lines, and a structural
 #: clone is worth a reader's time only when it is near-exact, hence the higher
 #: containment bar and the tighter length window on code.
-PROSE_DEFAULTS = {"min_tokens": 12, "coverage": 0.85}
+PROSE_DEFAULTS = {"min_tokens": 10, "coverage": 0.85}
 CODE_DEFAULTS = {"min_tokens": 30, "coverage": 0.90, "width": 5, "length_ratio": 0.7, "probes": 8}
 DOC_DEFAULTS = {"min_tokens": 12, "coverage": 0.85, "width": 4, "length_ratio": 0.6, "probes": None}
 

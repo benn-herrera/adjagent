@@ -6,7 +6,8 @@ in more than :data:`MAX_WINDOW_SITES` places is framing and finds nothing. Each 
 exact run it sits in, and runs between one pair of texts merge across gaps of at most
 :data:`MAX_MERGE_GAP` words while the merged pair still scores ``coverage``.
 
-Bounds: a run of ``2 * WINDOW - 1`` (15) or more identical words is always found. A run of
+Bounds, in words of the prose text — articles already dropped: a run of ``2 * WINDOW - 1`` (15) or
+more identical words is always found, so any shared run of 15 or more non-article words is. A run of
 ``WINDOW`` to 14 words is found only when a stride head of the later text falls far enough inside
 it — its first word at most ``length - WINDOW`` words before a multiple of ``WINDOW`` — and a
 shorter run never is. A paraphrase with no exact core of that length is invisible. Repeats inside

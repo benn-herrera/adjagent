@@ -48,6 +48,16 @@ TARGETS = (
     ClaimNode("clm-cccccc", "vol/b.md", "Equation (3)", None, None, equation="eq:three"),
 )
 SOURCE_GROUP = ask.ClassifyGroup(SOURCE, "**Theorem 1**. The map has a unique fixed point.")
+UNMARKED_GROUP = ask.UnmarkedGroup(
+    document="vol/a.md",
+    body="S1: We study the map.\n\n> **Theorem 1**. The map has a unique fixed point.",
+    source=SOURCE,
+    statement="**Theorem 1**. The map has a unique fixed point.",
+)
+SHORTLISTED = (
+    ask.UnmarkedItem(TARGETS[0], "**Lemma 2**. The map is a contraction."),
+    ask.UnmarkedItem(TARGETS[1], "$$ k = \\sup |f'| $$"),
+)
 CANDIDATES = (
     ask.ClassifyItem(
         TARGETS[0],
@@ -65,9 +75,11 @@ CANDIDATES = (
 
 
 def _group_asks(kind: letters.Kind) -> tuple[letters.LetterItem, ...]:
-    if kind is letters.Kind.PARAGRAPH:
-        return ask.paragraph_asks(LEAF, PARAGRAPHS)
-    return ask.classify_asks(SOURCE_GROUP, CANDIDATES)
+    return {
+        letters.Kind.PARAGRAPH: lambda: ask.paragraph_asks(LEAF, PARAGRAPHS),
+        letters.Kind.CLASSIFY: lambda: ask.classify_asks(SOURCE_GROUP, CANDIDATES),
+        letters.Kind.UNMARKED: lambda: ask.unmarked_asks(UNMARKED_GROUP, SHORTLISTED),
+    }[kind]()
 
 
 # --- the reader, against a stub server -----------------------------------------
@@ -243,6 +255,13 @@ def test_a_classify_question_closes_naming_exactly_the_letters_it_offers(candida
 
     assert set(entry.offered) == set(candidate.offered)
     assert set(re.findall(r"\b[A-Z]\b", closing)) == set(entry.offered)
+
+
+def test_an_unmarked_ask_is_named_by_its_target_and_offered_both_letters() -> None:
+    asks = ask.unmarked_asks(UNMARKED_GROUP, SHORTLISTED)
+
+    assert [entry.item for entry in asks] == [target.id for target in TARGETS]
+    assert all(entry.offered == ("A", "B") for entry in asks)
 
 
 def test_a_group_numbers_its_passages_once() -> None:

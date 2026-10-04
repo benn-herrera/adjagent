@@ -1039,6 +1039,8 @@ _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType
         "discover.record": Runner._record_stage,
         "equations.build": Runner._claim_graph,
         "equations.record": Runner._record_stage,
+        "unmarked.build": Runner._claim_graph,
+        "unmarked.record": Runner._record_stage,
         "depends.attribute": Runner._depends_attribute,
         "depends.record": Runner._record_stage,
         "p3a.gate": Runner._p3a_gate,

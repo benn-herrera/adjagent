@@ -1,9 +1,11 @@
 """Stage D's narrowing: every edge candidate, classed and drafted. Mechanical throughout.
 
-**The candidate set is narrowed mechanically and the model never adds to it.**
+**The candidate set is narrowed mechanically, and a model adds to it only by
+judging a pair a mechanical shortlist proposed** (:mod:`unmarked`).
 What this module returns is one :class:`Candidate` per ordered pair, whatever
-harvested it — a cross-reference anchor or a hand-written name
-(:mod:`hand_named`) — carrying the relations its class may be offered and the
+harvested it — a cross-reference anchor, a hand-written name
+(:mod:`hand_named`), or a pair the unmarked-reference ask answered yes
+(:mod:`unmarked`) — carrying the relations its class may be offered and the
 draft a build with no reader writes. :mod:`classify` asks about each one.
 Over stage B's cross-reference anchors, each end of a reference is attributed to
 a claim where a rule settles it, and left open where none does:
@@ -326,14 +328,14 @@ and asks nothing of anybody, so the drafts are the corpus's answer and not a
 model's. A run with no model reachable writes every candidate's draft.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 
 from .. import kb_pipeline
 from ..kb_write import render
-from . import hand_named, prose
+from . import equation_sites, hand_named, prose
 from .graph import AuthoredGraph, ClaimNode
 from .inventory import (
     NOT_A_CLAIM_TARGET,
@@ -387,6 +389,7 @@ class Harvest(StrEnum):
 
     REFERENCE = "reference"
     HAND_NAMED = "hand-named"
+    UNMARKED = "unmarked"
 
 
 class CandidateClass(StrEnum):
@@ -814,12 +817,19 @@ class Attribution:
     (:func:`names_no_premise`), less any pair that is a candidate anyway. They
     are no candidate: the author pointed at a section or a figure, and the
     claims it hosts are what the fallback routes offered in its place.
+
+    ``own_equations`` is the pairs some harvest reached from a claim to an
+    equation node whose fence lies inside that claim's own body
+    (:func:`equation_sites.own_equations`). They are no candidate: the claim
+    states that equation, so the pair is no dependency in either direction and
+    no reference.
     """
 
     candidates: tuple[Candidate, ...]
     routes: Mapping[str, int]
     demoted: tuple[tuple[str, str], ...] = ()
     word_dropped: tuple[tuple[str, str], ...] = ()
+    own_equations: tuple[tuple[str, str], ...] = ()
 
     def _drafted(self, kind: Written) -> tuple[tuple[str, str], ...]:
         records = (written(candidate, candidate.draft) for candidate in self.candidates)
@@ -846,17 +856,29 @@ class _Reached:
 
 
 def narrow(
-    tree: Tree, graph: AuthoredGraph, inventory: Inventory, record: kb_pipeline.NodePassRecord | None = None
+    tree: Tree,
+    graph: AuthoredGraph,
+    inventory: Inventory,
+    record: kb_pipeline.NodePassRecord | None = None,
+    unmarked: Iterable[tuple[str, str]] = (),
 ) -> Attribution:
     """Every edge candidate the corpus states, classed and drafted.
 
     Deterministic and total: nothing is sampled and nothing is dropped
-    silently. Two harvests: stage B's anchors, read end by end, and
-    :func:`hand_named.harvest`. A pair either reaches is one candidate.
+    silently. Three harvests: stage B's anchors, read end by end,
+    :func:`hand_named.harvest`, and ``unmarked``. A pair any of them reaches is
+    one candidate, unless it is a claim and one of its own equations
+    (:attr:`Attribution.own_equations`).
 
     ``record`` is the node pass's, whose verdicts decide the source end of a
     reference in readable prose (:func:`_source_end`). ``None`` is a record
     judging nothing, every such reference unjudged.
+
+    ``unmarked`` is the ordered pairs the unmarked-reference ask answered yes
+    (:func:`unmarked.found`). Each is classed as an undirected provenance of
+    its pair, drafted *mention*, and its passage is the source claim's own
+    body (:func:`hand_named.bodies`) — a prose claim's paragraph, a block
+    claim's block — the yes having been about that claim's text.
     """
     blocks = by_document(inventory.blocks)
     fences = by_document(inventory.fences)
@@ -878,13 +900,17 @@ def narrow(
     reached: dict[tuple[str, str], _Reached] = {}
     unopened: set[tuple[str, str]] = set()
 
-    def reach(pair: tuple[str, str], *, offered: frozenset[Relation], at: tuple[str, int], harvest: Harvest) -> None:
-        if at not in passages:
-            passages[at] = _reference_line(tree, *at)
+    def passage_at(document: str, line: int) -> str:
+        if (document, line) not in passages:
+            passages[(document, line)] = _reference_line(tree, document, line)
+        return passages[(document, line)]
+
+    def reach(pair: tuple[str, str], *, offered: frozenset[Relation], passage: str | None, harvest: Harvest) -> None:
         found = reached.setdefault(pair, _Reached(offered=offered, passages=set(), harvests=set()))
         found.offered &= offered
-        found.passages.add(passages[at])
         found.harvests.add(harvest)
+        if passage is not None:
+            found.passages.add(passage)
 
     for anchor in inventory.anchors:
         if anchor.target is None:
@@ -930,14 +956,32 @@ def narrow(
                     unopened.add(pair)
                     continue
                 offered = OFFERED[_class_of(directed=directed, target=target)]
-                reach(pair, offered=offered, at=(anchor.document, anchor.line), harvest=Harvest.REFERENCE)
+                reach(
+                    pair, offered=offered, passage=passage_at(anchor.document, anchor.line), harvest=Harvest.REFERENCE
+                )
 
     for found in hand_named.harvest(tree, graph, inventory):
         offered = OFFERED[_class_of(directed=False, target=graph.nodes[found.target])]
         reach(
-            (found.source, found.target), offered=offered, at=(found.document, found.line), harvest=Harvest.HAND_NAMED
+            (found.source, found.target),
+            offered=offered,
+            passage=passage_at(found.document, found.line),
+            harvest=Harvest.HAND_NAMED,
         )
 
+    yeses = tuple(unmarked)
+    if yeses:
+        # The yes was about the source claim's own text, so that text is its
+        # passage. A claim no body reaches is shown to classification by its
+        # title (`classify.statements`) and gets no passage here.
+        own_text: dict[str, str] = {}
+        for node, _, _, body in hand_named.bodies(tree, graph, inventory):
+            own_text.setdefault(node.id, render.collapse_prose(body))
+        for source, target in yeses:
+            offered = OFFERED[_class_of(directed=False, target=graph.nodes[target])]
+            reach((source, target), offered=offered, passage=own_text.get(source), harvest=Harvest.UNMARKED)
+
+    stated = equation_sites.own_equations(tree, graph, inventory).intersection(reached)
     demoted = cycle_edges(sorted(settled))
     on_ring = set(demoted)
     routes: dict[str, int] = {}
@@ -955,10 +999,12 @@ def narrow(
             harvests=frozenset(found.harvests),
         )
         for pair, found in sorted(reached.items())
+        if pair not in stated
     )
     return Attribution(
         candidates=candidates,
         routes=routes,
         demoted=demoted,
         word_dropped=tuple(sorted(unopened - set(reached))),
+        own_equations=tuple(sorted(stated)),
     )

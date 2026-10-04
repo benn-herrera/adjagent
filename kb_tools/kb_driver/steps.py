@@ -203,6 +203,7 @@ _SPINE_SEED = "spine-seed"
 _CLAIMS_DECLARED = "claims-declared"
 _CLAIMS_DISCOVERED = "claims-discovered"
 _EQUATIONS_MINTED = "equations-minted"
+_REFERENCES_FOUND = "references-found"
 _DEPENDS_ATTRIBUTED = "depends-attributed"
 _PHASE_3A = "phase-3a"
 _OVERVIEW_DRAFTED = "overview-drafted"
@@ -258,7 +259,7 @@ STEPS: tuple[Step, ...] = (
     ),
     # --- the head: the build's own production ---------------------------------
     #
-    # Six tool rows and their records. Every one of them invokes a module and
+    # Seven tool rows and their records. Every one of them invokes a module and
     # reads an exit code, so none briefs a seat and none raises a barrier of its
     # own — the two exceptions being stated where they sit. The order is forced
     # end to end: the seed refuses a `kb-root/` with no tree in it, the declared
@@ -360,6 +361,26 @@ STEPS: tuple[Step, ...] = (
     Step(
         id="equations.record",
         stage=_EQUATIONS_MINTED,
+        unit=Unit.DRIVER_OP,
+        writer=Writer.TOOL,
+        ledger_op=LedgerOp.ADVANCE_STEP,
+    ),
+    # --- references-found — unmarked references, asked over a shortlist -------
+    # Inference whole, like `discover.build`: the shortlist is planned
+    # mechanically, but nothing it records stands without the asks, so a build
+    # spending none drops the row and the unmarked record stays as the declared
+    # pass wrote it, empty. A stage of its own because its asks are what a
+    # boundary must keep from being spent twice.
+    Step(
+        id="unmarked.build",
+        stage=_REFERENCES_FOUND,
+        unit=Unit.DRIVER_OP,
+        writer=Writer.TOOL,
+        spends_own_inference=True,
+    ),
+    Step(
+        id="unmarked.record",
+        stage=_REFERENCES_FOUND,
         unit=Unit.DRIVER_OP,
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,

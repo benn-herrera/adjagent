@@ -3,7 +3,8 @@
 Invoked through `just measure-kb-roots` (kb-testing/justfile), which hands every
 staged kb-root as a leading positional argument. Each kb-root goes through
 ``tree.read`` → ``inventory.scan`` → ``graph.read`` → ``attribute.narrow`` with
-the repository's node-pass record, and nothing else.
+the repository's node-pass record and the yeses its unmarked record holds
+(``unmarked.found``; none where no record stands), and nothing else.
 
 Per kb-root, one tab-separated line.
 
@@ -17,8 +18,10 @@ declared pass records):
   the leaves holding at least one, which are the node pass's ask groups.
 
 **Classification**, over the candidate records ``attribute.narrow`` returns —
-one per ``(source, target)``, a reference and a hand-written name reaching one
-pair merged — each counted by class and harvest (``ref``, ``named``, ``both``).
+one per ``(source, target)``, every harvest reaching one pair merged — each
+counted by class and harvest (``ref``, ``named``, ``unmarked``, and ``both`` for
+a pair more than one harvest reached). ``unmarked-yeses`` is the pairs the
+unmarked record holds answered yes, ``-`` where no record stands.
 The class does not travel past the narrowing, so it is read back off the
 record: ``eqn`` where the target is a minted equation node; ``proof`` where it
 is not and the pair is offered no *in support of* (some provenance sat in a
@@ -36,10 +39,10 @@ import sys
 from pathlib import Path
 
 from kb_tools import kb_pipeline
-from kb_tools.kb_claimgraph import attribute, classify, graph, identify, inventory, prose, tree
+from kb_tools.kb_claimgraph import attribute, classify, graph, identify, inventory, prose, tree, unmarked
 
 CLASSES = ("proof", "eqn", "claim")
-HARVESTS = ("ref", "named", "both")
+HARVESTS = ("ref", "named", "unmarked", "both")
 
 
 def _node_pass(documents: tree.Tree, sites: inventory.Inventory) -> dict[str, int]:
@@ -63,10 +66,12 @@ def _node_pass(documents: tree.Tree, sites: inventory.Inventory) -> dict[str, in
 
 def _classify(
     documents: tree.Tree, sites: inventory.Inventory, kb_root: Path
-) -> tuple[dict[str, int], kb_pipeline.NodePassRecord | None]:
+) -> tuple[dict[str, int | str], kb_pipeline.NodePassRecord | None]:
     authored = graph.read(documents, sites)
     record = kb_pipeline.read_node_pass(kb_root.parent)
-    candidates = attribute.narrow(documents, authored, sites, record).candidates
+    unmarked_record = kb_pipeline.read_unmarked(kb_root.parent)
+    yeses = () if unmarked_record is None else unmarked.found(unmarked_record)
+    candidates = attribute.narrow(documents, authored, sites, record, unmarked=yeses).candidates
 
     figures = {f"{kind}/{harvest}": 0 for kind in CLASSES for harvest in HARVESTS}
     for candidate in candidates:
@@ -79,12 +84,14 @@ def _classify(
         harvest = {
             frozenset({attribute.Harvest.REFERENCE}): "ref",
             frozenset({attribute.Harvest.HAND_NAMED}): "named",
+            frozenset({attribute.Harvest.UNMARKED}): "unmarked",
         }.get(candidate.harvests, "both")
         figures[f"{kind}/{harvest}"] += 1
     drafts = [candidate.draft for candidate in candidates]
     depends, references, _ = classify.records(candidates, {candidate.pair: candidate.draft for candidate in candidates})
     return {
         "nodes": len(authored.nodes),
+        "unmarked-yeses": "-" if unmarked_record is None else len(yeses),
         "candidates": len(candidates),
         **figures,
         "sources": len({candidate.source.id for candidate in candidates}),

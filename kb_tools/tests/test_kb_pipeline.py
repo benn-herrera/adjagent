@@ -5,6 +5,7 @@ stage table directly, for obligations whose *absence* is the contract and which
 therefore have no rendered line to look for.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -398,3 +399,95 @@ def test_the_document_walk_is_one_walk(tmp_path: Path) -> None:
 
     assert set(kb_index_lib.document_texts(kb_root)) == set(tree.read(kb_root).documents)
     assert ".index/skipped.md" not in kb_index_lib.document_texts(kb_root)
+
+
+# ---------------------------------------------------------------------------
+# The unmarked record, and the codec it shares with the classification record
+# ---------------------------------------------------------------------------
+
+_ASKED = kb_pipeline.CandidateEntry(
+    offered=("A", "B"), letter="A", outcome=kb_pipeline.ClassifyOutcome.ANSWERED, confidence={"A": 0.9, "B": 0.1}
+)
+_DEFAULTED = kb_pipeline.CandidateEntry(offered=("A", "B"), letter=None, outcome=kb_pipeline.ClassifyOutcome.DEFAULTED)
+
+
+def test_the_unmarked_record_reads_back_what_was_written_with_its_plan_in_order(tmp_path: Path) -> None:
+    planned = (("clm-bbbbbb", "clm-zzzzzz"), ("clm-bbbbbb", "clm-aaaaaa"), ("clm-cccccc", "clm-aaaaaa"))
+    record = (
+        kb_pipeline.UnmarkedRecord()
+        .with_plan(planned)
+        .with_entries({planned[1]: _DEFAULTED, planned[0]: _ASKED, ("clm-dddddd", "clm-aaaaaa"): _ASKED})
+    )
+
+    kb_pipeline.write_unmarked(tmp_path, record)
+    back = kb_pipeline.read_unmarked(tmp_path)
+
+    assert back == record
+    assert back.unanswered() == (planned[2],)
+    written = (tmp_path / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8")
+    kb_pipeline.write_unmarked(tmp_path, back)
+    assert (tmp_path / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
+    assert kb_pipeline.UNMARKED_ABOUT in written
+
+
+def test_one_pair_codec_writes_both_records_rows_alike(tmp_path: Path) -> None:
+    """Two paths through one codec: a pair's row is the same bytes in either record."""
+    entries = {("clm-aaaaaa", "clm-bbbbbb"): _ASKED}
+    kb_pipeline.write_classification(tmp_path, kb_pipeline.ClassificationRecord().with_entries(entries))
+    kb_pipeline.write_unmarked(tmp_path, kb_pipeline.UnmarkedRecord().with_entries(entries))
+
+    classified = json.loads((tmp_path / kb_pipeline.CLASSIFICATION_RELPATH).read_text(encoding="utf-8"))
+    unmarked = json.loads((tmp_path / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8"))
+
+    assert classified["candidates"] == unmarked["pairs"]
+    assert dict(kb_pipeline.read_classification(tmp_path).candidates) == entries
+    assert dict(kb_pipeline.read_unmarked(tmp_path).pairs) == entries
+
+
+def test_no_unmarked_record_is_no_record_and_a_torn_one_is_refused(tmp_path: Path) -> None:
+    assert kb_pipeline.read_unmarked(tmp_path) is None
+    (tmp_path / kb_pipeline.UNMARKED_RELPATH).write_text('{"planned": [["clm-a"]], "pairs": []}', "utf-8")
+    with pytest.raises(kb_pipeline.UnmarkedRecordError):
+        kb_pipeline.read_unmarked(tmp_path)
+
+
+def test_the_unmarked_record_lives_outside_the_kb_and_outside_scratch() -> None:
+    assert not kb_pipeline.UNMARKED_RELPATH.startswith((kb_util.KB_DIRNAME, kb_util.scratch_dirname()))
+    assert "/" not in kb_pipeline.UNMARKED_RELPATH
+
+
+_PAIR = ("clm-aaaaaa", "clm-bbbbbb")
+
+
+@pytest.mark.parametrize(
+    ("record", "satisfied"),
+    [
+        (kb_pipeline.UnmarkedRecord().with_plan(()), True),
+        (kb_pipeline.UnmarkedRecord().with_plan((_PAIR,)).with_entries({_PAIR: _DEFAULTED}), True),
+        (kb_pipeline.UnmarkedRecord().with_plan((_PAIR,)), False),
+        (kb_pipeline.UnmarkedRecord(), False),
+        (None, False),
+    ],
+    ids=["empty-plan", "every-pair-answered", "a-pair-unanswered", "never-planned", "no-record"],
+)
+def test_the_unmarked_stage_is_covered_when_its_plan_stands_and_every_pair_carries_an_outcome(
+    tmp_path: Path, record: kb_pipeline.UnmarkedRecord | None, satisfied: bool
+) -> None:
+    if record is not None:
+        kb_pipeline.write_unmarked(tmp_path, record)
+
+    report = kb_pipeline._check_references_found(kb_pipeline.CheckContext(tmp_path))
+
+    assert [unit.satisfied for unit in report.units] == [satisfied]
+    assert all(unit.asserts_own_work for unit in report.units)
+
+
+def test_the_unmarked_stage_sits_after_the_node_set_is_fixed_and_before_classification() -> None:
+    ids = kb_pipeline.STAGE_IDS
+    stage = kb_pipeline.stage_by_id("references-found")
+
+    assert ids.index("equations-minted") + 1 == ids.index("references-found") == ids.index("depends-attributed") - 1
+    assert stage.work_is_inference and not stage.mints_nodes
+    assert stage.claimgraph_invocation == kb_pipeline.ClaimgraphInvocation(
+        which_pass=2, scope=kb_pipeline.CLAIMGRAPH_SCOPE_UNMARKED
+    )

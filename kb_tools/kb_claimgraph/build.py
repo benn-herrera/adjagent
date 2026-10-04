@@ -5,8 +5,9 @@ two artifacts or on a return code; none exits on an opinion, and none asks
 whether the work is good enough.
 
 **Mechanical end to end.** This pass identifies the claims the author marked and
-spends no inference. The two stages that do — the node pass over every leaf's
-prose (:mod:`discover`) and dependency attribution (:mod:`depends`) — are
+spends no inference. The stages that do — the node pass over every leaf's
+prose (:mod:`discover`), the unmarked-reference asks (:mod:`unmarked`) and
+dependency attribution (:mod:`depends`) — are
 separate entry points over this pass's output, because a failed or improved
 inference must not cost the mechanical work that preceded it and must be
 re-runnable without rebuilding the tree. Equations are minted by a stage of
@@ -18,7 +19,8 @@ authors are the ones the corpus marked; the ones it did not look for are named
 by count, and a leaf carrying no author-marked block carries a reason saying
 exactly that and nothing more. **It writes the node-pass record fresh**, every
 declaring leaf unread, which is the node pass's scope, and the classification
-record empty, so classification resumes only from asks this build answered.
+and unmarked records empty, so neither stage resumes from asks another build
+answered.
 """
 
 from pathlib import Path
@@ -133,6 +135,7 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path) -> Report:
             repo_root, kb_pipeline.NodePassRecord(leaves={path: kb_pipeline.LeafEntry() for path in leaves})
         )
         kb_pipeline.write_classification(repo_root, kb_pipeline.ClassificationRecord())
+        kb_pipeline.write_unmarked(repo_root, kb_pipeline.UnmarkedRecord())
         report.findings.append(
             Finding(FACT, "stage-F-node-pass", f"{len(leaves)} leaves recorded unread for the node pass")
         )

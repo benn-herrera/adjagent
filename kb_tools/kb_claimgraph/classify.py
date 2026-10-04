@@ -26,7 +26,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from .. import kb_pipeline
-from . import ask, letters
+from . import ask, equation_sites, letters
 from .attribute import Candidate, Relation, Written, cycle_edges, written
 from .graph import AuthoredGraph, ClaimNode
 from .hand_named import bodies
@@ -74,15 +74,10 @@ def statements(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Callab
     """
     found = {node.id: body for node, _, _, body in bodies(tree, graph, inventory)}
     lines: dict[str, list[str]] = {}
-    for node in graph.nodes.values():
-        if node.equation is None:
-            continue
-        fence = next((f for f in inventory.fences if f.document == node.document and node.equation in f.labels), None)
-        if fence is None:
-            continue
-        if node.document not in lines:
-            lines[node.document] = unquote(strip_markers(tree.documents[node.document].text)).splitlines()
-        found[node.id] = "\n".join(lines[node.document][fence.start : fence.end])
+    for node_id, fence in equation_sites.fences(graph, inventory).items():
+        if fence.document not in lines:
+            lines[fence.document] = unquote(strip_markers(tree.documents[fence.document].text)).splitlines()
+        found[node_id] = "\n".join(lines[fence.document][fence.start : fence.end])
     return lambda node: found.get(node.id, node.title)
 
 

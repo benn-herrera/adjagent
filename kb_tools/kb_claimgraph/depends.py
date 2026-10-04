@@ -20,7 +20,9 @@ Stages, in order:
 * **:mod:`graph`** — the authored claim graph, read back off the tree's own
   declarations and registers.
 * **D, :mod:`attribute`** — the narrowing: every edge candidate, from a
-  reference or a hand-written name, classed and drafted, with the drafts that
+  reference, a hand-written name, or a pair the unmarked record holds answered
+  yes (:func:`unmarked.found`, read and never recomputed), classed and
+  drafted, with the drafts that
   lie on a containment ring drafted *mention*. Its harvest completes for the
   whole corpus before the first ask.
 * **:mod:`classify`** — one letter ask per candidate, grouped by source, each
@@ -47,7 +49,7 @@ drafted and one a model answered write the same record.
 from pathlib import Path
 
 from .. import kb_pipeline
-from . import attribute, classify, conform, gate, graph, inventory, letters, tree, write
+from . import attribute, classify, conform, gate, graph, inventory, letters, tree, unmarked, write
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
 
@@ -90,7 +92,8 @@ def _candidate_findings(narrowed: attribute.Attribution) -> list[Finding]:
             "stage-D-candidates",
             f"{len(candidates)} candidates over {len({c.source.id for c in candidates})} source claims; by harvest: "
             f"{_counts(['+'.join(sorted(c.harvests)) for c in candidates])}; by letters offered: "
-            f"{_counts([','.join(c.offered) for c in candidates])}",
+            f"{_counts([','.join(c.offered) for c in candidates])}; "
+            f"{len(narrowed.own_equations)} pairs dropped as a claim's own equation",
         ),
         Finding(
             FACT,
@@ -187,6 +190,8 @@ def build(
                 f"no node-pass record stands at {kb_pipeline.NODE_PASS_RELPATH}; the source end of a reference "
                 f"in prose is read off its verdicts, and the declared pass is what writes it",
             )
+        unmarked_record = kb_pipeline.read_unmarked(repo_root)
+        yeses = () if unmarked_record is None else unmarked.found(unmarked_record)
         documents = tree.read(kb_root)
         state = conform.pass_two_gate(documents)
         report.findings.append(
@@ -197,7 +202,7 @@ def build(
         authored = graph.read(documents, sites)
         report.findings += _census_findings(state, authored, sites)
 
-        narrowed = attribute.narrow(documents, authored, sites, record)
+        narrowed = attribute.narrow(documents, authored, sites, record, unmarked=yeses)
         report.findings += _candidate_findings(narrowed)
 
         classified = classify.classify(

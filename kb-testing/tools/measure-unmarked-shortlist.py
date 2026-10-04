@@ -27,6 +27,10 @@ node-pass record), ranked by cosine of TF-IDF vectors, ties to the lower target 
   c9/statement+leaf   source side adds its whole leaf; targets stay statements
   wm/statement        the production ranking, kb_tools.kb_claimgraph.shortlist.rank: words
                       (kb_write.ops.canonical_form) plus maths symbols, statement only
+The stage's own shortlist (kb_tools.kb_claimgraph.unmarked.plan, at shortlist.K, whose pools also
+leave out each source's own equations, equation_sites.own_equations) is reported beside
+the wm/statement figure at that K the previous run's misses.tsv held, naming every miss whose reach
+moved — so a re-run after a change to the build or the toolchain says what the change moved.
   wm/statement+leaf   shortlist's tokens and weighting, source side adds its leaf
 IDF is computed over the target statements only, so the leaf context adds no term a target lacks.
 
@@ -64,7 +68,17 @@ from collections import Counter
 from pathlib import Path
 
 from kb_tools import kb_pipeline
-from kb_tools.kb_claimgraph import attribute, classify, graph, hand_named, inventory, shortlist, tree
+from kb_tools.kb_claimgraph import (
+    attribute,
+    classify,
+    equation_sites,
+    graph,
+    hand_named,
+    inventory,
+    shortlist,
+    tree,
+    unmarked,
+)
 from kb_tools.kb_claimgraph.tree import strip_markers, unquote
 from liaison_tools import openai_chat
 
@@ -76,7 +90,7 @@ UNMARKED = "unmarked — needs reading"
 KS = (1, 2, 3, 5, 8, 10, 15, 20, 30, 50)
 #: Measured per-call cost at concurrency 1 (the ModernCorp letter-ask build of 2026-10-03).
 SECONDS_PER_ASK = 3.1
-LOCALITY = ("same document", "same directory", "same paper", "cross paper")
+PRODUCTION = "wm/statement"
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -122,6 +136,7 @@ class Build:
         self.candidate_pairs = [candidate.pair for candidate in narrowed.candidates]
         self.excluded = {frozenset(pair) for pair in self.candidate_pairs}
         self.candidates = len(narrowed.candidates)
+        self.own_equations = equation_sites.own_equations(documents, authored, sites)
 
     def pool(self, source: str) -> list[str]:
         """Every target the shortlist may offer ``source``: any other node, less pairs already candidates."""
@@ -274,28 +289,18 @@ def embedders_served(specs: list[tuple[str, str]]) -> tuple[dict[str, Embedder],
 # --- locality and asks ----------------------------------------------------------------
 
 
-def locality(a: str, b: str) -> str:
-    if a == b:
-        return LOCALITY[0]
-    if a.rsplit("/", 1)[0] == b.rsplit("/", 1)[0]:
-        return LOCALITY[1]
-    if a.split("/")[0] == b.split("/")[0]:
-        return LOCALITY[2]
-    return LOCALITY[3]
-
-
 def asks_at(build: Build, k: int | None) -> int:
     """Per-source top-k asks; ``None`` is every pool pair (all-pairs)."""
     return sum(len(build.pool(s)) if k is None else min(k, len(build.pool(s))) for s in build.sources)
 
 
 def scoped_pairs(build: Build, widest: str) -> int:
-    limit = LOCALITY.index(widest)
+    limit = unmarked.LOCALITIES.index(widest)
     return sum(
         1
         for s in build.sources
         for t in build.pool(s)
-        if LOCALITY.index(locality(build.document[s], build.document[t])) <= limit
+        if unmarked.LOCALITIES.index(unmarked.locality(build.document[s], build.document[t])) <= limit
     )
 
 
@@ -325,6 +330,51 @@ def best(ranked: dict[str, dict[str, int]], sources: list[str], targets: list[st
     """The best rank any (s, t) pair reaches on s's shortlist, and that pair."""
     found = [(ranked[s][t], f"{s}->{t}") for s in sources if s in ranked for t in targets if t in ranked[s]]
     return min(found) if found else (None, "")
+
+
+def previous_reach(k: int) -> dict[str, tuple[bool, bool]]:
+    """Per miss, whether the previous run's misses.tsv had the production variant reaching it at ``k``."""
+    path = OUT / "misses.tsv"
+    if not path.exists():
+        return {}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split("\t")
+    if f"{PRODUCTION} fwd" not in header:
+        return {}
+    reach = {}
+    for line in lines[1:]:
+        row = dict(zip(header, line.split("\t")))
+        forward, backward = (row[f"{PRODUCTION} {col}"] for col in ("fwd", "rev"))
+        within = [bool(rank) and int(rank) <= k for rank in (forward, backward)]
+        reach[row["edge"]] = (within[0], any(within))
+    return reach
+
+
+def stage_lines(ours: Build, measured: list[dict[str, object]], previous: dict[str, tuple[bool, bool]]) -> list[str]:
+    """The stage's own shortlist's reach at shortlist.K, beside the previous run's figure, naming moved misses."""
+    k = shortlist.K
+    planned = set(
+        unmarked.plan(ours.nodes, ours.statement, candidate_pairs=ours.candidate_pairs, own=ours.own_equations).pairs
+    )
+    now = {}
+    for miss in measured:
+        sources, targets = miss["ends"]
+        forward = any((s, t) in planned for s in sources for t in targets)
+        now[miss["edge"]] = (forward, forward or any((t, s) in planned for s in sources for t in targets))
+    lines = ["", f"## The stage's shortlist (unmarked.plan) at K = {k}: misses reached, forward / either", ""]
+    lines.append(f"  production: {sum(f for f, _ in now.values())} / {sum(e for _, e in now.values())}")
+    if not previous:
+        return lines + [f"  previous run: no misses.tsv with a {PRODUCTION} column to compare against"]
+    lines.append(
+        f"  previous run's {PRODUCTION} at K = {k}: "
+        f"{sum(f for f, _ in previous.values())} / {sum(e for _, e in previous.values())}"
+    )
+    moved = [edge for edge in sorted(now.keys() | previous.keys()) if now.get(edge) != previous.get(edge)]
+    lines.append(
+        "  misses that moved: "
+        + (", ".join(f"{edge} {previous.get(edge)} -> {now.get(edge)}" for edge in moved) if moved else "none")
+    )
+    return lines
 
 
 def threshold_lines(
@@ -432,6 +482,7 @@ def main(argv: list[str]) -> int:
         lines += ["", "no ModernCorp kb-root among the arguments: no shortlist measured"]
     else:
         measured = misses()
+        previous = previous_reach(shortlist.K)
         ranked = {name: ranking(ours) for name, ranking in VARIANTS.items()}
         embedders, skipped = embedders_served(arguments.embed)
         cosines = {}
@@ -444,8 +495,8 @@ def main(argv: list[str]) -> int:
             sources = [s for s in miss["sources"] if s in ours.nodes and ours.kind[s] != "equation"]
             targets = [t for t in miss["targets"] if t in ours.nodes]
             nearest = min(
-                (locality(ours.document[s], ours.document[t]) for s in sources for t in targets if s != t),
-                key=LOCALITY.index,
+                (unmarked.locality(ours.document[s], ours.document[t]) for s in sources for t in targets if s != t),
+                key=unmarked.LOCALITIES.index,
                 default="",
             )
             miss["locality"] = nearest
@@ -463,12 +514,14 @@ def main(argv: list[str]) -> int:
         )
 
         lines += ["", f"## Locality of the {len(measured)} unmarked misses (nearest matched pair)", ""]
-        lines += [f"  {name}: {sum(1 for m in measured if m['locality'] == name)}" for name in LOCALITY]
+        lines += [f"  {name}: {sum(1 for m in measured if m['locality'] == name)}" for name in unmarked.LOCALITIES]
         lines += ["", "## All pairs inside a locality scope (ModernCorp): asks and misses reached", ""]
-        for name in LOCALITY:
+        for name in unmarked.LOCALITIES:
             pairs = scoped_pairs(ours, name)
             reached = sum(
-                1 for m in measured if m["locality"] and LOCALITY.index(m["locality"]) <= LOCALITY.index(name)
+                1
+                for m in measured
+                if m["locality"] and unmarked.LOCALITIES.index(m["locality"]) <= unmarked.LOCALITIES.index(name)
             )
             lines += [f"  up to {name}: {pairs} asks ({hours(pairs)} h), {reached} of {len(measured)} misses reachable"]
 
@@ -489,6 +542,7 @@ def main(argv: list[str]) -> int:
             "\n".join(["K\tvariant\tforward\teither"] + ["\t".join(row) for row in curve_rows]) + "\n",
             encoding="utf-8",
         )
+        lines += stage_lines(ours, measured, previous)
         if cosines:
             lines += ["", "## Could a cosine threshold replace a fixed K? (embedding variants)"]
         for name, scores in cosines.items():

@@ -505,9 +505,14 @@ than an observation:
 - **Direction comes from the markup, not from judgement.** The source is the claim whose text
   carries the reference; the target is the claim the reference resolves to. A claim named by its
   printed name and number with no `\ref` — *follows directly from Lemma 4.6* — is a reference too,
-  and its source is the claim whose body carries the mention. Nothing infers it and
-  nothing is asked about it. A reference in prose judged not a claim has no source claim and yields
-  no edge; in prose never judged, the source is every claim its document hosts. A reference the page
+  and its source is the claim whose body carries the mention. A claim whose text points at another
+  claim's result with neither cross-reference markup nor a printed name — by description, by
+  restatement, or in that claim's own notation — is a reference too, **where a build's reading finds
+  it**: the build proposes such pairs mechanically, asks of each whether the source's text points at
+  the target, and records a candidate only for a yes, its source the claim whose text was read. A
+  reference the markup or a printed name carries is neither inferred nor asked about. A reference in
+  prose judged not a claim has no source claim and yields no edge; in prose never judged, the source
+  is every claim its document hosts. A reference the page
   introduces as a section, a figure, a table or a kind of block classified as stating no result —
   *Section 3*, *Fig. 2* — resolves to no claim unless its own label or fragment names one, and
   yields no edge here; the claims its target document hosts are not what the author pointed at.
@@ -534,7 +539,9 @@ than an observation:
   so the guarantee is structural and not a branch each consumer remembers to write.
 
 **Every edge candidate is classified *mention*, *supported by* or *in support of*.** A candidate is
-an ordered pair of claims whose source names its target, however the build found it. It is offered
+an ordered pair of claims whose source names its target, however the build found it; a claim and an
+equation whose labelled fence lies inside that claim's own body are no candidate, since the claim
+states it. It is offered
 only what the graph can carry: a pair whose target is a minted equation node is never offered *in
 support of*, an edge from a node no edge may originate at being provably wrong, and nor is a pair
 containment directs, a proof of one claim citing another that rests on the first being circular
@@ -915,8 +922,9 @@ validation gate over what it wrote is what holds it there.
 
 **Every claim-graph inference is one decision, answered by one label from a closed set the build
 offers.** An answer that is not one of the offered labels is asked once more; otherwise the item
-takes its stated default and is recorded as defaulted — a paragraph stays unjudged, and an edge
-candidate takes its mechanical draft. Only a call that does not complete stops a stage: no answer
+takes its stated default and is recorded as defaulted — a paragraph stays unjudged, an edge
+candidate takes its mechanical draft, and a pair proposed as an unmarked reference is not one. Only
+a call that does not complete stops a stage: no answer
 arrived, and defaulting every item after it would present a model that is not answering as a
 finished run.
 

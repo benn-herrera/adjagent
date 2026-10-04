@@ -340,3 +340,13 @@ with one of them is the defect.
     `installed/README.tmpl.md` and `installed/CONVENTIONS.tmpl.md` ship into every KB is fixed by
     the toolchain, so a claim it makes about the tree is either true of every build or a toolchain
     defect — a question for the test suite over a built fixture KB, never for a build stage.
+
+17. **A list ask for unmarked references, if the per-pair asks prove too slow.** Today
+    `references-found` asks one letter per shortlisted pair: 197·K asks on ModernCorp's 197
+    sources (985 at K = 5, 2,955 at K = 15, each unit of K about 12–17 minutes at one call in
+    flight). One ask per source listing its K targets and taking several letters back is 197 asks
+    at any K. It was declined for three reasons, each still standing: it breaks SPEC.md's "every
+    claim-graph inference is one decision, answered by one label" (The Driver's Contract); an
+    answer partly wrong has no item-level default; and `letters.LetterReader`'s `confidence` has
+    no multi-label form. What would reopen it is a K the yes rate justifies whose per-pair cost the
+    build cannot carry.

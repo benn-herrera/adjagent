@@ -102,7 +102,8 @@ NODE_PASS_RELPATH = "kb-build-node-pass.json"
 # --- the node-pass record ---------------------------------------------------
 #
 # Written only by `kb_claimgraph`'s `claims-declared` and `claims-discovered`
-# invocations and read by those two, `equations-minted` and `depends-attributed`.
+# invocations and read by those two, `equations-minted`, `references-found` and
+# `depends-attributed`.
 # Its reader and writer live here because `kb_claimgraph` imports this module
 # and not the reverse. This module stores verdicts; it never interprets one.
 
@@ -299,22 +300,42 @@ class ClassificationRecordError(ValueError):
     """The record on disk does not read as one."""
 
 
+# The pair-keyed letter-record codec: one row per ordered pair, the letters
+# offered, the letter chosen and how. The classification record and the
+# unmarked record are two paths through it.
+
+
+def _pair_rows(entries: Mapping[tuple[str, str], CandidateEntry]) -> list[dict[str, object]]:
+    return [
+        {
+            "source": source,
+            "target": target,
+            "offered": list(entry.offered),
+            "letter": entry.letter,
+            "outcome": entry.outcome.value,
+            "confidence": None if entry.confidence is None else dict(entry.confidence),
+        }
+        for (source, target), entry in sorted(entries.items())
+    ]
+
+
+def _pair_entries(rows: Sequence[Mapping[str, object]]) -> Mapping[tuple[str, str], CandidateEntry]:
+    return MappingProxyType(
+        {
+            (row["source"], row["target"]): CandidateEntry(  # type: ignore[misc]
+                offered=tuple(row["offered"]),  # type: ignore[arg-type]
+                letter=row["letter"],  # type: ignore[arg-type]
+                outcome=ClassifyOutcome(row["outcome"]),
+                confidence=row["confidence"],  # type: ignore[arg-type]
+            )
+            for row in rows
+        }
+    )
+
+
 def write_classification(repo_root: Path, record: ClassificationRecord) -> None:
     """Land ``record`` whole, ordered by pair, through the toolchain's one atomic writer."""
-    payload = {
-        "about": CLASSIFICATION_ABOUT,
-        "candidates": [
-            {
-                "source": source,
-                "target": target,
-                "offered": list(entry.offered),
-                "letter": entry.letter,
-                "outcome": entry.outcome.value,
-                "confidence": None if entry.confidence is None else dict(entry.confidence),
-            }
-            for (source, target), entry in sorted(record.candidates.items())
-        ],
-    }
+    payload = {"about": CLASSIFICATION_ABOUT, "candidates": _pair_rows(record.candidates)}
     write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / CLASSIFICATION_RELPATH)
 
 
@@ -324,22 +345,77 @@ def read_classification(repo_root: Path) -> ClassificationRecord | None:
     if not path.is_file():
         return None
     try:
-        rows = json.loads(path.read_text(encoding="utf-8"))["candidates"]
         return ClassificationRecord(
-            candidates=MappingProxyType(
-                {
-                    (row["source"], row["target"]): CandidateEntry(
-                        offered=tuple(row["offered"]),
-                        letter=row["letter"],
-                        outcome=ClassifyOutcome(row["outcome"]),
-                        confidence=row["confidence"],
-                    )
-                    for row in rows
-                }
-            )
+            candidates=_pair_entries(json.loads(path.read_text(encoding="utf-8"))["candidates"])
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         raise ClassificationRecordError(f"{path} does not read as a classification record: {error!r}") from error
+
+
+# --- the unmarked record ----------------------------------------------------
+#
+# Written empty by `claims-declared`, beside the classification record and for
+# its reason; then written and read by `references-found`, which plans its
+# shortlist into it before the first ask and lands each source group's letters
+# as the group completes. A stop mid-stage keeps every ask already answered.
+# This module stores letters; it never interprets one.
+
+UNMARKED_RELPATH = "kb-build-unmarked.json"
+
+UNMARKED_ABOUT = (
+    "The claim-graph unmarked-reference build record: the shortlist of ordered claim pairs planned for asking "
+    "(null until the stage plans one), and for each pair asked, keyed by its source and target claim ids, the "
+    "letters its ask offered, the letter chosen (null where none was), and how it was reached. It joins to the "
+    "tree at this build's own boundary commits, not to a KB a maintainer later edits."
+)
+
+
+@dataclass(frozen=True)
+class UnmarkedRecord:
+    """``planned`` is ``None`` until the stage plans a shortlist; ``pairs`` holds every pair any run asked."""
+
+    planned: tuple[tuple[str, str], ...] | None = None
+    pairs: Mapping[tuple[str, str], CandidateEntry] = dataclass_field(default_factory=lambda: MappingProxyType({}))
+
+    def with_plan(self, planned: Sequence[tuple[str, str]]) -> "UnmarkedRecord":
+        return UnmarkedRecord(planned=tuple(planned), pairs=self.pairs)
+
+    def with_entries(self, entries: Mapping[tuple[str, str], CandidateEntry]) -> "UnmarkedRecord":
+        return UnmarkedRecord(planned=self.planned, pairs=MappingProxyType({**self.pairs, **entries}))
+
+    def unanswered(self) -> tuple[tuple[str, str], ...]:
+        """The planned pairs the record holds no outcome for, in plan order."""
+        return tuple(pair for pair in self.planned or () if pair not in self.pairs)
+
+
+class UnmarkedRecordError(ValueError):
+    """The record on disk does not read as one."""
+
+
+def write_unmarked(repo_root: Path, record: UnmarkedRecord) -> None:
+    """Land ``record`` whole through the toolchain's one atomic writer: the plan in its order, the pairs sorted."""
+    payload = {
+        "about": UNMARKED_ABOUT,
+        "planned": None if record.planned is None else [list(pair) for pair in record.planned],
+        "pairs": _pair_rows(record.pairs),
+    }
+    write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / UNMARKED_RELPATH)
+
+
+def read_unmarked(repo_root: Path) -> UnmarkedRecord | None:
+    """The record, or ``None`` where no declared pass has written one."""
+    path = repo_root / UNMARKED_RELPATH
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        planned = raw["planned"]
+        return UnmarkedRecord(
+            planned=None if planned is None else tuple((source, target) for source, target in planned),
+            pairs=_pair_entries(raw["pairs"]),
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise UnmarkedRecordError(f"{path} does not read as an unmarked record: {error!r}") from error
 
 
 class PipelineError(RuntimeError):
@@ -642,6 +718,37 @@ def _check_claims_discovered(ctx: CheckContext) -> CoverageReport:
     )
 
 
+def _check_references_found(ctx: CheckContext) -> CoverageReport:
+    """The unmarked-reference stage's exit condition: a planned shortlist, every pair of it carrying an outcome.
+
+    The declared pass writes the record with no plan, and this stage plans its
+    shortlist into it before the first ask. A record still holding no plan is
+    a stage that never ran; a planned pair with no outcome is one no ask reached.
+    """
+    record = read_unmarked(ctx.repo_root)
+    unanswered = () if record is None else record.unanswered()
+    if record is None:
+        detail = "no unmarked record stands, so no declared pass wrote one"
+    elif record.planned is None:
+        detail = "the record holds no planned shortlist, so the stage never planned one"
+    else:
+        detail = f"{len(unanswered)} planned pair(s) carry no outcome: " + ", ".join(
+            f"{source} -> {target}" for source, target in unanswered[:5]
+        )
+    return CoverageReport.declared(
+        (
+            CoverageUnit(
+                id="unmarked-pairs",
+                source=str(ctx.repo_root / UNMARKED_RELPATH),
+                satisfied=record is not None and record.planned is not None and not unanswered,
+                asserts_own_work=True,
+                detail=detail,
+            ),
+        ),
+        degenerate=True,
+    )
+
+
 def _check_verify_gates(ctx: CheckContext) -> CoverageReport:
     """The three verifiers, green. Three stages share it, each for its own reason.
 
@@ -882,8 +989,9 @@ class ClaimgraphInvocation:
     """Which ``kb_claimgraph`` invocation a stage is, as its own command line spells it.
 
     **The table that used to exist nowhere.** ``--pass 1 --scope block-hosted``,
-    ``--pass 1 --scope full``, ``--pass 1 --scope equations`` and ``--pass 2``
-    are four stages of this pipeline, and until this declaration the pairing lived in two places that
+    ``--pass 1 --scope full``, ``--pass 1 --scope equations``, ``--pass 2 --scope unmarked``
+    and ``--pass 2`` are five stages of this pipeline, and until this declaration the pairing lived in two
+    places that
     could not see each other: the driver composed the flags from pass numbers
     of its own, and the tool parsed them back into a branch of its own. Both
     read this now, in opposite directions — :attr:`flags` composes and
@@ -907,12 +1015,14 @@ class ClaimgraphInvocation:
 CLAIMGRAPH_SCOPE_BLOCK_HOSTED = "block-hosted"
 CLAIMGRAPH_SCOPE_FULL = "full"
 CLAIMGRAPH_SCOPE_EQUATIONS = "equations"
+CLAIMGRAPH_SCOPE_UNMARKED = "unmarked"
 
-# The four claim-graph invocations, named before the table so the stage that
+# The five claim-graph invocations, named before the table so the stage that
 # declares one and the flags composed from it are one value.
 _DECLARED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_BLOCK_HOSTED)
 _DISCOVERED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_FULL)
 _EQUATIONS_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_EQUATIONS)
+_UNMARKED_INVOCATION = ClaimgraphInvocation(which_pass=2, scope=CLAIMGRAPH_SCOPE_UNMARKED)
 _ATTRIBUTED_INVOCATION = ClaimgraphInvocation(which_pass=2)
 
 
@@ -938,7 +1048,7 @@ class Stage:
     inference and the unit asserts that work is there nothing left to assert
     (:func:`_excused`).
 
-    ``claimgraph_invocation`` is set on the four stages ``kb_claimgraph`` runs
+    ``claimgraph_invocation`` is set on the five stages ``kb_claimgraph`` runs
     and on no other — the mapping between this vocabulary and that tool's
     command line, read from both ends.
 
@@ -1023,6 +1133,13 @@ STAGES: tuple[Stage, ...] = (
         mints_nodes=True,
     ),
     Stage(
+        "references-found",
+        "unmarked references found",
+        coverage=_check_references_found,
+        work_is_inference=True,
+        claimgraph_invocation=_UNMARKED_INVOCATION,
+    ),
+    Stage(
         "depends-attributed",
         "dependency attribution",
         coverage=_check_verify_gates,
@@ -1092,7 +1209,7 @@ def precondition_of(stage: Stage) -> Stage | None:
     none.
 
     Read by the claim-graph tool as well as by this module, which is the point:
-    each of its three invocations refuses a tree the pass before it has not run
+    each of its invocations refuses a tree the pass before it has not run
     over, and until this the two statements of that order — the tool's entry
     conditions and this table — could not see each other.
     """

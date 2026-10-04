@@ -956,11 +956,14 @@ _ARTIFACTS = {
 def _lay_down_artifacts(repo: Path, *, only: set[str] | None = None) -> None:
     """Create the build artifacts the postconditions check for.
 
-    The node-pass record among them, written by its own writer rather than
-    typed: it lists no leaf, so none is left unread.
+    The node-pass and unmarked records among them, written by their own writers
+    rather than typed: the one lists no leaf, so none is left unread, and the
+    other plans an empty shortlist, so no pair is left unasked.
     """
     if (only is None or kb_pipeline.NODE_PASS_RELPATH in only) and not (repo / kb_pipeline.NODE_PASS_RELPATH).exists():
         kb_pipeline.write_node_pass(repo, kb_pipeline.NodePassRecord())
+    if (only is None or kb_pipeline.UNMARKED_RELPATH in only) and not (repo / kb_pipeline.UNMARKED_RELPATH).exists():
+        kb_pipeline.write_unmarked(repo, kb_pipeline.UnmarkedRecord().with_plan(()))
     for relpath, content in _ARTIFACTS.items():
         if only is not None and relpath not in only:
             continue
@@ -995,6 +998,7 @@ def test_show_status_exposes_the_frozen_stage_vocabulary_in_order(tmp_path: Path
         "claims-declared",
         "claims-discovered",
         "equations-minted",
+        "references-found",
         "depends-attributed",
         "phase-3a",
         "overview-drafted",
@@ -1871,6 +1875,11 @@ def _a_leaf_the_node_pass_never_read(repo: Path) -> None:
     kb_pipeline.write_node_pass(repo, kb_pipeline.NodePassRecord().with_leaf("unread.md", kb_pipeline.LeafEntry()))
 
 
+def _a_shortlisted_pair_never_asked(repo: Path) -> None:
+    """The unmarked record planning one pair and holding no outcome for it, as a stop before its ask leaves it."""
+    kb_pipeline.write_unmarked(repo, kb_pipeline.UnmarkedRecord().with_plan((("clm-aaaaaa", "clm-bbbbbb"),)))
+
+
 #: One constructed repo state per stage, built on that stage's own predecessor
 #: snapshot so everything before it is real. ``start`` has no predecessor and
 #: is constructed in the test itself.
@@ -1880,6 +1889,7 @@ _PARTIAL_COVERAGE: dict[str, Callable[[Path], None]] = {
     "spine-seed": _uninstall_the_include_line,
     "claims-declared": _a_document_without_its_metadata_block,
     "claims-discovered": _a_leaf_the_node_pass_never_read,
+    "references-found": _a_shortlisted_pair_never_asked,
     # The node set's close, the head's exit and the tail's entry are one gate,
     # so each fails the same way.
     "equations-minted": _break_a_link,

@@ -39,8 +39,8 @@ devtools/               repository-maintenance tooling — project space, never 
     __main__.py         the `-m` entry
     corpus.py           the corpus read from git, never a directory walk; the sweep's error
     clustering.py       units, containment scoring, shingle-blocked clustering, union-find grouping
-    normalization.py    text to lower-cased words, markers and fenced code dropped; prose texts
-    window_index.py     the prose detector: exact-window index, run widening, passage merging, and its recall bound
+    normalization.py    text to lower-cased words, markers and fenced code dropped; prose texts, articles dropped
+    window_index.py     the prose detector: exact-window index, run widening, passage merging, and its recall bound (every shared run of 15+ non-article words)
     prose_corpus.py     what the prose pass reads: chunk bodies, template bodies minus fence and frontmatter
     python_corpus.py    what the python pass reads: kb_tools/ less tests/ and _vendor/, parsed
     shapes.py           one concept, two implementations: function structural shapes
