@@ -90,6 +90,8 @@ memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lif
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

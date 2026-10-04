@@ -7,15 +7,16 @@ build's own narrowing — ``tree.read`` → ``inventory.scan`` → ``graph.read`
 
 Per kb-root, one tab-separated line:
 
-* the narrowing's output: ``depends`` edges it settles, ``references`` it
-  records, the candidate pairs it would put to a model and the questions
-  (source claims) they make up;
+* the narrowing's output: ``depends`` edges and ``references`` records a build
+  with no reader writes, the candidate pairs it would put to a model and the
+  questions (source claims) they make up. On a tree whose narrowing returns
+  candidate records every pair is a candidate, settled ones included; on one
+  from before, the open pairs alone are;
 * ``word-dropped``: anchor-level candidates the word before an anchor removed —
   the pairs an anchor would have opened had its preceding word not named a kind
   no premise relation can hold;
 * ``named``: hand-named candidates (a claim's printed name and number written
-  with no ``\\ref``) the narrowing found beyond the pairs references already
-  open or settle, and ``named-raw`` before that subtraction;
+  with no ``\\ref``) no reference also reached, and ``named-raw`` every one;
 * ``named-in-proofs``: hand-named mentions inside proof bodies that join a
   claim, which the narrowing does not scan — reported so the scope is visible.
 
@@ -47,28 +48,26 @@ def _figures(kb_root: Path) -> dict[str, object]:
     authored = graph.read(documents, sites)
     record = kb_pipeline.read_node_pass(kb_root.parent)
     narrowed = attribute.narrow(documents, authored, sites, record)
+    pairs = [candidate.pair for candidate in narrowed.candidates]
     figures: dict[str, object] = {
         "nodes": len(authored.nodes),
         "anchors": len(sites.anchors),
         "depends": len(narrowed.edges),
         "references": len(narrowed.references),
-        "candidates": sum(len(question.candidates) for question in narrowed.questions),
-        "questions": len(narrowed.questions),
+        "candidates": len(pairs),
+        "questions": len({source for source, _ in pairs}),
         "word-dropped": len(narrowed.word_dropped) if hasattr(narrowed, "word_dropped") else "-",
-        "named": "-",
-        "named-raw": "-",
-        "named-in-proofs": "-",
     }
-    named = getattr(narrowed, "hand_named", None)
-    if named is not None:
-        for candidate in named:
-            LISTING.append(
-                f"{kb_root.parent.name}\t{candidate.document}:{candidate.line + 1}\t{candidate.mention}\t"
-                f"{authored.nodes[candidate.source].title[:60]}\t->\t{authored.nodes[candidate.target].title[:60]}"
-            )
-        figures["named"] = len(named)
-        figures["named-raw"] = len(hand_named.harvest(documents, authored, sites))
-        figures["named-in-proofs"] = _in_proofs(documents, authored, sites)
+    alone = {c.pair for c in narrowed.candidates if c.harvests == {attribute.Harvest.HAND_NAMED}}
+    named = [found for found in hand_named.harvest(documents, authored, sites) if (found.source, found.target) in alone]
+    for candidate in named:
+        LISTING.append(
+            f"{kb_root.parent.name}\t{candidate.document}:{candidate.line + 1}\t{candidate.mention}\t"
+            f"{authored.nodes[candidate.source].title[:60]}\t->\t{authored.nodes[candidate.target].title[:60]}"
+        )
+    figures["named"] = len(named)
+    figures["named-raw"] = len(hand_named.harvest(documents, authored, sites))
+    figures["named-in-proofs"] = _in_proofs(documents, authored, sites)
     return figures
 
 

@@ -80,6 +80,8 @@ macOS-version-specific behaviors. @!integration-logging-signal sink="Console.app
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

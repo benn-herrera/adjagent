@@ -1,7 +1,7 @@
 """The run loop's own vocabulary: resume-skip and the driver-wide contracts.
 
-End-to-end walks of the surviving stages (``phase-3a`` through ``phase-5``) —
-barriers, the review sequence, exit selection, the driver-persists route — are
+End-to-end walks of the surviving stages (``phase-3a`` through ``overview-drafted``) —
+barriers, exit selection, the driver-persists route — are
 ``test_kb_driver_buildout.py``'s: that file owns the only stages this table
 still has rows for, and duplicating its scenario scaffold here would be a
 second answer to a question it already has one for.
@@ -35,7 +35,7 @@ def _runner(tmp_path: Path) -> run.Runner:
         config=cfg,
         paths=paths,
         repo_root=root,
-        caller=call.Caller(invoker=fake_model.FakeInvoker(fake_model.clean()), config=cfg, repo_root=root, paths=paths),
+        caller=call.Caller(config=cfg, repo_root=root, paths=paths, transport=fake_model.FakeChat(fake_model.clean())),
         answers=barriers.Resolver(config_decisions={}),
         ops=run.ledger_ops_for(root),
     )
@@ -101,7 +101,7 @@ def test_the_constructor_runs_the_same_guard(tmp_path: Path, monkeypatch: pytest
     assert "_seq" in str(raised.value)
 
 
-def test_no_row_hands_a_seat_the_charter() -> None:
+def test_no_row_hands_a_call_the_charter() -> None:
     """``run._pre_charter``'s docstring rests on this, so the negative is checked.
 
     The charter's one consumer is ``start.record``, which puts it in the ``start``
@@ -115,11 +115,9 @@ def test_no_row_hands_a_seat_the_charter() -> None:
     assert not carrying, carrying
 
 
-def test_every_row_of_the_table_has_a_handler_or_a_driver() -> None:
+def test_every_row_of_the_table_has_a_handler() -> None:
     """A row nobody executes is a stage that silently does not happen."""
-    covered = set(run._HANDLERS) | run.DRIVEN_STEPS
-
-    assert covered == set(steps.STEP_IDS)
+    assert set(run._HANDLERS) == set(steps.STEP_IDS)
 
 
 def test_the_slots_the_loop_supplies_compose_every_shipped_template() -> None:
@@ -131,5 +129,6 @@ def test_the_slots_the_loop_supplies_compose_every_shipped_template() -> None:
         text = prompt_templates.render(
             step.template,
             slots={slot: f"<{slot}>" for slot in step.slots},
+            alternatives={step.correction[0]: None} if step.correction else {},
         )
         assert text.strip()

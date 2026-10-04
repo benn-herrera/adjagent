@@ -44,7 +44,7 @@ from pathlib import Path
 
 from .. import kb_index_lib, kb_schema
 from ..kb_write import render
-from .assemble import REGISTER_FILENAME
+from .assemble import REGISTER_FILENAME, register_title
 from .inventory import Inventory
 from .report import ClaimGraphError
 from .tree import BLOCKQUOTE_PREFIX, Tree, strip_markers
@@ -154,7 +154,8 @@ def read(tree: Tree, inventory: Inventory) -> AuthoredGraph:
     blocks_by_document: dict[str, dict[str, tuple[str | None, str | None]]] = {}
     for block in inventory.claim_blocks():
         assert block.title is not None  # a block with neither title nor locator is not claim-bearing
-        blocks_by_document.setdefault(block.document, {})[block.title] = (block.display, block.identifier)
+        title = register_title(block.title, document=block.document)
+        blocks_by_document.setdefault(block.document, {})[title] = (block.display, block.identifier)
 
     nodes: dict[str, ClaimNode] = {}
     for path in sorted(tree.documents):

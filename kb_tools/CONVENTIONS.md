@@ -52,10 +52,10 @@ root.
   actually finished a build exited on a subprocess return code. A stage that asks a model whether
   the work is good enough is reintroducing that failure, not a smaller version of it.
 - **No prompt reaches a model from a heredoc or an in-code string.** Every prompt is a template
-  under `kb_driver/prompt-templates/`, rendered with its slots filled — the seat briefs and the
-  inference asks alike. A prompt assembled from string literals is a model-facing artifact that does
-  not look like one: it never lands in a diff as prose, it is never read end to end, and it never
-  goes to the prompt-engineer, because nothing about it says "document". This is a scar.
+  under `kb_driver/prompt-templates/`, rendered with its slots filled — every ask, its system prompt
+  and its re-ask included. A prompt assembled from string literals is a model-facing artifact that
+  does not look like one: it never lands in a diff as prose, it is never read end to end, and it
+  never goes to the prompt-engineer, because nothing about it says "document". This is a scar.
   `kb_claimgraph`'s claim-identification ask carried an answer format whose central rule — that a
   prose block's two markers carry one number — was stated nowhere in it and demonstrated only at
   block 1, where the two numbers are both `1` and the rule is invisible; the seat got it wrong on
@@ -63,6 +63,10 @@ root.
   The same ask requested a `no-claim` reason as "one sentence saying so", which nothing checks
   beyond non-emptiness and which is written into a document's frontmatter permanently. Neither had
   been read as a prompt by anyone.
+- **A model call is `inference.liaison_tools.call_chat` and nothing else; a system prompt is a
+  fragment, never an agent definition.** A call that spawns a process, or one whose system prompt is
+  an agent-set seat's definition, is the CLI path this package deleted: its bounds, its tool set and
+  its model were the CLI's and the definition's, not anything the build states.
 - **`prompt-templates/` holds what is dispatched; `prompt-templates/fragments/` holds what is
   spliced.** Which one a new file is, is settled by where it goes and by nothing else — no prefix,
   no suffix, no list to read. Every file under `fragments/` is registered in exactly one of
@@ -74,8 +78,15 @@ root.
   break around it.** Every alternative a caller can pick — the set
   `prompt_templates.ALTERNATIVE_SLOTS` registers — is spliced into a slot sitting inside a line
   rather than appended as a block of lines. An editor that adds the customary final newline moves
-  the prompt's bytes and nothing about the file says so; the byte-exactness checks in
-  `tests/test_kb_claimgraph_cinf.py` and `tests/test_kb_claimgraph_pass2.py` are what report it.
+  the prompt's bytes and nothing about the file says so.
+  `tests/test_kb_driver_prompt_templates.py` checks every registered alternative for it.
+- **Prompt generation is tested against in-test fixtures and goldens, never against the working
+  templates.** A generation test writes its own small templates and fragments, points the composer
+  at them (`tests/_fixture_templates.py`), composes real asks through them, and compares the result
+  byte for byte with a golden held in the test. A test that renders a working template and compares
+  it with a stored copy is a checksum of the wording: every prompt edit breaks it and it guards no
+  behaviour. A test over the working templates checks structure only: every slot filled, the slot
+  order, the shared prefix.
 - **A `dyn.` slot the caller supplies under one alternative lives in that alternative's fragment and
   nowhere else.** Composition refuses an unsupplied slot and an unused value alike.
 - **A register holds four entry kinds, and `RegisterEntry.kind` is where you learn which.** `clm`,

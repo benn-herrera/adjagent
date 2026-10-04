@@ -2108,7 +2108,7 @@ class TestInstallExclusions(unittest.TestCase):
         ):
             self.assertTrue(product.excluded_from_install(Path(excluded)), excluded)
         # README is the one project-doc name a package writes for its consumer,
-        # and a `.tmpl` is payload rather than documentation.
+        # and a `.tmpl.md` is payload rather than documentation.
         for kept in (
             "hand.md",
             "agents/mad/review-topics/t.md",
@@ -2365,10 +2365,10 @@ class TestInstalledBanner(unittest.TestCase):
             self.assertFalse(installation.vendored(Path(key)), key)
 
     def test_unbannerable_suffixes_take_no_banner(self):
-        # A filetype admitting no comment, and a shipped template — `.tmpl`
-        # prompt or `.tmpl.md` document — whose whole content is payload a
+        # A filetype admitting no comment, and a shipped template — a
+        # `.tmpl.md` prompt or document — whose whole content is payload a
         # banner would change.
-        for name, text in (("s.json", "{}\n"), ("prompt.tmpl", "Prompt text.\n"), ("doc.tmpl.md", "# Doc\n")):
+        for name, text in (("s.json", "{}\n"), ("doc.tmpl.md", "# Doc\n")):
             with self.subTest(name=name):
                 self.assertFalse(installation.bannerable(Path(name)))
                 self.assertIsNone(installation.install_content(self._source(name, text), surface="agents"))

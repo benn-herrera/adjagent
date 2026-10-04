@@ -23,6 +23,7 @@ from pathlib import Path
 
 from kb_tools import kb_index_lib
 from kb_tools.kb_claimgraph import graph, inventory, prose, tree
+from kb_tools.kb_claimgraph.shortlist import STOPWORDS, cosine
 from kb_tools.kb_claimgraph.tree import strip_markers, unquote
 
 OUT = Path(__file__).resolve().parents[2] / ".claude-temp" / "pristine-compare"
@@ -33,14 +34,6 @@ MARKER_RE = re.compile(r"<!-- claim-quality: (clm-[a-z0-9]+) -->")
 HEADING_RE = re.compile(r"^#{1,6} ")
 TAG_RE = re.compile(r"<[^>]+>")
 WORD_RE = re.compile(r"[a-z]{2,}")
-STOPWORDS = frozenset(
-    """the and for that this with from are is be as by of to in on at or an it its not no
-    which when where then than these those their there such can may must will would into
-    under over between each every both only also more most any all one two has have had
-    was were been being what how why who whom our we us but if so do does done per via
-    text mathrm frac left right cdot quad mathbb begin end href data reference type class
-    span id label eqref ref qquad operatorname displaystyle""".split()
-)
 
 NAME_FORMS = {
     "proposition": r"(?:Proposition|Prop)",
@@ -198,12 +191,6 @@ def vectors(documents: dict[str, list[str]]) -> dict[str, dict[str, float]]:
         norm = math.sqrt(sum(value * value for value in weights.values())) or 1.0
         out[key] = {term: value / norm for term, value in weights.items()}
     return out
-
-
-def cosine(a: dict[str, float], b: dict[str, float]) -> float:
-    if len(a) > len(b):
-        a, b = b, a
-    return sum(value * b.get(term, 0.0) for term, value in a.items())
 
 
 # --- edges ----------------------------------------------------------------------------

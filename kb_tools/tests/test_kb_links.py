@@ -221,3 +221,36 @@ def test_strip_target_normalizes_destinations(raw: str, want: str) -> None:
 )
 def test_ref_def_re_matches_definitions_and_not_prose(text: str, want: list[str]) -> None:
     assert kb_links.REF_DEF_RE.findall(text) == want
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        # The measured failure: a linked image moved from vol/sec/ up to vol/.
+        # Both destinations move — the image's own and the link around it.
+        ("[![](../assets/f.pdf)](../assets/f.pdf) cap", "[![](assets/f.pdf)](assets/f.pdf) cap"),
+        ("see [x](other.md#sec) here", "see [x](sec/other.md#sec) here"),
+        ("see [x](<a file.md>)", "see [x](<sec/a file.md>)"),
+        # Nothing relative to the document: a scheme, a rooted or home path, an anchor.
+        ("[x](https://e.org/a.md) [m](mailto:a@b) [r](/abs.md) [h](~/x.md) [a](#top)", None),
+        # A destination inside a code or maths span is not a link.
+        ("`[x](a.md)` and $`[T](z)`$", None),
+    ],
+)
+def test_rebase_inline_links_keeps_every_relative_target_naming_its_file(text: str, want: str | None) -> None:
+    assert kb_links.rebase_inline_links(text, from_dir="vol/sec", to_dir="vol") == (text if want is None else want)
+
+
+def test_rebase_inline_links_between_one_directory_and_itself_changes_no_byte() -> None:
+    text = "[x](./a.md) [y](sub/../b.md)"
+    assert kb_links.rebase_inline_links(text, from_dir="vol", to_dir="vol/") == text
+
+
+def test_a_rebased_target_resolves_to_the_file_the_original_did(tmp_path: Path) -> None:
+    (tmp_path / "vol/assets").mkdir(parents=True)
+    (tmp_path / "vol/a/b").mkdir(parents=True)
+    (tmp_path / "vol/assets/f.pdf").write_text("", encoding="utf-8")
+    target = kb_links.LINK_RE.search(
+        kb_links.rebase_inline_links("[f](../../assets/f.pdf)", from_dir="vol/a/b", to_dir="other/c")
+    ).group(1)
+    assert (tmp_path / "other/c" / target).resolve() == (tmp_path / "vol/assets/f.pdf").resolve()

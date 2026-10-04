@@ -102,6 +102,8 @@ OEM skins. @!integration-logging-signal sink="logcat"!@
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

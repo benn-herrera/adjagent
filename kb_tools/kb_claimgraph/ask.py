@@ -1,776 +1,340 @@
-"""This package's two inferences: what is asked, how it is asked, what is read back.
+"""This package's asks: what is asked, how it is asked, and the reader that asks it.
 
-**Inference arrives by injection, as a seat and a prompt** —
-:class:`SeatAsk`, satisfied in production by :func:`ask_without_tools`. That
-signature is the whole of this module's dependency on the machinery behind it:
-a seat name and a prompt go in, response text and an
-:class:`~kb_tools.inference.Outcome` come back, and nothing about argv, a
-subprocess, a process group or a stream format is visible here. The layer that
-satisfies it knows the agent set and nothing about this KB; the layer under
-*that* knows neither.
+**Every claim-graph ask is a letter ask**: one decision, answered with one
+letter from a closed set (:mod:`letters`). Two kinds. A **paragraph** ask puts
+one paragraph of a leaf to the reader — does it state a result — with the leaf as
+:mod:`label` renders it for context; its group is the leaf. A **classify** ask
+puts one edge candidate — is the source *supported by* it, *in support of* it,
+or does it merely *mention* it — with the source claim and the passages its
+references sit in for context; its group is the source claim.
 
-**Every ask is answered from its prompt and nothing else.** Each shows the seat
-exactly the document or the candidates it is to judge, and a seat able to run
-tools reaches past that — neighbouring leaves, the sources — so its answer
-would rest on what it chose to look at. :func:`ask_without_tools` therefore
-puts every ask through :func:`kb_tools.inference.ask_reader`: the seat's
-definition body as the system prompt with the ``no-tools`` fragment after it,
-and no tool to call.
+**One letter-to-meaning table per kind** (:class:`ParagraphLetter`,
+:class:`ClassifyLetter`). A question offering fewer meanings withholds their
+letters and never relabels the rest, so a letter means one thing in every ask
+of its kind. The letters reach a template only as composer constants
+(:data:`LETTER_SLOTS`): a template spelling one would be a second definition of
+the string the parse holds the reader to.
 
-**Neither ask is written here.** Both are templates under
-``kb_driver/prompt-templates/``, filled through
-:func:`kb_tools.kb_driver.prompt_templates.render`, so an ask lands in a diff as
-prose and can be read end to end by the person who writes prose. Two mechanisms
-carry what varies, and which one a condition takes turns on what it does to the
-ask. Where a specific needs tailoring and the question is unchanged, the
-alternatives are **fragments** and this module picks one **by name**, the
-composer loading and resolving whichever it named: C-inf's display-maths
-section, the correction a re-ask of either stage carries, and the evidence
-C-inf's per-claim re-ask shows. Where the question itself differs, there is an
-**alternate template**: stage D's acyclicity re-ask, and C-inf's per-claim
-re-ask, which asks about one claim where the ask before it asked about a
-document. No template carries a conditional, and nothing here composes prose or
-holds any — a choice is all that leaves this module for a prompt, beside the
-values a call computes and the markers in :data:`MARKER_SLOTS`.
+**The group's context comes first and the question last.** Every slot of an
+item (:data:`ITEM_SLOTS`) sits in a template's final section, after every slot
+of its group, so every ask of a group opens with the same bytes and a server
+can serve that prefix from cache. A re-ask is the same prompt with a correction
+after the question — ``letter-correction``, carrying what came back, cut to
+:data:`RETURNED_MAX_CHARS` — so it shares the whole prefix too. No prompt is
+written here: both are templates under ``kb_driver/prompt-templates/``, and
+this module hands the composer values and the names of the alternatives it
+chose.
 
-**Nothing usage-specific happens on the way back, either.** The response is
-text, and each parse below is its stage's own —
-:mod:`kb_tools.kb_driver.envelope`'s record toolkit, which extracts a marked
-block, decodes it, checks a closed vocabulary in both directions, and reads
-every key carrying words out of a raw block beside the JSON. Parse only, never
-quality. Neither answer has a verdict field, a confidence field or free text,
-because there is nothing in either for a model to say about its own work.
-
-**Nothing either seat composes or quotes travels inside JSON**, and each ask
-declares which transport each of its keys travels in (:data:`LEVELS`, proved a
-partition of the key vocabulary at import). Stage D declares JSON and nothing
-else: its answer is a claim id and an array of candidate ids, and nothing there
-is composed. That declaration is still work rather than a formality — it is
-**an empty prose vocabulary**, and what it buys is that a stray prose block in a
-stage-D answer is a refusal instead of something nobody looked for. C-inf
-declares the opposite: no JSON at all, and a closed set of single-line fields in
-a raw block (:data:`CLAIM_FIELDS`).
-
-**Two failure paths, and they are different failures.** A call that did not
-complete is re-issued *identically* while the layer below calls its outcome
-retryable, bounded by :data:`TRANSPORT_ATTEMPTS` — the same shape the write
-path applies to the write API's retry code, and not a fix loop: the prompt does
-not change and nothing is asked about the failure. A call the layer below calls
-unretryable stops the stage at once. Neither is a stage's re-ask, which is spent
-on an answer that **arrived**. A parse refusal is
-:class:`~.report.AnswerFormatError`, declared in :mod:`report` because this
-module imports from both of the stages that catch it.
-
-**A re-ask carries a fact computed after the previous answer, or it is a spent
-call.** Re-issuing the question with the rule restated went out twice against
-one live document and came back with the same slip in the same place. So stage
-D's acyclicity re-ask carries the cycle the answers so far close, and C-inf's
-per-claim re-ask carries the sentences the tool actually found — with an
-explicit "none of these", because a forced choice over a narrowed window gets
-confidently answered even when the right sentence lies outside it.
-
-**Stage D's ask is a selection from an enumerated set.** One source claim, the
-candidate targets that stage D's mechanical narrowing offered it, and the
-reference lines those candidates were enumerated from. What comes back is a
-subset of the ids that were handed over.
-
-**Stage C-inf's ask is the one open-ended reading in this build.** One leaf's
-readable prose, rendered one labelled sentence per line (:mod:`label`) with its
-claim, proof and definition blocks shown unlabelled, and what results it states
-— each as a self-contained block carrying the **quote** the result begins at,
-the **label** of that sentence, and a **title** the seat authors — together with
-one **verdict** per paragraph owed one, named by the paragraph's label range: a
-claim block carrying a title, or a not-a-claim block carrying nothing more.
-
-**The model quotes; the tool addresses.** The quote is a lookup key and never
-content: it resolves to a sentence, and then it is discarded and the tool cuts
-the bytes, so no model-typed byte reaches the KB and there is still nothing for
-a verbatimness check to establish. What changes against the shape before it is
-that the address is now **verified** rather than trusted — a label the seat
-named alone was a pointer, and a wrong pointer is a well-formed record aimed at
-the wrong span that no downstream check can tell from a right one. The label
-survives as the cross-check that catches exactly that divergence
-(:mod:`identify`).
-
-**Both go to the same seat, and it is a constructor parameter in both.** The
-seat's native discipline is verbatim correspondence, which is the one property
-either stage can check, and a seat whose instincts and whose gate agree fails
-visibly rather than plausibly. It stays injected so a run can move it.
-
-**The seam is what makes both testable.** Every check over either stage runs
-against a fixed :class:`SeatAsk`, because a check that needs a model to be
-reachable is a check that does not run.
+**The reader is a system prompt and one tool-less chat call.**
+:func:`ask_without_tools` is the production :class:`~.letters.LetterReader`:
+the :data:`READER_SYSTEM` fragment as the system prompt, through
+:func:`kb_tools.inference.call_chat` on the environment's model, so an answer
+rests on the prompt and nothing a model chose to look at. Its capture is read
+by :func:`kb_tools.inference.read_capture` into :class:`~.letters.CallStats`.
+A call that did not reach ``[DONE]`` is re-issued identically up to
+:data:`TRANSPORT_ATTEMPTS`, and so is one the server answered without
+processing a token; a call that never completes raises :class:`AskError`,
+which is the one thing that stops a stage — no answer arrived, and defaulting
+every remaining item would hide a dead model behind what looks like a finished
+run.
 """
 
-import json
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import StrEnum
+from functools import partial
+from hashlib import sha256
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import MappingProxyType
-from typing import Protocol
 
-from ..inference import Invoker, Outcome, ask_reader
-from ..kb_driver import envelope, prompt_templates
-from . import label
-from .attribute import Question
+from .. import inference
+from ..kb_driver import prompt_templates
 from .graph import ClaimNode
-from .identify import Answer, Reading, Record, Trigger, Unresolved, Verdict
-from .report import AnswerFormatError, ClaimGraphError
+from .letters import CallStats, Kind, LetterItem, LetterQuestion, Reply
+from .report import ClaimGraphError
 
-#: The block stage D's answer travels in. One JSON document between two marker
-#: lines, matched as whole lines, so the markers can be named in prose without
-#: opening a block.
-ANSWER_NAME = "KB-CLAIMGRAPH-DEPENDS"
-ANSWER_OPEN = f"<<<{ANSWER_NAME}"
-ANSWER_CLOSE = ANSWER_NAME
-
-#: Closed and total, in both directions: a key left out is refused by name and
-#: so is a key added.
-ANSWER_KEYS: tuple[str, ...] = ("claim", "depends-on")
-
-#: The block stage D's own words would travel in, one per value, numbered — the
-#: transport an answer declaring no prose key must still refuse rather than
-#: ignore. A prose block's opener carries a number after it, so the marker is
-#: the name with the delimiter on it and nothing more.
-PROSE_NAME = "KB-CLAIMGRAPH-PROSE"
-PROSE_OPEN = f"<<<{PROSE_NAME}"
-
-#: One result C-inf reports: a raw block carrying a closed, fixed set of
-#: single-line fields, and **no number**. The answer is a flat sequence of these
-#: in any order, so nothing in it points at anything else in it.
-CLAIM_NAME = "KB-CLAIMGRAPH-CLAIM"
-CLAIM_OPEN = f"<<<{CLAIM_NAME}"
-CLAIM_CLOSE = CLAIM_NAME
-
-#: Closed and total, in both directions, on :func:`envelope.check_keys`' terms.
-#: Each is one line: ``label.render`` emits one sentence per line with the wraps
-#: collapsed, so a quoted sentence cannot contain a newline.
-CLAIM_FIELDS: tuple[str, ...] = ("quote", "label", "title")
-
-#: The block a document stating no result of its own returns instead, holding
-#: the one sentence saying so. Zero claim blocks *alone* is not an answer — it
-#: is indistinguishable from a failed one — and this block is what makes
-#: "states none" a positive assertion.
-NO_CLAIM_NAME = "KB-CLAIMGRAPH-NO-CLAIM"
-NO_CLAIM_OPEN = f"<<<{NO_CLAIM_NAME}"
-NO_CLAIM_CLOSE = NO_CLAIM_NAME
-
-#: The block a leaf hosting a claim block returns where its prose adds nothing:
-#: no further result, and no paragraph judged a claim. An empty marker pair,
-#: because an answer carrying no block at all is indistinguishable from a call
-#: that said nothing, and this is what makes "nothing further" a positive
-#: assertion — the no-claim sentence's role for a leaf that may not decline.
-NOTHING_FURTHER_NAME = "KB-CLAIMGRAPH-NOTHING-FURTHER"
-NOTHING_FURTHER_OPEN = f"<<<{NOTHING_FURTHER_NAME}"
-NOTHING_FURTHER_CLOSE = NOTHING_FURTHER_NAME
-
-#: A verdict on one paragraph owed one, in two block kinds rather than one block
-#: with a verdict field: which kind a block is says claim or not-a-claim, so the
-#: title is required exactly where it is meaningful and absent everywhere else
-#: without an optional field in a closed vocabulary. ``paragraph`` is the
-#: paragraph's label range, as :meth:`identify.Reading.paragraph_ids` spells it.
-PARAGRAPH_CLAIM_NAME = "KB-CLAIMGRAPH-PARAGRAPH-CLAIM"
-PARAGRAPH_CLAIM_OPEN = f"<<<{PARAGRAPH_CLAIM_NAME}"
-PARAGRAPH_CLAIM_CLOSE = PARAGRAPH_CLAIM_NAME
-PARAGRAPH_CLAIM_FIELDS: tuple[str, ...] = ("paragraph", "title")
-
-PARAGRAPH_NOT_A_CLAIM_NAME = "KB-CLAIMGRAPH-PARAGRAPH-NOT-A-CLAIM"
-PARAGRAPH_NOT_A_CLAIM_OPEN = f"<<<{PARAGRAPH_NOT_A_CLAIM_NAME}"
-PARAGRAPH_NOT_A_CLAIM_CLOSE = PARAGRAPH_NOT_A_CLAIM_NAME
-PARAGRAPH_NOT_A_CLAIM_FIELDS: tuple[str, ...] = ("paragraph",)
-
-#: The answer a per-claim re-ask's menu must always admit: none of the sentences
-#: offered is the one the result begins at. It ends that claim as unresolved
-#: rather than re-asking, because a forced choice over a narrowed window gets
-#: confidently answered even when the right sentence lies outside it.
-NONE_OF_THESE_NAME = "KB-CLAIMGRAPH-NONE-OF-THESE"
-NONE_OF_THESE_OPEN = f"<<<{NONE_OF_THESE_NAME}"
-NONE_OF_THESE_CLOSE = NONE_OF_THESE_NAME
-
-#: Which transport each key of each ask travels in. Stage D declares an **empty
-#: prose vocabulary** and that is a check rather than a formality: nothing in
-#: its answer is composed, and a prose block arriving in one is refused rather
-#: than ignored. C-inf declares the other direction — no JSON at all.
-LEVELS: tuple[envelope.Level, ...] = (
-    envelope.Level("depends", ANSWER_KEYS, json=ANSWER_KEYS, prose=()),
-    envelope.Level("identify claim", CLAIM_FIELDS, fields=CLAIM_FIELDS),
-    envelope.Level("identify paragraph claim", PARAGRAPH_CLAIM_FIELDS, fields=PARAGRAPH_CLAIM_FIELDS),
-    envelope.Level("identify paragraph not-a-claim", PARAGRAPH_NOT_A_CLAIM_FIELDS, fields=PARAGRAPH_NOT_A_CLAIM_FIELDS),
-)
-
-envelope.check_levels(LEVELS)
-
-#: How many times a call the layer below calls retryable is re-issued
-#: **identically** before the stage stops. The layer below retries nothing by
-#: design — policy is the caller's — so a bound belongs here or nowhere, and a
-#: writer that never yields is a wedge rather than a retry.
+#: How many times a call that did not come back is re-issued **identically**
+#: before the stage stops. The layer below retries nothing by design — policy
+#: is the caller's — so a bound belongs here or nowhere, and a writer that never
+#: yields is a wedge rather than a retry.
 TRANSPORT_ATTEMPTS = 3
 
-#: The templates each ask is composed from — a template being a whole ask,
-#: dispatched as it stands.
-DEPENDS_TEMPLATE = "depends.tmpl"
-DEPENDS_CYCLE_TEMPLATE = "depends-cycle-reask.tmpl"
-IDENTIFY_TEMPLATE = "identify.tmpl"
-IDENTIFY_REASK_TEMPLATE = "identify-claim-reask.tmpl"
-
-#: This package's composer constants — the pool the two asks hand
-#: ``prompt_templates.render``, drawn on only where a template names one. Every value here
-#: is a marker literal :func:`parse_answer` or :func:`parse_identify_answer`
-#: matches an answer against, so it reaches a prompt as a slot rather than as
-#: template text: a template spelling one would be a second definition of a
-#: string the parse holds the seat to, and a rename would leave the ask asking
-#: for what the parse no longer accepts. They are constants and never per-call
-#: values, which is why they travel through ``constants`` and not through the
-#: caller's own slots.
-MARKER_SLOTS: Mapping[str, str] = MappingProxyType(
-    {
-        "answer-open": ANSWER_OPEN,
-        "answer-close": ANSWER_CLOSE,
-        "prose-open": PROSE_OPEN,
-        "prose-name": PROSE_NAME,
-        "claim-open": CLAIM_OPEN,
-        "claim-close": CLAIM_CLOSE,
-        "no-claim-open": NO_CLAIM_OPEN,
-        "no-claim-close": NO_CLAIM_CLOSE,
-        "none-of-these-open": NONE_OF_THESE_OPEN,
-        "none-of-these-close": NONE_OF_THESE_CLOSE,
-        "paragraph-claim-open": PARAGRAPH_CLAIM_OPEN,
-        "paragraph-claim-close": PARAGRAPH_CLAIM_CLOSE,
-        "paragraph-not-a-claim-open": PARAGRAPH_NOT_A_CLAIM_OPEN,
-        "paragraph-not-a-claim-close": PARAGRAPH_NOT_A_CLAIM_CLOSE,
-        "nothing-further-open": NOTHING_FURTHER_OPEN,
-        "nothing-further-close": NOTHING_FURTHER_CLOSE,
-    }
-)
-
-#: The slots whose alternatives this module chooses between, and the choices it
-#: makes. A choice travels as the alternative's registered name and never as its
-#: prose: where a fragment lives, and what it says, are
-#: :mod:`kb_tools.kb_driver.prompt_templates`' knowledge and the prompt
-#: engineer's respectively, and neither is this module's to hold.
-#:
-#: ``CORRECTION`` serves both asks — the same subject, the same question, and
-#: the mechanical failure the previous answer produced supplied beneath it,
-#: chosen against a first ask's ``None``, which fills the slot with nothing. The
-#: other two are C-inf's display-maths section, whichever of the two a document
-#: takes. Each is spliced into a slot sitting inside a line of its template,
-#: which is why none of their files ends in a newline.
-#: ``CLAIM_EVIDENCE`` is the third, and it belongs to the per-claim re-ask alone:
-#: what the tool found differs by *how* the quote failed to settle, and the
-#: framing of the menu differs with it. It is registered here rather than edited
-#: into ``ask-correction`` because that fragment is **shared** — stage D fills
-#: the same slot from it — so tailoring it for C-inf would change stage D's
-#: re-ask.
+#: The slot a re-ask's correction fills, after the question.
 CORRECTION_SLOT = "correction"
-DISPLAY_MATHS_SLOT = "display-maths"
-CLAIM_EVIDENCE_SLOT = "claim-evidence"
-CORRECTION = "ask-correction"
-DISPLAY_MATHS = "identify-display-maths"
-NO_DISPLAY_MATHS = "identify-no-display-maths"
 
-#: The node pass's three choices. Whether the leaf has paragraphs owed a
-#: verdict, whether its answer may be a no-claim sentence — a leaf hosting a
-#: claim block may not — and, as a second alternative on the shared correction
-#: slot rather than an edit to ``ask-correction``, the re-ask naming the
-#: paragraphs the previous answer left without a verdict.
-VERDICTS_SLOT = "paragraph-verdicts"
-VERDICTS = "identify-verdicts"
-NO_VERDICTS = "identify-no-verdicts"
-NO_CLAIM_SLOT = "no-claim-sentence"
-NO_CLAIM_ADMITTED = "identify-no-claim-admitted"
-NO_CLAIM_REFUSED = "identify-no-claim-refused"
-MISSING_VERDICTS = "identify-missing-verdicts"
+#: How long one blocking socket operation of a call — the connect, or a read of
+#: its stream — may wait. The outer edge of "something is wrong", not an
+#: expectation; nothing bounds the call as a whole.
+SOCKET_TIMEOUT_SECONDS = 600.0
 
-#: Which evidence fragment each trigger's re-ask is composed from. The mapping
-#: is here and the trigger is :mod:`identify`'s, because what happened is the
-#: stage's knowledge and how it is put to a seat is this module's.
-CLAIM_EVIDENCE: Mapping[Trigger, str] = MappingProxyType(
-    {
-        Trigger.NOWHERE: "identify-reask-nowhere",
-        Trigger.SEVERAL: "identify-reask-several",
-        Trigger.DISAGREED: "identify-reask-disagreed",
-    }
-)
-
-#: The seat both asks are put to. It is KB-agnostic — nothing it is told
-#: presumes a knowledge base — which is the property both asks need: each
-#: carries its whole subject in the prompt, and every property of what comes
-#: back is checked against that subject rather than trusted. Stage D asks it
-#: which of a set of claims another rests on; C-inf asks it what a document
-#: states. It is a default here and a constructor parameter on both consumers,
-#: so a run can move it without a code change.
-SEAT = "applied-mathematician"
+#: The fragment that is a claim-graph ask's whole system prompt.
+READER_SYSTEM = "reader-system"
 
 
 class AskError(ClaimGraphError):
     """The call did not come back. No answer arrived, so no re-ask can be spent on one.
 
-    What came back and does not carry the answer is
-    :class:`~.report.AnswerFormatError` instead, and the difference is the whole
-    of why there are two: one of them is a stage's to retry.
+    A letter ask whose reply carries no offered letter is not this: it is
+    re-asked once and then takes its default (:mod:`letters`).
     """
-
-
-class SeatAsk(Protocol):
-    """One call to a named seat. The seam this package reaches inference through.
-
-    :func:`ask_without_tools` is what satisfies it in production.
-    Keyword-only, deliberately: ``seat`` and ``prompt`` are two strings of the
-    same type that would swap silently if either were positional.
-    """
-
-    def __call__(
-        self,
-        *,
-        seat: str,
-        prompt: str,
-        cwd: Path | None = None,
-        capture_path: Path | None = None,
-    ) -> tuple[str, Outcome]:
-        """Put ``prompt`` to ``seat``; return what came back and how the call ended."""
-
-
-#: The fragment closing a claim-graph ask's system prompt, after the seat's own
-#: definition: telling the seat it has no tools.
-NO_TOOLS = "no-tools"
-
-
-def ask_without_tools(
-    *,
-    seat: str,
-    prompt: str,
-    cwd: Path | None = None,
-    capture_path: Path | None = None,
-    bare: bool = False,
-    invoker: Invoker | None = None,
-) -> tuple[str, Outcome]:
-    """The production :class:`SeatAsk`: ``prompt`` put to ``seat`` with no tools.
-
-    ``bare`` and ``invoker`` are not part of the seam: a run wanting the CLI's
-    minimal mode, or a check substituting the invoker, binds them
-    (``functools.partial``) and hands the result to a consumer as its ``ask``.
-    """
-    return ask_reader(
-        seat=seat,
-        prompt=prompt,
-        system_addendum=prompt_templates.render(prompt_templates.FRAGMENTS[NO_TOOLS], slots={}),
-        cwd=cwd,
-        bare=bare,
-        capture_path=capture_path,
-        invoker=invoker,
-    )
-
-
-def _record_ask(workspace: Path | None, stem: str, prompt: str) -> Path | None:
-    """Land one ask's prompt beside where its captured stream will land.
-
-    A run's inference is on disk as it happens, so a failed answer can be read
-    rather than described.
-    """
-    if workspace is None:
-        return None
-    workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / f"{stem}.prompt.md").write_text(prompt, encoding="utf-8")
-    return workspace / f"{stem}.capture.jsonl"
-
-
-def _put(ask: SeatAsk, *, seat: str, prompt: str, cwd: Path, capture_path: Path | None, subject: str) -> str:
-    """One call, re-issued identically while the layer below calls its outcome retryable."""
-    for attempt in range(TRANSPORT_ATTEMPTS):
-        response, outcome = ask(seat=seat, prompt=prompt, cwd=cwd, capture_path=capture_path)
-        if outcome.ok:
-            return response
-        if not outcome.retryable or attempt == TRANSPORT_ATTEMPTS - 1:
-            break
-    raise AskError(
-        "inference-failed",
-        f"{subject}: the call to {seat!r} ended {outcome.value} and "
-        f"{'was re-issued identically to no effect' if outcome.retryable else 'is not retryable'}. "
-        f"Nothing was written, and no answer is assumed for a call that did not complete"
-        + (f". Capture: {capture_path}" if capture_path is not None else ""),
-    )
-
-
-# --- stage D: which of these claims does this claim rest on ------------------
 
 
 def _claim_line(node: ClaimNode) -> str:
-    where = node.locator or node.document
-    return f"- `{node.id}` — {node.title} (stated in `{node.document}`: {where})"
+    where = f": {node.locator}" if node.locator else ""
+    return f"- `{node.id}` — {node.title} (stated in `{node.document}`{where})"
 
 
-def _correction(report: str | None) -> tuple[dict[str, str], dict[str, str | None]]:
-    """The re-ask correction as the composer takes it: the choice, and what it needs.
-
-    A first ask chooses nothing and supplies nothing; a re-ask chooses the
-    correction and supplies the report the chosen body's own slot names. The two
-    move together, which is why one call answers for both.
-    """
-    if report is None:
-        return {}, {CORRECTION_SLOT: None}
-    return {"report": report}, {CORRECTION_SLOT: CORRECTION}
+# --- the letter asks -----------------------------------------------------------
 
 
-def _question_slots(question: Question) -> dict[str, str]:
-    """What either stage-D template's per-call slots are: the claim, its candidates, their lines."""
-    return {
-        "claim-line": _claim_line(question.source),
-        "candidate-lines": "\n".join(_claim_line(candidate) for candidate in question.candidates),
-        "reference-lines": "\n".join(f"- {line}" for line in question.evidence),
-        "claim-id": question.source.id,
+class ParagraphLetter(StrEnum):
+    """The paragraph ask's letters: does the paragraph itself state a result."""
+
+    CLAIM = "A"
+    NOT_A_CLAIM = "B"
+
+
+class ClassifyLetter(StrEnum):
+    """The classify ask's letters: how the source claim relates to the candidate."""
+
+    SUPPORTED_BY = "A"
+    IN_SUPPORT_OF = "B"
+    MENTION = "C"
+
+
+#: The letters as both letter templates and their fragments name them.
+LETTER_SLOTS: Mapping[str, str] = MappingProxyType(
+    {
+        "letter-claim": ParagraphLetter.CLAIM,
+        "letter-not-a-claim": ParagraphLetter.NOT_A_CLAIM,
+        "letter-supported-by": ClassifyLetter.SUPPORTED_BY,
+        "letter-in-support-of": ClassifyLetter.IN_SUPPORT_OF,
+        "letter-mention": ClassifyLetter.MENTION,
     }
+)
+
+LETTER_TEMPLATES: Mapping[Kind, str] = MappingProxyType(
+    {Kind.PARAGRAPH: "paragraph.tmpl.md", Kind.CLASSIFY: "classify.tmpl.md"}
+)
+
+#: Each kind's per-item slots, as a template spells them. Everything before the
+#: first of them is the group's and identical across the group's asks.
+ITEM_SLOTS: Mapping[Kind, tuple[str, ...]] = MappingProxyType(
+    {
+        Kind.PARAGRAPH: ("dyn.paragraph", "dyn.paragraph-text", "correction"),
+        Kind.CLASSIFY: (
+            "dyn.candidate-line",
+            "dyn.candidate-text",
+            "dyn.candidate-passages",
+            "classify-options",
+            "correction",
+        ),
+    }
+)
+
+LETTER_CORRECTION = "letter-correction"
+CLASSIFY_OPTIONS_SLOT = "classify-options"
+
+#: The closing question a classify ask carries, by the letters it offers. Every
+#: offered set holds *supported by* and *mention*; *in support of* is the one a
+#: candidate may be refused.
+CLASSIFY_OPTIONS: Mapping[frozenset[ClassifyLetter], str] = MappingProxyType(
+    {
+        frozenset(ClassifyLetter): "classify-options-three",
+        frozenset({ClassifyLetter.SUPPORTED_BY, ClassifyLetter.MENTION}): "classify-options-two",
+    }
+)
+
+#: How much of an unreadable reply a re-ask shows back to the reader.
+RETURNED_MAX_CHARS = 400
 
 
-def compose_prompt(question: Question, *, report: str | None) -> str:
-    """The prompt for one source claim. Everything the question needs, and no document to read."""
-    slots, alternatives = _correction(report)
+def _letter_correction(returned: str | None) -> tuple[dict[str, str], dict[str, str | None]]:
+    """A first ask's empty correction, or the re-ask's carrying what came back, cut short."""
+    if returned is None:
+        return {}, {CORRECTION_SLOT: None}
+    return {"returned": returned.strip()[:RETURNED_MAX_CHARS]}, {CORRECTION_SLOT: LETTER_CORRECTION}
+
+
+@dataclass(frozen=True)
+class ParagraphGroup:
+    """A leaf: its path, and its body as :func:`label.render` shows it."""
+
+    document: str
+    body: str
+
+
+@dataclass(frozen=True)
+class ParagraphItem:
+    """One paragraph: its label range, and its labelled lines."""
+
+    paragraph: str
+    text: str
+
+
+def _paragraph_prompt(group: ParagraphGroup, item: ParagraphItem, returned: str | None) -> str:
+    slots, alternatives = _letter_correction(returned)
     return prompt_templates.render(
-        DEPENDS_TEMPLATE,
-        slots={**_question_slots(question), **slots},
-        constants=MARKER_SLOTS,
+        LETTER_TEMPLATES[Kind.PARAGRAPH],
+        slots={
+            "document": group.document,
+            "body": group.body.rstrip("\n"),
+            "paragraph": item.paragraph,
+            "paragraph-text": item.text.rstrip("\n"),
+            **slots,
+        },
+        constants=LETTER_SLOTS,
         alternatives=alternatives,
     )
 
 
-def compose_cycle_prompt(question: Question, *, cycle: str) -> str:
-    """The acyclicity re-ask: the same claim, with the cycle the answers so far close.
+def paragraph_asks(group: ParagraphGroup, items: Sequence[ParagraphItem]) -> tuple[LetterItem, ...]:
+    """One leaf's paragraph asks, each named by its label range and offered both letters."""
+    offered = tuple(ParagraphLetter)
+    return tuple(LetterItem(item.paragraph, offered, partial(_paragraph_prompt, group, item)) for item in items)
 
-    A template of its own rather than a correction on the one above, because what
-    is asked differs: this is a constrained revision, and it is the only ask in
-    this build that puts another question's answer in front of the seat.
-    """
+
+@dataclass(frozen=True)
+class ClassifyGroup:
+    """A source claim, and its statement: block content, prose paragraph or equation fence."""
+
+    source: ClaimNode
+    statement: str
+
+
+@dataclass(frozen=True)
+class ClassifyItem:
+    """One edge candidate: its target, the target's statement, its own passages, its letters."""
+
+    target: ClaimNode
+    statement: str
+    passages: tuple[str, ...]
+    offered: tuple[ClassifyLetter, ...]
+
+
+def _classify_prompt(
+    group: ClassifyGroup,
+    item: ClassifyItem,
+    returned: str | None,
+    *,
+    numbers: Mapping[str, int],
+    offered: tuple[ClassifyLetter, ...],
+) -> str:
+    slots, alternatives = _letter_correction(returned)
     return prompt_templates.render(
-        DEPENDS_CYCLE_TEMPLATE,
-        slots={**_question_slots(question), "cycle-path": cycle},
-        constants=MARKER_SLOTS,
-    )
-
-
-def parse_answer(text: str, *, claim: str) -> tuple[str, ...]:
-    """The selected ids, or :class:`~.report.AnswerFormatError`. Parse only — structure, never quality.
-
-    Every key here is an id, so the prose declaration is empty and
-    ``check_exhausted`` is the whole of what it buys: a prose block in this
-    answer is a seat composing something this ask did not request, and that is
-    refused on the same argument :func:`envelope.check_keys` makes about an
-    invented key.
-    """
-    try:
-        payload, prose = envelope.parse_record(
-            text, open_marker=ANSWER_OPEN, close_marker=ANSWER_CLOSE, prose_name=PROSE_NAME, label="depends"
-        )
-        if not isinstance(payload, dict):
-            raise envelope.ParseError(f"depends: the block must be a JSON object, got {type(payload).__name__}")
-        envelope.check_keys(payload, ANSWER_KEYS, label="depends")
-        declared = envelope.string_field(payload, "claim", label="depends")
-        if declared != claim:
-            raise envelope.ParseError(f"depends: the block answers for {declared!r}, but this ask is {claim!r}")
-        selected = envelope.string_array(payload["depends-on"], label="depends: depends-on")
-        prose.check_exhausted()
-        return selected
-    except envelope.ParseError as error:
-        raise AnswerFormatError(str(error)) from error
-
-
-class ModelSelector:
-    """:class:`~.attribute.Selector` over a :class:`SeatAsk`.
-
-    ``workspace`` is where each call's prompt and captured stream land, so a
-    run's inference is on disk as it happens and a failed answer can be read
-    rather than described. ``cwd`` is what decides which project's installed
-    agent set the seat name resolves against.
-    """
-
-    def __init__(
-        self,
-        *,
-        cwd: Path,
-        ask: SeatAsk = ask_without_tools,
-        workspace: Path | None = None,
-        seat: str = SEAT,
-    ) -> None:
-        self._cwd = cwd
-        self._ask = ask
-        self._workspace = workspace
-        self._seat = seat
-        self._calls = 0
-
-    def select(self, question: Question, *, report: str | None, cycle: str | None = None) -> tuple[str, ...]:
-        prompt = (
-            compose_cycle_prompt(question, cycle=cycle)
-            if cycle is not None
-            else compose_prompt(question, report=report)
-        )
-        capture_path = _record_ask(self._workspace, f"{self._calls:03d}-{question.source.id}", prompt)
-        self._calls += 1
-        response = _put(
-            self._ask,
-            seat=self._seat,
-            prompt=prompt,
-            cwd=self._cwd,
-            capture_path=capture_path,
-            subject=question.source.id,
-        )
-        return parse_answer(response, claim=question.source.id)
-
-
-def answer_block(claim: str, depends_on: Sequence[str]) -> str:
-    """The answer block for ``claim``, composed rather than typed.
-
-    Used to state an expected answer without hand-writing the format the parser
-    reads — the same demand this module refuses to make of a model's output is
-    one no caller should make of itself either.
-    """
-    payload = json.dumps({"claim": claim, "depends-on": list(depends_on)}, ensure_ascii=False)
-    return f"{ANSWER_OPEN}\n{payload}\n{ANSWER_CLOSE}\n"
-
-
-# --- stage C-inf: what results does this document state ----------------------
-
-
-def _fence_labels(reading: Reading, rendered: label.Render) -> list[str]:
-    """The labels whose lines sit inside a display-maths fence.
-
-    Stated as labels rather than as line numbers because labels are the only
-    coordinates the seat is given: a line range names nothing it can see.
-    """
-    spans = [range(fence.start, fence.end) for fence in reading.fences]
-    return [sentence.label for sentence in rendered.sentences if any(sentence.line in span for span in spans)]
-
-
-def _identify_correction(report: str | None, missing: Sequence[str]) -> tuple[dict[str, str], dict[str, str | None]]:
-    """The node pass's correction: the verdicts' own re-ask where paragraphs went unjudged, else the shared one."""
-    if missing:
-        return {"missing-paragraphs": ", ".join(missing)}, {CORRECTION_SLOT: MISSING_VERDICTS}
-    return _correction(report)
-
-
-def compose_identify_prompt(reading: Reading, *, report: str | None, missing: Sequence[str] = ()) -> str:
-    """The prompt for one leaf. The leaf, and nothing else in the corpus.
-
-    No other document, no previous answer and no other document's answer: the
-    question is what *this* file states, and anything else in front of it is a
-    second document's result available to be attributed to this one.
-    """
-    rendered = reading.render
-    fenced = _fence_labels(reading, rendered)
-    owed = tuple(reading.paragraph_ids())
-    slots, alternatives = _identify_correction(report, missing)
-    return prompt_templates.render(
-        IDENTIFY_TEMPLATE,
+        LETTER_TEMPLATES[Kind.CLASSIFY],
         slots={
-            "document": reading.document,
-            "body": rendered.text.rstrip("\n"),
-            **({"fenced-labels": ", ".join(fenced)} if fenced else {}),
-            **({"obligated-paragraphs": ", ".join(owed)} if owed else {}),
+            "claim-line": _claim_line(group.source),
+            "claim-text": group.statement.rstrip("\n"),
+            "reference-lines": "\n".join(f"P{number}: {passage}" for passage, number in numbers.items()),
+            "candidate-line": _claim_line(item.target),
+            "candidate-text": item.statement.rstrip("\n"),
+            "candidate-passages": ", ".join(f"P{number}" for number in sorted({numbers[p] for p in item.passages})),
             **slots,
         },
-        constants=MARKER_SLOTS,
-        alternatives={
-            DISPLAY_MATHS_SLOT: DISPLAY_MATHS if fenced else NO_DISPLAY_MATHS,
-            VERDICTS_SLOT: VERDICTS if owed else NO_VERDICTS,
-            NO_CLAIM_SLOT: NO_CLAIM_ADMITTED if reading.may_decline else NO_CLAIM_REFUSED,
-            **alternatives,
-        },
+        constants=LETTER_SLOTS,
+        alternatives={CLASSIFY_OPTIONS_SLOT: CLASSIFY_OPTIONS[frozenset(offered)], **alternatives},
     )
 
 
-def _claim_records(text: str, *, label: str) -> envelope.FieldBlocks:
-    return envelope.extract_field_blocks(text, name=CLAIM_NAME, keys=CLAIM_FIELDS, label=label)
+def classify_asks(group: ClassifyGroup, items: Sequence[ClassifyItem]) -> tuple[LetterItem, ...]:
+    """One source claim's classify asks, each named by its target's id.
 
-
-def _records_of(blocks: envelope.FieldBlocks) -> tuple[Record, ...]:
-    return tuple(
-        Record(quote=fields["quote"], label=fields["label"], title=fields["title"]) for fields in blocks.blocks
-    )
-
-
-def parse_identify_answer(text: str, *, document: str) -> Answer:
-    """The records, the verdicts and the reason, or :class:`~.report.AnswerFormatError`. Parse only, never quality.
-
-    **A malformed block costs that block and nothing else**, so it comes back
-    in :attr:`Answer.refusals` rather than as an exception. What *is* an
-    exception is an answer this parse cannot read at all: a block left unclosed,
-    which swallows every block behind it; two no-claim blocks or two
-    nothing-further blocks, which are two answers; and a returned text carrying
-    no block of any kind, which is indistinguishable from a call that said
-    nothing. Every answer says something positive — a record, a verdict, a
-    no-claim sentence, or that nothing further is stated.
-
-    ``document`` names the ask in a refusal and is not compared against anything
-    the answer declares: there is no declaration to compare it to. The answer's
-    blocks carry no path, and the check that used to be made against one is made
-    more strongly downstream — a quote lifted from another document resolves
-    nowhere in this one.
+    The group's passages are every item's, sorted and deduplicated and numbered
+    ``P1``…, so each ask names its own by number against one shared list.
     """
-    label = f"identify {document}"
-    try:
-        found = _claim_records(text, label=label)
-        yes = envelope.extract_field_blocks(text, name=PARAGRAPH_CLAIM_NAME, keys=PARAGRAPH_CLAIM_FIELDS, label=label)
-        no = envelope.extract_field_blocks(
-            text, name=PARAGRAPH_NOT_A_CLAIM_NAME, keys=PARAGRAPH_NOT_A_CLAIM_FIELDS, label=label
-        )
-        reasons = envelope.extract_blocks(text, open_marker=NO_CLAIM_OPEN, close_marker=NO_CLAIM_CLOSE, label=label)
-        further = envelope.extract_blocks(
-            text, open_marker=NOTHING_FURTHER_OPEN, close_marker=NOTHING_FURTHER_CLOSE, label=label
-        )
-        for kind, bodies in ((NO_CLAIM_OPEN, reasons), (NOTHING_FURTHER_OPEN, further)):
-            if len(bodies) > 1:
-                raise envelope.ParseError(
-                    f"{label}: {len(bodies)} {kind!r} blocks. A document says this once or not at all, and two "
-                    f"of them are two answers"
-                )
-        if not reasons and not further and not any(blocks.blocks or blocks.refusals for blocks in (found, yes, no)):
-            raise envelope.ParseError(
-                f"{label}: the returned text carries no {CLAIM_OPEN!r}, {PARAGRAPH_CLAIM_OPEN!r}, "
-                f"{PARAGRAPH_NOT_A_CLAIM_OPEN!r}, {NO_CLAIM_OPEN!r} or {NOTHING_FURTHER_OPEN!r} block, so it "
-                f"states nothing at all. Every answer states a result, a verdict, or that there is none"
+    passages = sorted({passage for item in items for passage in item.passages})
+    numbers = {passage: number for number, passage in enumerate(passages, start=1)}
+    asks = []
+    for item in items:
+        offered = tuple(letter for letter in ClassifyLetter if letter in item.offered)
+        compose = partial(_classify_prompt, group, item, numbers=numbers, offered=offered)
+        asks.append(LetterItem(item.target.id, offered, compose))
+    return tuple(asks)
+
+
+#: Characters a capture's file name keeps from the ask it is named after.
+_FILE_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+_FILE_STEM_MAX_CHARS = 150
+
+
+@contextmanager
+def _capture_path(captures: Path | None, question: LetterQuestion) -> Iterator[Path]:
+    """Where one question's stream is captured: under ``captures``, or in a spool that does not outlive the call.
+
+    Named by the ask and its prompt's digest, so a first ask and its re-ask land
+    apart, and emptied first, so a resumed run asking again counts one call.
+    """
+    digest = sha256(question.prompt.encode("utf-8")).hexdigest()[:12]
+    stem = _FILE_NAME_UNSAFE.sub("_", f"{question.kind}-{question.group}-{question.item}")[:_FILE_STEM_MAX_CHARS]
+    name = f"{stem}-{digest}.capture.jsonl"
+    if captures is None:
+        with TemporaryDirectory(prefix="kb-letter-ask-") as spool:
+            yield Path(spool) / name
+        return
+    captures.mkdir(parents=True, exist_ok=True)
+    path = captures / name
+    path.unlink(missing_ok=True)
+    yield path
+
+
+def _call_stats(capture: inference.CaptureStats) -> CallStats:
+    """The capture's figures, under the names the ask record keeps: each attempt that reasoned is one thinking block."""
+    return CallStats(
+        duration_api_ms=capture.duration_ms,
+        output_tokens=capture.completion_tokens,
+        thinking_blocks=capture.reasoning_attempts,
+        cache_read_input_tokens=capture.cached_tokens,
+        prompt_tokens=capture.prompt_tokens,
+    )
+
+
+def _served_nothing(stats: CallStats) -> bool:
+    """Whether the server reports neither reading the prompt nor writing a token.
+
+    The stream reaches ``[DONE]`` and hands on whatever text came back as the
+    reply. A server aborting a request (out of memory, say) answers that way,
+    with its error message as the text; a call that ran reports the prompt it
+    read. Counts the stream does not carry decide nothing.
+    """
+    return stats.prompt_tokens == 0 and stats.output_tokens == 0
+
+
+def ask_without_tools(question: LetterQuestion, *, captures: Path | None = None) -> Reply:
+    """The production :class:`~.letters.LetterReader`: ``question`` put to the environment's model with no tools.
+
+    ``captures`` is bound by the stage that holds it (``functools.partial``):
+    where each call's stream lands — a spool discarded after the call where it
+    is ``None``. Returns no ``confidence``.
+
+    Raises :class:`AskError` where the call never completed, or the server
+    served it without reading the prompt, on every one of
+    :data:`TRANSPORT_ATTEMPTS`; :class:`ValueError` where
+    :func:`~kb_tools.inference.call_chat` refuses the environment.
+    """
+    subject = f"{question.kind} ask {question.item!r} of {question.group!r}"
+    system_prompt = prompt_templates.render(prompt_templates.FRAGMENTS[READER_SYSTEM], slots={})
+    with _capture_path(captures, question) as capture_path:
+        for _attempt in range(TRANSPORT_ATTEMPTS):
+            text, outcome = inference.call_chat(
+                system_prompt=system_prompt,
+                prompt=question.prompt,
+                timeout_seconds=SOCKET_TIMEOUT_SECONDS,
+                capture_path=capture_path,
             )
-    except envelope.ParseError as error:
-        raise AnswerFormatError(str(error)) from error
-    refusals = found.refusals + yes.refusals + no.refusals
-    if further and further[0].strip():
-        refusals += (f"{label}: the {NOTHING_FURTHER_OPEN!r} block carries text; it is an empty marker pair",)
-    return Answer(
-        claims=_records_of(found),
-        verdicts=tuple(Verdict(paragraph=fields["paragraph"], title=fields["title"]) for fields in yes.blocks)
-        + tuple(Verdict(paragraph=fields["paragraph"], title=None) for fields in no.blocks),
-        no_claim=reasons[0].strip() if reasons else "",
-        nothing_further=bool(further) and not further[0].strip(),
-        refusals=refusals,
+            if not outcome.ok:
+                ended = outcome.value
+                continue
+            stats = _call_stats(inference.read_capture(capture_path))
+            if not _served_nothing(stats):
+                return Reply(text=text, stats=stats)
+            ended = "with no token read or written"
+    raise AskError(
+        "inference-failed",
+        f"{subject}: the call ended {ended} and was re-issued identically to no effect. "
+        f"No answer is assumed for a call that did not complete"
+        + (f". Capture: {capture_path}" if captures is not None else ""),
     )
-
-
-def identify_answer_block(
-    claims: Sequence[Record] = (),
-    no_claim: str = "",
-    verdicts: Sequence[Verdict] = (),
-    *,
-    nothing_further: bool = False,
-) -> str:
-    """C-inf's answer as a seat returns it: one block per record and per verdict, and the reason or the empty pair.
-
-    Composed rather than typed, wherever a caller needs to *state* an answer —
-    the demand this format refuses to make of a model's output is one no caller
-    should make of itself either.
-    """
-    blocks = [
-        envelope.field_block({"quote": record.quote, "label": record.label, "title": record.title}, name=CLAIM_NAME)
-        for record in claims
-    ]
-    blocks += [
-        (
-            envelope.field_block({"paragraph": verdict.paragraph}, name=PARAGRAPH_NOT_A_CLAIM_NAME)
-            if verdict.title is None
-            else envelope.field_block(
-                {"paragraph": verdict.paragraph, "title": verdict.title}, name=PARAGRAPH_CLAIM_NAME
-            )
-        )
-        for verdict in verdicts
-    ]
-    if no_claim:
-        blocks.append(f"{NO_CLAIM_OPEN}\n{no_claim}\n{NO_CLAIM_CLOSE}\n")
-    if nothing_further:
-        blocks.append(f"{NOTHING_FURTHER_OPEN}\n{NOTHING_FURTHER_CLOSE}\n")
-    return "".join(blocks)
-
-
-# --- C-inf's per-claim re-ask ------------------------------------------------
-
-
-def compose_claim_reask_prompt(reading: Reading, unresolved: Unresolved) -> str:
-    """The re-ask for one claim: what the seat named, and the sentences the tool found.
-
-    **One call per unresolved claim, not one per document.** Isolating the ask
-    is what raises the odds on each, and every value below was computed *after*
-    the previous answer — which is the property that distinguishes a re-ask from
-    a re-issue.
-    """
-    record = unresolved.record
-    return prompt_templates.render(
-        IDENTIFY_REASK_TEMPLATE,
-        slots={
-            "document": reading.document,
-            "quote": record.quote,
-            "label": record.label,
-            "title": record.title,
-            "candidate-lines": "\n".join(f"- {line}" for line in unresolved.candidates),
-        },
-        constants=MARKER_SLOTS,
-        alternatives={CLAIM_EVIDENCE_SLOT: CLAIM_EVIDENCE[unresolved.trigger]},
-    )
-
-
-def parse_claim_reask_answer(text: str, *, document: str) -> Record | None:
-    """The one claim block a re-ask settled on, or ``None`` for "none of these".
-
-    ``None`` is an answer and not a failure: it ends that claim as unresolved
-    without a further call, which is what keeps a narrowed menu from forcing a
-    confident wrong choice.
-    """
-    label = f"identify re-ask {document}"
-    try:
-        declined = envelope.extract_blocks(
-            text, open_marker=NONE_OF_THESE_OPEN, close_marker=NONE_OF_THESE_CLOSE, label=label
-        )
-        found = _claim_records(text, label=label)
-        records = _records_of(found)
-        if declined and not records:
-            return None
-        if len(records) != 1 or declined:
-            raise envelope.ParseError(
-                f"{label}: a re-ask about one claim is answered by exactly one {CLAIM_OPEN!r} block or by one "
-                f"{NONE_OF_THESE_OPEN!r} block; this answer carries {len(records)} and {len(declined)}"
-                + (f". {found.refusals[0]}" if found.refusals else "")
-            )
-    except envelope.ParseError as error:
-        raise AnswerFormatError(str(error)) from error
-    return records[0]
-
-
-class ModelIdentifier:
-    """:class:`~.identify.Identifier` over a :class:`SeatAsk`.
-
-    ``workspace`` is where each call's prompt and captured stream land, so a
-    run's inference is on disk as it happens. ``cwd`` is what decides which
-    project's installed agent set the seat name resolves against.
-    """
-
-    def __init__(
-        self,
-        *,
-        cwd: Path,
-        ask: SeatAsk = ask_without_tools,
-        workspace: Path | None = None,
-        seat: str = SEAT,
-    ) -> None:
-        self._cwd = cwd
-        self._ask = ask
-        self._workspace = workspace
-        self._seat = seat
-        self._calls = 0
-
-    def _put_identify(self, prompt: str, *, subject: str, stem: str) -> str:
-        capture_path = _record_ask(self._workspace, f"{self._calls:03d}-{stem}", prompt)
-        self._calls += 1
-        return _put(
-            self._ask,
-            seat=self._seat,
-            prompt=prompt,
-            cwd=self._cwd,
-            capture_path=capture_path,
-            subject=subject,
-        )
-
-    def identify(self, reading: Reading, *, report: str | None, missing: Sequence[str] = ()) -> Answer:
-        stem = reading.document.replace("/", "_")
-        response = self._put_identify(
-            compose_identify_prompt(reading, report=report, missing=missing), subject=reading.document, stem=stem
-        )
-        return parse_identify_answer(response, document=reading.document)
-
-    def re_ask(self, reading: Reading, unresolved: Unresolved) -> Record | None:
-        stem = f"{reading.document.replace('/', '_')}-{unresolved.trigger}"
-        response = self._put_identify(
-            compose_claim_reask_prompt(reading, unresolved), subject=reading.document, stem=stem
-        )
-        return parse_claim_reask_answer(response, document=reading.document)

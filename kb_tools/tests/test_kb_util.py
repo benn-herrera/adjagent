@@ -998,7 +998,6 @@ def test_show_status_exposes_the_frozen_stage_vocabulary_in_order(tmp_path: Path
         "depends-attributed",
         "phase-3a",
         "overview-drafted",
-        "phase-5",
     ]
 
 
@@ -1023,13 +1022,12 @@ def test_show_status_reports_in_progress_with_a_resume_marker(branch_at: Callabl
 
     assert result.returncode == 0, result.stderr
     assert "in progress" in result.stdout
-    # The opt-in audit is not a stage an unaudited build is short of.
-    assert f"1 of {len(kb_pipeline.REQUIRED_STAGES)}" in result.stdout
+    assert f"1 of {len(kb_pipeline.STAGE_IDS)}" in result.stdout
     markers = dict((stage_id, marker) for marker, stage_id in _checklist(result.stdout))
     assert markers["start"] == "x"
     # The first unrecorded stage is where a resuming agent picks up.
     assert markers[kb_pipeline.STAGE_IDS[1]] == "*"
-    assert markers["phase-3a"] == " " and markers["phase-5"] == " "
+    assert markers["phase-3a"] == " " and markers["overview-drafted"] == " "
 
 
 # The third world-state, complete, needs a spine green enough to clear
@@ -1179,10 +1177,10 @@ def test_advance_step_refuses_an_out_of_order_stage(branch_at: Callable[[str], P
     repo = branch_at("start")
     before = _commit_count(repo)
 
-    result = _op(repo, "advance-step", "--stage", "phase-5")
+    result = _op(repo, "advance-step", "--stage", "overview-drafted")
 
     assert result.returncode == kb_pipeline.EXIT_OUT_OF_ORDER
-    assert "cannot record 'phase-5'" in result.stderr
+    assert "cannot record 'overview-drafted'" in result.stderr
     # The refusal names exactly what is missing, and corrects the world-model.
     for missing in ("phase-3a",):
         assert missing in result.stderr
@@ -1491,8 +1489,8 @@ def test_the_walk_records_every_stage_and_ends_complete(
         ],
         "the ledger's boundary subjects, in order": _subjects(final.tree),
         "artifact-gated stages missing from the ledger": sorted({s for s, _ in _CHECKED_STAGES} - recorded),
-        "commits the phase-5 boundary added": _commit_count(ladder["phase-5"].tree)
-        - _commit_count(ladder[_predecessor_of("phase-5")].tree),
+        "commits the final boundary added": _commit_count(final.tree)
+        - _commit_count(ladder[_predecessor_of(last_stage)].tree),
         "the world-state named at completion": "complete" in final.status.stdout,
         "checklist markers at completion": sorted({marker for marker, _ in _checklist(final.status.stdout)}),
         "the line closing the render": final.status.stdout.splitlines()[-1],
@@ -1507,7 +1505,7 @@ def test_the_walk_records_every_stage_and_ends_complete(
             f"{kb_pipeline.LEDGER_PREFIX} {stage.id} | {stage.display}" for stage in kb_pipeline.STAGES
         ],
         "artifact-gated stages missing from the ledger": [],
-        "commits the phase-5 boundary added": 1,
+        "commits the final boundary added": 1,
         "the world-state named at completion": True,
         "checklist markers at completion": ["x"],
         "the line closing the render": kb_pipeline.checklist_lines(set(kb_pipeline.STAGE_IDS))[-1],
@@ -1730,31 +1728,33 @@ def test_start_refuses_when_the_charter_was_never_written(tmp_path: Path) -> Non
 def test_meta_documentation_requires_the_overview_and_not_the_stamped_document(
     branch_at: Callable[[str], Path],
 ) -> None:
-    """One check, two boundaries, and it asks for the document these stages produce.
+    """The boundary asks for the document its stage produces, and not for one an earlier stage stamped.
 
     ``CONVENTIONS.md`` comes from ``phase-3a``'s readiness stamp, so a boundary
     here that asked for it would be satisfied by an earlier stage's work — a
     unit that cannot fail and therefore tells a caller nothing. Asserted both
-    ways from one tree: its absence does not refuse the boundary, and the
-    overview's does.
+    ways: its absence does not refuse the boundary, and the overview's does.
     """
     repo = branch_at("phase-3a")
+    overview = repo / "kb-root" / kb_pipeline.OVERVIEW_DOC
+    standing = overview.read_text(encoding="utf-8")
     (repo / "kb-root" / kb_pipeline.CONVENTIONS_DOC).unlink()
+    overview.unlink()
     before = _commit_count(repo)
 
-    stamped_gone = _op(repo, "advance-step", "--stage", "overview-drafted")
-
-    assert stamped_gone.returncode == 0, stamped_gone.stderr
-    assert _commit_count(repo) == before + 1
-
-    (repo / "kb-root" / kb_pipeline.OVERVIEW_DOC).unlink()
-    overview_gone = _op(repo, "advance-step", "--stage", "phase-5")
+    overview_gone = _op(repo, "advance-step", "--stage", "overview-drafted")
 
     assert overview_gone.returncode == kb_pipeline.EXIT_POSTCONDITION_FAILED
     assert kb_pipeline.OVERVIEW_DOC in overview_gone.stderr
     # Only what this stage owes: the document an earlier stage stamped is gone
     # from the tree and the refusal has nothing to say about it.
     assert kb_pipeline.CONVENTIONS_DOC not in overview_gone.stderr
+    assert _commit_count(repo) == before
+
+    overview.write_text(standing, encoding="utf-8")
+    stamped_gone = _op(repo, "advance-step", "--stage", "overview-drafted")
+
+    assert stamped_gone.returncode == 0, stamped_gone.stderr
     assert _commit_count(repo) == before + 1
 
 
@@ -1885,12 +1885,10 @@ _PARTIAL_COVERAGE: dict[str, Callable[[Path], None]] = {
     "equations-minted": _break_a_link,
     "depends-attributed": _break_a_link,
     "phase-3a": _break_a_link,
-    # Both meta-documentation boundaries read one check, and the overview is
-    # what it asks for. Removing CONVENTIONS.md would refuse neither: the
-    # readiness stamp owns that document and no boundary after phase-3a asks
-    # whether it stands.
+    # The overview is what the meta-documentation boundary asks for. Removing
+    # CONVENTIONS.md would not refuse it: the readiness stamp owns that document
+    # and no boundary after phase-3a asks whether it stands.
     "overview-drafted": _remove("kb-root/README.md"),
-    "phase-5": _remove("kb-root/README.md"),
 }
 
 
@@ -1933,7 +1931,9 @@ def test_the_read_and_the_refusal_name_one_set_of_missing_units(
     assert _missing_ids(read.stdout)
 
 
-def test_the_read_reports_phase_5s_one_unit_covered_and_then_missing(branch_at: Callable[[str], Path]) -> None:
+def test_the_read_reports_the_overview_stages_one_unit_covered_and_then_missing(
+    branch_at: Callable[[str], Path],
+) -> None:
     """What landed and what did not, with the path either way.
 
     The paths are the point. A coordinator resuming here dispatches against the
@@ -1945,9 +1945,12 @@ def test_the_read_reports_phase_5s_one_unit_covered_and_then_missing(branch_at: 
     # The tool resolves its root from the working directory, so the paths it
     # prints are that resolution's, not the fixture path's spelling of it.
     kb = repo.resolve() / "kb-root"
-    fact = f"{kb_pipeline.STAGE_STATUS_TAG} {kb_pipeline.FACT} phase-5 (document audit) — 1 coverage unit(s) declared"
+    fact = (
+        f"{kb_pipeline.STAGE_STATUS_TAG} {kb_pipeline.FACT} overview-drafted (overview drafted) — "
+        "1 coverage unit(s) declared"
+    )
 
-    covered = _op(repo, "show-stage-status", "--stage", "phase-5")
+    covered = _op(repo, "show-stage-status", "--stage", "overview-drafted")
 
     assert covered.returncode == 0, covered.stderr
     assert _stage_status_lines(covered.stdout) == [
@@ -1956,7 +1959,7 @@ def test_the_read_reports_phase_5s_one_unit_covered_and_then_missing(branch_at: 
     ]
 
     (kb / "README.md").unlink()
-    missing = _op(repo, "show-stage-status", "--stage", "phase-5")
+    missing = _op(repo, "show-stage-status", "--stage", "overview-drafted")
 
     assert missing.returncode == 0, missing.stderr
     assert _stage_status_lines(missing.stdout) == [
@@ -1974,7 +1977,7 @@ def test_the_read_renders_no_checklist(branch_at: Callable[[str], Path]) -> None
     """
     repo = branch_at("phase-3a")
 
-    for stage_id in (None, "start", "phase-3a", "phase-5"):
+    for stage_id in (None, "start", "phase-3a", "overview-drafted"):
         result = _op(repo, "show-stage-status", *(() if stage_id is None else ("--stage", stage_id)))
 
         assert result.returncode == 0, result.stderr
@@ -1998,13 +2001,12 @@ def test_the_zero_argument_read_is_the_stage_the_checklist_stars(branch_at: Call
 
 
 def test_a_complete_build_names_no_stage_and_does_not_fall_back_to_the_last(branch_at: Callable[[str], Path]) -> None:
-    """Every stage a build owes recorded is an answer, not a stage to report on.
+    """Every stage recorded is an answer, not a stage to report on.
 
     Falling back to the final stage would answer a question nobody asked and
-    read as though it were still in flight. The opt-in audit standing
-    unrecorded behind the build does not make it incomplete: nobody asked for it.
+    read as though it were still in flight.
     """
-    repo = branch_at(kb_pipeline.REQUIRED_STAGES[-1].id)
+    repo = branch_at(kb_pipeline.STAGE_IDS[-1])
     status = _op(repo, "show-status").stdout
 
     asked = _op(repo, "show-stage-status")
@@ -2015,24 +2017,52 @@ def test_a_complete_build_names_no_stage_and_does_not_fall_back_to_the_last(bran
     lines = _stage_status_lines(asked.stdout)
     assert len(lines) == 1
     assert lines[0].startswith(f"{kb_pipeline.STAGE_STATUS_TAG} {kb_pipeline.FACT} ")
-    assert f"all {len(kb_pipeline.REQUIRED_STAGES)} stages a build owes are recorded" in lines[0]
+    assert f"all {len(kb_pipeline.STAGE_IDS)} stages are recorded" in lines[0]
     assert "--stage" in lines[0]
     # And it is not the last stage's report wearing a different opening line.
     assert lines != _stage_status_lines(_op(repo, "show-stage-status", "--stage", kb_pipeline.STAGE_IDS[-1]).stdout)
+
+
+def test_a_ledger_that_recorded_the_retired_audit_still_reads_complete(branch_at: Callable[[str], Path]) -> None:
+    """Built KBs carry a ``phase-5`` boundary, the document audit this table no longer holds.
+
+    An id outside the stage table is no stage at all: the ledger reads
+    complete, counts only the stages the table has, and the checklist does not
+    list it — and recording the last stage again is the complete process's
+    no-op, not a refusal.
+    """
+    repo = branch_at(kb_pipeline.STAGE_IDS[-1])
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", f"{kb_pipeline.LEDGER_PREFIX} phase-5 | document audit"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    total = len(kb_pipeline.STAGE_IDS)
+
+    status = _op(repo, "show-status")
+    rerecorded = _op(repo, "advance-step", "--stage", kb_pipeline.STAGE_IDS[-1])
+
+    assert status.returncode == 0, status.stderr
+    assert f"status: complete ({total} of {total} stages recorded)" in status.stdout
+    assert [stage_id for _, stage_id in _checklist(status.stdout)] == list(kb_pipeline.STAGE_IDS)
+    assert kb_pipeline.recorded_stages(repo) == set(kb_pipeline.STAGE_IDS)
+    assert rerecorded.returncode == 0, rerecorded.stderr
+    assert "process already complete" in rerecorded.stdout
 
 
 def test_a_recorded_stage_and_an_unreached_stage_both_report(branch_at: Callable[[str], Path]) -> None:
     """Neither position refuses the question: a resume reads back, a lookahead reads forward.
 
     Both report every unit they declare, and here both find them: the walk lays
-    its artifacts down before it starts, so the document phase-5 declares is on
-    disk long before phase-5 is reached. That is the tree, and the read
+    its artifacts down before it starts, so the document overview-drafted
+    declares is on disk long before overview-drafted is reached. That is the tree, and the read
     reports the tree rather than the ledger's opinion of it.
     """
     repo = branch_at("phase-3a")
 
     recorded = _op(repo, "show-stage-status", "--stage", "phase-3a")
-    unreached = _op(repo, "show-stage-status", "--stage", "phase-5")
+    unreached = _op(repo, "show-stage-status", "--stage", "overview-drafted")
 
     assert recorded.returncode == 0, recorded.stderr
     assert _unit_ids(recorded.stdout, kb_pipeline.COVERED) == ["verify-gates"]
@@ -2046,7 +2076,7 @@ def test_the_read_writes_nothing_and_records_nothing(branch_at: Callable[[str], 
     repo = branch_at("phase-3a")
     before = (_tree_snapshot(repo), _commit_count(repo))
 
-    for args in ((), ("--stage", kb_pipeline.FIRST_STAGE_ID), ("--stage", "phase-3a"), ("--stage", "phase-5")):
+    for args in ((), ("--stage", kb_pipeline.FIRST_STAGE_ID), ("--stage", "phase-3a"), ("--stage", "overview-drafted")):
         assert _op(repo, "show-stage-status", *args).returncode == 0
 
     assert (_tree_snapshot(repo), _commit_count(repo)) == before

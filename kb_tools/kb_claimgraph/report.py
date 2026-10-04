@@ -70,20 +70,3 @@ class ClaimGraphError(Exception):
 
     def finding(self) -> Finding:
         return Finding(FAIL, self.check, self.detail)
-
-
-class AnswerFormatError(ClaimGraphError):
-    """An answer arrived and does not carry the answer that was asked for.
-
-    Raised by :mod:`ask`'s parses and caught by the two stages that hold a
-    re-ask, :mod:`identify` and :mod:`attribute` — an answer that arrived and
-    did not parse costs a re-ask, spent from an allowance of its own so that the
-    mechanical checks it never reached keep theirs.
-
-    It is declared here rather than beside the parse that raises it because
-    :mod:`ask` imports from both of those stages, so an exception that module
-    owned could not be named at the place the re-ask is spent.
-    """
-
-    def __init__(self, detail: str) -> None:
-        super().__init__("answer-format", detail)

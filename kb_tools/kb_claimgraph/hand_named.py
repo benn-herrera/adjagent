@@ -3,8 +3,9 @@
 *follows directly from Lemma 4.6*, *This proves Theorem B* — the mechanical half
 of THESIS gap 2. The author named a claim the way a reader would, and the markup
 carries no anchor for stage D to read, so the mention is found here off the
-words themselves and offered as an **edge candidate**: never an edge, and
-neither asked about nor recorded until classification offers it.
+words themselves and offered as an **edge candidate**: :func:`attribute.narrow`
+merges it with whatever a reference reached on the same pair, and it is
+classified and recorded like every other candidate.
 
 **The names are the corpus's own.** The display names of the blocks this corpus
 states its results in (:func:`claim_names`) — whatever its ``\\newtheorem``
@@ -165,11 +166,13 @@ def printed_claims(
     return {key: tuple(nodes) for key, nodes in joined.items()}
 
 
-def _bodies(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Iterator[tuple[ClaimNode, str, int, str]]:
-    """Each node's body: the claim, its document, the body's first line and its text.
+def bodies(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Iterator[tuple[ClaimNode, str, int, str]]:
+    """Each block or prose claim's body: the claim, its document, the body's first line and its text.
 
-    The text is marker-stripped and unquoted, line for line, so a line counted
-    in it is a line of the written document.
+    A block claim's body is the block's extent, a prose claim's the paragraph
+    it was minted from. An equation node has neither and is not yielded. The
+    text is marker-stripped and unquoted, line for line, so a line counted in
+    it is a line of the written document.
     """
     lines: dict[str, list[str]] = {}
 
@@ -181,14 +184,7 @@ def _bodies(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Iterator[
     in_blocks = set()
     for node, start, end in _block_claims(graph, inventory):
         in_blocks.add(node.id)
-        body = "\n".join(text_of(node.document)[start:end])
-        # The display line opens with the block's own printed name and number —
-        # its label, not a mention of anything. Read as one, it names every other
-        # block a corpus printed under the same number.
-        own = PRINTED_NAME_RE.search(body, len(text_of(node.document)[start]) + 1)
-        if own is not None:
-            body = body[: own.start()] + _blank(own) + body[own.end() :]
-        yield node, node.document, start, body
+        yield node, node.document, start, "\n".join(text_of(node.document)[start:end])
 
     in_prose: dict[str, list[ClaimNode]] = {}
     for node in graph.nodes.values():
@@ -211,8 +207,15 @@ def harvest(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> tuple[Han
     vocabulary = Vocabulary(names)
     printed = printed_claims(graph, inventory, vocabulary)
 
+    in_blocks = {node.id for node, _, _ in _block_claims(graph, inventory)}
     found: dict[tuple[str, str], HandNamed] = {}
-    for source, document, first, body in _bodies(tree, graph, inventory):
+    for source, document, first, body in bodies(tree, graph, inventory):
+        # A block's display line opens with its own printed name and number —
+        # its label, not a mention of anything. Read as one, it names every other
+        # block a corpus printed under the same number.
+        own = PRINTED_NAME_RE.search(body, len(body.split("\n", 1)[0]) + 1) if source.id in in_blocks else None
+        if own is not None:
+            body = body[: own.start()] + _blank(own) + body[own.end() :]
         volume = tree.documents[document].domain
         for offset, name, numbers, written in vocabulary.mentions(body):
             for number in numbers:

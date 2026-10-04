@@ -15,7 +15,8 @@ Subject format — stable, greppable, and machine-readable::
     kb-build: <stage-id> | <display name>
 
 ``<stage-id>`` is the first whitespace-free token after the ``kb-build: ``
-prefix and is always one of :data:`STAGE_IDS`. An optional body paragraph
+prefix. It is one of :data:`STAGE_IDS` or a retired id, which
+:func:`recorded_stages` reads as no stage at all. An optional body paragraph
 follows the subject: the charter path on ``start``, the ``--note`` text
 ``advance-step`` carries on any stage.
 
@@ -119,16 +120,24 @@ class LeafOutcome(StrEnum):
     """What reading one leaf came to."""
 
     MINTED = "minted"
-    #: The leaf's own no-claim sentence, carried in :attr:`LeafEntry.reason`.
+    #: Read, and no paragraph of it minted a claim. The leaf keeps the frontmatter it already carries.
     NO_CLAIM = "no-claim"
-    #: Results were named and none of them anchored.
-    UNANCHORED = "unanchored"
+    #: No paragraph of it is one the node pass asks about, so nothing was asked.
     NOTHING_TO_READ = "nothing-to-read"
 
 
 class Judgement(StrEnum):
     CLAIM = "claim"
     NOT_A_CLAIM = "not-a-claim"
+    #: No judgement stands for the paragraph; :class:`DefaultCause` says why.
+    DEFAULTED = "defaulted"
+
+
+class DefaultCause(StrEnum):
+    #: Neither the ask nor its one re-ask came back with an offered letter.
+    NO_LETTER = "no-letter"
+    #: Judged a claim, and no slice of the paragraph is one the write path can place.
+    UNPLACEABLE = "unplaceable"
 
 
 @dataclass(frozen=True)
@@ -141,17 +150,20 @@ class PlannedClaim:
 
 @dataclass(frozen=True)
 class ParagraphVerdict:
-    """One obligated paragraph's verdict. ``line`` is the 0-based line the paragraph begins on."""
+    """One asked paragraph's verdict. ``line`` is the 0-based line the paragraph begins on.
+
+    ``cause`` is given exactly where the judgement is :attr:`Judgement.DEFAULTED`.
+    """
 
     line: int
     judgement: Judgement
+    cause: DefaultCause | None = None
 
 
 @dataclass(frozen=True)
 class LeafEntry:
     state: ReadState = ReadState.UNREAD
     outcome: LeafOutcome | None = None
-    reason: str | None = None
     claims: tuple[PlannedClaim, ...] = ()
     verdicts: tuple[ParagraphVerdict, ...] = ()
 
@@ -160,8 +172,9 @@ class LeafEntry:
 #: reader holding only the file is told.
 NODE_PASS_ABOUT = (
     "The claim-graph node pass's build record: each leaf's read state and outcome, and a verdict for every "
-    "paragraph of readable prose that holds a cross-reference, identified by the 0-based line it begins on. "
-    "It joins to the tree at this build's own boundary commits, not to a KB a maintainer later edits."
+    "paragraph of readable prose the pass asked about — claim, not a claim, or defaulted with its cause — "
+    "identified by the 0-based line it begins on. It joins to the tree at this build's own boundary commits, "
+    "not to a KB a maintainer later edits."
 )
 
 
@@ -181,13 +194,27 @@ def _entry_json(entry: LeafEntry) -> dict[str, object]:
     return {
         "state": entry.state.value,
         "outcome": None if entry.outcome is None else entry.outcome.value,
-        "reason": entry.reason,
         "claims": [{"title": claim.title, "locator": claim.locator} for claim in entry.claims],
         "verdicts": [
-            {"line": verdict.line, "verdict": verdict.judgement.value}
+            {
+                "line": verdict.line,
+                "verdict": verdict.judgement.value,
+                "cause": None if verdict.cause is None else verdict.cause.value,
+            }
             for verdict in sorted(entry.verdicts, key=lambda verdict: verdict.line)
         ],
     }
+
+
+def _verdict_of(raw: Mapping[str, object]) -> ParagraphVerdict:
+    # `cause` is read where present: records written before it existed are still
+    # on disk under staged corpora, and their verdicts carry none to read.
+    cause = raw.get("cause")
+    return ParagraphVerdict(
+        line=raw["line"],  # type: ignore[arg-type]
+        judgement=Judgement(raw["verdict"]),
+        cause=None if cause is None else DefaultCause(cause),
+    )
 
 
 def _entry_of(raw: Mapping[str, object]) -> LeafEntry:
@@ -195,11 +222,8 @@ def _entry_of(raw: Mapping[str, object]) -> LeafEntry:
     return LeafEntry(
         state=ReadState(raw["state"]),
         outcome=None if outcome is None else LeafOutcome(outcome),
-        reason=raw["reason"],  # type: ignore[arg-type]
         claims=tuple(PlannedClaim(title=c["title"], locator=c["locator"]) for c in raw["claims"]),  # type: ignore[attr-defined]
-        verdicts=tuple(
-            ParagraphVerdict(line=v["line"], judgement=Judgement(v["verdict"])) for v in raw["verdicts"]  # type: ignore[attr-defined]
-        ),
+        verdicts=tuple(_verdict_of(v) for v in raw["verdicts"]),  # type: ignore[attr-defined]
     )
 
 
@@ -222,6 +246,100 @@ def read_node_pass(repo_root: Path) -> NodePassRecord | None:
         return NodePassRecord(leaves=MappingProxyType({key: _entry_of(value) for key, value in leaves.items()}))
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         raise NodePassRecordError(f"{path} does not read as a node-pass record: {error!r}") from error
+
+
+# --- the classification record ----------------------------------------------
+#
+# Written empty by `kb_claimgraph`'s `claims-declared` invocation, beside the
+# node-pass record it starts, so a record an earlier build left is never read
+# as this build's resume point; then written and read by `depends-attributed`,
+# on the node-pass record's placement and for its reasons: a stop mid-stage
+# keeps every classify ask already answered. This module stores letters; it
+# never interprets one.
+
+CLASSIFICATION_RELPATH = "kb-build-classification.json"
+
+
+class ClassifyOutcome(StrEnum):
+    """How a candidate's letter was reached. ``defaulted`` and ``drafted`` carry none."""
+
+    ANSWERED = "answered"
+    REASKED = "re-asked"
+    DEFAULTED = "defaulted"
+    #: No reader was there to ask.
+    DRAFTED = "drafted"
+
+
+@dataclass(frozen=True)
+class CandidateEntry:
+    """One candidate's classification: the letters offered, the one chosen, and how."""
+
+    offered: tuple[str, ...]
+    letter: str | None
+    outcome: ClassifyOutcome
+    confidence: Mapping[str, float] | None = None
+
+
+CLASSIFICATION_ABOUT = (
+    "The claim-graph classification's build record: for each edge candidate, keyed by its source and target "
+    "claim ids, the letters its ask offered, the letter chosen (null where none was), and how it was reached. "
+    "It joins to the tree at this build's own boundary commits, not to a KB a maintainer later edits."
+)
+
+
+@dataclass(frozen=True)
+class ClassificationRecord:
+    candidates: Mapping[tuple[str, str], CandidateEntry] = dataclass_field(default_factory=lambda: MappingProxyType({}))
+
+    def with_entries(self, entries: Mapping[tuple[str, str], CandidateEntry]) -> "ClassificationRecord":
+        return ClassificationRecord(candidates=MappingProxyType({**self.candidates, **entries}))
+
+
+class ClassificationRecordError(ValueError):
+    """The record on disk does not read as one."""
+
+
+def write_classification(repo_root: Path, record: ClassificationRecord) -> None:
+    """Land ``record`` whole, ordered by pair, through the toolchain's one atomic writer."""
+    payload = {
+        "about": CLASSIFICATION_ABOUT,
+        "candidates": [
+            {
+                "source": source,
+                "target": target,
+                "offered": list(entry.offered),
+                "letter": entry.letter,
+                "outcome": entry.outcome.value,
+                "confidence": None if entry.confidence is None else dict(entry.confidence),
+            }
+            for (source, target), entry in sorted(record.candidates.items())
+        ],
+    }
+    write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / CLASSIFICATION_RELPATH)
+
+
+def read_classification(repo_root: Path) -> ClassificationRecord | None:
+    """The record, or ``None`` where no classification has written one."""
+    path = repo_root / CLASSIFICATION_RELPATH
+    if not path.is_file():
+        return None
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))["candidates"]
+        return ClassificationRecord(
+            candidates=MappingProxyType(
+                {
+                    (row["source"], row["target"]): CandidateEntry(
+                        offered=tuple(row["offered"]),
+                        letter=row["letter"],
+                        outcome=ClassifyOutcome(row["outcome"]),
+                        confidence=row["confidence"],
+                    )
+                    for row in rows
+                }
+            )
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise ClassificationRecordError(f"{path} does not read as a classification record: {error!r}") from error
 
 
 class PipelineError(RuntimeError):
@@ -562,10 +680,9 @@ OVERVIEW_DOC = "README.md"
 
 #: The KB's operating contract, seeded from its packaged template at the
 #: readiness stamp below — :data:`READINESS_DOCS`' document, and no later
-#: stage's. ``phase-5``'s reviewer is still handed its path and may fault what
-#: it says; what no boundary after ``phase-3a`` asks is whether it exists,
-#: because the stamp has already written it and a check there is satisfied
-#: before the stage it guards has run.
+#: stage's. No boundary after ``phase-3a`` asks whether it exists, because the
+#: stamp has already written it and a check there is satisfied before the stage
+#: it guards has run.
 CONVENTIONS_DOC = "CONVENTIONS.md"
 
 #: What the meta-documentation stages must produce, declared here so the
@@ -577,15 +694,7 @@ META_DOCS = (OVERVIEW_DOC,)
 
 
 def _check_meta_docs(ctx: CheckContext) -> CoverageReport:
-    """The meta-document is on disk. Two boundaries share it, for two halves of one job.
-
-    ``overview-drafted`` writes the overview document and ``phase-5`` reviews
-    what it wrote, so the question at both boundaries is the same question — the
-    document is there — and the answer is the same computation. Existence is
-    not quality here any more than anywhere else: whether the review improved it
-    is the reviewer's ruling, which reaches the run as severities and never as a
-    unit.
-    """
+    """The meta-document ``overview-drafted`` writes is on disk. Existence, never quality."""
     kb = kb_util.kb_root(ctx.repo_root)
     return CoverageReport.declared(
         tuple(
@@ -837,11 +946,6 @@ class Stage:
     stages that do form one contiguous run, and ``kb_index_lib.scan_authored_ids``
     keeps the same keys across every stage after it: the node set is fixed
     before any edge is drawn over it.
-
-    ``opt_in`` marks a stage a build does not owe: a ledger recording every
-    other stage is complete with this one unrecorded, and a walk reaches it
-    only when the run asks for it. It is recorded like any other stage when it
-    does run, so a ledger that holds it says the audit happened.
     """
 
     id: str
@@ -853,24 +957,27 @@ class Stage:
     work_is_inference: bool = False
     claimgraph_invocation: ClaimgraphInvocation | None = None
     mints_nodes: bool = False
-    opt_in: bool = False
 
 
 # The frozen vocabulary. Ids are a cross-team contract — templates elsewhere
 # are written against these exact strings — so an id is never renamed in
 # place; a change means a new id and a migration.
 #
+# A retired id is never reused. Built ledgers still record `phase-5`, the
+# document audit that followed `overview-drafted`, and `recorded_stages` reads
+# an id outside this table as no stage at all — which is what keeps such a
+# ledger complete, and what a new stage spelled `phase-5` would silently
+# inherit as already recorded.
+#
 # **A stage is as small as the most expensive thing in it that must not be
 # repeated** (SPEC.md, The Driver's Contract). A boundary is a stage, so a stage
 # holding two steps that spend inference would leave the first one's result
 # behind a step that can fail, and a resume re-spends what had already been
-# earned. That is what decides where the tail's boundaries fall:
-# `overview-drafted` is the overview document written, and `phase-5` is the
-# review of it — one stage each, because the draft and the review are two
-# model calls and neither may pay for the other's failure. Splitting them is also
-# what retired the alternative, which was to trust the draft's scratch file on
-# re-entry: an output no boundary accounts for is discarded, and a boundary
-# immediately behind the draft means there is nothing left to trust.
+# earned. That is what puts `overview-drafted`'s boundary immediately behind
+# its draft's model call, and it is also what retired the alternative, which
+# was to trust the draft's scratch file on re-entry: an output no boundary
+# accounts for is discarded, and a boundary immediately behind the draft means
+# there is nothing left to trust.
 #
 # The rule is enforced over the step table rather than restated here
 # (`kb_driver.steps`, and `test_kb_driver_steps.py`'s assertion that no failable
@@ -937,22 +1044,9 @@ STAGES: tuple[Stage, ...] = (
         coverage=_check_meta_docs,
         work_is_inference=True,
     ),
-    # Opt-in: the review's findings come back build after build from the
-    # toolchain's own skeleton text, which no per-KB revision can change, so
-    # its worth is as an occasional audit of what those documents claim.
-    Stage(
-        "phase-5",
-        "document audit",
-        coverage=_check_meta_docs,
-        work_is_inference=True,
-        opt_in=True,
-    ),
 )
 
 STAGE_IDS: tuple[str, ...] = tuple(stage.id for stage in STAGES)
-#: The stages a build owes. Every one recorded is a complete build, whatever
-#: opt-in stage stands unrecorded behind them.
-REQUIRED_STAGES: tuple[Stage, ...] = tuple(stage for stage in STAGES if not stage.opt_in)
 _STAGE_BY_ID = {stage.id: stage for stage in STAGES}
 _ID_WIDTH = max(len(stage_id) for stage_id in STAGE_IDS)
 FIRST_STAGE_ID = STAGES[0].id
@@ -1047,14 +1141,13 @@ def recorded_charter(repo_root: Path) -> str | None:
 
 
 def current_stage(recorded: set[str]) -> Stage | None:
-    """The stage to act on — the first unrecorded one a build owes — or None when complete.
+    """The stage to act on — the first unrecorded one — or None when complete.
 
     One definition serves the checklist's ``[*]`` marker, the zero-argument
     coverage read and the completion verdict alike, so they can never disagree
-    about where a build stands. An opt-in stage is never in flight: a build
-    that has not asked for it is not waiting on it.
+    about where a build stands.
     """
-    return next((stage for stage in REQUIRED_STAGES if stage.id not in recorded), None)
+    return next((stage for stage in STAGES if stage.id not in recorded), None)
 
 
 def checklist_lines(recorded: set[str]) -> list[str]:
@@ -1073,24 +1166,19 @@ def checklist_lines(recorded: set[str]) -> list[str]:
             marker = "*"
         else:
             marker = " "
-        lines.append(f"[{marker}] {stage.id:<{_ID_WIDTH}}  {stage.display}{' (opt-in)' if stage.opt_in else ''}")
+        lines.append(f"[{marker}] {stage.id:<{_ID_WIDTH}}  {stage.display}")
     return lines
 
 
 def status_line(recorded: set[str]) -> str:
-    """The one-line verdict naming which of the three world-states holds.
-
-    The count is over the stages this ledger owes or holds: an opt-in stage
-    nobody asked for is not a stage the build is short of.
-    """
+    """The one-line verdict naming which of the three world-states holds."""
     if FIRST_STAGE_ID not in recorded:
         state = "not started"
     elif current_stage(recorded) is None:
         state = "complete"
     else:
         state = "in progress"
-    counted = sum(1 for stage in STAGES if not stage.opt_in or stage.id in recorded)
-    return f"{_TAG} status: {state} ({len(recorded)} of {counted} stages recorded)"
+    return f"{_TAG} status: {state} ({len(recorded)} of {len(STAGES)} stages recorded)"
 
 
 def _print_report(
@@ -1338,8 +1426,8 @@ def show_stage_status(repo_root: Path, stage_id: str | None) -> int:
         in_flight = current_stage(recorded_stages(repo_root))
         if in_flight is None:
             print(
-                f"{STAGE_STATUS_TAG} {FACT} complete — all {len(REQUIRED_STAGES)} stages a build owes are "
-                f"recorded; --stage names one to inspect"
+                f"{STAGE_STATUS_TAG} {FACT} complete — all {len(STAGES)} stages are recorded; "
+                f"--stage names one to inspect"
             )
             return EXIT_OK
         stage = in_flight

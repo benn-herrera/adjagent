@@ -29,10 +29,11 @@ downstream of it. Local rigor is hand-authored by a grading seat on a later
 pass, and solidity is computed by refresh.
 """
 
+import posixpath
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .. import kb_index_lib, kb_schema
+from .. import kb_index_lib, kb_links, kb_schema
 from ..kb_write import render
 from . import endcap, equation
 from .identify import Claim
@@ -137,6 +138,19 @@ def register_for(document: str) -> str:
     """The register a claim hosted by ``document`` belongs in."""
     domain, _, _ = document.partition("/")
     return f"{domain}/{REGISTER_FILENAME}"
+
+
+def register_title(title: str, *, document: str) -> str:
+    """``title``, read off ``document``, as ``document``'s register carries it.
+
+    The one place a leaf's words become register text, so a relative link in
+    them is rebased to resolve from the register's directory rather than the
+    leaf's. Both writes key on it and so does :func:`graph.read`'s join back
+    to a block: a title rebased on one side only would bind nothing.
+    """
+    return kb_links.rebase_inline_links(
+        title, from_dir=posixpath.dirname(document), to_dir=posixpath.dirname(register_for(document))
+    )
 
 
 def _rationale(claim: Claim) -> str:

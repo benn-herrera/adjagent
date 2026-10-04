@@ -1,11 +1,11 @@
 """The sentence-labelled render of one document, and the map from a label back to it.
 
-**What the seat is shown, and what it may name.** Discovery's ask hands a model
-one document and asks what results it states. It used to ask for the author's
-words back, which made a model the transport for bytes it did not compose; this
-module removes that demand. The document is rendered one sentence per line, each
-line opening with its own label, and a locator is a label or a label range. The
-seat picks a label; **the tool cuts the bytes**.
+**What the seat is shown, and how a paragraph is named.** Discovery's paragraph
+ask shows a model one document rendered one sentence per line, each line opening
+with its own label, and asks of one paragraph at a time whether it states a
+result. A paragraph is named by its label range (:meth:`Render.span_of`), and the
+same span is the slice a yes places (:attr:`Span.excerpt`). So the model answers
+with a letter, and every byte written comes from the document.
 
 **Three properties the render has, and each is load-bearing.**
 
@@ -34,7 +34,7 @@ leave a fence's lines unsegmented: a sentence splitter run over
 """
 
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..kb_write import render as compose
@@ -45,8 +45,6 @@ from .tree import BLOCKQUOTE_PREFIX
 #: The letter every label opens with. A label is this and a 1-based ordinal, and
 #: a locator is one label or two joined by a hyphen.
 LABEL_PREFIX = "S"
-
-_LOCATOR_RE = re.compile(rf"^{LABEL_PREFIX}(\d+)(?:-{LABEL_PREFIX}(\d+))?$")
 
 #: A line opening a heading or a list item, over blockquote-stripped text. Either
 #: one starts a paragraph of its own, which is what stops a locator widening out
@@ -74,10 +72,6 @@ _ABBREVIATIONS = frozenset("""
     fig. figs. i.e. incl. lem. max. min. mr. mrs. ms. no. p. pp. prof. prop. ref.
     refs. resp. sec. sect. secs. st. thm. trans. viz. vol. vols. vs.
     """.split())
-
-
-class LocatorError(ValueError):
-    """A locator does not name a span of this render. Reported to the seat, never raised past C4."""
 
 
 @dataclass(frozen=True)
@@ -160,66 +154,6 @@ class Render:
     def span_of(self, paragraph: Paragraph) -> Span:
         """Every sentence of ``paragraph``, as one span."""
         return Span(sentences=tuple(sentence for sentence in self.sentences if sentence.paragraph == paragraph.index))
-
-    def resolve(self, locator: str) -> Span:
-        """The span ``locator`` names, or :class:`LocatorError` saying which way it failed."""
-        match = _LOCATOR_RE.match(locator.strip())
-        if match is None:
-            raise LocatorError(
-                f"{locator!r} is not a locator. A locator is one label — {LABEL_PREFIX}12 — or two of them "
-                f"joined by a hyphen — {LABEL_PREFIX}12-{LABEL_PREFIX}14"
-            )
-        if not self.sentences:
-            raise LocatorError(f"{locator!r} names a label, and this document's render carries none")
-        positions = {sentence.label: index for index, sentence in enumerate(self.sentences)}
-        first_label = f"{LABEL_PREFIX}{int(match.group(1))}"
-        last_label = f"{LABEL_PREFIX}{int(match.group(2))}" if match.group(2) else first_label
-        for named in (first_label, last_label):
-            if named not in positions:
-                raise LocatorError(
-                    f"{locator!r} names {named}, which the render of this document does not carry; its "
-                    f"labels run {self.sentences[0].label} to {self.sentences[-1].label}"
-                )
-        first, last = positions[first_label], positions[last_label]
-        if first > last:
-            raise LocatorError(f"{locator!r} runs backwards: {last_label} sits above {first_label} in the document")
-        return Span(sentences=self.sentences[first : last + 1])
-
-    def widen(self, span: Span) -> Iterator[Span]:
-        """Successively wider spans inside ``span``'s own paragraph, one sentence at a time.
-
-        Forward to the end of the paragraph first, then backward to its start, so
-        the sequence is deterministic and its last term is the whole paragraph.
-        Widening is what makes a repeated sentence usable without an ask: the
-        seat has no instrument for making its own quotation unique, and the tool
-        does.
-        """
-        family = [sentence for sentence in self.sentences if sentence.paragraph == span.sentences[0].paragraph]
-        low, high = family.index(span.sentences[0]), family.index(span.sentences[-1])
-        while low > 0 or high < len(family) - 1:
-            if high < len(family) - 1:
-                high += 1
-            else:
-                low -= 1
-            yield Span(sentences=tuple(family[low : high + 1]))
-
-
-def labels_at(render: Render, offset: int) -> str:
-    """The label of the sentence whose span contains ``offset``, or ``""``.
-
-    The mapping from a resolved quotation back to a label, and it resolves by
-    **offset rather than by line** because the two are not the same question:
-    several sentences share a hard-wrapped physical line and one sentence may
-    run across several, so a line names a set and an offset names one sentence.
-    ``ops.Hit.offset`` is the offset to pass, and it is an offset into the text
-    this render was built from — the caller must resolve against that same text.
-
-    The empty string where no sentence covers ``offset``: a blank line, the
-    navigation above the labelled region, or a line the render segmented into
-    nothing. It is a label no seat can have written, so a caller comparing it
-    against a seat's own label is answered correctly without a second branch.
-    """
-    return next((sentence.label for sentence in render.sentences if sentence.start <= offset < sentence.end), "")
 
 
 def _body_start(text: str) -> int:

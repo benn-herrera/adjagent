@@ -1,53 +1,37 @@
-"""On-demand inference, in two layers, for any tooling that wants some.
+"""On-demand inference for any tooling that wants some: one tool-less chat call.
 
-* :mod:`claude` — one headless ``claude`` call: spawn, stream capture,
-  watchdog, process-group kill, and the one classification of how a call ended.
-  It knows the CLI's shape and nothing else — not this agent set, not a KB, not
-  this repository. :func:`invoke` returns the whole :class:`CallResult`;
-  :func:`call_claude` builds the argv, spools the prompt, and returns the
-  response text and the outcome.
-* :mod:`seat` — one call to a named seat of this agent set, built on the
-  first: :func:`ask_seat` invokes the seat as an agent with its tools, and
-  :func:`ask_reader` puts a question to it with none, its definition's body as
-  the system prompt. It knows what a seat is and how to name one, and nothing
-  about what a seat is being asked to do.
-
-Neither parses what comes back beyond taking the response text out of the
-stream, and neither retries: policy of every kind — retry, a re-ask, where a
-bound's value comes from, one call at a time — is the caller's. Both are tested
-against a substituted invoker, so nothing here needs a reachable model.
+:mod:`liaison_tools` holds the whole of it — :func:`call_chat`, the
+environment check every call runs (:func:`check_environment`), how a call ended
+(:class:`Outcome`), and the one reader of the capture a call writes
+(:func:`read_capture`). It knows nothing about a KB and parses nothing in the
+reply, and it retries nothing: policy of every kind — retry, a re-ask, where a
+bound's value comes from — is the caller's. It is tested against a loopback
+stub server, so nothing here needs a reachable model.
 """
 
-from .claude import (
-    NO_PROCESS_STATUS,
-    STREAM_FLAGS,
-    CallResult,
-    Invoker,
+from .liaison_tools import (
+    REQUEST_RECORD,
+    CaptureStats,
+    ChatEnvironment,
     Outcome,
-    SubprocessInvoker,
-    build_argv,
-    call_claude,
-    invoke,
+    call_chat,
+    check_environment,
+    read_capture,
 )
-from .seat import ask_reader, ask_seat
 
 #: The logger tree this package writes to. It attaches no handler of its own —
-#: an application wanting a call's spawn, kill and classification lines in its
-#: own log attaches its handlers here, and one that attaches none gets
-#: ``logging``'s default handling of a warning.
+#: an application wanting a call's lines in its own log attaches its handlers
+#: here, and one that attaches none gets ``logging``'s default handling of a
+#: warning.
 LOGGER_NAME = __name__
 
 __all__ = [
     "LOGGER_NAME",
-    "NO_PROCESS_STATUS",
-    "STREAM_FLAGS",
-    "CallResult",
-    "Invoker",
+    "REQUEST_RECORD",
+    "CaptureStats",
+    "ChatEnvironment",
     "Outcome",
-    "SubprocessInvoker",
-    "ask_reader",
-    "ask_seat",
-    "build_argv",
-    "call_claude",
-    "invoke",
+    "call_chat",
+    "check_environment",
+    "read_capture",
 ]

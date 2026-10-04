@@ -266,18 +266,17 @@ def walked_without_inference(
 def test_a_fresh_build_spending_no_inference_runs_to_completion(
     walked_without_inference: tuple[Path, run.Result],
 ) -> None:
-    """Exit 0 with every stage a build owes recorded — a finished build, not a resumable stop.
+    """Exit 0 with every stage recorded — a finished build, not a resumable stop.
 
     This is the whole difference from the flag's previous meaning, and the two
     are otherwise easy to confuse: both leave the inference rows undone. A bound
     ended the walk and the ledger stopped where it stopped; here every stage is
     recorded, including the two the head could never reach without a model.
-    The opt-in audit is not among them: this run did not ask for it.
     """
     consumer, result = walked_without_inference
 
     assert result.exit_code == baton.EXIT_OK, result.detail
-    assert kb_pipeline.recorded_stages(consumer) == {stage.id for stage in kb_pipeline.REQUIRED_STAGES}
+    assert kb_pipeline.recorded_stages(consumer) == set(kb_pipeline.STAGE_IDS)
 
 
 def test_every_stage_that_lost_rows_records_which_ones(walked_without_inference: tuple[Path, run.Result]) -> None:
@@ -303,7 +302,7 @@ def test_every_stage_that_lost_rows_records_which_ones(walked_without_inference:
     }
 
     noted = {stage for stage, body in bodies.items() if config.NO_INFERENCE_FLAG in body}
-    assert noted == {stage.id for stage in kb_pipeline.REQUIRED_STAGES if steps.inference_rows(stage.id)}
+    assert noted == {stage for stage in kb_pipeline.STAGE_IDS if steps.inference_rows(stage)}
     # Not `depends-attributed`: its row drops in no build. The narrowing
     # settles what containment decides with no model, and the open pairs are
     # reported by the tool rather than dropped by the table. The tail's one is

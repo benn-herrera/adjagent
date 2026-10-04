@@ -8,7 +8,8 @@ what moves is what the word moved.
 
 **A claim named by hand is a candidate.** A printed name and number with no
 ``\\ref`` joins a claim whose display line prints it, or a claim titled with
-it, and nothing else.
+it, and nothing else. It is merged with whatever a reference reached on the same
+pair and classed like every other candidate.
 
 The authored graph is stood up from the inventory's own blocks rather than from
 a declared pass: the narrowing reads ids, titles and locators, and joining a
@@ -114,8 +115,9 @@ def _narrow(tmp_path, *, open_word: str = "by", proof_word: str = "by") -> attri
     return attribute.narrow(documents, authored, sites)
 
 
-def _pairs(narrowed: attribute.Attribution) -> set[tuple[str, str]]:
-    return {(question.source.id, candidate.id) for question in narrowed.questions for candidate in question.candidates}
+def _pairs(narrowed: attribute.Attribution, harvest: attribute.Harvest | None = None) -> set[tuple[str, str]]:
+    """Every candidate pair, or those ``harvest`` reached."""
+    return {c.pair for c in narrowed.candidates if harvest is None or harvest in c.harvests}
 
 
 _T1, _L2, _T3, _L4, _P5, _TWIN = (
@@ -213,11 +215,14 @@ def test_which_words_name_a_kind_no_premise_relation_can_hold(word, names_none):
 def test_a_reference_the_page_calls_a_section_opens_no_candidate(tmp_path):
     """Theorem 1 points at Section 3, which hosts two claims; Proposition 5 points at it with *by*."""
     plain, filtered = _narrow(tmp_path / "a"), _narrow(tmp_path / "b", open_word="Section")
+    referenced = attribute.Harvest.REFERENCE
 
-    assert {(_T1, _T3), (_T1, _L4), (_P5, _T3), (_P5, _L4)} <= _pairs(plain)
-    assert _pairs(plain) - _pairs(filtered) == {(_T1, _T3), (_T1, _L4)}
-    assert set(filtered.word_dropped) == {(_T1, _T3), (_T1, _L4)}
-    assert not {(_T1, _T3), (_T1, _L4)} & set(filtered.references)
+    assert {(_T1, _T3), (_T1, _L4), (_P5, _T3), (_P5, _L4)} <= _pairs(plain, referenced)
+    assert _pairs(plain, referenced) - _pairs(filtered, referenced) == {(_T1, _T3), (_T1, _L4)}
+    # Theorem 1's body also names Lemma 4 by hand, so that pair is a candidate
+    # anyway and was never only the word's to drop.
+    assert set(filtered.word_dropped) == {(_T1, _T3)}
+    assert (_T1, _T3) not in _pairs(filtered)
     assert plain.word_dropped == ()
 
 
@@ -233,24 +238,34 @@ def test_the_word_never_moves_an_edge_containment_settled(tmp_path, proof_word):
 
 def test_a_claim_named_by_hand_in_a_claim_body_is_a_candidate(tmp_path):
     """*Lemma 2* joins Beta; *Lemmas 4 and 7* joins Lemma 4 and nothing for 7; cited theorems join nothing."""
-    narrowed = _narrow(tmp_path, open_word="Section")
-    found = {(candidate.source, candidate.target): candidate.mention for candidate in narrowed.hand_named}
-
+    documents, sites, authored = _read(tmp_path, open_word="Section", proof_word="by")
+    found = {(c.source, c.target): c.mention for c in hand_named.harvest(documents, authored, sites)}
     assert found == {(_T1, _L2): "Lemma 2", (_T1, _L4): "Lemmas 4 and 7"}
-    # Candidates only: neither asked about nor recorded.
-    assert not set(found) & (_pairs(narrowed) | set(narrowed.references) | set(narrowed.edges))
+
+    # Classed and drafted like any other: a claim-to-claim pair, offered all
+    # three letters, drafted *mention*, its passage the mention's paragraph.
+    narrowed = attribute.narrow(documents, authored, sites)
+    named = {c.pair: c for c in narrowed.candidates if attribute.Harvest.HAND_NAMED in c.harvests}
+    assert set(named) == set(found)
+    for candidate in named.values():
+        assert candidate.harvests == {attribute.Harvest.HAND_NAMED}
+        assert candidate.offered == tuple(attribute.Relation)
+        assert candidate.draft is attribute.Relation.MENTION
+        assert len(candidate.passages) == 1 and "Lemma 2" in candidate.passages[0]
+    assert set(found) <= set(narrowed.references)
 
 
-def test_a_hand_named_pair_a_reference_already_opened_is_not_offered_twice(tmp_path):
-    """With *by* before it, the Section 3 anchor opens Theorem 1 → Lemma 4 itself."""
+def test_a_hand_named_pair_a_reference_already_reached_is_one_candidate(tmp_path):
+    """With *by* before it, the Section 3 anchor opens Theorem 1 → Lemma 4 itself, and the two merge."""
     narrowed = _narrow(tmp_path)
-    assert {(candidate.source, candidate.target) for candidate in narrowed.hand_named} == {(_T1, _L2)}
-    assert (_T1, _L4) in _pairs(narrowed)
+    (merged,) = [c for c in narrowed.candidates if c.pair == (_T1, _L4)]
+    assert merged.harvests == {attribute.Harvest.REFERENCE, attribute.Harvest.HAND_NAMED}
+    assert _pairs(narrowed, attribute.Harvest.HAND_NAMED) == {(_T1, _L2), (_T1, _L4)}
 
 
 def test_a_block_s_own_display_line_is_not_a_mention_of_its_twin(tmp_path):
     narrowed = _narrow(tmp_path)
-    assert not {(_P5, _TWIN), (_TWIN, _P5)} & {(c.source, c.target) for c in narrowed.hand_named}
+    assert not {(_P5, _TWIN), (_TWIN, _P5)} & _pairs(narrowed)
 
 
 @pytest.mark.parametrize(

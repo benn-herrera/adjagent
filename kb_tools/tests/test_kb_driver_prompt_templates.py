@@ -46,35 +46,35 @@ CONSTANTS = {
 # set looks like, and the lint test below asserts exactly that.
 
 FRAGMENT_FIXTURES = {
-    "verdict-contract.tmpl": (
+    # The one registered fragment slot, stood in for under its registered name
+    # for the same reason as the alternatives below.
+    "reader-system.tmpl.md": (
         "End with: VERDICT: critical=<n> warning=<n> note=<n>\n\n"
         "Return the counts as JSON where a tool asks for them:\n\n"
-        '{"critical": 0, "warning": 0, "note": 0}\n'
+        '{"critical": 0, "warning": 0, "note": 0}\n\n'
+        "Record the counts with @!values-flag!@ <your file>.\n"
     ),
-    "return-contract.tmpl": "Return the artifact as your final message body and nothing else.\n",
-    "write-op-contract.tmpl": "Call the op as @!values-flag!@ <your file>.\n",
     # The caller-selected alternatives, stood in for under their registered
     # names: which file an alternative slot resolves to is the registry's, so a
     # fixture that renamed them would be exercising a route nothing takes.
-    "ask-correction.tmpl": "\n\n## A previous answer failed\n\n@!dyn.report!@",
-    "identify-display-maths.tmpl": "These labels are maths:\n\n- @!dyn.fenced-labels!@",
-    "identify-no-display-maths.tmpl": "The document carries no display-maths block.",
+    "letter-correction.tmpl.md": "\n\n## A previous answer failed\n\n@!dyn.returned!@",
+    "classify-options-three.tmpl.md": "Answer A, B or C for:\n\n- @!dyn.candidate!@",
+    "classify-options-two.tmpl.md": "Answer A or C.",
 }
 
-SPLICING_FIXTURE = "fixture-review.single.tmpl"
-CONSTANTS_FIXTURE = "fixture-design.single.tmpl"
-ALTERNATIVE_FIXTURE = "fixture-ask.single.tmpl"
+SPLICING_FIXTURE = "fixture-review.single.tmpl.md"
+CONSTANTS_FIXTURE = "fixture-design.single.tmpl.md"
+ALTERNATIVE_FIXTURE = "fixture-ask.single.tmpl.md"
 
 STEP_FIXTURES = {
-    ALTERNATIVE_FIXTURE: "Read @!dyn.document!@.\n\n@!display-maths!@\n\nAnswer.@!correction!@",
+    ALTERNATIVE_FIXTURE: "Read @!dyn.document!@.\n\n@!classify-options!@\n\nAnswer.@!correction!@",
     SPLICING_FIXTURE: (
         "Review the documents named below.\n\n"
         "Charter: @!dyn.charter!@\n\nDocuments:\n@!dyn.documents!@\n\n"
-        "@!verdict-contract!@\n@!return-contract!@\n@!write-op-contract!@\n"
+        "@!reader-system!@\n"
     ),
     CONSTANTS_FIXTURE: (
-        "Design the taxonomy from the charter at @!dyn.charter!@.\n\n"
-        "@!layout-paths!@\n\n@!pending-rule!@\n\n@!return-contract!@\n"
+        "Design the taxonomy from the charter at @!dyn.charter!@.\n\n@!layout-paths!@\n\n@!pending-rule!@\n"
     ),
 }
 
@@ -191,7 +191,7 @@ def test_a_caller_handing_prose_to_an_alternative_slot_reads_as_the_same_mistake
         prompt_templates.render(
             ALTERNATIVE_FIXTURE,
             slots={"document": "vol/one.md", "correction": "\n\n## A previous answer failed\n\nno such label"},
-            alternatives={"display-maths": "identify-no-display-maths", "correction": None},
+            alternatives={"classify-options": "classify-options-two", "correction": None},
             directory=directory,
         )
 
@@ -217,11 +217,11 @@ def test_an_unused_supplied_slot_fails_composition(tmp_path: Path) -> None:
 # stop holding the first time someone added a slot to a fragment.
 
 
-@pytest.mark.parametrize("inner", ["return-contract", "correction"])
+@pytest.mark.parametrize("inner", ["reader-system", "correction"])
 def test_a_fragment_whose_body_names_an_expandable_slot_is_refused(tmp_path: Path, inner: str) -> None:
-    directory = _templates(tmp_path, fragments_extra={"write-op-contract.tmpl": f"Call the op.\n\n@!{inner}!@\n"})
+    directory = _templates(tmp_path, fragments_extra={"reader-system.tmpl.md": f"End with a verdict.\n\n@!{inner}!@\n"})
 
-    complaint = rf"@!write-op-contract!@ resolves to .*whose body names @!{inner}!@"
+    complaint = rf"@!reader-system!@ resolves to .*whose body names @!{inner}!@"
 
     with pytest.raises(runlog.BoundaryError, match=complaint):
         prompt_templates.render(
@@ -232,15 +232,15 @@ def test_a_fragment_whose_body_names_an_expandable_slot_is_refused(tmp_path: Pat
         )
 
 
-@pytest.mark.parametrize("inner", ["write-op-contract", "display-maths"])
+@pytest.mark.parametrize("inner", ["reader-system", "classify-options"])
 def test_an_alternative_whose_body_names_an_expandable_slot_is_refused(tmp_path: Path, inner: str) -> None:
-    directory = _templates(tmp_path, fragments_extra={"ask-correction.tmpl": f"\n\nCorrection:\n\n@!{inner}!@"})
+    directory = _templates(tmp_path, fragments_extra={"letter-correction.tmpl.md": f"\n\nCorrection:\n\n@!{inner}!@"})
 
     with pytest.raises(runlog.BoundaryError, match=rf"@!correction!@ resolves to .*whose body names @!{inner}!@"):
         prompt_templates.render(
             ALTERNATIVE_FIXTURE,
             slots={"document": "vol/one.md"},
-            alternatives={"display-maths": "identify-no-display-maths", "correction": "ask-correction"},
+            alternatives={"classify-options": "classify-options-two", "correction": "letter-correction"},
             directory=directory,
         )
 
@@ -254,12 +254,12 @@ def test_a_caller_names_an_alternative_and_the_composer_resolves_it(tmp_path: Pa
 
     brief = prompt_templates.render(
         ALTERNATIVE_FIXTURE,
-        slots={"document": "vol/one.md", "fenced-labels": "S6, S7"},
-        alternatives={"display-maths": "identify-display-maths", "correction": None},
+        slots={"document": "vol/one.md", "candidate": "clm-bbbbbb"},
+        alternatives={"classify-options": "classify-options-three", "correction": None},
         directory=directory,
     )
 
-    assert brief == "Read vol/one.md.\n\nThese labels are maths:\n\n- S6, S7\n\nAnswer."
+    assert brief == "Read vol/one.md.\n\nAnswer A, B or C for:\n\n- clm-bbbbbb\n\nAnswer."
 
 
 def test_the_choice_that_is_no_choice_fills_the_slot_with_nothing(tmp_path: Path) -> None:
@@ -270,10 +270,10 @@ def test_the_choice_that_is_no_choice_fills_the_slot_with_nothing(tmp_path: Path
         prompt_templates.render(
             ALTERNATIVE_FIXTURE,
             slots={"document": "vol/one.md", **extra},
-            alternatives={"display-maths": "identify-no-display-maths", "correction": correction},
+            alternatives={"classify-options": "classify-options-two", "correction": correction},
             directory=directory,
         )
-        for correction, extra in (("ask-correction", {"report": "the locator names no label"}), (None, {}))
+        for correction, extra in (("letter-correction", {"returned": "the locator names no label"}), (None, {}))
     )
 
     assert chosen == absent + "\n\n## A previous answer failed\n\nthe locator names no label"
@@ -282,13 +282,13 @@ def test_the_choice_that_is_no_choice_fills_the_slot_with_nothing(tmp_path: Path
 @pytest.mark.parametrize(
     ("alternatives", "complaint"),
     [
-        ({"display-maths": "identify-display-maths"}, "no alternative chosen for slot"),
+        ({"classify-options": "classify-options-three"}, "no alternative chosen for slot"),
         (
-            {"display-maths": "identify-display-maths", "correction": None, "verdict": "ask-correction"},
+            {"classify-options": "classify-options-three", "correction": None, "verdict": "letter-correction"},
             "does not declare",
         ),
-        ({"display-maths": "ask-correction", "correction": None}, "takes one of"),
-        ({"display-maths": "identify-no-display-maths", "correction": "no-such-fragment"}, "takes one of"),
+        ({"classify-options": "letter-correction", "correction": None}, "takes one of"),
+        ({"classify-options": "classify-options-two", "correction": "no-such-fragment"}, "takes one of"),
     ],
 )
 def test_a_choice_the_slot_does_not_register_is_refused(
@@ -312,7 +312,7 @@ def test_a_named_but_absent_template_fails_composition(tmp_path: Path) -> None:
     directory = _templates(tmp_path)
 
     with pytest.raises(runlog.BoundaryError, match="not found"):
-        prompt_templates.render("no-such.single.tmpl", slots={}, directory=directory)
+        prompt_templates.render("no-such.single.tmpl.md", slots={}, directory=directory)
 
 
 def test_a_body_that_is_all_punctuation_composes_untouched(tmp_path: Path) -> None:
@@ -323,17 +323,17 @@ def test_a_body_that_is_all_punctuation_composes_untouched(tmp_path: Path) -> No
     example, a shell expansion, and a LaTeX macro taking braced arguments.
     """
     body = 'Return {"step": "x"}, run ${VAR}, and typeset \\frac{a}{b}.\n'
-    directory = _templates(tmp_path, extra={"raw.single.tmpl": body})
+    directory = _templates(tmp_path, extra={"raw.single.tmpl.md": body})
 
-    assert prompt_templates.render("raw.single.tmpl", slots={}, directory=directory) == body
+    assert prompt_templates.render("raw.single.tmpl.md", slots={}, directory=directory) == body
 
 
 def test_an_unclosed_marker_is_refused_by_line(tmp_path: Path) -> None:
     """The property a polar delimiter buys: an opener with no closer names its own line."""
-    directory = _templates(tmp_path, extra={"stray.single.tmpl": "Fill @!charter and stop.\n"})
+    directory = _templates(tmp_path, extra={"stray.single.tmpl.md": "Fill @!charter and stop.\n"})
 
     with pytest.raises(runlog.BoundaryError, match="stray slot delimiter on line\\(s\\) 1"):
-        prompt_templates.render("stray.single.tmpl", slots={}, directory=directory)
+        prompt_templates.render("stray.single.tmpl.md", slots={}, directory=directory)
 
 
 @pytest.mark.parametrize("body", ["Fill @!Charter Path!@.\n", "Fill @!charter_path!@.\n", "Fill @!2nd-charter!@.\n"])
@@ -343,10 +343,10 @@ def test_a_marker_whose_name_is_not_a_slot_name_is_refused(tmp_path: Path, body:
     The name class is kebab — the generator's own (``SLOT_NAME``) — so an
     underscore and a leading digit are as much a defect as a space is.
     """
-    directory = _templates(tmp_path, extra={"odd.single.tmpl": body})
+    directory = _templates(tmp_path, extra={"odd.single.tmpl.md": body})
 
     with pytest.raises(runlog.BoundaryError, match="stray slot delimiter"):
-        prompt_templates.render("odd.single.tmpl", slots={}, directory=directory)
+        prompt_templates.render("odd.single.tmpl.md", slots={}, directory=directory)
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +409,12 @@ def test_every_shipped_fragment_is_registered_exactly_once_and_every_registratio
     assert resolved & selected == set()
 
 
+@pytest.mark.parametrize("name", prompt_templates.ALTERNATIVE_NAMES)
+def test_every_shipped_alternative_ends_without_a_newline(name: str) -> None:
+    """An alternative fills a slot inside a line; the template around it supplies every line break."""
+    assert not prompt_templates.load(prompt_templates.ALTERNATIVES[name]).endswith("\n")
+
+
 def test_no_dispatchable_template_sits_in_the_fragments_directory_or_the_other_way_round() -> None:
     """The layout is the declaration, so the step table's own names have to honour it."""
     named = {step.template for step in steps.STEPS if step.template}
@@ -418,34 +424,6 @@ def test_no_dispatchable_template_sits_in_the_fragments_directory_or_the_other_w
     assert all("/" not in name for name in named), "a row dispatches a template from the top level"
 
 
-# --- the agent-side write-op contract ---------------------------------------
-
-
-def test_the_write_op_contract_fragment_states_the_exit_eight_rule() -> None:
-    """Teeth for the guard below: the one body it looks for has to say the thing.
-
-    Exit 8 is the outcome a *correct* set of values gets when another writer
-    moved the file, and the whole point of separating it from 7 is that the
-    caller must re-run rather than re-author — re-asking a model for values that
-    were already right is how a duplicate id gets written. A guard that only
-    checked the fragment was present would pass over a fragment that had
-    quietly lost the rule.
-    """
-    body = prompt_templates.load(prompt_templates.FRAGMENTS["write-op-contract"])
-
-    assert "**8**" in body
-    assert "Re-run the identical invocation" in body
-    assert "Never re-author the values" in body
-
-
-#: No shipped template names a write op today: the mint-bearing rows that used
-#: to call one are gone, and the rows this table still holds are generic content
-#: work, never a metadata write.
-#: ``test_the_write_op_contract_fragment_states_the_exit_eight_rule``
-#: keeps the fragment itself honest; there is currently no composed brief to
-#: hold to it.
-
-
 @pytest.mark.parametrize(
     ("body", "named"),
     [
@@ -453,7 +431,7 @@ def test_the_write_op_contract_fragment_states_the_exit_eight_rule() -> None:
         ("Then depends-attributed writes the edges.\n", "depends-attributed"),
         ("Run advance-step when you are done.\n", "advance-step"),
         ("Then start-build opens the ledger.\n", "start-build"),
-        ("Record PHASE-5 before moving on.\n", "phase-5"),
+        ("Record OVERVIEW-DRAFTED before moving on.\n", "overview-drafted"),
         # A template that spells the write ops' flag has hand-written a token
         # `kb_util` publishes, and a rename would leave it stale. The fixture is
         # built from that constant for the same reason — a literal here would be
@@ -462,16 +440,16 @@ def test_the_write_op_contract_fragment_states_the_exit_eight_rule() -> None:
     ],
 )
 def test_a_template_naming_the_drivers_own_business_is_flagged(tmp_path: Path, body: str, named: str) -> None:
-    directory = _templates(tmp_path, extra={"leak.single.tmpl": body})
+    directory = _templates(tmp_path, extra={"leak.single.tmpl.md": body})
 
     findings = prompt_templates.lint(prompt_templates.template_paths(directory), prohibited=steps.TEMPLATE_PROHIBITIONS)
 
-    assert [finding for finding in findings if named in finding and finding.startswith("leak.single.tmpl:1:")]
+    assert [finding for finding in findings if named in finding and finding.startswith("leak.single.tmpl.md:1:")]
 
 
 def test_start_reads_as_prose_but_not_as_a_stage_argument(tmp_path: Path) -> None:
-    prose = _templates(tmp_path / "a", extra={"ok.single.tmpl": "Start with the charter, then start the survey.\n"})
-    naming = _templates(tmp_path / "b", extra={"bad.single.tmpl": "Then --stage start is recorded.\n"})
+    prose = _templates(tmp_path / "a", extra={"ok.single.tmpl.md": "Start with the charter, then start the survey.\n"})
+    naming = _templates(tmp_path / "b", extra={"bad.single.tmpl.md": "Then --stage start is recorded.\n"})
 
     assert prompt_templates.lint(prompt_templates.template_paths(prose), prohibited=steps.TEMPLATE_PROHIBITIONS) == []
     assert prompt_templates.lint(prompt_templates.template_paths(naming), prohibited=steps.TEMPLATE_PROHIBITIONS)
@@ -479,7 +457,7 @@ def test_start_reads_as_prose_but_not_as_a_stage_argument(tmp_path: Path) -> Non
 
 def test_the_lint_reports_a_stray_delimiter_rather_than_raising(tmp_path: Path) -> None:
     """A template defect the lint has to survive: it reports every file, not the first bad one."""
-    directory = _templates(tmp_path, extra={"stray.single.tmpl": "Review @!documents and stop.\n"})
+    directory = _templates(tmp_path, extra={"stray.single.tmpl.md": "Review @!documents and stop.\n"})
 
     findings = prompt_templates.lint(prompt_templates.template_paths(directory), prohibited=steps.TEMPLATE_PROHIBITIONS)
 
@@ -488,27 +466,3 @@ def test_the_lint_reports_a_stray_delimiter_rather_than_raising(tmp_path: Path) 
 
 def test_template_paths_tolerates_an_absent_directory(tmp_path: Path) -> None:
     assert prompt_templates.template_paths(tmp_path / "absent") == ()
-
-
-# ---------------------------------------------------------------------------
-# Seats
-# ---------------------------------------------------------------------------
-
-
-def test_no_shipped_template_spells_a_seat_the_step_table_holds() -> None:
-    """A seat rename reaches the briefs through the row, or it does not reach them at all.
-
-    The clause used to name its seat in eight places, so renaming a seat went red
-    at none of them and left a brief dispatching an agent type that no longer
-    exists. Nothing a template says may be a seat name now.
-    """
-    seats = {step.seat for step in steps.STEPS if step.seat}
-
-    spelled = {
-        (path.name, seat)
-        for path in prompt_templates.template_paths()
-        for seat in seats
-        if seat in path.read_text(encoding="utf-8")
-    }
-
-    assert spelled == set()

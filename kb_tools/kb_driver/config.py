@@ -15,17 +15,10 @@ than a rule per door. A repeated ``--source`` replaces the configured list
 outright rather than extending it: a merge would leave no way to say "these
 sources and not the file's".
 
-``permission_mode`` defaults to ``bypassPermissions`` because the driver is
-headless: a mode that gates a tool the build needs stops a spawned ``claude``
-with nobody there to answer it, and ``bypassPermissions`` is the only mode a
-run has been driven to completion under. What the build may do is bounded by
-the environment it runs in, not by this field; ``--permission-mode`` narrows
-it for a run that wants it narrowed.
-
-No model key exists, by design: an explicit ``--model``
-overrides a seat's frontmatter pin, so the driver never passes the flag, and a
-``[claude]`` key attempting a per-step model is rejected at load rather than
-silently ignored. Model routing survives through ``command``/``env``.
+**Nothing here names the server a model call goes to, or its model.** Every
+call is ``inference.call_chat``, which reads both from the environment the run
+is launched from; a section or key that once named a CLI command, a permission
+mode or a total call bound is refused as unknown, like any other nothing reads.
 
 Barrier decisions arrive through two doors with one vocabulary — the
 ``[barriers.<stage>.<kind>]`` config tables and the repeatable
@@ -42,20 +35,20 @@ every invocation. A setting whose vocabulary has one member is a question with
 one answer, so ``[run] build_mode``, its vocabulary and its default are deleted
 outright rather than kept as a single-valued vestige. It needs no key of its
 own to be refused by, because **every key :func:`load` does not read is
-refused, naming its section and the key** — in ``[run]``, ``[claude]``,
-``[timeouts]``, ``[retry]`` and ``[log]`` alike. An unknown key is never inert:
+refused, naming its section and the key** — in ``[run]``, ``[timeouts]``,
+``[retry]`` and ``[log]`` alike, and a section nothing reads is refused the same
+way, by name. An unknown key is never inert:
 a file that still carries one means something by it, and silently ignoring it
 would walk a different build than the file asks for. ``[barriers]`` is checked
 differently because it is the one section with a vocabulary to check
 against — the registry's own registered pairs, below.
 
-**Two fields say what a run is made of; one bounds how far it goes.**
+**One field says what a run is made of; one bounds how far it goes.**
 ``no_inference`` drops every row that would cost a model call, row by row, and
-the walk carries on past them to a finished build. ``doc_audit`` adds the
-opt-in stages a build otherwise completes without. ``through`` names the last
+the walk carries on past them to a finished build. ``through`` names the last
 stage to walk, by stage id or by the stage's own display name, resolved here to
-an id so nothing downstream deals in two spellings. The first two are rendered
-back into the resume line and the third is not.
+an id so nothing downstream deals in two spellings. The first is rendered back
+into the resume line and the second is not.
 
 A stage id containing a dot must be quoted in TOML — e.g. ``[barriers."phase-1.5".some-kind]``
 — because TOML reads an unquoted dot as another level of table nesting. No
@@ -73,19 +66,13 @@ from pathlib import Path
 
 from .. import kb_pipeline, kb_util
 
-# The step-id vocabulary `[timeouts.by_step]` is keyed by. Imported rather than
-# injected the way the barrier registry above is: what made the registry a
-# parameter is that `barriers` imports this module, and `steps` does not.
-from . import steps
-
 # --- vocabularies -----------------------------------------------------------
 
-# The three flags that specify a run, named here rather than in ``cli`` because
+# The two flags that specify a run, named here rather than in ``cli`` because
 # this module both validates what they carry and renders them back into the
 # resume line every relay card prints. One spelling, two readers.
 CONFIG_FLAG = "--config"
 SOURCE_FLAG = "--source"
-PERMISSION_MODE_FLAG = "--permission-mode"
 
 # The mode flag. It specifies what the run is made of rather than how far it
 # goes, so it is rendered back into the resume line (:func:`invocation`).
@@ -95,11 +82,6 @@ PERMISSION_MODE_FLAG = "--permission-mode"
 # Spelled once in `kb_util`, because the driver passes the same flag through to
 # `advance-step`, where the stage table decides what it excuses.
 NO_INFERENCE_FLAG = kb_util.NO_INFERENCE_FLAG
-
-# The opt-in audit: walk the stages `kb_pipeline.Stage.opt_in` marks, which a
-# build otherwise completes without. Rendered back into the resume line, so a
-# run stopped inside the audit resumes into it rather than out of it.
-DOC_AUDIT_FLAG = "--doc-audit"
 
 # The one flag that bounds an invocation rather than specifying the build, and
 # so the one this module does not render back: see :func:`invocation`.
@@ -114,20 +96,11 @@ THROUGH_FLAG = "--through"
 # modules through, so one spelling serves whatever renders a command line.
 RUN_DIR_FLAG = kb_util.RUN_DIR_FLAG
 
-# The installed CLI's permission modes, probed at 2.1.220 (`--permission-mode`
-# rejects anything else and names the set). Config load validates against this
-# list and refuses an unknown mode at load rather than discovering it at the
-# first call.
-PERMISSION_MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
-
 RUNNERS = ("just", "make")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # --- defaults ---------------------------------------------------------------
 
-DEFAULT_PERMISSION_MODE = "bypassPermissions"
-DEFAULT_CLAUDE_COMMAND = ("claude",)
-DEFAULT_SINGLE_SECONDS = 1800
 DEFAULT_SILENCE_SECONDS = 600
 DEFAULT_TRANSPORT_ATTEMPTS = 3
 DEFAULT_BACKOFF_SECONDS = (5, 30)
@@ -173,7 +146,6 @@ class Decision:
 @dataclass(frozen=True)
 class RunSection:
     sources: tuple[str, ...]
-    permission_mode: str
     #: Where this run looks for a charter, defaulted to ``kb_pipeline``'s own
     #: durable path rather than restated here. A charter is an input that must
     #: already stand when the build opens, and the ``start`` boundary's body
@@ -193,9 +165,6 @@ class RunSection:
     #: (``steps.applies``) and the walk continues past it, so this specifies
     #: what the build is made of rather than bounding how far it goes.
     no_inference: bool = False
-    #: Walk the opt-in audit of the build's own documents as well, after the
-    #: build's last stage — or alone, over a ledger whose build is complete.
-    doc_audit: bool = False
     #: The last stage this invocation walks, as a **resolved stage id** — the
     #: display name a caller may have written is resolved at load, so nothing
     #: downstream deals in anything but ids. Empty is the whole build.
@@ -203,20 +172,11 @@ class RunSection:
 
 
 @dataclass(frozen=True)
-class ClaudeSection:
-    command: tuple[str, ...]
-    env: Mapping[str, str]
-
-
-@dataclass(frozen=True)
 class TimeoutSection:
-    single_seconds: int
+    #: The longest a call may wait on one blocking socket operation — the
+    #: connect, or one read of the reply's stream. Nothing bounds a call as a
+    #: whole (``inference.call_chat``).
     silence_seconds: int
-    #: Per-step total bounds, keyed by step id. The keys are checked against the
-    #: step table at load and the values against the same positivity rule the
-    #: three scalars above take, because a key naming no step leaves the default
-    #: silently in force and a non-positive one is refused mid-build or nowhere.
-    by_step: Mapping[str, int]
 
 
 @dataclass(frozen=True)
@@ -239,7 +199,6 @@ class DriverConfig:
     #: cannot hand back an invocation the operator never made.
     invocation: str
     run: RunSection
-    claude: ClaudeSection
     timeouts: TimeoutSection
     retry: RetrySection
     log: LogSection
@@ -265,9 +224,7 @@ class _TrackedTable(dict):
     below reads through ``.get``, so wrapping the table is enough to capture
     the whole set with no change to the helpers. :func:`_table` reads through
     ``.get`` too, which is what makes a nested table a read key of its parent
-    rather than an unknown one: ``[timeouts.by_step]`` and ``[claude] env``
-    reach their values through the helper that fetched the table, and the
-    fetch is the read.
+    rather than an unknown one: the fetch is the read.
     """
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -279,19 +236,24 @@ class _TrackedTable(dict):
         return super().get(key, default)
 
 
-def _refuse_unknown_keys(table: _TrackedTable, *, section: str) -> None:
+def _refuse_unknown_keys(table: _TrackedTable, *, section: str | None) -> None:
     """Refuse every key of one section that :func:`load` did not read.
 
     Called once per section, after that section is built, so what counts as
-    recognized is the set of reads that built it. The state refused is a
-    hand-authored config file — an operator's ``--config`` or a consuming
-    repo's committed one — where a key sits that nothing consults: the default
-    stays in force and the run reports itself configured.
+    recognized is the set of reads that built it — and once over the file's
+    top level (``section`` ``None``), whose keys are the sections themselves.
+    The state refused is a hand-authored config file — an operator's
+    ``--config`` or a consuming repo's committed one — where a key sits that
+    nothing consults: the default stays in force and the run reports itself
+    configured.
     """
     unknown = sorted(set(table) - table.read_keys)
-    if unknown:
-        plural = "s" if len(unknown) > 1 else ""
-        raise ConfigError(f"[{section}] unknown key{plural}: {', '.join(unknown)}")
+    if not unknown:
+        return
+    plural = "s" if len(unknown) > 1 else ""
+    if section is None:
+        raise ConfigError(f"unknown section{plural}: {', '.join(f'[{name}]' for name in unknown)}")
+    raise ConfigError(f"[{section}] unknown key{plural}: {', '.join(unknown)}")
 
 
 def _required(section: str, key: str, flag: str) -> str:
@@ -385,61 +347,6 @@ def _int_list_field(
     ):
         raise ConfigError(f"[{section}] {key} must be a list of integers")
     return tuple(value)
-
-
-def _str_map(table: Mapping[str, object], key: str, *, section: str) -> dict[str, str]:
-    mapping = _table(table, key, section=f"{section}.{key}")
-    for name, value in mapping.items():
-        if not isinstance(value, str):
-            raise ConfigError(f"[{section}.{key}] {name} must be a string, got {type(value).__name__}")
-    return dict(mapping)
-
-
-def _int_map(table: Mapping[str, object], key: str, *, section: str, keys: Sequence[str]) -> dict[str, int]:
-    """A table of positive durations, keyed by a closed vocabulary.
-
-    Both refusals are the ones :func:`_int_field` already makes for a duration
-    this module names itself, applied to one the caller names instead. A key
-    outside the vocabulary is a misspelling, and left unrefused it does nothing
-    at all — the default stays in force and the run reads as configured. A
-    non-positive value reaches ``call.Caller``'s own spawn boundary instead, as a
-    boundary error mid-build, where every other duration setting is refused at
-    load. The refusal carries the whole vocabulary, because a step id is a thing
-    an operator types from memory.
-    """
-    mapping = _table(table, key, section=f"{section}.{key}")
-    for name, value in mapping.items():
-        if name not in keys:
-            raise ConfigError(
-                f"[{section}.{key}] {name!r} names no step. The steps this build walks, " f"in order: {', '.join(keys)}"
-            )
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise ConfigError(f"[{section}.{key}] {name} must be an integer, got {type(value).__name__}")
-        if value <= 0:
-            raise ConfigError(f"[{section}.{key}] {name} must be positive, got {value}")
-    return dict(mapping)
-
-
-def _reject_model_keys(claude_raw: Mapping[str, object]) -> None:
-    """Refuse any ``[claude]`` model key.
-
-    An explicit ``--model`` overrides a seat's frontmatter pin, so the driver
-    omits the flag unconditionally. An honored
-    model key would therefore be a lie; the key is named and refused at load
-    instead, so exit 13's baton has a key to report.
-
-    It runs before the section is built, so a model key always meets this
-    refusal and never the general unknown-key one: the two never report the
-    same key, and the operator gets the message that says why no such key
-    exists rather than the one that says this one is unrecognized.
-    """
-    for key in claude_raw:
-        if key == "model" or key.startswith("model_"):
-            raise ConfigError(
-                f"[claude] {key} is rejected: no model key exists, by design. An explicit --model "
-                "overrides a seat's frontmatter pin, so the driver never passes it. Route models "
-                "through [claude] command/env instead."
-            )
 
 
 # --- barrier decisions ------------------------------------------------------
@@ -568,10 +475,9 @@ def invocation(
     hand the operator an invocation that stops in the same place forever.
     Resuming past a bound is the point of resuming.
 
-    **The mode flags are rendered, for the mirror-image reason.** They say what
-    this build is made of, so a resume that dropped one would change the build
-    half way through — running the very rows the build was told to do without,
-    or completing without the audit it was asked for.
+    **The mode flag is rendered, for the mirror-image reason.** It says what
+    this build is made of, so a resume that dropped it would change the build
+    half way through — running the very rows the build was told to do without.
     """
     overrides = run_overrides or {}
     parts: list[str] = []
@@ -579,16 +485,11 @@ def invocation(
         parts += [CONFIG_FLAG, str(path)]
     sources = overrides.get("sources") or ()
     parts += [part for source in sources for part in (SOURCE_FLAG, str(source))]
-    mode = overrides.get("permission_mode")
-    if mode is not None:
-        parts += [PERMISSION_MODE_FLAG, str(mode)]
     named_parent = run_dir_parent(run_dir)
     if named_parent:
         parts += [RUN_DIR_FLAG, named_parent]
     if overrides.get("no_inference"):
         parts.append(NO_INFERENCE_FLAG)
-    if overrides.get("doc_audit"):
-        parts.append(DOC_AUDIT_FLAG)
     return shlex.join(parts)
 
 
@@ -616,39 +517,25 @@ def load(
     and only their form is checked.
     """
     overrides = dict(run_overrides or {})
-    raw = _read(path) if path is not None else {}
+    raw = _TrackedTable(_read(path) if path is not None else {})
 
     run_raw = _TrackedTable({**_table(raw, "run", section="run"), **overrides})
     runner = run_raw.get("runner")
     run = RunSection(
         sources=_str_list_field(run_raw, "sources", section="run", flag=SOURCE_FLAG),
         bibliography=_str_field(run_raw, "bibliography", section="run", default=""),
-        permission_mode=_str_field(
-            run_raw, "permission_mode", section="run", default=DEFAULT_PERMISSION_MODE, choices=PERMISSION_MODES
-        ),
         charter_file=Path(_str_field(run_raw, "charter_file", section="run", default=kb_pipeline.CHARTER_RELPATH)),
         runner=None if runner is None else _str_field(run_raw, "runner", section="run", choices=RUNNERS),
         no_inference=_bool_field(run_raw, "no_inference", section="run", default=False),
-        doc_audit=_bool_field(run_raw, "doc_audit", section="run", default=False),
         through=_stage_field(run_raw, "through", section="run", flag=THROUGH_FLAG),
     )
     _refuse_unknown_keys(run_raw, section="run")
 
-    claude_raw = _TrackedTable(_table(raw, "claude", section="claude"))
-    _reject_model_keys(claude_raw)
-    claude = ClaudeSection(
-        command=_str_list_field(claude_raw, "command", section="claude", default=DEFAULT_CLAUDE_COMMAND),
-        env=_str_map(claude_raw, "env", section="claude"),
-    )
-    _refuse_unknown_keys(claude_raw, section="claude")
-
     timeouts_raw = _TrackedTable(_table(raw, "timeouts", section="timeouts"))
     timeouts = TimeoutSection(
-        single_seconds=_int_field(timeouts_raw, "single_seconds", section="timeouts", default=DEFAULT_SINGLE_SECONDS),
         silence_seconds=_int_field(
             timeouts_raw, "silence_seconds", section="timeouts", default=DEFAULT_SILENCE_SECONDS
         ),
-        by_step=_int_map(timeouts_raw, "by_step", section="timeouts", keys=tuple(steps.STEPS_BY_ID)),
     )
     _refuse_unknown_keys(timeouts_raw, section="timeouts")
 
@@ -669,13 +556,15 @@ def load(
     )
     _refuse_unknown_keys(log_raw, section="log")
 
+    decisions = _decisions(raw, admissible=admissible)
+    _refuse_unknown_keys(raw, section=None)
+
     return DriverConfig(
         path=path,
         invocation=invocation(path, overrides, run_dir=log.run_dir),
         run=run,
-        claude=claude,
         timeouts=timeouts,
         retry=retry,
         log=log,
-        decisions=_decisions(raw, admissible=admissible),
+        decisions=decisions,
     )

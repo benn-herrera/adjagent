@@ -110,7 +110,7 @@ def _repo_lock_path(repo: Path, *, harness: str) -> Path:
         return runlog.repo_lock_path(repo)
 
 
-def _run_guard(dir_: Path) -> subprocess.CompletedProcess:
+def _run_guard(dir_: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["just", "guard-run-lock", str(dir_)],
         cwd=_KB_TESTING,
@@ -118,6 +118,7 @@ def _run_guard(dir_: Path) -> subprocess.CompletedProcess:
         text=True,
         encoding="utf-8",
         check=False,
+        env=env,
     )
 
 
@@ -185,7 +186,9 @@ def test_guard_refuses_a_dir_holding_toolchains_under_two_harnesses() -> None:
     """Which copy a run there was launched against cannot be told, so neither copy's answer is taken."""
     root = _SCRATCH / "two-harnesses"
     for harness in ("claude", "opencode"):
-        (root / _harness_dir(harness) / "agents" / "kb_tools").mkdir(parents=True)
+        package = root / _harness_dir(harness) / "agents" / "kb_tools"
+        package.mkdir(parents=True)
+        (package / "kb_util.py").write_text("", encoding="utf-8")
     result = _run_guard(root)
     assert result.returncode != 0
     assert "more than one harness" in result.stderr
@@ -223,18 +226,50 @@ def _make_stale_toolchain_dir(root: Path) -> Path:
     return root
 
 
-def test_guard_proceeds_when_the_installed_toolchain_predates_the_op() -> None:
+@pytest.mark.parametrize("force_color", [None, "1"], ids=["plain", "force-color"])
+def test_guard_proceeds_when_the_installed_toolchain_predates_the_op(force_color: str | None) -> None:
     """The case that cost a corpus wipe: an installed kb_util whose argparse rejects `show-run-lock` outright.
 
-    Indistinguishable from a resolution failure by exit code alone — both are
-    nonzero — so the guard has to read *how* it failed: argparse's own
-    "invalid choice" refusal, raised before any op runs, opens with a
-    `usage:` line that `show-run-lock`'s own failures never produce. Read
-    correctly, this is the no-toolchain case, not "no lock": proceed.
+    Indistinguishable from a resolution failure by the main call's exit code
+    alone — both are 2 — and by its text under FORCE_COLOR, where Python
+    3.14+ argparse wraps `usage:` in colour codes; so both colour settings
+    are run. Read correctly, this is the no-toolchain case, not "no lock":
+    proceed.
     """
-    stale = _make_stale_toolchain_dir(_SCRATCH / "stale-toolchain")
-    result = _run_guard(stale)
+    env = {key: value for key, value in os.environ.items() if key not in ("FORCE_COLOR", "NO_COLOR", "PYTHON_COLORS")}
+    if force_color is not None:
+        env["FORCE_COLOR"] = force_color
+    stale = _make_stale_toolchain_dir(_SCRATCH / f"stale-toolchain-{force_color or 'plain'}")
+    result = _run_guard(stale, env=env)
     assert result.returncode == 0, result.stderr
+
+
+def _make_bytecode_skeleton(root: Path) -> Path:
+    """What a reset leaves of a toolchain: ignored `__pycache__/*.pyc`, no `.py` — not an installed toolchain."""
+    pycache = root / _harness_dir("claude") / "agents" / "kb_tools" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (pycache / "kb_util.cpython-312.pyc").write_bytes(b"\0")
+    return root
+
+
+def test_guard_proceeds_when_the_install_dir_holds_only_bytecode() -> None:
+    result = _run_guard(_make_bytecode_skeleton(_SCRATCH / "bytecode-skeleton"))
+    assert result.returncode == 0, result.stderr
+
+
+def test_installed_harness_value_reads_a_bytecode_skeleton_as_no_toolchain() -> None:
+    """The finder every caller shares (`--resume`'s refusal, the arXiv drivers, ask replay) answers nothing."""
+    root = _make_bytecode_skeleton(_SCRATCH / "bytecode-skeleton-finder")
+    result = subprocess.run(
+        ["just", "_installed-harness-value", str(root), "project-harness-dir"],
+        cwd=_KB_TESTING,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
 
 
 def _make_tarball(path: Path) -> None:

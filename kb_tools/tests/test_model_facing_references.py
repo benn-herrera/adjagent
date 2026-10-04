@@ -4,7 +4,7 @@
 model: the composed brief of every shipped ``kb_driver/prompt-templates/``
 template a step-table row names. It is rendered here the way a run renders it —
 ``prompt_templates.render`` with the row's slots filled by named placeholders —
-because what a seat reads is the filled body, and a raw read of the template
+because what a model reads is the filled body, and a raw read of the template
 would judge text nobody receives. ``kb_pipeline``'s refusals compose their paths
 from the same constants the checks do, so they carry no reference of their own.
 
@@ -16,11 +16,10 @@ would be suppressed, and then it would protect nothing.
 
 **What it deliberately does not see.** A path carrying neither the scratch root
 in front of it nor ``.md`` on the end (``review/`` alone). A runner target named
-outside backticks. A seat named in free prose outside the ``kb-`` namespace — no
+outside backticks. An agent named in free prose outside the ``kb-`` namespace — no
 rule tells ``applied-mathematician`` from ``warrant-mapping`` without a
-hand-maintained list, so that direction is covered instead by holding the step
-table's own seats against the shipped definitions. Anything inside an angle
-bracket, which is a placeholder rather than a reference.
+hand-maintained list. Anything inside an angle bracket, which is a placeholder
+rather than a reference.
 
 Vocabularies are harvested from the code, never enumerated here: a list of
 today's references would be the same hand-maintained text one layer down.
@@ -39,8 +38,6 @@ pytestmark = pytest.mark.skip(
     reason="lints a pipeline shape that has not yet completed a run end to end; re-enable once it has"
 )
 
-_AGENTS_SURFACE = Path(__file__).resolve().parent.parent.parent
-_AGENT_TEMPLATES = _AGENTS_SURFACE / "templates" / "agents"
 
 # A package resource, so ``__file__`` is the right anchor: the fragment ships
 # beside the modules it wraps, wherever kb_tools was installed.
@@ -62,6 +59,7 @@ def _population() -> dict[str, str]:
         texts[f"brief:{step.id}"] = prompt_templates.render(
             step.template,
             slots={slot: f"<{slot}>" for slot in step.slots},
+            alternatives={step.correction[0]: None} if step.correction else {},
         )
     return texts
 
@@ -101,14 +99,9 @@ def _published_strings() -> frozenset[str]:
 PUBLISHED_STRINGS = _published_strings()
 
 
-def _declared_seats() -> frozenset[str]:
-    """Every seat the step table can dispatch — row seats plus the meta-review roster."""
-    return frozenset({step.seat for step in steps.STEPS if step.seat} | {steps.META_REVIEW_SEAT})
-
-
 def _published_kb_words() -> frozenset[str]:
-    """Every ``kb-`` word the toolchain publishes, seats included."""
-    return frozenset(word for value in PUBLISHED_STRINGS for word in _KB_WORD.findall(value)) | _declared_seats()
+    """Every ``kb-`` word the toolchain publishes."""
+    return frozenset(word for value in PUBLISHED_STRINGS for word in _KB_WORD.findall(value))
 
 
 def _published_documents() -> frozenset[str]:
@@ -229,34 +222,16 @@ def test_every_runner_target_named_is_one_the_fragment_defines(source: str) -> N
 
 
 @pytest.mark.parametrize("source", POPULATION_IDS)
-def test_every_namespaced_word_resolves_to_a_constant_or_a_seat(source: str) -> None:
-    """The ``kb-`` namespace is where this toolchain's seats and tokens live.
+def test_every_namespaced_word_resolves_to_a_constant(source: str) -> None:
+    """The ``kb-`` namespace is where this toolchain's tokens live.
 
-    A seat rename, a target rename or a typo lands here: the stale word extends
+    A target rename or a typo lands here: the stale word extends
     no published one, so it resolves against nothing.
     """
     known = _published_kb_words()
     unresolved = [word for word in _NAMESPACED.findall(POPULATION[source]) if not _resolves(word, known)]
 
-    assert not unresolved, f"{source}: {unresolved} is neither a published kb_tools word nor a seat the table holds"
-
-
-def test_every_seat_the_step_table_holds_is_a_shipped_definition() -> None:
-    """The seat a brief dispatches comes from the row; this is what makes the row true.
-
-    Templates spell no seat at all, so a seat that stopped existing would
-    otherwise reach a dispatch as an agent type nothing
-    defines. The names come from the generator's own reader, since a template may
-    declare several outputs and none of them has to be its stem.
-    """
-    assert _AGENT_TEMPLATES.is_dir(), f"no agent template tree at {_AGENT_TEMPLATES}"
-    from gen_defs.discovery import split_outputs
-
-    shipped = {name for template in _AGENT_TEMPLATES.rglob("*.tmpl.md") for name in split_outputs(template)[0]}
-
-    missing = sorted(_declared_seats() - shipped)
-
-    assert not missing, f"the step table seats {missing}, which no template renders"
+    assert not unresolved, f"{source}: {unresolved} is not a published kb_tools word"
 
 
 @pytest.mark.parametrize("template", prompt_templates.template_paths(), ids=lambda path: path.name)

@@ -3046,9 +3046,7 @@ def compute_solidity_full(claim_entries, experiments=(), supports=(), works=()) 
 
     With ``supports=()`` this reduces exactly to the prior behavior:
     ``local_quality[C] == confidence[C]`` and the support machinery is inert.
-    With ``works=()`` every ``rests-on`` edge is pending-by-absent-strength,
-    which is what a caller holding no register — ``attribute.check_acyclic``,
-    walking synthetic claim-to-claim entries — needs and gets.
+    With ``works=()`` every ``rests-on`` edge is pending-by-absent-strength.
     """
     entries = {e.id: e for e in claim_entries}
     sups = {s.id: s for s in supports}

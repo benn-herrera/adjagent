@@ -19,44 +19,35 @@ Stages, in order:
   prose, so every claim site it found before is where it was.
 * **:mod:`graph`** — the authored claim graph, read back off the tree's own
   declarations and registers.
-* **D, :mod:`attribute`** — the narrowing, which settles an edge outright where
-  containment directs it, demotes to a ``references`` edge any settled edge
-  lying on a cycle, and offers a candidate pair where containment directs
-  nothing; then one bounded selection per source claim over what is left, and
-  the two mechanical checks that bound it. Inference reaches it through
-  :mod:`ask`'s injected seam, which is why this pipeline takes a selector rather
-  than building one.
+* **D, :mod:`attribute`** — the narrowing: every edge candidate, from a
+  reference or a hand-written name, classed and drafted, with the drafts that
+  lie on a containment ring drafted *mention*. Its harvest completes for the
+  whole corpus before the first ask.
+* **:mod:`classify`** — one letter ask per candidate, grouped by source, each
+  group recorded as it lands; then every ``depends`` edge on a cycle of the
+  classified set is demoted to a reference. Inference reaches it through an
+  injected :class:`~.letters.LetterReader`, which is why this pipeline takes a
+  reader rather than building one.
 * **F′, :func:`write.write_edges`** — pass 3 of the write path, one batch.
 * **G, :mod:`gate`** — the runner's refresh and verify targets. Exits on the
   return code.
 
 **Nothing here exits on a model's opinion.** Every stage ends on a comparison
-between two artifacts or on a return code, and the one inference is asked for a
-selection from a set it did not choose.
+between two artifacts or on a return code; a reply carrying no offered letter
+takes the candidate's draft, and only a call that never completes stops it.
 
-**Only the asking is conditional.** ``selector=None`` is a run with no model
-reachable, and every stage above still runs: the entry condition, the inventory,
-the authored graph, the narrowing, the acyclicity check over what it settled,
-the write and the gates. What such a run does without is the selection over the
-pairs containment left open — those pairs carry no ``depends`` edge — so its
-dependency set is a subset of what a full run authors, never a different one.
-The report says which run it was on its own line, in both directions, because a
-corpus that left no pair open and a build that could not ask about the ones it
-did are otherwise the same silence.
-
-**What such a run does not do without is the cross-references themselves.**
-Every open pair is recorded as a ``references`` edge either way
-(:mod:`attribute`): the corpus states that one claim's text names another, and
-that statement is not conditional on a model being reachable. A full run
-differs only in that pairs the selection raised to dependencies are recorded as
-dependencies instead.
+**Only the asking is conditional.** ``reader=None`` is a run with no model
+reachable, and every stage above still runs: such a run writes every
+candidate's draft — *supported by* where containment directed the pair and no
+ring refused it, *mention* everywhere else — so no relationship the corpus
+states goes unrecorded. The report says which run it was, because a candidate
+drafted and one a model answered write the same record.
 """
 
-from collections.abc import Sequence
 from pathlib import Path
 
 from .. import kb_pipeline
-from . import attribute, conform, gate, graph, inventory, tree, write
+from . import attribute, classify, conform, gate, graph, inventory, letters, tree, write
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
 
@@ -86,63 +77,105 @@ def _census_findings(
     ]
 
 
-def _unasked_finding(*, offered: int, sources: int, asked: bool) -> Finding:
-    """What the narrowing left open, and whether anybody was asked about it.
+def _counts(values: list[str]) -> str:
+    """``name n`` per distinct value, sorted, or ``none``."""
+    return ", ".join(f"{value} {values.count(value)}" for value in sorted(set(values))) or "none"
 
-    Total over both dimensions and stated in the zero form as well, because the
-    two absences a reader has to tell apart — a corpus whose references
-    containment settled outright, and a build with no model to put the rest to —
-    produce the same dependency count and the same silence everywhere else.
 
-    What is *not* at stake is whether the pair was recorded: every open pair is
-    a ``references`` edge either way (``stage-D-references``). This line is
-    about the dependency question alone.
+def _candidate_findings(narrowed: attribute.Attribution) -> list[Finding]:
+    candidates = narrowed.candidates
+    return [
+        Finding(
+            FACT,
+            "stage-D-candidates",
+            f"{len(candidates)} candidates over {len({c.source.id for c in candidates})} source claims; by harvest: "
+            f"{_counts(['+'.join(sorted(c.harvests)) for c in candidates])}; by letters offered: "
+            f"{_counts([','.join(c.offered) for c in candidates])}",
+        ),
+        Finding(
+            FACT,
+            "stage-D-drafts",
+            f"{_counts([c.draft for c in candidates])}; the drafts containment directed, by the rule that "
+            f"resolved the referenced claim: "
+            f"{', '.join(f'{route} {count}' for route, count in sorted(narrowed.routes.items())) or 'none'}",
+        ),
+        Finding(
+            FACT,
+            "stage-D-word-filtered",
+            f"{len(narrowed.word_dropped)} candidate pairs never opened: the word before the anchor names a "
+            f"section, a figure or another kind no premise relation can hold, and nothing else reaches them",
+        ),
+        Finding(
+            FACT,
+            "stage-D-containment-ring",
+            (
+                "no pair containment directed lay on a cycle"
+                if not narrowed.demoted
+                else f"{len(narrowed.demoted)} pairs containment directed lay on a cycle and are drafted mention: "
+                + ", ".join(f"{source} -> {target}" for source, target in narrowed.demoted)
+            ),
+        ),
+    ]
+
+
+def _classification_findings(classified: classify.Classification, *, asked: bool) -> list[Finding]:
+    """What the candidates were classified as, how each answer was reached, and what a cycle cost.
+
+    Every figure is stated in the zero form, and every defaulted candidate and
+    every demoted edge is named, a defaulted candidate and a demoted edge being
+    indistinguishable from any other record once written.
     """
-    if not offered:
-        detail = "none — the narrowing left no candidate pair open, so there was nothing to ask about"
-    elif asked:
-        detail = f"none — every one of {offered} candidate pairs over {sources} claims was put to a model"
-    else:
-        detail = (
-            f"{offered} candidate pairs over {sources} claims were put to no model — this build asked none, "
-            f"so among them no dependency is asserted and none is denied; each is recorded as a reference"
+    outcomes = classified.outcomes
+    defaulted = sorted(pair for pair, outcome in outcomes.items() if outcome is kb_pipeline.ClassifyOutcome.DEFAULTED)
+    findings = [
+        Finding(
+            FACT,
+            "stage-D-classified",
+            f"by relation: {_counts(list(classified.relations.values()))}; by outcome: "
+            f"{_counts(list(outcomes.values()))}"
+            + ("" if asked else "; no model was asked, so every candidate this run decided took its draft"),
+        ),
+        Finding(
+            FACT,
+            "stage-D-defaulted",
+            (
+                "no candidate defaulted"
+                if not defaulted
+                else f"{len(defaulted)} candidates carried no offered letter after one re-ask and took their draft: "
+                + ", ".join(f"{source} -> {target}" for source, target in defaulted)
+            ),
+        ),
+        Finding(FACT, "stage-D-asks", letters.AskTotals.of(classified.asks).detail()),
+    ]
+    findings.append(
+        Finding(
+            PASS,
+            "stage-D-classify",
+            f"{len(classified.edges)} dependency edges and {len(classified.references)} references, acyclic "
+            f"before the write; "
+            + (
+                "no classified edge lay on a cycle, so none was demoted"
+                if not classified.demoted
+                else f"{len(classified.demoted)} classified edges lay on a cycle and are recorded as references "
+                f"instead: " + ", ".join(f"{source} -> {target}" for source, target in classified.demoted)
+            ),
         )
-    return Finding(FACT, "stage-D-unasked", detail)
-
-
-def _attribute_finding(
-    *, edges: int, settled: int, offered: int, demoted: Sequence[tuple[str, str]], asked: bool
-) -> Finding:
-    """The stage's verdict: what was authored, under which mode, and what a ring cost it.
-
-    The demotion is stated in the zero form as well, because a corpus whose
-    settled edges are acyclic and one that lost a ring to the constraint pass
-    identically otherwise — and the second is the one a reader has to be able to
-    go and look at. Each demoted edge is named, a demoted edge being an ordinary
-    ``references`` edge once written and findable by nothing else.
-    """
-    mode = (
-        f"{edges} edges: {settled} settled by containment and the rest of {offered} candidate pairs "
-        f"selected as dependencies, acyclic before the write"
-        if asked
-        else f"{edges} edges, every one settled by containment with no model asked, acyclic before the write"
     )
-    cost = (
-        "no settled edge lay on a cycle, so none was demoted"
-        if not demoted
-        else f"{len(demoted)} settled edges lay on a cycle and are recorded as references instead, the ring "
-        f"disproving for the set the direction containment read for each: "
-        + ", ".join(f"{source} -> {target}" for source, target in demoted)
-    )
-    return Finding(PASS, "stage-D-attribute", f"{mode}; {cost}")
+    return findings
 
 
-def build(*, kb_root: Path, repo_root: Path, scratch: Path, selector: attribute.Selector | None) -> Report:
+def build(
+    *,
+    kb_root: Path,
+    repo_root: Path,
+    scratch: Path,
+    reader: letters.LetterReader | None,
+    asks: Path | None = None,
+) -> Report:
     """Run the discovered pass's dependency attribution over ``kb_root``.
 
-    ``selector`` is ``None`` for a run with no model reachable: the mechanical
-    half runs and its edges are recorded; the pairs it left open are reported
-    and left open.
+    ``reader`` is ``None`` for a run with no model reachable: every candidate
+    takes its draft. ``asks`` is where each classify group's ask record lands.
     """
     report = Report()
 
@@ -165,68 +198,21 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path, selector: attribute.
         report.findings += _census_findings(state, authored, sites)
 
         narrowed = attribute.narrow(documents, authored, sites, record)
-        offered = sum(len(question.candidates) for question in narrowed.questions)
-        routes = ", ".join(f"{route} {count}" for route, count in sorted(narrowed.routes.items())) or "none"
-        report.findings.append(
-            Finding(
-                FACT,
-                "stage-D-settled",
-                f"{len(narrowed.edges)} edges settled by proof containment, no model asked; by the rule that "
-                f"resolved the referenced claim: {routes}",
-            )
-        )
-        report.findings.append(
-            Finding(
-                FACT,
-                "stage-D-candidates",
-                f"{offered} candidate pairs over {len(narrowed.questions)} claims; "
-                f"{len(authored.nodes) - len(narrowed.questions)} claims have an empty candidate set and can "
-                f"carry no edge beyond what containment already settled",
-            )
-        )
-        report.findings.append(
-            Finding(
-                FACT,
-                "stage-D-word-filtered",
-                f"{len(narrowed.word_dropped)} candidate pairs never opened: the word before the anchor names a "
-                f"section, a figure or another kind no premise relation can hold, and no other reference opens them",
-            )
-        )
-        report.findings.append(
-            Finding(
-                FACT,
-                "stage-D-hand-named",
-                f"{len(narrowed.hand_named)} candidate pairs where a claim's body names another by its printed name "
-                f"and number with no reference; held for classification, neither asked about nor recorded",
-            )
-        )
-        report.findings.append(
-            _unasked_finding(offered=offered, sources=len(narrowed.questions), asked=selector is not None)
-        )
+        report.findings += _candidate_findings(narrowed)
 
-        edges = attribute.attribute_dependencies(documents, authored, sites, selector, record)
-        report.findings.append(
-            _attribute_finding(
-                edges=len(edges),
-                settled=len(narrowed.edges),
-                offered=offered,
-                demoted=narrowed.demoted,
-                asked=selector is not None,
-            )
+        classified = classify.classify(
+            narrowed.candidates,
+            graph=authored,
+            statement=classify.statements(documents, authored, sites),
+            reader=reader,
+            repo_root=repo_root,
+            record_dir=asks,
         )
+        report.findings += _classification_findings(classified, asked=reader is not None)
 
-        references = attribute.references_beyond(narrowed, edges)
-        report.findings.append(
-            Finding(
-                FACT,
-                "stage-D-references",
-                f"{len(references)} cross-references recorded that carry no direction and "
-                f"{len(narrowed.references) - len(references)} that the selection raised to dependencies; "
-                f"a reference gates nothing, enters no solidity and is under no acyclicity constraint",
-            )
+        report.findings += write.write_edges(
+            classified.edges, kb_root=kb_root, scratch=scratch, references=classified.references
         )
-
-        report.findings += write.write_edges(edges, kb_root=kb_root, scratch=scratch, references=references)
     except ClaimGraphError as error:
         report.findings.append(error.finding())
         return report

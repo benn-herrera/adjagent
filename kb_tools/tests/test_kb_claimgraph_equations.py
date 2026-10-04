@@ -356,8 +356,8 @@ def test_an_equation_node_sources_no_edge_and_no_reference(declared: Path):
     assert minted
     assert not [pair for pair in narrowed.edges if pair[0] in minted]
     assert not [pair for pair in narrowed.references if pair[0] in minted]
-    assert not [question for question in narrowed.questions if question.source.id in minted]
-    assert attribute.check_acyclic(authored, narrowed.edges) == ()
+    assert not [candidate for candidate in narrowed.candidates if candidate.source.id in minted]
+    assert attribute.cycle_edges(narrowed.edges) == ()
 
 
 # ---------------------------------------------------------------------------

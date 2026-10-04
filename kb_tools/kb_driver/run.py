@@ -31,9 +31,9 @@ makes a recorded stage unwalked — where a ``kb-root/`` holding documents this
 build did not write refuses rather than being overwritten.
 
 **Nothing here counts a call, and no call's number is read back off disk.** A
-stage's rows are a fixed sequence, so what a stage spent is what its rows are:
-``phase-5`` dispatches one review and one revision, and its ledger entry says
-both are behind it. A file an earlier process left under the scratch layout is
+stage's rows are a fixed sequence, so what a stage spent is what its rows are,
+and its ledger entry says every one of them is behind it. A file an earlier
+process left under the scratch layout is
 therefore not a spent anything — it is work no boundary accounts for, and the
 row that really runs overwrites it.
 
@@ -54,23 +54,12 @@ and by ``phase-3a``'s verify coverage.
 **No stage repairs a gate.** ``phase-3a`` runs the three verifiers and either
 records or stops: what each of them compares is one mechanically-produced
 artifact against another, so a red one is a defect in a tool or in what was
-authored and there is nothing for a seat to remediate in the KB. ``phase-5``,
-walked only under ``--doc-audit``, is a fixed sequence over the documents
-``overview-drafted`` wrote and its boundary committed — one review, then one
-revision answering it (:meth:`Runner._p5_review_and_fix`). **No severity fails
-the stage**: every finding the reviewer sorted is reported by
-:meth:`Runner._report_review`, the revision answers what it can, and the stage
-records.
+authored and there is nothing for a model to remediate in the KB.
 
 **Scope**: the walk covers :data:`steps.TABLE_STAGE_IDS` — every stage of the
-pipeline — less an opt-in stage (``kb_pipeline.Stage.opt_in``) the run did not
-ask for with ``--doc-audit``. ``execute`` still takes the stage list, because a
-test that means to exercise one stage's rows should not have to walk every
-other stage to reach them; exit 0 means every stage walked is recorded. Asked
-for over a ledger whose build is already complete, the audit is the one stage
-left unrecorded, so the run walks it alone: an audit of a built KB needs no
-rebuild. A ledger that records it has had its audit, and a second run walks
-nothing.
+pipeline. ``execute`` still takes the stage list, because a test that means to
+exercise one stage's rows should not have to walk every other stage to reach
+them; exit 0 means every stage walked is recorded.
 
 **One flag bounds the walk, and a bounded run is not a failed one.**
 ``--through`` names the last stage to walk, cut in :meth:`Runner._walk`.
@@ -95,20 +84,10 @@ from pathlib import Path
 from types import MappingProxyType
 
 from .. import inference, kb_pipeline, kb_readme, kb_util
-from . import barriers, baton, call, checklist, envelope, ledger, runlog, steps
-from .config import DOC_AUDIT_FLAG, NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig
+from . import barriers, baton, call, checklist, ledger, runlog, steps
+from .config import NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig
 
 _log = runlog.logger("run")
-
-#: The review ``p5.fix``'s handler dispatches ahead of its own call.
-REVIEW_STEP = "p5.review"
-
-# Rows whose execution belongs to another row's handler rather than to the
-# linear walk, so the walk must not also run them in table order. `p5.review`
-# is the one: its stage is a fixed sequence of two calls, and running them from
-# one handler is what puts both in front of one boundary rather than leaving the
-# review's call accounted for by nothing (SPEC.md, The Driver's Contract).
-DRIVEN_STEPS: frozenset[str] = frozenset({REVIEW_STEP})
 
 # Preflight's own remediation marker. `ov.docent-check` relays the `restore:`
 # line preflight already prints for a missing docent command rather than
@@ -398,19 +377,14 @@ class Runner:
 
     def run(self) -> Result:
         """Walk this run's stages in ledger order. Exit 0 when every one is recorded."""
-        missing = sorted(set(steps.STEP_IDS) - set(_HANDLERS) - DRIVEN_STEPS)
+        missing = sorted(set(steps.STEP_IDS) - set(_HANDLERS))
         runlog.require(not missing, f"step table rows with no handler: {', '.join(missing)}")
 
         self._recorded = self._recorded_stages()
+        self._require_server()
         for stage in self.stages:
             if stage in self._recorded:
                 _log.info("stage is already recorded; skipping it", extra={"context": {"stage": stage}})
-                continue
-            if kb_pipeline.stage_by_id(stage).opt_in and not self.config.run.doc_audit:
-                _log.info(
-                    f"{stage} is an opt-in audit this run did not ask for; pass `{DOC_AUDIT_FLAG}` to run it",
-                    extra={"context": {"stage": stage}},
-                )
                 continue
             walk = self._walk()
             if stage not in walk:
@@ -468,11 +442,37 @@ class Runner:
             ),
         )
 
+    def _require_server(self) -> None:
+        """Refuse, before the walk, a run that will call a model with no server named to call.
+
+        **Per invocation, and a resume included**: what this reads is the
+        stages left to walk, so a ``start`` row would be too early to hold it —
+        a resume skips ``start``. A run spending no inference, and one with no
+        row left to walk that calls a model, need no server and are not asked
+        for one. The validation is ``inference.check_environment``'s, the one
+        every call makes; holding it here is what makes a missing variable exit
+        14 before hours of mechanical stages rather than a refusal at the first
+        call after them.
+        """
+        if self.config.run.no_inference:
+            return
+        remaining = [stage for stage in self._walk() if stage not in self._recorded]
+        calling = [step.id for stage in remaining for step in steps.steps_for(stage) if step.calls_a_model]
+        if not calling:
+            return
+        try:
+            inference.check_environment()
+        except ValueError as refusal:
+            self._halt(
+                baton.EXIT_ENVIRONMENT,
+                f"{calling[0]} calls a model, and the environment names no server to call: {refusal}",
+                "restore: launch from an environment that names the server, or re-run with "
+                f"{NO_INFERENCE_FLAG} to build without those rows",
+            )
+
     def _run_stage(self, stage: str) -> None:
         self._check_attributes()
         for step in steps.steps_for(stage):
-            if step.id in DRIVEN_STEPS:
-                continue
             if not self._applies(step):
                 _log.info(
                     "row does not apply to this run",
@@ -590,25 +590,11 @@ class Runner:
         self._halt_unless(self.ops.show_status(relay=True))
 
     def _repo_relative(self, path: Path) -> str:
-        """A path as a log line, a barrier record or a relay card states it.
-
-        For a reader who is standing in this repository, never for a brief:
-        a seat resolves a path against a cwd no brief states, so a path a brief
-        carries is :meth:`_brief_path`'s.
-        """
+        """A path as a log line, a barrier record or a relay card states it."""
         try:
             return str(path.relative_to(self.repo_root))
         except ValueError:
             return str(path)
-
-    @staticmethod
-    def _brief_path(path: Path | None) -> str:
-        """A path as a brief states it: absolute, or the named absence.
-
-        ``steps.PATH_SLOTS`` says which slots this is the composer of, and
-        ``call.py`` refuses the call where a value reaches one any other way.
-        """
-        return steps.NOTHING if path is None else str(path)
 
     # --- calls ---------------------------------------------------------------
 
@@ -840,8 +826,8 @@ class Runner:
     def _discover_build(self, step: steps.Step) -> None:
         """``discover.build``: the node pass, one ask per leaf its record lists unread.
 
-        The model this row spends is spawned inside ``kb_claimgraph``, through
-        that package's own seat seam, and the whole of the row is that call —
+        The model this row spends is called inside ``kb_claimgraph``, through
+        that package's own reader, and the whole of the row is that call —
         which is the row's ``spends_own_inference`` declaration, and why a run
         told to spend none never reaches this handler at all.
         """
@@ -931,7 +917,7 @@ class Runner:
     def _p3a_gate(self, step: steps.Step) -> None:
         """``p3a.gate``: ``kb-refresh`` then ``kb-verify``, green or the run stops.
 
-        There is no repair round here and no seat to run one. Each of the three
+        There is no repair round here and no model call to run one. Each of the three
         verifiers compares one mechanically-produced artifact against another —
         every edge resolving among the claims that exist, the graph acyclic, the
         derived index against the authored bytes — so a red one is a defect in a
@@ -945,91 +931,43 @@ class Runner:
         del step
         self._halt_unless(self._gate())
 
-    # --- phase-5: the review, and the one revision that answers it ------------
+    # --- overview-drafted ----------------------------------------------------
 
-    def _findings_path(self, step: steps.Step) -> Path:
-        """Where the review row's findings land: one review, one author, one file."""
-        return self.scratch / steps.findings(stage=step.stage, author=steps.META_REVIEW_SEAT)
+    def _meta_docs(self, step: steps.Step) -> None:
+        """``ov.docs``: ask the model for prose, then assemble the document.
 
-    def _report_review(self, verdict: envelope.Verdict, *, stage: str, findings: Path) -> None:
-        """State the review's counts by severity, where the findings are, and what follows.
-
-        **The whole statement is in the message text**, because the console tee
-        prints messages alone and a count in the record's context would reach the
-        run log and not the operator — the same reason the permission-mode
-        announcement carries its value in its words.
-
-        **Both forms are stated**, the way ``kb_docgraph.build._declarations``
-        states its zero: no severity fails this stage, so a build that said
-        nothing about what the reviewer raised would read exactly like a build
-        whose reviewer raised nothing (SPEC.md, The Driver's Contract). This line
-        is also where the stage says it ran both of its calls: the review it is
-        reporting, and the revision it names as following.
+        **The model composes no document.** It answers the one question no read
+        of the KB answers — what this corpus is and where a reader starts — and
+        its return is prose, which ``call.py`` persists under the scratch layout.
+        What it is written from is ``kb_readme.compose_excerpts``' excerpts of the
+        tree and nothing else; a cut the caps made is a warning here, by title.
         """
-        raised = verdict.critical + verdict.warning + verdict.note
-        consequence = (
-            f"no severity fails this stage, so the {raised} finding(s) are answered by the one revision "
-            "that follows and by nothing after it"
-            if raised
-            else "the reviewer raised no finding at any severity over these documents, and the one "
-            "revision that follows runs regardless"
-        )
-        where = self._repo_relative(findings)
-        _log.info(
-            f"{stage} review: critical={verdict.critical} warning={verdict.warning} "
-            f"note={verdict.note} — {consequence}; findings: {where}",
-            extra={
-                "context": {
-                    "stage": stage,
-                    "critical": verdict.critical,
-                    "warning": verdict.warning,
-                    "note": verdict.note,
-                    "findings": where,
-                }
-            },
-        )
-
-    def _meta_docs(self, step: steps.Step, *, source: Path | None) -> None:
-        """``ov.docs`` and ``p5.fix``: ask the seat for prose, then assemble the document.
-
-        One template, two call sites. What changes between them is whether the
-        call is answering a reviewer's findings or answering for the first time,
-        and that is a slot with a named absence on the first pass.
-
-        **The seat composes no document.** It answers the one question no read of
-        the KB answers — what this corpus is and where a reader starts — and its
-        return is prose, which ``call.py`` persists under the scratch layout.
-        Every count the document states is read here, at the moment it is
-        written, so the numbers are exact by construction rather than checked
-        after the fact by a second call.
-        """
+        excerpts = kb_readme.compose_excerpts(self._kb_root)
+        for cut in excerpts.cuts:
+            _log.warning(
+                "an excerpt was cut to fit its cap, at a paragraph boundary",
+                extra={
+                    "context": {"step": step.id, "document": cut.title, "kept": cut.kept_chars, "cut": cut.cut_chars}
+                },
+            )
+        _log.info("excerpts composed", extra={"context": {"step": step.id, "chars": len(excerpts.text)}})
         prose = self.scratch / steps.overview_prose(stage=step.stage)
-        self._call(
-            step,
-            slots={
-                "kb-root": self._brief_path(self._kb_root),
-                "remediation-source-path": self._brief_path(source),
-            },
-            outputs=(prose,),
-        )
+        self._call(step, slots={"excerpts": excerpts.text}, outputs=(prose,))
         self._assemble_overview(step, prose=prose, target=self._kb_root / kb_pipeline.OVERVIEW_DOC)
 
     def _assemble_overview(self, step: steps.Step, *, prose: Path, target: Path) -> None:
-        """The stage's own half: the packaged template, the derived facts, the seat's answer.
+        """The stage's own half: the packaged template filled around the model's answer.
 
         The one place this driver writes under ``kb-root/``, and it writes bytes
-        it composed rather than bytes a model returned — the seat's answer
+        it composed rather than bytes a model returned — the model's answer
         reaches the file as the value of one slot, in a document whose every
-        other word is the template's or the index's.
+        other word is the template's.
 
-        Both call sites compose over whatever stands: the draft because
-        re-composing what stands is exactly what it is for on a resume past a
-        lost boundary, and the revision because it is asked the same question the
-        draft was, from the tree, with the review beside it.
+        It composes over whatever stands, because re-composing what stands is
+        exactly what it is for on a resume past a lost boundary.
         """
         try:
             text = kb_readme.assemble(
-                kb_root=self._kb_root,
                 project_name=self.repo_root.name,
                 prose={kb_readme.PROSE_SLOT: prose.read_text(encoding="utf-8").strip()},
             )
@@ -1043,49 +981,12 @@ class Runner:
             raise runlog.BoundaryError(str(exc)) from exc
         target.write_text(text, encoding="utf-8")
         _log.info(
-            "the overview document was assembled from the index and the seat's answer",
+            "the overview document was assembled from the template and the model's answer",
             extra={"context": {"step": step.id, "document": self._repo_relative(target)}},
         )
 
-    def _p5_review_and_fix(self, step: steps.Step) -> None:
-        """``p5.fix``: the stage's whole work — one review, then one revision answering it.
-
-        **A sequence, not a loop.** The review runs, its findings are reported at
-        every severity, and the revision is handed the file it wrote. Nothing
-        re-reviews, nothing is counted, and no severity the reviewer returns
-        fails the stage: what a reviewer called critical and what it called a
-        note reach the same one revision and the same boundary behind it.
-
-        The review is a SINGLE never-writer: the seat returns its findings,
-        ``call.py`` writes them at the path the row declares and parses the
-        ``VERDICT`` off what it wrote. One reviewing seat, so its findings file
-        already *is* the revision's one remediation source and nothing merges
-        anything.
-        """
-        review = steps.STEPS_BY_ID[REVIEW_STEP]
-        findings = self._findings_path(review)
-        # Each document named for itself, because the pair this brief reads and
-        # the set this stage's boundary checks are no longer the same set: the
-        # reviewer still judges CONVENTIONS.md, which `phase-3a` stamped and no
-        # boundary here asks after.
-        outcome = self._call(
-            review,
-            slots={
-                "readme-path": self._brief_path(self._kb_root / kb_pipeline.OVERVIEW_DOC),
-                "conventions-path": self._brief_path(self._kb_root / kb_pipeline.CONVENTIONS_DOC),
-            },
-            outputs=(findings,),
-        )
-        runlog.require(outcome.verdict is not None, "a review returned without the verdict its row declares")
-        assert outcome.verdict is not None  # required above
-        self._report_review(outcome.verdict, stage=review.stage, findings=findings)
-
-        self._meta_docs(step, source=findings)
-
-    # --- overview-drafted ----------------------------------------------------
-
     def _ov_docs(self, step: steps.Step) -> None:
-        """``ov.docs``: the overview document, assembled over the seat's first answer.
+        """``ov.docs``: the overview document, assembled over the model's answer.
 
         **No skip on what is already on disk.** The row's own boundary is the row
         behind it, so the only invocation that reaches this one is an invocation
@@ -1094,7 +995,7 @@ class Runner:
         rather than adopted (SPEC.md, The Driver's Contract). It costs one call to
         re-ask, against trusting a file a dying process may have half-written.
         """
-        self._meta_docs(step, source=None)
+        self._meta_docs(step)
 
     def _ov_docent_check(self, step: steps.Step) -> None:
         """``ov.docent-check``: the commands that make a finished KB navigable are installed.
@@ -1118,9 +1019,9 @@ class Runner:
         )
 
 
-#: Row id → the handler that executes it. A row with no entry here and no place
-#: in :data:`DRIVEN_STEPS` fails the boundary check at the top of the walk,
-#: so a new row cannot be silently unexecuted.
+#: Row id → the handler that executes it. A row with no entry here fails the
+#: boundary check at the top of the walk, so a new row cannot be silently
+#: unexecuted.
 _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType(
     {
         "pre.lock": Runner._pre_lock,
@@ -1145,8 +1046,6 @@ _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType
         "ov.docent-check": Runner._ov_docent_check,
         "ov.docs": Runner._ov_docs,
         "ov.record": Runner._record_stage,
-        "p5.fix": Runner._p5_review_and_fix,
-        "p5.record": Runner._record_stage,
     }
 )
 
@@ -1182,7 +1081,7 @@ def execute(
     config: DriverConfig,
     paths: runlog.RunPaths,
     decisions: Sequence[Decision] = (),
-    invoker: inference.Invoker | None = None,
+    transport: call.Transport | None = None,
     ops: LedgerOps | None = None,
     repo_root: Path | None = None,
     stages: Sequence[str] = steps.TABLE_STAGE_IDS,
@@ -1191,7 +1090,7 @@ def execute(
     """Run the build from its ledger position and return the terminal state.
 
     ``stages`` is the walk, defaulting to every stage of the pipeline. It stays
-    a parameter for the same reason ``ops`` and ``invoker`` are — a test that
+    a parameter for the same reason ``ops`` and ``transport`` are — a test that
     means to exercise one stage's rows should not have to walk every other
     stage to reach them — but no caller narrows it to buy a green any more: the
     default is the whole walk.
@@ -1226,10 +1125,10 @@ def execute(
         paths=paths,
         repo_root=repo_root,
         caller=call.Caller(
-            invoker=invoker if invoker is not None else inference.SubprocessInvoker(),
             config=config,
             repo_root=repo_root,
             paths=paths,
+            **({} if transport is None else {"transport": transport}),
             **({} if prompt_templates_dir is None else {"prompt_templates_dir": prompt_templates_dir}),
         ),
         answers=answers,

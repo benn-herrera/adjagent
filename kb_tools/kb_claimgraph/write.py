@@ -46,12 +46,13 @@ import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 from .. import kb_index_lib, kb_schema
 from ..kb_write import ops, render
 from . import endcap
-from .assemble import WORKS_REGISTER, Plan, register_for
+from .assemble import WORKS_REGISTER, Plan, register_for, register_title
 from .report import FACT, PASS, ClaimGraphError, Finding
 
 #: How many times an 8 is re-issued before the run stops. The contract says
@@ -64,6 +65,10 @@ RETRY_LIMIT = 3
 #: Paths, kinds, ids and the pending literal are all inside it; prose is not,
 #: and travels in a literal block instead.
 _BASIC_STRING_SAFE = re.compile(r"^[ -~]*$")
+
+#: The longest file name, in bytes, the common filesystems accept (APFS, ext4).
+#: A values file's name is flattened from a document path, which has no bound.
+_NAME_MAX_BYTES = 255
 
 
 class WriteError(ClaimGraphError):
@@ -166,8 +171,15 @@ def _landed(result: ops.Result, pass_name: str) -> ops.Result:
 
 
 def _values_path(scratch: Path, name: str) -> Path:
+    """``<name>.toml`` under ``scratch``; a name past NAME_MAX keeps a prefix and a digest of the whole."""
     scratch.mkdir(parents=True, exist_ok=True)
-    return scratch / f"{name}.toml"
+    file_name = f"{name}.toml"
+    if len(file_name.encode("utf-8")) > _NAME_MAX_BYTES:
+        tail = f"-{sha256(name.encode('utf-8')).hexdigest()[:16]}.toml"
+        head = name.encode("utf-8")[: _NAME_MAX_BYTES - len(tail)]
+        # A cut through a multi-byte character drops its partial bytes, never the bound.
+        file_name = head.decode("utf-8", errors="ignore") + tail
+    return scratch / file_name
 
 
 def _prove_mint_order(kb_root: Path, register: str, minted: Sequence[str], titles: Sequence[str]) -> None:
@@ -204,14 +216,15 @@ def write(plan: Plan, *, kb_root: Path, scratch: Path) -> tuple[list[Finding], M
     # field, so this is a choice rather than a precondition.
     for register in plan.registers():
         positions = [position for position, entry in enumerate(plan.entries) if entry.register == register]
+        titles = [register_title(plan.entries[p].title, document=plan.entries[p].document) for p in positions]
         batch = [
             {
                 "register": plan.entries[position].register,
-                "title": Prose(plan.entries[position].title),
+                "title": Prose(title),
                 "rigor": kb_schema.PENDING_LITERAL,
                 "rationale": Prose(plan.entries[position].rationale),
             }
-            for position in positions
+            for position, title in zip(positions, titles, strict=True)
         ]
         path = _values_path(scratch, f"1-insert-{register.replace('/', '_')}")
         path.write_text(_compose(batch), encoding="utf-8")
@@ -219,7 +232,7 @@ def write(plan: Plan, *, kb_root: Path, scratch: Path) -> tuple[list[Finding], M
         ids = result.minted
         if len(ids) != len(positions):
             raise WriteError("pass-1", f"{register}: {len(positions)} entries in, {len(ids)} ids back")
-        _prove_mint_order(kb_root, register, ids, [plan.entries[p].title for p in positions])
+        _prove_mint_order(kb_root, register, ids, titles)
         minted.update(zip(positions, ids, strict=True))
         findings.append(Finding(PASS, "pass-1-insert-claim-entry", f"{len(ids)} entries minted into {register}"))
 
@@ -288,18 +301,15 @@ def prose_rationale(document: str) -> str:
 _CARRIED_FRONTMATTER: tuple[str, ...] = ("path-stable", "experiments")
 
 
-def _frontmatter(text: str, *, document: str, kind: str, claims: Sequence[str], no_claim: str | None) -> dict:
-    """One ``set-frontmatter`` entry: the primary field this writer owns, and every carried attribute as it stands."""
+def _frontmatter(text: str, *, document: str, kind: str, claims: Sequence[str]) -> dict:
+    """One ``set-frontmatter`` entry: the claims this writer owns, and every carried attribute as it stands."""
     fields = kb_index_lib.parse_frontmatter(text) or {}
     entry: dict[str, object] = {"document": document, "kind": kind}
     for key in _CARRIED_FRONTMATTER:
         value = fields.get(key)
         if value:
             entry[key] = Prose(value) if isinstance(value, str) else tuple(value)
-    if claims:
-        entry["claims"] = tuple(claims)
-    elif no_claim is not None:
-        entry["no-claim"] = Prose(no_claim)
+    entry["claims"] = tuple(claims)
     return entry
 
 
@@ -318,7 +328,6 @@ def land_leaf(
     document: str,
     kind: str,
     claims: Sequence[NewClaim],
-    no_claim: str | None,
     blocks: Mapping[str, str],
     elsewhere: frozenset[str],
     kb_root: Path,
@@ -336,8 +345,8 @@ def land_leaf(
     **The final state is the whole state.** ``claims:`` is the leaf's existing
     list with the new ids after it, so the claims its blocks carry are carried
     forward, and every attribute this writer does not own is carried as it
-    stands (:data:`_CARRIED_FRONTMATTER`). ``no_claim`` replaces the reason a
-    leaf with no claim carries, and is given only where ``claims`` is empty.
+    stands (:data:`_CARRIED_FRONTMATTER`). A leaf that gains no claim is left as
+    it stands.
 
     **Markers cover the final claim set.** A new claim with a locator is marked
     however few the leaf declares, a prose claim's position being recoverable
@@ -352,32 +361,33 @@ def land_leaf(
     held = kb_index_lib.parse_claim_quality_file(kb_root / register, kb_root) if (kb_root / register).is_file() else []
     landed = {entry.title: entry.id for entry in held if entry.id in existing or entry.id not in elsewhere}
 
-    fresh = [claim for claim in claims if claim.title not in landed]
+    titles = [register_title(claim.title, document=document) for claim in claims]
+    fresh = [(title, claim) for title, claim in zip(titles, claims, strict=True) if title not in landed]
     if fresh:
         batch = [
             {
                 "register": register,
-                "title": Prose(claim.title),
+                "title": Prose(title),
                 "rigor": kb_schema.PENDING_LITERAL,
                 "rationale": Prose(claim.rationale),
             }
-            for claim in fresh
+            for title, claim in fresh
         ]
         path = _values_path(scratch, f"{stem}-1-insert-claim-entry")
         path.write_text(_compose(batch), encoding="utf-8")
         minted = _landed(_call(ops.insert_claim_entry, kb_root=kb_root, values_file=path, create=True), stem).minted
         if len(minted) != len(fresh):
             raise WriteError(stem, f"{document}: {len(fresh)} entries in, {len(minted)} ids back")
-        _prove_mint_order(kb_root, register, minted, [claim.title for claim in fresh])
-        landed.update(zip((claim.title for claim in fresh), minted, strict=True))
+        _prove_mint_order(kb_root, register, minted, [title for title, _ in fresh])
+        landed.update(zip((title for title, _ in fresh), minted, strict=True))
         held = kb_index_lib.parse_claim_quality_file(kb_root / register, kb_root)
-    ids = tuple(landed[claim.title] for claim in claims)
+    ids = tuple(landed[title] for title in titles)
 
     final = existing + tuple(node_id for node_id in ids if node_id not in existing)
-    if final != existing or (no_claim is not None and fields.get("no-claim") != no_claim):
+    if final != existing:
         path = _values_path(scratch, f"{stem}-2-set-frontmatter")
         path.write_text(
-            _compose([_frontmatter(text, document=document, kind=kind, claims=final, no_claim=no_claim)]),
+            _compose([_frontmatter(text, document=document, kind=kind, claims=final)]),
             encoding="utf-8",
         )
         _landed(_call(ops.set_frontmatter, kb_root=kb_root, values_file=path), f"{stem}-frontmatter")

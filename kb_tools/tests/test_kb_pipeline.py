@@ -290,6 +290,12 @@ def test_the_record_reads_back_what_was_written(tmp_path: Path) -> None:
                 verdicts=(
                     kb_pipeline.ParagraphVerdict(line=12, judgement=kb_pipeline.Judgement.NOT_A_CLAIM),
                     kb_pipeline.ParagraphVerdict(line=4, judgement=kb_pipeline.Judgement.CLAIM),
+                    kb_pipeline.ParagraphVerdict(
+                        line=20, judgement=kb_pipeline.Judgement.DEFAULTED, cause=kb_pipeline.DefaultCause.NO_LETTER
+                    ),
+                    kb_pipeline.ParagraphVerdict(
+                        line=30, judgement=kb_pipeline.Judgement.DEFAULTED, cause=kb_pipeline.DefaultCause.UNPLACEABLE
+                    ),
                 ),
             ),
         )
@@ -308,6 +314,20 @@ def test_the_record_reads_back_what_was_written(tmp_path: Path) -> None:
     kb_pipeline.write_node_pass(tmp_path, back)
     assert (tmp_path / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
     assert kb_pipeline.NODE_PASS_ABOUT in written
+
+
+def test_a_record_written_before_verdicts_carried_a_cause_still_reads(tmp_path: Path) -> None:
+    """Staged corpora hold records from before defaults existed, and the measurement scripts read them."""
+    (tmp_path / kb_pipeline.NODE_PASS_RELPATH).write_text(
+        '{"leaves": {"a.md": {"state": "landed", "outcome": "no-claim", "reason": "A sentence.", "claims": [], '
+        '"verdicts": [{"line": 4, "verdict": "not-a-claim"}]}}}',
+        "utf-8",
+    )
+    back = kb_pipeline.read_node_pass(tmp_path)
+    assert back is not None
+    assert back.leaves["a.md"].verdicts == (
+        kb_pipeline.ParagraphVerdict(line=4, judgement=kb_pipeline.Judgement.NOT_A_CLAIM),
+    )
 
 
 def test_no_record_is_no_record_and_a_torn_one_is_refused(tmp_path: Path) -> None:

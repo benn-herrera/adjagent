@@ -91,7 +91,7 @@ _SELF = Path(__file__).resolve()
 #: Text filetypes the sweep reads. An allowlist rather than a denylist so a
 #: binary fixture is never decoded: `read_text` on one raises
 #: `UnicodeDecodeError`, which fails the sweep instead of reporting on it.
-_TEXT_SUFFIXES = frozenset({".py", ".md", ".tmpl", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg"})
+_TEXT_SUFFIXES = frozenset({".py", ".md", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg"})
 
 #: Extensionless text files, admitted by name the way the list above admits by
 #: extension. Admitting the empty suffix instead would readmit every

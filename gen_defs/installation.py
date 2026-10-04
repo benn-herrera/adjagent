@@ -89,9 +89,10 @@ its filetype admits:
                              frontmatter, which would present it as a
                              definition
     .py .sh .toml .mk .just  `#` comment lines at the top, below a shebang
-    *.tmpl.md                a template (kb_tools/installed/): every byte is
-                             payload for a file a build writes from it, so a
-                             banner would ship inside that file — copied
+    *.tmpl.md                a template (kb_tools/installed/, or a prompt
+                             under kb_tools/kb_driver/prompt-templates/):
+                             every byte is payload for what is composed from
+                             it, so a banner would ship inside that — copied
                              verbatim, like the row below
     any other suffix         no comment syntax to carry a banner: the file is
                              copied verbatim, and --verbose names it (which

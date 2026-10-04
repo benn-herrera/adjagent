@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from kb_tools import inference
 from kb_tools.kb_driver import runlog
 
 EXIT_JSON_FIELDS = {"exit_code", "barrier_record", "unconsumed_decisions"}
@@ -119,14 +120,18 @@ def _capture(paths: runlog.RunPaths, *, seq: int, label: str, attempt: int, line
     return path
 
 
-def _result(*, duration_ms: int, cost: float) -> str:
-    return json.dumps({"type": "result", "subtype": "success", "duration_ms": duration_ms, "total_cost_usd": cost})
+def _result(*, duration_ms: int) -> str:
+    """The line ``inference.call_chat`` closes each attempt of a capture with."""
+    return json.dumps({"type": inference.REQUEST_RECORD, "duration_ms": duration_ms, "outcome": "ok"})
+
+
+_USAGE = json.dumps({"choices": [], "usage": {"prompt_tokens": 40, "completion_tokens": 3}})
 
 
 def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -> None:
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(paths, seq=11, label="ex.first-step", attempt=1, lines=[_result(duration_ms=1200, cost=0.25)])
-    _capture(paths, seq=12, label="ex.second-step", attempt=1, lines=[_result(duration_ms=900, cost=0.5)])
+    _capture(paths, seq=11, label="ex.first-step", attempt=1, lines=[_USAGE, _result(duration_ms=1200)])
+    _capture(paths, seq=12, label="ex.second-step", attempt=1, lines=[_result(duration_ms=900)])
 
     records = runlog.read_cadence(paths, stages=_STAGES)
 
@@ -138,7 +143,9 @@ def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -
             "attempt": 1,
             "re_ask": False,
             "duration_ms": 1200,
-            "cost_usd": 0.25,
+            "prompt_tokens": 40,
+            "completion_tokens": 3,
+            "cached_tokens": None,
         },
         {
             "seq": 12,
@@ -147,7 +154,9 @@ def test_cadence_carries_one_record_per_capture_with_its_stage(tmp_path: Path) -
             "attempt": 1,
             "re_ask": False,
             "duration_ms": 900,
-            "cost_usd": 0.5,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "cached_tokens": None,
         },
     ]
 
@@ -159,7 +168,7 @@ def test_a_re_ask_and_a_hyphenated_step_id_are_told_apart(tmp_path: Path) -> Non
     the capture-name pattern is anchored at both ends instead.
     """
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(paths, seq=11, label="ex.first-step-reask", attempt=2, lines=[_result(duration_ms=5, cost=0.0)])
+    _capture(paths, seq=11, label="ex.first-step-reask", attempt=2, lines=[_result(duration_ms=5)])
 
     (record,) = runlog.read_cadence(paths, stages=_STAGES)
 
@@ -169,34 +178,11 @@ def test_a_re_ask_and_a_hyphenated_step_id_are_told_apart(tmp_path: Path) -> Non
     assert record["attempt"] == 2
 
 
-def test_the_last_result_event_wins(tmp_path: Path) -> None:
-    """A headless call can emit a premature result, a second init, then the real one.
-
-    Reading the first would report a fraction of what the call actually cost.
-    """
+def test_a_capture_no_request_closed_contributes_nothing(tmp_path: Path) -> None:
+    """Chunks with no closing record are a request that never finished: it has no duration to report."""
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(
-        paths,
-        seq=1,
-        label="p3.distill",
-        attempt=1,
-        lines=[
-            _result(duration_ms=10, cost=0.01),
-            json.dumps({"type": "system", "subtype": "init"}),
-            _result(duration_ms=4000, cost=1.75),
-        ],
-    )
-
-    (record,) = runlog.read_cadence(paths, stages=_STAGES)
-
-    assert (record["duration_ms"], record["cost_usd"]) == (4000, 1.75)
-
-
-def test_a_capture_with_no_result_event_contributes_nothing(tmp_path: Path) -> None:
-    """The call died in transport: its duration is the watchdog's story, not the model's."""
-    paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(paths, seq=1, label="p3.distill", attempt=1, lines=[json.dumps({"type": "system", "subtype": "init"})])
-    _capture(paths, seq=2, label="p3.distill", attempt=1, lines=["{ not json", _result(duration_ms=7, cost=0.0)])
+    _capture(paths, seq=1, label="p3.distill", attempt=1, lines=[_USAGE])
+    _capture(paths, seq=2, label="p3.distill", attempt=1, lines=["{ not json", _result(duration_ms=7)])
 
     records = runlog.read_cadence(paths, stages=_STAGES)
 
@@ -207,7 +193,7 @@ def test_an_unparsable_capture_name_is_logged_and_skipped_not_raised(configured:
     """An evidence pass on the way out of a finished run must not turn it into exit 15."""
     paths = configured
     (paths.calls / f"not-a-capture{runlog.CALL_STREAM_SUFFIX}").write_text(
-        _result(duration_ms=1, cost=0.0) + "\n", encoding="utf-8"
+        _result(duration_ms=1) + "\n", encoding="utf-8"
     )
 
     assert runlog.read_cadence(paths, stages=_STAGES) == []
@@ -226,7 +212,7 @@ def test_cadence_is_written_even_when_the_run_made_no_calls(tmp_path: Path) -> N
 
 def test_write_cadence_emits_one_json_object_per_line(tmp_path: Path) -> None:
     paths = runlog.prepare(tmp_path / "kb-driver", "run-1")
-    _capture(paths, seq=1, label="p3.distill", attempt=1, lines=[_result(duration_ms=3, cost=0.0)])
+    _capture(paths, seq=1, label="p3.distill", attempt=1, lines=[_result(duration_ms=3)])
 
     lines = runlog.write_cadence(paths, stages=_STAGES).read_text(encoding="utf-8").splitlines()
 

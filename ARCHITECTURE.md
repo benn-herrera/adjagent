@@ -237,13 +237,12 @@ reaches a prompt body, and a body extraction drops it with the rest of the front
 lines at the top of `.py`/`.sh`/`.toml`/`.mk`/`.just`, below a shebang where there is one, so
 `python -m` imports, `-include`/`import?` consumption, and shell sourcing are unaffected. Everything
 else is copied verbatim and named as unbannered in the verbose install report. That population is
-the shipped `kb_tools` templates today — the `.tmpl` prompt templates and the `.tmpl.md` document
-templates — beside a data file whose type admits no comment; SPEC.md (Deployed Surfaces) states both
-rules, and the templates are outside the set under its content rule rather than for want of a
-comment syntax. `bannerable` therefore refuses any name ending in `TEMPLATE_SUFFIX` (`.tmpl.md`)
-before it consults the final suffix — without that, a banner would ride into every document a build
-stamps into a consuming KB — and adding `.tmpl` to `HASH_COMMENT_SUFFIXES` is the wrong reading of
-this list, injecting banner text into every prompt the driver composes.
+the shipped `kb_tools` templates today — the `.tmpl.md` prompt templates and document templates —
+beside a data file whose type admits no comment; SPEC.md (Deployed Surfaces) states both rules, and
+the templates are outside the set under its content rule rather than for want of a comment syntax.
+`bannerable` therefore refuses any name ending in `TEMPLATE_SUFFIX` (`.tmpl.md`) before it consults
+the final suffix — without that, a banner would ride into every document a build stamps into a
+consuming KB and every prompt the driver composes.
 
 A `*.md` with no frontmatter of its own splits by kind, on the same distinction `render_template`
 already makes for templates: a **command** is given a minimal frontmatter block holding only the

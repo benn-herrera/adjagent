@@ -216,39 +216,15 @@ def call_stream_path(paths: RunPaths, *, seq: int, label: str, attempt: int) -> 
     return paths.calls / f"{seq:03d}-{label}-a{attempt}{CALL_STREAM_SUFFIX}"
 
 
-def _last_result(capture: Path) -> dict[str, object] | None:
-    """The capture's final ``result`` event, or None when it holds none.
-
-    The LAST one, not the first: a headless call can emit a premature result
-    followed by a second init and the real one, and the first would report a
-    fraction of the call's cost. A line that is not JSON is skipped rather than
-    fatal — this reads evidence a wedged call left behind, and half a capture is
-    the normal shape of the interesting case.
-    """
-    found: dict[str, object] | None = None
-    with capture.open(encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(event, dict) and event.get("type") == "result":
-                found = event
-    return found
-
-
 def read_cadence(paths: RunPaths, *, stages: Mapping[str, str]) -> list[dict[str, object]]:
-    """One record per capture: which step it was, and what it cost.
+    """One record per capture: which step it was, how long it took, and its token counts.
 
     ``stages`` maps step id to stage id. It is a parameter rather than an import
     because this module is the one every other imports and holds no stage
     knowledge; the sequencer, which does, supplies it.
 
-    A capture with no ``result`` event contributes nothing: the call died in
-    transport, and its duration is the watchdog's story rather than the model's.
+    The figures are ``inference.read_capture``'s — the capture format's
+    producer owns its reader. A capture no request closed contributes nothing.
     A capture whose name does not parse is a driver defect, but this runs on the
     way out of a finished run — it is logged and skipped, never raised, because
     an evidence pass must not be able to turn a completed build into exit 15.
@@ -261,11 +237,11 @@ def read_cadence(paths: RunPaths, *, stages: Mapping[str, str]) -> list[dict[str
             _log.warning("capture filename does not parse", extra={"context": {"capture": capture.name}})
             continue
         try:
-            event = _last_result(capture)
-        except OSError as exc:
+            stats = inference.read_capture(capture)
+        except (OSError, UnicodeDecodeError) as exc:
             _log.warning("capture could not be read", extra={"context": {"capture": capture.name, "error": str(exc)}})
             continue
-        if event is None:
+        if stats.duration_ms is None:
             continue
         step = match["step"]
         records.append(
@@ -275,15 +251,17 @@ def read_cadence(paths: RunPaths, *, stages: Mapping[str, str]) -> list[dict[str
                 "stage": stages.get(step),
                 "attempt": int(match["attempt"]),
                 "re_ask": bool(match["reask"]),
-                "duration_ms": event.get("duration_ms"),
-                "cost_usd": event.get("total_cost_usd"),
+                "duration_ms": stats.duration_ms,
+                "prompt_tokens": stats.prompt_tokens,
+                "completion_tokens": stats.completion_tokens,
+                "cached_tokens": stats.cached_tokens,
             }
         )
     return records
 
 
 def write_cadence(paths: RunPaths, *, stages: Mapping[str, str]) -> Path:
-    """Write ``cadence.jsonl`` — the run's per-call timing and cost record.
+    """Write ``cadence.jsonl`` — the run's per-call timing and token record.
 
     Called once, on the way out, beside ``exit.json``: every capture is complete
     by then and the pass is one read of each. The file is always written, so
@@ -582,9 +560,9 @@ def configure(*, run_log: Path, level: str) -> logging.Logger:
     """Attach the JSONL file handler and the console tee. Called once, from ``cli``.
 
     Both logger trees the run writes get them: this driver's, and the shared
-    inference layer's, which configures no handler of its own — a call's spawn,
-    kill and classification lines are this run's evidence wherever the code
-    that emits them lives.
+    inference layer's, which configures no handler of its own — a call's
+    outcome and refusal lines are this run's evidence wherever the code that
+    emits them lives.
     """
     file_handler = logging.FileHandler(run_log, encoding="utf-8")
     file_handler.setFormatter(_JsonlFormatter())

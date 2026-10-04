@@ -1,12 +1,12 @@
 """Prompt composition: template load, strict slot fill, persistence, lint.
 
-Templates ship beside the code at ``kb_driver/prompt-templates/*.tmpl`` and are
+Templates ship beside the code at ``kb_driver/prompt-templates/*.tmpl.md`` and are
 anchored by ``__file__`` — the package-resource exception
 ``kb_pipeline.installed_template`` already makes; repo and KB paths stay
 cwd-anchored. Bodies are the prompt engineer's; this module is the machinery
 that loads, composes, persists, and lints them, and it never chooses which
-template to use — its callers do: the step table for the seat briefs, and
-:mod:`kb_tools.kb_claimgraph.ask` for the two claim-graph inference asks, whose
+template to use — its callers do: the step table for the driver's own calls, and
+:mod:`kb_tools.kb_claimgraph.ask` for the claim-graph inference asks, whose
 composed prompts land in that build's own workspace rather than through
 :func:`persist`.
 
@@ -46,8 +46,8 @@ code single-sourced:
 
 * *constants* — the pool a template draws on only where a slot names it, so one
   pool serves every template that names an entry of it. The caller supplies the
-  pool: today that is ``kb_claimgraph.ask.MARKER_SLOTS``, the marker literals
-  whose parse matches against the same constants;
+  pool: today that is ``kb_claimgraph.ask``'s ``LETTER_SLOTS``, the answer
+  letters whose parse matches against the same constants;
 * *fragments* — the shared fragments, resolved here from :data:`FRAGMENTS` by
   loading the file under ``fragments/`` and rendering it first, so a contract
   several templates carry is one chunk injected by the composer rather than a
@@ -79,7 +79,7 @@ _log = runlog.logger("prompt_templates")
 # Package resource, not a cwd path: the templates ship with the code.
 PROMPT_TEMPLATES_DIR = Path(__file__).parent / "prompt-templates"
 
-TEMPLATE_SUFFIX = ".tmpl"
+TEMPLATE_SUFFIX = ".tmpl.md"
 
 #: Where the pieces spliced into a template live, beneath it. **Membership is
 #: the whole declaration**: the top level holds exactly what something
@@ -116,31 +116,11 @@ _DELIMITER = re.compile(r"@!|!@")
 # The shared fragments, by slot name. A template names the slot; the composer
 # loads the file and supplies the rendered body.
 #
-# `write-op-contract` is the agent-side half of the write-op contract: the
-# values-file discipline and the three exit codes a distiller reads for itself.
-# Exit 8 lands in the calling agent's own Bash result and never reaches the
-# driver, so the retry rule has to be in the brief body — and in exactly one of
-# them, injected here rather than restated by every template that names a write
-# op.
-#
-# It is not the only statement of that contract. The `kb-metadata-write` chunk
-# of `templates/shared-chunks.toml` states it for the two seats that write
-# metadata without a brief — the duplication is deliberate: different readers,
-# separately worded. What is jointly asserted of the two bodies — the
-# values-file transport, exit 7 and 8, the re-run-identical rule and its bound
-# of three — is `tests/test_write_op_contract_sources.py`, which is the only
-# thing naming both. Editing that fragment out of one of those facts fails
-# there.
-#
-# `no-tools` is named by no template: `kb_claimgraph.ask` renders it whole and
-# hands it to `inference.ask_reader`, which appends it to the seat definition's
-# body as the system prompt of a claim-graph ask.
-FRAGMENT_SLOTS: tuple[str, ...] = (
-    "verdict-contract",
-    "return-contract",
-    "write-op-contract",
-    "no-tools",
-)
+# A system prompt is named by no template: the caller renders it whole and hands
+# it to `inference.call_chat` — `reader-system` for a claim-graph ask
+# (`kb_claimgraph.ask`), and a calling row's `steps.Step.system` for the
+# driver's own calls.
+FRAGMENT_SLOTS: tuple[str, ...] = ("reader-system", "overview-system")
 
 #: The caller-selected alternatives, by the slot each is a choice for. A template
 #: carries an ordinary bare slot that knows nothing about the choice, and the
@@ -148,24 +128,19 @@ FRAGMENT_SLOTS: tuple[str, ...] = (
 #: a conditional out of a template body and the chosen prose out of the code that
 #: chooses. ``None`` is a registered choice where the slot's absence is itself an
 #: answer: a first ask carries no correction, and the slot fills with nothing.
-#: Today every slot here is :mod:`kb_tools.kb_claimgraph.ask`'s.
 #:
-#: ``correction`` is **shared** by both of that module's asks, which is why
-#: C-inf's per-claim re-ask registers a slot of its own rather than tailoring
-#: that fragment: an edit there would change the other stage's re-ask. The
-#: node pass's re-ask for unjudged paragraphs is a further alternative on it for
-#: the same reason.
+#: ``correction`` is the re-ask of a letter ask, after the question.
+#: ``classify-options`` is the classify ask's closing question, naming the
+#: letters it admits: all three, or the two a candidate that cannot be *in
+#: support of* is offered. Both are :mod:`kb_tools.kb_claimgraph.ask`'s.
+#: ``passage-correction`` is the re-ask of the overview passage, after the
+#: question, naming the lines a passage may not hold — the step table's
+#: (``steps.Step.correction``).
 ALTERNATIVE_SLOTS: Mapping[str, tuple[str | None, ...]] = MappingProxyType(
     {
-        "correction": (None, "ask-correction", "identify-missing-verdicts"),
-        "display-maths": ("identify-display-maths", "identify-no-display-maths"),
-        "claim-evidence": (
-            "identify-reask-nowhere",
-            "identify-reask-several",
-            "identify-reask-disagreed",
-        ),
-        "paragraph-verdicts": ("identify-verdicts", "identify-no-verdicts"),
-        "no-claim-sentence": ("identify-no-claim-admitted", "identify-no-claim-refused"),
+        "correction": (None, "letter-correction"),
+        "classify-options": ("classify-options-three", "classify-options-two"),
+        "passage-correction": (None, "overview-correction"),
     }
 )
 
@@ -207,7 +182,7 @@ _NO_CHOICES: Mapping[str, str | None] = MappingProxyType({})
 
 
 def template_paths(directory: Path = PROMPT_TEMPLATES_DIR) -> tuple[Path, ...]:
-    """Every ``*.tmpl`` under ``directory``, fragments included, sorted. Empty is a legal answer.
+    """Every ``*.tmpl.md`` under ``directory``, fragments included, sorted. Empty is a legal answer.
 
     The fragments are in because every sweep over the shipped bodies — the lint
     below, and the checks over what a model is shown — asks a question about

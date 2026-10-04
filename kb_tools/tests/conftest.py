@@ -37,6 +37,20 @@ def pytest_unconfigure(config: pytest.Config) -> None:
         shutil.rmtree(_harness_root)
 
 
+@pytest.fixture(autouse=True)
+def no_reader_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts with no server or key named, so an operator's env never reaches a test's call."""
+    from kb_tools.inference import liaison_tools
+
+    for variable in (
+        liaison_tools.BASE_URL_ENV,
+        liaison_tools.MODEL_ENV,
+        liaison_tools.KEY_FILE_ENV,
+        liaison_tools.ALLOW_HTTP_ENV,
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+
 @pytest.fixture
 def runner_gate() -> None:
     """Names a test whose claim-graph pipelines reach stage G through the consuming project's runner.

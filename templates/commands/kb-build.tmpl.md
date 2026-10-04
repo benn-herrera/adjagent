@@ -6,9 +6,6 @@
 # No stages, no procedure, no exit codes: kb_driver/cli.py prints a relay card
 # (kb_driver/baton.py) on every terminating path, and prose here restating one
 # drifts from it.
-# No permission-mode ask: kb_driver/config.py defaults permission_mode to
-# bypassPermissions and the driver names its effective mode at startup; printing
-# the flag would make an override read as a required field again.
 # Trailing text is named as not-an-input because the surface before this one took
 # a charter there, and the argument rule turns every path into --source.
 # The raw `python3 -m kb_tools.kb_driver` line stands in for a runner target that

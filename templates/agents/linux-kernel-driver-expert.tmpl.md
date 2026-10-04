@@ -148,6 +148,8 @@ to the kernel goes. @!integration-logging-signal sink="the kernel log"!@
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

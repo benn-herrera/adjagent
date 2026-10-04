@@ -31,19 +31,18 @@ def test_the_table_covers_the_whole_stage_vocabulary_and_the_walk_covers_the_tab
     fails it rather than quietly buying a green by not going there.
     """
     assert steps.TABLE_STAGE_IDS == kb_pipeline.STAGE_IDS
-    assert len(steps.TABLE_STAGE_IDS) == 10
+    assert len(steps.TABLE_STAGE_IDS) == 9
 
 
-def test_every_row_of_the_table_is_executed_by_a_handler_or_driven_by_another_row() -> None:
+def test_every_row_of_the_table_is_executed_by_a_handler() -> None:
     """The other half: a row nothing runs is a row the sequencer has silently dropped."""
-    unexecuted = set(steps.STEP_IDS) - set(run._HANDLERS) - run.DRIVEN_STEPS
+    unexecuted = set(steps.STEP_IDS) - set(run._HANDLERS)
 
     assert not unexecuted
 
 
-def test_no_handler_and_no_driven_row_names_a_row_the_table_does_not_hold() -> None:
+def test_no_handler_names_a_row_the_table_does_not_hold() -> None:
     assert set(run._HANDLERS) <= set(steps.STEP_IDS)
-    assert run.DRIVEN_STEPS <= set(steps.STEP_IDS)
 
 
 def test_each_stage_of_the_table_appears_once_in_stage_id_order() -> None:
@@ -64,15 +63,6 @@ def test_every_stage_of_the_table_ends_in_exactly_one_ledger_row(stage: str) -> 
     assert recording[0] is rows[-1]
 
 
-def _walked(stage: str) -> tuple[steps.Step, ...]:
-    """The rows of one stage the linear walk executes, in order.
-
-    A driven row is not one of them: it is executed by the handler of the row
-    that drives it, so its position in the table is not a position in the walk.
-    """
-    return tuple(step for step in steps.steps_for(stage) if step.id not in run.DRIVEN_STEPS)
-
-
 @pytest.mark.parametrize("stage", steps.TABLE_STAGE_IDS)
 def test_no_failable_row_stands_between_an_inference_spending_row_and_its_boundary(stage: str) -> None:
     """R-C as a property of the table: expensive work that succeeded is never discarded.
@@ -83,15 +73,10 @@ def test_no_failable_row_stands_between_an_inference_spending_row_and_its_bounda
     and both are the point rather than side effects: no stage may hold two such
     rows, and nothing failable may be appended after one.
 
-    The walk's rows, because a row that drives another is one unit of expensive
-    work: the call it drives takes no boundary of its own, the ledger's entries
-    being the stage vocabulary. What the driving row's boundary accounts for is
-    both calls, and a run killed between them re-spends both.
-
     Static, over the table alone: a timed run would price the guarantee in hours
     and could only ever observe the shape this asserts.
     """
-    walked = _walked(stage)
+    walked = steps.steps_for(stage)
     spending = [index for index, step in enumerate(walked) if step.spends_inference]
 
     assert len(spending) <= 1, f"{stage} holds {len(spending)} inference-spending rows, so one of them has no boundary"
@@ -102,26 +87,6 @@ def test_no_failable_row_stands_between_an_inference_spending_row_and_its_bounda
             f"stands between it and its boundary"
         )
         assert walked[-1].ledger_op is not None
-
-
-@pytest.mark.parametrize("stage", steps.TABLE_STAGE_IDS)
-def test_a_driven_row_spends_inside_a_walked_row_of_its_own_stage(stage: str) -> None:
-    """The other half: a driven row's boundary is its driver's, so it must share the stage.
-
-    A driven row costs a model call and takes no boundary of its own. That is
-    only sound while the row that drives it stands in the same stage — the two
-    calls and the commit that accounts for them are then one stage's business. A
-    driven row whose driver sat in an earlier stage would spend a call behind a
-    boundary already written.
-    """
-    driven = [step for step in steps.steps_for(stage) if step.id in run.DRIVEN_STEPS]
-    if not driven:
-        pytest.skip(f"{stage} drives no row")
-    drivers = [step for step in _walked(stage) if step.spends_inference]
-
-    assert drivers, f"{stage} holds a driven row and no walked row that could drive one"
-    for step in driven:
-        assert step.spends_inference, "a driven row that costs nothing needs no driver to sit in"
 
 
 def test_only_the_first_stage_starts_the_build() -> None:
@@ -149,39 +114,16 @@ CALL_IDS = [step.id for step in CALL_ROWS]
 @pytest.mark.parametrize("step", steps.STEPS, ids=steps.STEP_IDS)
 def test_only_a_row_that_calls_inference_carries_a_brief(step: steps.Step) -> None:
     if step.unit in CALL_UNITS:
-        assert step.template and step.template.endswith(".tmpl")
+        assert step.template and step.template.endswith(".tmpl.md")
     else:
         assert step.template is None
         assert step.slots == ()
 
 
 @pytest.mark.parametrize("step", CALL_ROWS, ids=CALL_IDS)
-def test_a_templates_name_matches_its_call_unit(step: steps.Step) -> None:
-    """A naming convention only: the step table names every template it uses."""
-    assert step.template is not None and ".single." in step.template
-
-
-@pytest.mark.parametrize("step", CALL_ROWS, ids=CALL_IDS)
-def test_every_call_row_names_the_seat_it_dispatches(step: steps.Step) -> None:
-    """``--agent`` carries that name, and ``call.py`` refuses a call row without one."""
-    assert step.seat, "a call row names the seat --agent will carry"
-
-
-@pytest.mark.parametrize("step", steps.STEPS, ids=steps.STEP_IDS)
-def test_only_a_call_row_declares_parses(step: steps.Step) -> None:
-    if step.parses:
-        assert step.unit in CALL_UNITS
-        assert step.template
-
-
-def test_the_verdict_is_asked_of_the_one_review_row() -> None:
-    """The whole parse vocabulary is one format, and one row declares it.
-
-    The verdict rides the *returned text*: a never-writer SINGLE whose return
-    ``call.py`` persists and parses.
-    """
-    assert {step.id for step in steps.STEPS if steps.Parse.VERDICT in step.parses} == {"p5.review"}
-    assert set(steps.Parse) == {steps.Parse.VERDICT}
+def test_every_call_row_names_a_registered_fragment_as_its_system_prompt(step: steps.Step) -> None:
+    """The system prompt is a fragment the composer renders whole, and ``call.py`` refuses a call row without one."""
+    assert step.system in prompt_templates.FRAGMENTS
 
 
 def test_declared_outputs_are_scratch_relative_layout_patterns() -> None:
@@ -211,31 +153,9 @@ def test_the_tables_barrier_pairs_are_each_raised_once() -> None:
     assert set(raised) == {"spine-seed.runner-choice"}
 
 
-def test_a_findings_path_names_the_stage_and_the_author_and_nothing_else() -> None:
-    """One review per stage, one file per reviewing seat, and no counter in the name."""
-    assert steps.findings(stage="phase-5", author="gate") == "review/phase-5-gate.md"
-
-
 # ---------------------------------------------------------------------------
-# The path slots and the lint vocabulary
+# The lint vocabulary
 # ---------------------------------------------------------------------------
-
-
-def test_every_path_slot_is_a_slot_some_shipped_template_declares() -> None:
-    """A misspelled entry checks nothing, and reads exactly like one that does.
-
-    Against the shipped templates rather than against the rows, because the
-    vocabulary deliberately reaches the slots of a template no row dispatches
-    yet — which is what stops a first caller of one from having to know.
-    """
-    declared = {
-        slot.removeprefix(prompt_templates.DYNAMIC_PREFIX)
-        for path in prompt_templates.template_paths()
-        for slot in prompt_templates.slots_of(path.read_text(encoding="utf-8"), source=path.name)
-        if slot.startswith(prompt_templates.DYNAMIC_PREFIX)
-    }
-
-    assert steps.PATH_SLOTS <= declared
 
 
 def test_the_lint_vocabulary_covers_every_stage_id_and_both_ledger_write_verbs() -> None:
@@ -268,12 +188,12 @@ def test_each_unambiguous_stage_id_is_flagged_under_its_own_name(stage_id: str) 
 def test_a_row_spends_inference_by_either_route_and_the_two_stay_distinguishable() -> None:
     """The union is what a no-inference run drops; the halves are not interchangeable.
 
-    The two halves reach a model by different code — the driver's own transport
-    for a ``seat``, a tool the driver invokes for ``spends_own_inference`` — so
-    they have to stay tellable apart, which is why the derived property sits
+    The two halves reach a model by different code — the driver's own call for a
+    ``system`` prompt, a tool the driver invokes for ``spends_own_inference`` —
+    so they have to stay tellable apart, which is why the derived property sits
     beside both rather than replacing either.
     """
-    dispatched = {step.id for step in steps.STEPS if step.seat is not None}
+    dispatched = {step.id for step in steps.STEPS if step.system is not None}
     inside_a_tool = {step.id for step in steps.STEPS if step.spends_own_inference}
     spending = {step.id for step in steps.STEPS if step.spends_inference}
 
@@ -282,12 +202,26 @@ def test_a_row_spends_inference_by_either_route_and_the_two_stay_distinguishable
     assert spending == dispatched | inside_a_tool
 
 
+def test_the_rows_that_call_a_model_are_the_spending_rows_and_the_ones_spending_in_part() -> None:
+    """What the launch check of the environment reads: wider than what a run spending none drops.
+
+    A row spending part of its work on a model keeps running in a build spending
+    none, so it is not dropped — but with inference on it calls the server like
+    any other, and a server nobody named has to be refused before it.
+    """
+    in_part = {step.id for step in steps.STEPS if step.spends_inference_in_part}
+    spending = {step.id for step in steps.STEPS if step.spends_inference}
+
+    assert in_part and in_part.isdisjoint(spending)
+    assert {step.id for step in steps.STEPS if step.calls_a_model} == spending | in_part
+
+
 def test_no_ledger_row_spends_inference() -> None:
     """What lets the walk continue past a stage whose work was dropped.
 
     A stage nothing recorded is a stage no later stage can be recorded after,
     so a build spending no inference finishes only if recording never costs
-    one. Asserted rather than assumed: a record row that grew a seat would make
+    one. Asserted rather than assumed: a record row that grew a call would make
     the whole mode unreachable, and quietly.
     """
     assert [step.id for step in steps.STEPS if step.ledger_op is not None and step.spends_inference] == []
@@ -325,7 +259,6 @@ def test_the_rows_a_stage_loses_are_named_by_the_table_and_not_by_a_stage_id() -
     assert {stage for stage, rows in by_stage.items() if rows} == {
         "claims-discovered",
         "overview-drafted",
-        "phase-5",
     }
     for stage, rows in by_stage.items():
         assert set(rows) <= {step.id for step in steps.steps_for(stage)}, stage
@@ -347,7 +280,7 @@ def test_the_rows_a_stage_loses_are_named_by_the_table_and_not_by_a_stage_id() -
 def test_the_stage_declaration_and_the_rows_agree_about_which_stages_spend_inference() -> None:
     """Derived here, declared there, compared both ways.
 
-    A row gaining a seat or ``spends_own_inference`` in a stage the table calls
+    A row gaining a system prompt or ``spends_own_inference`` in a stage the table calls
     mechanical fails this; so does a stage declaring itself inferential with no
     row that costs a call. Neither can reach a shipped run, which is the
     guarantee the deleted runtime derivation used to carry.

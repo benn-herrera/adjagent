@@ -4,23 +4,35 @@ Integration testing harness and fixtures for kb- commands, agents, and kb_tools.
 
 ## Pointing a build at your own endpoint
 
-`kb_driver run --config <path.toml>` takes a `[claude]` section with two keys: `command`, the argv
-the driver spawns, and `env`, a table of variables set for it. That is where a local endpoint and
-any model routing go — there is no model key, and one is refused at load rather than ignored. A
-command-line flag wins over the file for the field it names, so a config can carry the endpoint
-while `--source`, `--no-inference` and `--through` stay on the line. Unrecognised keys are refused
-with their section named. Keep the file outside the repository: it is yours, not the project's.
+Every model call a build makes is one request to the server its environment names, in
+`liaison_tools`' env format: `API_BASE_URL` (the API root, `/v1` included), `MODEL`, `API_KEY_FILE`
+(the file holding the key) and, for plaintext http to a host that is not loopback, `ALLOW_HTTP=1`.
+No config key names a server or a model, and a `[claude]` section is refused at load like any other
+section nothing reads. A run with a model call left to walk refuses an environment that names no
+server before its first stage, naming the missing variable; a `--no-inference` run needs none. Keep
+the env file outside the repository: it is yours, not the project's.
 
 ## Building a hand-staged fixture with inference
 
-`just kb-driver-fixture <dir> <env-file> [stage-fixture flags] [-- kb_driver run flags]` restages
-the fixture (`stage-fixture`, which refuses while a run holds the repository's lock), then launches
-a with-inference build over it detached and returns. The env file is sourced into the driver's
-environment only and is never printed. Sources are the fixture's top-level `.tex` files that hold
-`\documentclass`. The pid file, console log and run directory land in
+`just kb-driver-fixture <dir> <env-file> [--resume] [--sources=<a.tex>,<b.tex>,...] [stage-fixture flags] [-- kb_driver run flags]`
+(`dir` and `env-file`, like `stage-fixture`'s `dir`, are absolute or relative to the directory you
+ran `just` from, so `just -f kb-testing/justfile ...` from the repository root takes
+`kb-testing/test-data/transient/ModernCorp`; `env-file` is `~` expanded) restages the fixture
+(`stage-fixture`, which refuses while a run holds the repository's lock), then launches a
+with-inference build over it detached and returns. A leading `--resume` skips staging and relaunches
+over the fixture as it stands, so the driver continues from its ledger; it refuses a fixture with no
+installed toolchain or no `kb-build:` ledger commit. The env file is sourced into the driver's
+environment only and is never printed. It names the server every model call of the build goes to, in
+the `liaison_tools` variables above. Sources are the fixture's top-level `.tex` files that hold
+`\documentclass`, unless a leading `--sources=<a.tex>,<b.tex>,...` (either order with `--resume`)
+names exactly the files to build, relative to `dir` and in that order; it refuses an empty list, a
+duplicate, and a file that is missing or holds no `\documentclass`. With `--resume` the named subset
+goes to the driver as given; the ledger is the driver's concern. For example,
+`just kb-driver-fixture test-data/transient/ModernCorp ~/.config/reaper-qwen3.8-flash-next.env --sources=ModernCorp.tex,ModernCorpShort.tex --family=qwen3`.
+The pid file, console log and run directory land in
 `.claude-temp/kb-driver-live/`, so `just kb-driver-harvest` and `just kb-driver-kill` apply; one
 such run at a time. Flags before `--` go to staging (`--family=qwen3`), flags after it to the driver
-(`--through <stage>`, `--doc-audit`).
+(`--through <stage>`).
 
 ## Papers this corpus does not contain
 

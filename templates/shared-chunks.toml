@@ -15,6 +15,23 @@ defaults.act = '''write'''
 defaults.moment = '''implementing a capability'''
 text = '''**Find the incumbent before you @!arg.act!@ one.** Before @!arg.moment!@, search for one that already exists — by what it does, not by what you would name it: an incumbent in another package answers to a description of its behavior and never to your name for it. Your report states the search you ran and what it returned, a negative included ("looked for an existing atomic file write, found none" is reviewable; silence is not). Where you found one and went ahead with a new one anyway, name it and the specific thing it does not do — "it takes no mode argument" is a fact a reader can check by opening the incumbent, while "it is in another package" says nothing about the incumbent at all.'''
 
+# Provenance: observed 2026-10-03 in the ACTIVE_PLAN of commit 072b07d. The
+# architect designed the steps and the main session sequenced the waves, putting
+# the deletion of the `claude` CLI inference path in wave 1; the only proof that
+# the direct-API replacement worked was the last step's done-when. Until a
+# replacement has done the job, the old path is the comparison and the fallback,
+# so one that fails still leaves a working path. Each consumer places this right
+# after incumbent-search: the incumbent found there is the mechanism this rule
+# keeps in place. The plan variant lets the removal share the evidence step, so
+# it holds with CONVENTIONS.md's "Obviated code is deleted" in the same change.
+# prove-replacement-rule is reached only through prove-replacement-first.
+[chunks.prove-replacement-rule]
+text = '''**Retire a mechanism only after its replacement has done the job.** When a job moves from an existing mechanism to a new one, the new one must demonstrably do that job while the old one is still in place, and only then is the old one removed. A pure removal, where the job itself goes away, has nothing to prove.'''
+
+[chunks.prove-replacement-first]
+variants.plan = '''@!prove-replacement-rule!@ In a plan, the step that removes the old mechanism lands no earlier than the step whose completion condition is the new one doing the job — in that step after its evidence, or later — and names that evidence as its precondition. A removal in the same parallel wave as that evidence is not later.'''
+variants.change = '''@!prove-replacement-rule!@ When your assignment deletes a mechanism whose replacement no test or runner target yet shows doing its job, report that as a Blocker and leave it in place.'''
+
 # Stated in their own words, unreached by a chunk edit: prompt-engineer.tmpl.md
 # (`Write no obligation its reader cannot hold`), security-reviewer.tmpl.md
 # (`Inference output crossing a trust boundary`), tech-writer-reviewer.tmpl.md.

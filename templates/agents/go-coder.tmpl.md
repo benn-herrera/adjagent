@@ -14,6 +14,8 @@ recognize when a clever approach is worse than a boring one.
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!machine-guarantees-coder!@
 
 @!separation-of-concerns!@

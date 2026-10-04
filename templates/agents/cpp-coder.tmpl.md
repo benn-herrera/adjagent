@@ -15,6 +15,8 @@ simulating a template instantiation in their head.
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!machine-guarantees-coder!@
 
 @!separation-of-concerns!@

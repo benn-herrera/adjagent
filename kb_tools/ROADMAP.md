@@ -314,18 +314,29 @@ with one of them is the defect.
     **Out of scope**: matching on any word of a definition's body; matching
     outside the claim statement; any proximity or same-document rule; and any
     rule that authors a `depends` edge directly. A match produces a
-    **candidate**, never an edge — it feeds `attribute.narrow`'s existing
-    settle-or-ask path, and `_source_end`'s rule is not relaxed. **The node half
+    **candidate**, never an edge — it joins `attribute.narrow`'s candidates and
+    is classified like every other, and `_source_end`'s rule is not relaxed. **The node half
     alone is worthless** and makes the orphan picture worse, adding nodes
     nothing points at.
 
-    **Separately, in the same stage: `depends.tmpl` and
-    `depends-cycle-reask.tmpl` duplicate their body, and nothing checks that
-    they agree.** An edit one needs is an edit the other will not get.
+13. **Confidence-fed defaults for the letter asks.** A reader returning per-label probabilities is a
+    drop-in (`letters.LetterReader`'s `confidence`), and none is built. With one, a classify answer
+    whose top label clears the next by less than a margin would fall to the candidate's draft, and a
+    paragraph *yes* below a threshold to unjudged — thresholds chosen from the confidences the
+    records already carry, not set ahead of them.
 
-    **Also in the same stage: the dependency ask hands the seat its evidence
-    passages unlabelled** (`ask.py`, the reference-lines slot). They are sorted
-    and deduplicated, so nothing says which candidate a passage bears on and
-    position carries no answer; the seat can only recover the pairing by finding
-    the anchor inside the prose. Keying each passage to its candidates would
-    make it readable.
+14. **A cycle re-ask, if ring demotions of classified edges prove frequent.** Today every
+    `depends` edge on a cycle of the classified set is demoted to a reference with no question
+    asked (`classify.records`), and the report names each. Should those counts run high, one re-ask
+    putting the cycle in front of the seat would be the only ask showing it other answers, with a
+    template of its own.
+
+15. **Sub-paragraph claim granularity, if the paragraph unit proves too coarse.** The node pass
+    mints one claim per paragraph that states a result, so a paragraph stating two results becomes
+    one claim. Measured against the author's own graph (`kb-testing/tools/compare-to-pristine.py`),
+    a claim-recall shortfall traced to merged paragraphs is what would reopen it.
+
+16. **Checking the README template's claims against a built KB, as a toolchain test.** The text
+    `installed/README.tmpl.md` and `installed/CONVENTIONS.tmpl.md` ship into every KB is fixed by
+    the toolchain, so a claim it makes about the tree is either true of every build or a toolchain
+    defect — a question for the test suite over a built fixture KB, never for a build stage.

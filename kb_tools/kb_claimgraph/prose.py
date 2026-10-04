@@ -16,9 +16,9 @@ one verdict by the node pass.
 
 **Where a reference stands** (:func:`standing`) joins the render to the
 record's verdicts, and :func:`claim_of` joins a yes-verdict's paragraph to the
-Tier-2 marker its claim carries there. A paragraph with no verdict is unjudged
-and keeps today's rules; a reference is dropped only on a recorded not-a-claim
-verdict.
+Tier-2 marker its claim carries there. A paragraph with no verdict, or a
+defaulted one, is unjudged and keeps today's rules; a reference is dropped only
+on a recorded not-a-claim verdict.
 """
 
 from collections.abc import Iterable
@@ -87,7 +87,7 @@ class Standing(StrEnum):
     OUTSIDE = "outside"
     CLAIM = "claim"
     NOT_A_CLAIM = "not-a-claim"
-    #: In readable prose no recorded verdict covers.
+    #: In readable prose no recorded verdict covers, or one recorded as defaulted.
     UNJUDGED = "unjudged"
 
 
@@ -100,7 +100,7 @@ def standing(anchor: Anchor, leaf: Readable, entry: kb_pipeline.LeafEntry | None
         (verdict for verdict in (entry.verdicts if entry is not None else ()) if verdict.line == paragraph.start),
         None,
     )
-    if verdict is None:
+    if verdict is None or verdict.judgement is kb_pipeline.Judgement.DEFAULTED:
         return Standing.UNJUDGED
     return Standing.CLAIM if verdict.judgement is kb_pipeline.Judgement.CLAIM else Standing.NOT_A_CLAIM
 

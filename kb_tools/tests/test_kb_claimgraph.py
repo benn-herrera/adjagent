@@ -901,6 +901,107 @@ def test_prose_closing_on_a_quote_reaches_the_register_byte_exact(tmp_path):
     assert [entry.title for entry in kb_index_lib.parse_claim_quality_file(register, kb_root)] == [_QUOTE_CLOSING_TITLE]
 
 
+#: A leaf one directory below its register, its paragraph opening on a linked
+#: figure written relative to the leaf — the shape a live build failed verify on.
+_NESTED_TREE = {
+    "entry-point.md": _ENTRY_POINT,
+    "vol/index.md": "[↑ Knowledge Base](../entry-point.md)\n\n# Vol\n\n- [Sec](sec/index.md)\n",
+    "vol/sec/index.md": "[↑ Vol](../index.md)\n\n# Sec\n\n- [Leaf](leaf.md)\n",
+    "vol/assets/fig.pdf": "",
+}
+_FIGURE_LINE = "[![](../assets/fig.pdf)](../assets/fig.pdf) The outcome of a firm started in the stable region."
+
+
+def _register_link_findings(kb_root):
+    from kb_tools import verify_citations, verify_md_links
+
+    register = kb_root / "vol/claim-quality.md"
+    text = register.read_text(encoding="utf-8")
+    assert "assets/fig.pdf" in text
+    return verify_md_links.check_links(register, text, kb_root) + verify_citations.check_citations(
+        "vol/claim-quality.md", text, kb_root, register
+    )
+
+
+def test_a_prose_claim_s_relative_link_resolves_from_its_register(tmp_path):
+    """The paragraph's link was written for the leaf; the register sits a directory up."""
+    kb_root = _write(
+        tmp_path / "kb-root",
+        {**_NESTED_TREE, "vol/sec/leaf.md": f"[↑ Sec](index.md)\n\n# Leaf\n\n{_FIGURE_LINE}\n"},
+    )
+
+    def land():
+        return write.land_leaf(
+            document="vol/sec/leaf.md",
+            kind="leaf",
+            claims=[write.NewClaim(title=_FIGURE_LINE, rationale="r", locator=_FIGURE_LINE)],
+            blocks={},
+            elsewhere=frozenset(),
+            kb_root=kb_root,
+            scratch=tmp_path / "scratch",
+            stem="leaf",
+        )
+
+    ids = land()
+
+    assert _register_link_findings(kb_root) == []
+    # A resumed run finds the entry under its register title rather than minting a second.
+    assert land() == ids
+    assert len(kb_index_lib.parse_claim_quality_file(kb_root / "vol/claim-quality.md", kb_root)) == 1
+
+
+def test_a_block_claim_s_relative_link_resolves_from_its_register_and_still_binds_to_its_block(tmp_path):
+    """The declared pass's titles take the same rule, and the read-back join meets them there."""
+    from kb_tools.kb_claimgraph import graph
+
+    kb_root = _write(
+        tmp_path / "kb-root",
+        {
+            **_NESTED_TREE,
+            "vol/sec/leaf.md": "[↑ Sec](index.md)\n\n# Leaf\n\n> **theorem**\n>\n"
+            "> **Theorem 1** (Shown in [the figure](../assets/fig.pdf)). *A result.*\n",
+        },
+    )
+    documents = tree.read(kb_root)
+    sites = inventory.scan(documents)
+    write.write(
+        assemble.assemble(documents, sites, identify.block_claims(sites)), kb_root=kb_root, scratch=tmp_path / "s"
+    )
+
+    assert _register_link_findings(kb_root) == []
+    [node] = graph.read(tree.read(kb_root), inventory.scan(tree.read(kb_root))).nodes.values()
+    assert node.locator == sites.claim_blocks()[0].display
+
+
 def test_a_path_needing_an_escape_grammar_is_not_emitted_as_a_quoted_string():
     with pytest.raises(write.WriteError):
         write._compose([{"document": 'vol/a"b.md'}])
+
+
+#: A flattened leaf path long enough that its values file's name passes NAME_MAX,
+#: in ASCII and in a multi-byte script, so the bound is met in bytes rather than
+#: characters.
+_LONG_STEMS = [
+    "equations-" + "_".join(["joint-measurements-on-multiple-samples"] * 8) + ".md",
+    "cinf-" + "_".join(["Fisher-Informationsgrenze-für-gemeinsame-Messungen-ä"] * 6) + ".md",
+]
+
+
+@pytest.mark.parametrize("stem", _LONG_STEMS)
+def test_a_values_file_named_past_name_max_still_lands(tmp_path, stem):
+    path = write._values_path(tmp_path, f"{stem}-1-insert-claim-entry")
+    path.write_text("landed\n", encoding="utf-8")
+    assert len(path.name.encode("utf-8")) <= 255
+    assert path.read_text(encoding="utf-8") == "landed\n"
+
+
+def test_long_values_file_names_sharing_a_prefix_stay_apart(tmp_path):
+    prefix = _LONG_STEMS[0]
+    names = {write._values_path(tmp_path, f"{prefix}_{leaf}-1-insert-claim-entry").name for leaf in ("a.md", "b.md")}
+    assert len(names) == 2
+
+
+def test_a_values_file_name_that_fits_is_unchanged(tmp_path):
+    assert write._values_path(tmp_path, "equations-vol_leaf.md-1-insert-claim-entry").name == (
+        "equations-vol_leaf.md-1-insert-claim-entry.toml"
+    )

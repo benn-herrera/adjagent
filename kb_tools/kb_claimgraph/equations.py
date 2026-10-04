@@ -72,7 +72,6 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path) -> Report:
                 document=path,
                 kind=tree.document_kind(path, has_children=bool(documents.children[path])),
                 claims=[write.NewClaim(title=entry.title, rationale=entry.rationale, locator=None) for entry in found],
-                no_claim=None,
                 blocks={},
                 elsewhere=frozenset(node_id for other, ids in hosted.items() if other != path for node_id in ids),
                 kb_root=kb_root,

@@ -22,9 +22,11 @@ the head driven over the one paper that ships with the tests.
 ``--no-inference`` is what lets the launch go the whole way: every row that would
 cost a model call is dropped, so a fresh entry walks past both claim-graph
 stages and closes the build out without spending anything. The resume spends its
-inference into ``_fake_model``'s invoker instead, which is the seam the driver's
-own surface offers no flag for and must not — a consumer's installed copy
-carries no fake model.
+inference into ``_fake_model``'s chat fake instead, which is the seam the
+driver's own surface offers no flag for and must not — a consumer's installed
+copy carries no fake model. It runs in an environment naming a server all the
+same, because a run with a model call left to walk refuses one that names none
+before its first stage.
 """
 
 import json
@@ -39,10 +41,11 @@ from types import MappingProxyType
 
 import pytest
 
-from kb_tools import inference, install_location, kb_index_lib, kb_pipeline, kb_util
+from kb_tools import install_location, kb_index_lib, kb_pipeline, kb_readme, kb_util
 from kb_tools.kb_claimgraph import tree
-from kb_tools.kb_driver import barriers, baton, config, run, runlog
+from kb_tools.kb_driver import barriers, baton, call, config, prompt_templates, run, runlog, steps
 from kb_tools.kb_write.render import FRONTMATTER_OPENER
+from kb_tools.tests import _chat_stub
 from kb_tools.tests import _fake_model as fake_model
 
 _PKG_PARENT = install_location.current().agents_dir
@@ -103,7 +106,7 @@ def _walk_head(
     stages: Sequence[str],
     overrides: Mapping[str, object] = MappingProxyType({}),
     run_id: str = "20260901T120000-1",
-    invoker: inference.Invoker | None = None,
+    transport: call.Transport | None = None,
 ) -> run.Result:
     """One walk of the head, driven the way the launch line specifies a run.
 
@@ -123,7 +126,7 @@ def _walk_head(
     return run.execute(
         config=config.load(None, run_overrides=dict(overrides), admissible=barriers.ADMISSIBLE),
         paths=paths,
-        invoker=invoker,
+        transport=transport,
         repo_root=consumer,
         stages=stages,
     )
@@ -209,7 +212,7 @@ def lamb(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, run.Result]:
 
 
 def test_the_head_walks_a_repository_that_holds_only_its_sources(lamb: tuple[Path, run.Result]) -> None:
-    """Every stage a build owes recorded, from a repository with no KB in it — and the worktree clean after.
+    """Every stage recorded, from a repository with no KB in it — and the worktree clean after.
 
     The ordering rule, observed: each boundary sweeps what its stage wrote. It
     is what lets the seed run at all — its preflight refuses a dirty worktree,
@@ -219,7 +222,7 @@ def test_the_head_walks_a_repository_that_holds_only_its_sources(lamb: tuple[Pat
     consumer, result = lamb
 
     assert result.exit_code == baton.EXIT_OK, result.detail
-    assert kb_pipeline.recorded_stages(consumer) == {stage.id for stage in kb_pipeline.REQUIRED_STAGES}
+    assert kb_pipeline.recorded_stages(consumer) == set(kb_pipeline.STAGE_IDS)
     assert kb_util.document_tree_present(consumer)
     assert (kb_util.kb_root(consumer) / kb_util.INDEX_DIRNAME).is_dir()
     assert kb_util.targets_installed(consumer)
@@ -302,40 +305,20 @@ def test_the_resolved_citation_path_reaches_the_leaf_and_the_reference_list(lamb
 # The first is bounded where the head's own production ends and spends nothing.
 # The second is told nothing about being a resume — no flag says so and none
 # exists — and walks whatever the ledger's recorded stages leave it, spending
-# its inference into the injected invoker.
+# its inference into the injected chat fake.
 # ---------------------------------------------------------------------------
 
 #: The head's last stage: the two front ends' production ends here, and every
-#: stage past it validates, reviews and documents what they produced.
+#: stage past it validates and documents what they produced.
 HEAD_BOUND = "depends-attributed"
 HEAD_STAGES = kb_pipeline.STAGE_IDS[: kb_pipeline.STAGE_IDS.index(HEAD_BOUND) + 1]
 
-#: The rows the tail dispatches: the draft, the review of it, and the one
-#: revision answering that review.
-TAIL_CALLS = 3
+#: The rows the tail dispatches: the overview draft, and nothing else.
+TAIL_CALLS = 1
 
-#: The row the revision is made by. Its sibling is named by ``run.REVIEW_STEP``,
-#: which the driver has a constant for because its own handler drives it.
-FIX_STEP = "p5.fix"
-
-#: What the two writing rows are answered with. The passages differ so the
-#: assembled document says which call it was last composed over — the revision's
-#: is the one that must stand when the build closes out.
+#: What the draft row is answered with, so the assembled document says which
+#: call it was composed over.
 DRAFT_PASSAGE = "One paper, about a lamb. The entry point lists the volume it built."
-REVISED_PASSAGE = "One paper, about a lamb. Start at the entry point, which lists the volume and its sections."
-
-
-def _meta_seat(context: fake_model.Context) -> fake_model.Response:
-    """The tail's dispatched rows, answered: a verdict for the review, prose for the writers.
-
-    The verdict is composed from the parser's own marker, so a scripted review
-    cannot spell a format the driver would refuse. Its counts are deliberately
-    non-zero: no severity fails this stage, and a resume that stopped on one
-    would be a walk exiting on a model's opinion.
-    """
-    if context.step.endswith(run.REVIEW_STEP):
-        return fake_model.clean(fake_model.verdict(critical=0, warning=1, note=2))(context)
-    return fake_model.clean(REVISED_PASSAGE if context.step.endswith(FIX_STEP) else DRAFT_PASSAGE)(context)
 
 
 @dataclass(frozen=True)
@@ -351,12 +334,14 @@ class Resumption:
     recorded_at_entry: frozenset[str]
     documents_at_entry: tuple[str, ...]
     resumed: run.Result
-    seat_calls: int
+    model_calls: int
+    #: Every call the chat fake served, as it was asked.
+    asked: tuple[fake_model.Context, ...]
 
 
 @pytest.fixture(scope="module")
 def resumption(tmp_path_factory: pytest.TempPathFactory) -> Resumption:
-    """A build bounded at the head's end, then continued by a second invocation that asks for the audit."""
+    """A build bounded at the head's end, then continued by a second invocation."""
     root = tmp_path_factory.mktemp("resumed")
     consumer = _make_fresh_consumer(root / "consumer", corpus=_LAMB, files=(*LAMB_SOURCES, "lamb.bib", "stray.bib"))
     opened = _walk_head(
@@ -368,22 +353,25 @@ def resumption(tmp_path_factory: pytest.TempPathFactory) -> Resumption:
     recorded_at_entry = frozenset(kb_pipeline.recorded_stages(consumer))
     documents_at_entry = tuple(sorted(_documents(kb_util.kb_root(consumer))))
 
-    invoker = fake_model.FakeInvoker(_meta_seat)
-    resumed = _walk_head(
-        consumer,
-        root / "runs",
-        stages=kb_pipeline.STAGE_IDS,
-        overrides={"sources": LAMB_SOURCES, "doc_audit": True},
-        run_id="20260901T120000-2",
-        invoker=invoker,
-    )
+    chat = fake_model.FakeChat(fake_model.clean(DRAFT_PASSAGE))
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _chat_stub.name_server(monkeypatch, port=9, key_dir=root)
+        resumed = _walk_head(
+            consumer,
+            root / "runs",
+            stages=kb_pipeline.STAGE_IDS,
+            overrides={"sources": LAMB_SOURCES},
+            run_id="20260901T120000-2",
+            transport=chat,
+        )
     return Resumption(
         consumer=consumer,
         opened=opened,
         recorded_at_entry=recorded_at_entry,
         documents_at_entry=documents_at_entry,
         resumed=resumed,
-        seat_calls=invoker.calls,
+        model_calls=chat.calls,
+        asked=tuple(chat.seen),
     )
 
 
@@ -423,16 +411,18 @@ def test_the_resume_continues_the_recorded_build_rather_than_opening_one(resumpt
 
 
 def test_the_resume_spends_its_inference_on_the_rows_the_first_invocation_left(resumption: Resumption) -> None:
-    """Three calls, and the document the last of them was composed over.
+    """One call, and the document it was composed over.
 
-    The head's rows are recorded, so nothing re-dispatches them and the calls
-    the injected invoker served are the tail's three. Which one the standing
-    document was assembled over is read off the document itself rather than off
-    a dispatch log: the revision answers the review, so the revision's passage
-    is the one that survives.
+    The head's rows are recorded, so nothing re-dispatches them and the call
+    the injected chat fake served is the tail's one. That the standing document
+    was assembled over it is read off the document itself rather than off a
+    dispatch log.
     """
-    assert resumption.seat_calls == TAIL_CALLS
+    assert resumption.model_calls == TAIL_CALLS
+    (asked,) = resumption.asked
+    system = steps.STEPS_BY_ID["ov.docs"].system or ""
+    assert asked.system_prompt == prompt_templates.render(prompt_templates.FRAGMENTS[system], slots={})
+    assert kb_readme.compose_excerpts(kb_util.kb_root(resumption.consumer)).text in asked.prompt
     overview = (kb_util.kb_root(resumption.consumer) / kb_pipeline.OVERVIEW_DOC).read_text(encoding="utf-8")
 
-    assert REVISED_PASSAGE in overview
-    assert DRAFT_PASSAGE not in overview
+    assert DRAFT_PASSAGE in overview

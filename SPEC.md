@@ -79,11 +79,12 @@ by, and never in a form that would present a shipped package's own documentation
 Where a file's whole content is itself the payload — consumed verbatim as prompt text, or written
 out verbatim as a consuming project's own file — there is no place a banner does not change how the
 file is read, and the file is installed unstamped whatever comment syntax its type would admit: the
-shipped templates, `.tmpl` and `.tmpl.md` alike, are that case. A filetype admitting no comment is
-likewise installed unbannered. Third-party source vendored into a shipped package's `_vendor/`
-directory is a third class: it ships byte-verbatim and is never bannered whatever comment syntax its
-filetype would admit, because a banner would carry this repository's provenance claim and edit-here
-pointer over code it did not write. The verbose install report names every file it leaves unstamped.
+shipped `.tmpl.md` templates, prompt and document alike, are that case. A filetype admitting no
+comment is likewise installed unbannered. Third-party source vendored into a shipped package's
+`_vendor/` directory is a third class: it ships byte-verbatim and is never bannered whatever comment
+syntax its filetype would admit, because a banner would carry this repository's provenance claim and
+edit-here pointer over code it did not write. The verbose install report names every file it leaves
+unstamped.
 The recorded hash is what makes Write Safety below decidable for an installed tree exactly as it is
 for a regenerated one.
 

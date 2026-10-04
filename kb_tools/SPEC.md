@@ -56,13 +56,14 @@ checked against. What is the same across both origins: a leaf's metadata still r
 through the write API, and every derived field on it is still derived, never authored, whichever
 origin wrote the body beside it.
 
-What is *said about* a leaf is inference's still: which registered claims it establishes, or the
-reason it establishes none. That declaration is metadata and reaches the file the way all metadata
-does, through the write API — as do a multi-claim leaf's in-body markers, which the build places
-from the leaf's own words (ARCHITECTURE.md, The Leaf-Body Renderer and The Driver). Where no reading
-reached a leaf with no author-marked claim block, its reason says only that it carries none, and
-asserts nothing about its prose: which leaves were read is build record, never KB metadata. A
-paragraph a reading judges a claim mints one whose span is that paragraph.
+What is *said about* a leaf's prose is inference's still: which claims it establishes, decided
+paragraph by paragraph. A paragraph a reading judges to state a result mints one claim whose span is
+that paragraph and whose title is that paragraph's own words. A leaf establishing no claim carries
+the mechanical reason, which says only that it carries none and asserts nothing about its prose,
+whether or not a reading reached it: which leaves were read is build record, never KB metadata.
+That declaration is metadata and reaches the file the way all metadata does, through the write API
+— as do a multi-claim leaf's in-body markers, which the build places from the leaf's own words
+(ARCHITECTURE.md, The Leaf-Body Renderer and The Driver).
 
 ### The Skeleton Is Derived
 
@@ -142,7 +143,9 @@ numbering is fixed and is what other documents and code cite by point number.
    a dependency edge from a cross-reference where something other than the reference itself supplies
    the direction — a reference inside a proof runs from the claim that proof establishes, the
    containment being part of the markup — provided it proves the result acyclic before it writes it,
-   and never stores a cycle it finds as a dependency graph. Where those edges go instead, and why a
+   and never stores a cycle it finds as a dependency graph. Containment supplies that direction *for
+   the draft*: where a classification runs, a proof-contained pair is asked whether it is *supported
+   by* or a *mention*, and never *in support of*. Where those edges go instead, and why a
    cycle costs them and nothing else, is the `references` class's (Claim-Graph Nodes and Edges,
    below). What is forbidden is importing this edge set unchecked, which is what would make the
    acyclicity the claim graph guarantees a property of the source rather than of the consumer.
@@ -500,7 +503,9 @@ properties are what keep the class from being a weak `depends`, and each is a re
 than an observation:
 
 - **Direction comes from the markup, not from judgement.** The source is the claim whose text
-  carries the reference; the target is the claim the reference resolves to. Nothing infers it and
+  carries the reference; the target is the claim the reference resolves to. A claim named by its
+  printed name and number with no `\ref` — *follows directly from Lemma 4.6* — is a reference too,
+  and its source is the claim whose body carries the mention. Nothing infers it and
   nothing is asked about it. A reference in prose judged not a claim has no source claim and yields
   no edge; in prose never judged, the source is every claim its document hosts. A reference the page
   introduces as a section, a figure, a table or a kind of block classified as stating no result —
@@ -508,12 +513,13 @@ than an observation:
   yields no edge here; the claims its target document hosts are not what the author pointed at.
 - **It is under no acyclicity constraint.** Two claims naming each other is the author's argument,
   not the defect a dependency cycle is — point 6's own reading of a cross-reference set that may
-  contain cycles. `check_acyclic` continues to run over `depends` alone, and a corpus whose claims
-  name each other mutually builds.
+  contain cycles. Acyclicity is checked over `depends` alone, and a corpus whose claims name each
+  other mutually builds.
 
-  **This is also where a ring of derived dependency edges lands.** Where a build directs edges by
-  the containment rule point 6 admits and the directed set closes a cycle, every edge on that cycle
-  is recorded in this class instead, and the build carries on. The cycle proves those edges cannot
+  **This is also where a ring of derived dependency edges lands.** Where a build directs edges —
+  by the containment rule point 6 admits, or by classifying them (below) — and the directed set
+  closes a cycle, every edge on that cycle is recorded in this class instead, and the build carries
+  on; nothing is asked again about the cycle. The cycle proves those edges cannot
   all be dependencies; it proves nothing about any other edge the corpus yielded, so producing no
   graph for that document spends a whole paper on one ring and records every claim in it as resting
   on nothing. The relationship each demoted edge states is kept — the author did write one claim's
@@ -527,9 +533,16 @@ than an observation:
   field of its own (`kb_index_lib.ClaimEntry.references`) rather than among the edges that compute,
   so the guarantee is structural and not a branch each consumer remembers to write.
 
-**Recording a reference is not answering the dependency question.** Where a pair is both recorded
-here and put to inference, the ask still happens; a build that suppressed it because it had already
-written something down would trade the answer for the note.
+**Every edge candidate is classified *mention*, *supported by* or *in support of*.** A candidate is
+an ordered pair of claims whose source names its target, however the build found it. It is offered
+only what the graph can carry: a pair whose target is a minted equation node is never offered *in
+support of*, an edge from a node no edge may originate at being provably wrong, and nor is a pair
+containment directs, a proof of one claim citing another that rests on the first being circular
+unless it is a mention. *Mention* is a `references` edge source → target; *supported by* is a
+`depends` edge source → target and *in support of* a `depends` edge target → source, and either
+dependency is recorded with no `references` edge beside it. A build that cannot classify a candidate
+records its mechanical draft: *supported by* where containment directs the pair and no ring refuses
+it, *mention* everywhere else.
 
 **`depends` and `strengthens` differ temporally, not computationally.** Both resolve in the single
 pass of `kb_index_lib.compute_solidity_full`; neither has a computation of its own. What separates
@@ -789,28 +802,38 @@ PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util render-citation --va
 
 ## The Driver's Contract
 
-`kb_driver/` runs a KB build end to end: it sequences the stages, dispatches each seat, checks what
+`kb_driver/` runs a KB build end to end: it sequences the stages, makes each model call, checks what
 came back, records the ledger, and stops at a decision instead of taking one. **No inference
 performs sequencing, recording, or display** — those belong to the toolchain, enforced mechanically
 (ARCHITECTURE.md, The Driver). **A barrier is an *exit*, never a prompt**: the driver never blocks
 on a human, so the answer arrives on the next invocation through `--decide` or a config table.
 
 **The build is driver-controlled end to end, and there is no coordinator seat.** One process
-sequences a build: it dispatches every seat itself, reads every tool's exit code itself, and records
-every boundary itself. Nothing in this contract, and no artifact this toolchain produces, admits a
-second controller — human or agent — standing between an invocation and the driver's own step table;
-a build has exactly one process directing it, from `start` through its last stage.
+sequences a build: it makes every model call itself, reads every tool's exit code itself, and
+records every boundary itself. Nothing in this contract, and no artifact this toolchain produces,
+admits a second controller — human or agent — standing between an invocation and the driver's own
+step table; a build has exactly one process directing it, from `start` through its last stage.
+
+**Every model call a build makes is one tool-less chat-completions request** to the server its
+environment names — `API_BASE_URL`, `MODEL`, `API_KEY_FILE` and `ALLOW_HTTP`, in `liaison_tools`'
+env format — whether the driver makes it or a tool the driver invokes does. Nothing a build runs
+spawns a process to obtain a model's answer, and no call is offered a tool, so everything a call
+judges is in its prompt. OpenAI chat-completions is a given interface, observed against a local oMLX
+server serving `Qwen3.8-Flash-Next` (2026-10-04; its stream reports no server version). **A build
+that will spend inference refuses, before the first stage it walks, when its environment does not
+name a server**: exit 14, naming the variable and never its value. A resume is checked the same way,
+and a build spending no inference, or with no stage left to walk that calls a model, needs no
+server.
 
 **A build has exactly two modes, fresh and resume, and resume is never configured.** Which one an
 invocation performs is read off the ledger itself — recorded stages mean resume, none mean fresh —
 re-derived on every invocation rather than chosen on a command line or in a config table. Revising a
 finished KB is not a third mode: it is the maintenance path's work, a maintainer and a human
-cooperating through the write API, and no driver invocation expresses it — the one exception being
-the opt-in document audit below, which is a stage of the same ledger and is reached by resuming it.
-The one thing a fresh launch must be guarded against is destroying what a prior build already wrote:
-an invocation finding `kb-root/` already `populated` (`kb_util.kb_root_state`) refuses, naming what
-it found; finding it `absent`, or `spine-only` — holding only the derived index, with no authored
-byte to lose — it proceeds.
+cooperating through the write API, and no driver invocation expresses it. The one thing a fresh
+launch must be guarded against is destroying what a prior build already wrote: an invocation finding
+`kb-root/` already `populated` (`kb_util.kb_root_state`) refuses, naming what it found; finding it
+`absent`, or `spine-only` — holding only the derived index, with no authored byte to lose — it
+proceeds.
 
 **A build may spend no inference and still be a finished build.** `--no-inference` drops every step
 that would cost a model call and the walk carries on past it, so the run produces a real KB built
@@ -867,31 +890,17 @@ not to the stage, because one check may guard more than one boundary and a per-s
 let two stages disagree about it. A record says only what the build was; which checks that excuses
 is the toolchain's own classification and is not nameable from a command line.
 
-**No stage exits on a review's findings, and a stage that ends on a seat's review is a fixed
-sequence rather than a loop.** The review runs, one revision answers what it wrote, and the stage
-records: nothing re-reviews, nothing counts what the revision closed, and no severity the reviewer
-returns fails the stage. The documents stand as written, with whatever findings are outstanding
-against them. A stage that ends when a reviewer stops finding problems is a stage exiting on a
-model's opinion, which is the failure `CONVENTIONS.md` records under "a `kb_claimgraph` stage never
-exits on a model's opinion": reviewer instructions that make problems inexhaustible make such a
-stage unable to terminate, and a gate reading one severity rather than another only narrows which
-opinion it hangs on.
+**No stage exits on a model's opinion.** A stage that ends when a reviewer stops finding problems is
+the failure `CONVENTIONS.md` records under "a `kb_claimgraph` stage never exits on a model's
+opinion": reviewer instructions that make problems inexhaustible make such a stage unable to
+terminate, and a gate reading one severity rather than another only narrows which opinion it hangs
+on. No stage reviews the documents the build writes, and a build is complete once the overview is
+written.
 
-**Findings that stop nothing must still be seen, and that is the other half of the same guarantee.**
-The stage states the review's counts, one per severity, and names the findings artifact so a reader
-can go look — in both directions, a review that raised nothing saying so in as many words. Whether a
-class of finding should stop a build is a decision made later from the record of what those findings
-actually were, so a silent carry-past would spend the evidence that decision runs on; and an absence
-that reads like success is the failure this states the zero form against.
-
-**The review of the build's own documents is an audit a run asks for, not a stage a build owes.**
-Its findings recur build after build, because they come from the text the toolchain itself ships
-into those documents, which no revision of one KB can change; its worth is as an occasional audit of
-what that text claims. A build is complete once the overview is written, with the audit unrecorded
-and the ledger saying so. A run asks for it with `--doc-audit`: it then walks after the build's last
-stage, as a recorded stage like any other, and over a ledger whose build is already complete it
-walks alone, rebuilding nothing. Once recorded it is not walked again, and a ledger that recorded it
-reads as complete.
+**A stage id leaves the vocabulary without leaving the ledgers that recorded it.** A ledger holding
+a boundary for an id the stage table no longer has reads exactly as it would without that boundary:
+complete when every current stage is recorded, and counting and listing the current stages alone.
+An id once retired is never given to a new stage.
 
 **The build authors the claim graph and grades none of it.** Every rigor value and every on-point
 fraction a build writes is the `*pending*` literal, and a finished build leaves them there.
@@ -904,6 +913,13 @@ this build dispatches mints anything. Every id, edge and register entry a build 
 mechanically, inside `kb_claimgraph`, which writes the unscored literal by construction — and the
 validation gate over what it wrote is what holds it there.
 
+**Every claim-graph inference is one decision, answered by one label from a closed set the build
+offers.** An answer that is not one of the offered labels is asked once more; otherwise the item
+takes its stated default and is recorded as defaulted — a paragraph stays unjudged, and an edge
+candidate takes its mechanical draft. Only a call that does not complete stops a stage: no answer
+arrived, and defaulting every item after it would present a model that is not answering as a
+finished run.
+
 **The build derives the tree and grades none of it.** The skeleton is computed from the surveyed
 sources (The Skeleton Is Derived, above) before any seat is asked about the taxonomy, and a build
 that cannot derive a partition from its own manifest stops rather than asking a seat to repair one —
@@ -914,17 +930,23 @@ no seat proposes one.
 from its own extent (Leaf Bodies Are Derived, above) and written by the driver, so no stage asks a
 seat to read a source extent and no stage asks one to transcribe it. What a seat is asked for is
 judgement about material that already exists — the structural and conceptual reading a survey
-produces, the claims a written leaf establishes, the summaries above it, the reviews — and the build
+produces, the claims a written leaf establishes, the summaries above it — and the build
 carries no stage whose product is a copy of the corpus in a second place.
+
+**The overview passage is written from excerpts the build composes from the tree, and from nothing
+else.** They are the entry point, then for each document it lists that document's index and then
+its own opening prose where it has one. Each is the document's own text less its metadata block,
+its link up and every link destination, and a boundary between two names the next by its title,
+never its path. The same tree gives the same excerpts byte for byte; one document, and the whole,
+are capped, and a cut falls on a paragraph boundary and is reported. The passage is prose: a reply
+holding a heading, a list item, a table row, a code fence, a link or a `.md` path is asked for once
+more, quoting those lines back, and a second such reply stops the build.
 
 **A build is launched, never composed.** One invocation opens a build, and nothing is authored
 before it: the run's sources — the only field with no default — are arguments to that invocation,
-and a charter is optional, a build given none running on the sources it was given. The permission
-mode every dispatched call runs under is defaulted rather than asked for, because the driver is
-headless and a mode that gates a tool the build needs stops it with nobody to answer; an invocation
-may override it, and **a run states the mode it took, and the flag that changes it, before its first
-stage**. A config file remains available for a run that sets more than the arguments carry, and
-where both are given the argument wins for the field it names.
+and a charter is optional, a build given none running on the sources it was given. A config file
+remains available for a run that sets more than the arguments carry, and where both are given the
+argument wins for the field it names.
 
 Exit codes are one ladder, enumerated in `baton.RUN_MODE_EXIT_CODES`. Every terminating invocation
 prints a relay card naming what to ask and what to run next, and an unrecognized code prints the

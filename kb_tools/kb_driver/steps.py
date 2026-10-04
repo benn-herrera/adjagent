@@ -6,14 +6,14 @@ sequencer, and everything else in the driver reads them. The
 guard is ``prompt_templates.lint`` run over :data:`TEMPLATE_PROHIBITIONS`, which also
 carries the metadata markers — the other thing a brief may never spell.
 
-What this module holds: rows, their call unit and seat, the template and the
+What this module holds: rows, their call unit and system prompt, the template and the
 per-call slots the run loop must compute, the artifacts the contract check
-looks for, the parses each return must survive, and the barriers a row can
-raise. What it must not hold: subprocess calls, file writes, or template text.
-Stage order comes from ``kb_pipeline`` and is never restated here.
+looks for, and the barriers a row can raise. What it must not hold: subprocess
+calls, file writes, or template text. Stage order comes from ``kb_pipeline``
+and is never restated here.
 
 **Scope**: the rows below cover every stage of the pipeline, and a run walks all
-of them but an opt-in stage it did not ask for (``run.Runner.run``). :data:`TABLE_STAGE_IDS` is sliced from ``kb_pipeline.STAGE_IDS`` so it
+of them. :data:`TABLE_STAGE_IDS` is sliced from ``kb_pipeline.STAGE_IDS`` so it
 cannot disagree with the stage vocabulary about order or membership.
 
 Executing a row is the run loop's job. This module is a table.
@@ -33,7 +33,7 @@ from .. import kb_pipeline, kb_util
 
 
 class Unit(StrEnum):
-    """A step's call unit. ``SINGLE`` is the one that dispatches a seat."""
+    """A step's call unit. ``SINGLE`` is the one that makes a model call."""
 
     DRIVER_OP = "driver-op"
     GATE = "gate"
@@ -46,12 +46,6 @@ class Writer(StrEnum):
     NONE = "—"
     DRIVER = "driver"
     TOOL = "tool"
-
-
-class Parse(StrEnum):
-    """The formats a step's return must survive. Existence and parse only, never quality."""
-
-    VERDICT = "verdict"
 
 
 class LedgerOp(StrEnum):
@@ -79,88 +73,17 @@ class LedgerOp(StrEnum):
 # names its path permanently, so it lives at `kb_pipeline.CHARTER_RELPATH` in
 # the tracked tree. Staging deletes this one wholesale.
 
-# A review's evidence lands in `review/` under one filename grammar, so that a
-# reader can tell one stage's findings from another's and one author's from
-# another's. One format string, so a stage whose review dispatches several seats
-# and a stage that dispatches one cannot end up with two readings of the same
-# name. A file here is evidence and nothing else: nothing is read back out of a
-# name, and a review runs once per stage, so the file a dying process left is
-# overwritten by the review that really runs.
-_FINDINGS_FMT = "review/{stage}-{author}.md"
-FINDINGS = _FINDINGS_FMT.format(stage="<stage>", author="<author>")
-
-
-def findings(*, stage: str, author: str) -> str:
-    """One review's findings path for one author, scratch-relative."""
-    return _FINDINGS_FMT.format(stage=stage, author=author)
-
-
-# The seat's whole half of the meta-documentation stages: one prose answer, which
-# the driver persists here and then substitutes into the packaged overview
-# template beside the counts it read out of the KB. Deliberately not under
-# `review/` — that grammar is the review's, and a file there is what a reviewing
-# seat wrote — and deliberately one path per stage: the latest answer is the one
-# the document stands on.
+# The model's whole half of the meta-documentation stage: one prose answer,
+# which the driver persists here and then substitutes into the packaged overview
+# template. One path per stage: the latest answer is the one the document stands
+# on.
 _PROSE_FMT = "{stage}/overview-prose.md"
 OVERVIEW_PROSE = _PROSE_FMT.format(stage="<stage>")
 
 
 def overview_prose(*, stage: str) -> str:
-    """Where ``stage``'s seat's prose answer lands, scratch-relative."""
+    """Where ``stage``'s prose answer lands, scratch-relative."""
     return _PROSE_FMT.format(stage=stage)
-
-
-# --- the KB documents the last three stages author ---------------------------
-#
-# These live under `kb-root/`, not under the scratch layout, so they are never
-# a row's `outputs` — those are scratch-relative patterns. The run loop names
-# the KB path and declares it at the call, the way the mint-bearing rows
-# already do for registers.
-
-META_REVIEW_SEAT = "tech-writer-reviewer"
-
-
-# --- what a brief says when it hands a seat a path ----------------------------
-
-#: What a brief says when a slot has nothing to carry. A slot is never left
-#: empty: an empty slot reads as a truncated brief, while a named absence reads
-#: as an absence. It is the one value a path slot may carry that is not a path.
-NOTHING = "(none)"
-
-#: The path slots a brief must carry a real path for. Each names something an
-#: earlier stage has already produced, so an absent one is that stage having
-#: failed quietly rather than an input this build may not have: ``kb-root`` is
-#: the tree the head wrote, ``readme-path`` is what ``ov.docs`` assembles in the
-#: stage immediately before the review, and ``conventions-path`` is what
-#: ``phase-3a``'s readiness stamp seeds two stages earlier.
-REQUIRED_PATH_SLOTS: frozenset[str] = frozenset({"kb-root", "readme-path", "conventions-path"})
-
-#: The path slots whose subject a build may legitimately not have, and which
-#: therefore admit :data:`NOTHING`. The draft has no findings to answer, which
-#: is an absence with a name rather than a file that is missing.
-OPTIONAL_PATH_SLOTS: frozenset[str] = frozenset({"remediation-source-path"})
-
-#: Every slot of this driver's own vocabulary whose value is a filesystem path,
-#: and the whole of it. ``call.Caller`` holds two things of one: the value is an
-#: absolute path that exists, or — for an optional slot alone — :data:`NOTHING`.
-#:
-#: **Absolute**, because a seat resolves a relative path against a working
-#: directory this driver sets and no brief states, so a relative path in a brief
-#: is a path with no base. That is the ambiguity ``call.CallRequest`` already
-#: refuses for the artifacts a step declares, asked here on the side of the call
-#: that carries paths *in*. A live review handed ``kb-root/README.md`` searched
-#: for a directory of that name instead of resolving it, reviewed a different
-#: repository's knowledge base, and returned three critical findings about it.
-#:
-#: **Existing**, because the alternative to a precondition is an instruction,
-#: and a seat handed a path to a file that is not there has to be relied on to
-#: report that rather than to find something nearby. A dangling path is never
-#: the right thing to state: where a build may not have the subject, the slot
-#: is optional and carries the named absence instead.
-#:
-#: Keyed by slot rather than by row so one entry closes the slot wherever a row
-#: fills it — including the slots of a template no row dispatches today.
-PATH_SLOTS: frozenset[str] = REQUIRED_PATH_SLOTS | OPTIONAL_PATH_SLOTS
 
 
 # --- what a template may never say --------------------------------------------
@@ -182,10 +105,10 @@ SEQUENCING_TOKENS: tuple[str, ...] = (LedgerOp.ADVANCE_STEP.value, LedgerOp.STAR
 # question of a template line: does it say something it may not say.
 METADATA_MARKER_TOKENS: tuple[str, ...] = ("<!-- id:", "<!-- kb-frontmatter", "<!-- claim-quality:")
 
-# The write ops' one flag. A template names it through
-# `@!values-flag!@`; spelling it by hand is the same freehand act removed from
-# the op token, and it is the token a rename would leave stale in every brief at
-# once. Banning the literal is what makes "no site hand-types the flag" a
+# The write ops' one flag. A template that needs it names it through a slot the
+# caller's constant pool fills; spelling it by hand is the same freehand act
+# removed from the op token, and it is the token a rename would leave stale in
+# every brief at once. Banning the literal is what makes "no site hand-types the flag" a
 # property of the template set rather than of the sites that happen to exist.
 WRITE_FLAG_TOKENS: tuple[str, ...] = (kb_util.VALUES_FLAG,)
 
@@ -193,8 +116,8 @@ WRITE_FLAG_TOKENS: tuple[str, ...] = (kb_util.VALUES_FLAG,)
 def _template_prohibitions() -> dict[str, re.Pattern[str]]:
     # Boundaries exclude `.` and `-` so that one id does not match inside
     # another that extends it — each is flagged under its own name — and so a
-    # layout path the driver itself supplies (`review/phase-3a-…`) is not
-    # read as prose naming a stage.
+    # layout path the driver itself supplies is not read as prose naming a
+    # stage.
     patterns: dict[str, re.Pattern[str]] = {}
     for stage_id in kb_pipeline.STAGE_IDS:
         body = re.escape(stage_id)
@@ -218,46 +141,58 @@ class Step:
     """One row of the step table.
 
     ``outputs`` are layout patterns, scratch-relative, with ``<...>`` marking a
-    segment the run loop expands (a stage id, a seat name). ``slots`` are
-    the per-call values the run loop computes; the slots the composer resolves
-    for itself — fragments, alternatives — are deliberately absent.
+    segment the run loop expands (a stage id). ``slots`` are the per-call
+    values the run loop computes; the slots the composer resolves for itself —
+    fragments, alternatives — are deliberately absent. ``system`` is the
+    fragment the composer renders whole as a calling row's system prompt.
+    ``correction`` is the alternative slot a re-ask after a rejected reply
+    fills, and the choice it fills it with; the first ask fills it with nothing.
     """
 
     id: str
     stage: str
     unit: Unit
     writer: Writer = Writer.NONE
-    seat: str | None = None
+    system: str | None = None
     template: str | None = None
+    correction: tuple[str, str] | None = None
     slots: tuple[str, ...] = ()
     outputs: tuple[str, ...] = ()
-    parses: tuple[Parse, ...] = ()
     raises: tuple[str, ...] = ()
     ledger_op: LedgerOp | None = None
-    #: This row's **whole** work is a model call spawned inside a tool the
-    #: driver invokes — ``kb_claimgraph``'s ``ask.SeatAsk`` — so a build
-    #: spending none drops the row outright. It is not "reaches
-    #: ``ask.SeatAsk``": ``depends.attribute`` reaches it too and declares
-    #: nothing here, because only part of that row costs a call and the rest
-    #: settles edges that must not be discarded with the questions — it gets
-    #: the tool's own ``--no-inference`` passed through instead
-    #: (``run._claim_graph``). The field is a declaration rather than a derived
-    #: fact for that reason: the split is the row's to state.
-    #: :attr:`spends_inference` is what reads it; nothing else does.
+    #: This row's **whole** work is a model call made inside a tool the driver
+    #: invokes — ``kb_claimgraph``'s ``ask.ask_without_tools`` — so a build
+    #: spending none drops the row outright. :attr:`spends_inference` is what
+    #: reads it.
     spends_own_inference: bool = False
+    #: **Part** of this row's work is a model call made inside the tool it
+    #: invokes, and the rest settles what must not be discarded with the
+    #: questions — so a build spending none keeps the row and passes the tool its
+    #: own ``--no-inference`` (``run._claim_graph``). The split is the row's to
+    #: state, so it is a declaration rather than a derived fact.
+    #: :attr:`calls_a_model` is what reads it.
+    spends_inference_in_part: bool = False
 
     @property
     def spends_inference(self) -> bool:
-        """Whether running this row costs a model call, by whichever route.
+        """Whether running this row costs a model call, by whichever route — what a run spending none drops.
 
         The two routes are not otherwise comparable and that is why this exists:
-        :attr:`spends_own_inference` is a model spawned *inside* a tool the
-        driver invokes, and a row naming a ``seat`` is a model the driver
-        dispatches through its own transport. A run spending no inference does
-        without both, so it is this union — never either half — that decides
-        which rows it walks.
+        :attr:`spends_own_inference` is a model called *inside* a tool the
+        driver invokes, and a row naming a ``system`` prompt is a call the driver
+        makes itself. A run spending no inference does without both, so it is
+        this union — never either half — that decides which rows it walks.
         """
-        return self.spends_own_inference or self.seat is not None
+        return self.spends_own_inference or self.system is not None
+
+    @property
+    def calls_a_model(self) -> bool:
+        """Whether this row, in a run spending inference, calls the server the environment names.
+
+        Wider than :attr:`spends_inference` by the rows that spend part of their
+        work on one: what the launch check of the environment reads.
+        """
+        return self.spends_inference or self.spends_inference_in_part
 
 
 # --- the table ---------------------------------------------------------------
@@ -271,7 +206,6 @@ _EQUATIONS_MINTED = "equations-minted"
 _DEPENDS_ATTRIBUTED = "depends-attributed"
 _PHASE_3A = "phase-3a"
 _OVERVIEW_DRAFTED = "overview-drafted"
-_PHASE_5 = "phase-5"
 
 
 def _through(stage: str) -> tuple[str, ...]:
@@ -280,11 +214,11 @@ def _through(stage: str) -> tuple[str, ...]:
 
 
 #: Every stage this table holds rows for, and every stage a run may walk — the
-#: whole pipeline, opt-in stages included. ``_through(_PHASE_5)`` rather than ``kb_pipeline.STAGE_IDS``
-#: directly, so that a stage appended to the vocabulary after ``phase-5``
+#: whole pipeline. ``_through(_OVERVIEW_DRAFTED)`` rather than ``kb_pipeline.STAGE_IDS``
+#: directly, so that a stage appended to the vocabulary after ``overview-drafted``
 #: arrives here as a row this table is missing rather than as a stage the walk
 #: silently claims to cover.
-TABLE_STAGE_IDS: tuple[str, ...] = _through(_PHASE_5)
+TABLE_STAGE_IDS: tuple[str, ...] = _through(_OVERVIEW_DRAFTED)
 
 STEPS: tuple[Step, ...] = (
     # --- pre-stage: before `start` is recorded -------------------------------
@@ -388,12 +322,12 @@ STEPS: tuple[Step, ...] = (
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
     # --- claims-discovered — the node pass --------------------------------------
-    # The whole of this row is a model call, and it is spawned inside
-    # `kb_claimgraph` rather than through this driver's own transport: the seat
-    # is that package's `ask.SeatAsk`. That is what `spends_own_inference`
-    # declares, and it is why the field sits beside `seat` rather than being
-    # collapsed into it — the two routes are dropped by the same flag and reached
-    # by different code.
+    # The whole of this row is a model call, and it is made inside
+    # `kb_claimgraph` rather than by this driver: the reader is that package's
+    # `ask.ask_without_tools`. That is what `spends_own_inference` declares, and
+    # it is why the field sits beside `system` rather than being collapsed into
+    # it — the two routes are dropped by the same flag and reached by different
+    # code.
     #
     # `--no-inference` excludes this row outright, which is not a bound: the
     # walk continues, `discover.record` still writes the boundary, and the node
@@ -432,20 +366,21 @@ STEPS: tuple[Step, ...] = (
     ),
     # --- depends-attributed — stage D -----------------------------------------
     # **The row runs in every build, and only part of it costs a call.** Stage
-    # D's narrowing settles an edge wherever containment decides it — a `\ref`
-    # inside a proof body is direction-bearing by construction — and only the
-    # pairs it leaves open go to `ask.SeatAsk` through `ask.ModelSelector`. The
-    # row therefore declares no inference of its own: dropping it would discard
-    # the settled edges along with the questions, and a graph that records no
-    # relationship it holds in hand asserts its claims rest on nothing
+    # D's narrowing drafts every edge candidate mechanically — *supported by*
+    # where containment directs it, a `\ref` inside a proof body being
+    # direction-bearing by construction, and *mention* everywhere else — and
+    # the classification puts each candidate to `ask.ask_without_tools` as one
+    # letter ask. The row therefore declares no inference of its own: dropping
+    # it would discard the drafts along with the asks, and a graph that records
+    # no relationship it holds in hand asserts its claims rest on nothing
     # (`kb_tools/AGENTS.md`, the second bullet). `run.py` passes the tool its
-    # own `--no-inference` instead, and the open pairs are reported rather than
-    # guessed at.
+    # own `--no-inference` instead, and every candidate takes its draft.
     Step(
         id="depends.attribute",
         stage=_DEPENDS_ATTRIBUTED,
         unit=Unit.DRIVER_OP,
         writer=Writer.TOOL,
+        spends_inference_in_part=True,
     ),
     Step(
         id="depends.record",
@@ -470,25 +405,20 @@ STEPS: tuple[Step, ...] = (
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
     # --- overview-drafted — the overview document, written --------------------
-    # **The stage assembles the document; the seat is never asked to compose
-    # one.** Every count the overview document states already sits in `.index/`
-    # or in the tree, so it is read and substituted rather than written out by a
-    # model and then audited by a second one. What is left for a seat is the
-    # part no read produces — what this corpus is and where a reader starts —
-    # and the answer to that is prose and nothing else, which is a return shape
-    # with nothing to get wrong. Hence `Writer.DRIVER`: the returned text *is*
-    # the artifact, persisted under the scratch layout, and `run._meta_docs`
-    # substitutes it.
+    # **The stage assembles the document; the model is never asked to compose
+    # one.** What is left for a model is the part no read produces — what this
+    # corpus is and where a reader starts — and the answer to that is prose and
+    # nothing else. Hence `Writer.DRIVER`: the returned text *is* the artifact,
+    # persisted under the scratch layout, and `run._meta_docs` substitutes it.
     #
-    # **The draft is a stage of its own because it spends a model call and the
-    # review that follows it spends another.** A stage holding both would leave
-    # the draft's answer behind a review that can fail, and a resume would buy it
-    # a second time; the boundary below is what earns it once
-    # (`kb_pipeline.STAGES`, the granularity comment).
+    # **The draft's boundary stands immediately behind it because it spends a
+    # model call.** Anything failable between the two would leave the draft's
+    # answer behind it, and a resume would buy it a second time; the boundary
+    # below is what earns it once (`kb_pipeline.STAGES`, the granularity comment).
     #
     # The docent check runs *first* for the same reason read the other way: it
     # can fail, so it may not stand behind the call. An incomplete install is
-    # also cheaper to meet before a seat is dispatched than after. A driver-op
+    # also cheaper to meet before a call is made than after. A driver-op
     # over an imported constant: the docent commands are what make a finished KB
     # navigable, and their absence is an incomplete install (exit 14), never a
     # barrier — there is no answer that would install them.
@@ -498,61 +428,15 @@ STEPS: tuple[Step, ...] = (
         stage=_OVERVIEW_DRAFTED,
         unit=Unit.SINGLE,
         writer=Writer.DRIVER,
-        seat="tech-writer",
-        template="phase-5-overview-passage.single.tmpl",
-        slots=("kb-root", "remediation-source-path"),
+        system="overview-system",
+        template="overview-passage.tmpl.md",
+        correction=("passage-correction", "overview-correction"),
+        slots=("excerpts",),
         outputs=(OVERVIEW_PROSE,),
     ),
     Step(
         id="ov.record",
         stage=_OVERVIEW_DRAFTED,
-        unit=Unit.DRIVER_OP,
-        writer=Writer.TOOL,
-        ledger_op=LedgerOp.ADVANCE_STEP,
-    ),
-    # --- phase-5 — the review of what was drafted, and the one revision -------
-    # Opt-in (`kb_pipeline.Stage.opt_in`): walked only by a run given
-    # `--doc-audit`, and a build is complete without it.
-    #
-    # **A fixed sequence, not a loop.** The review runs, the revision answers
-    # what it wrote, and the stage records: nothing re-reviews, nothing counts,
-    # and no severity the reviewer returns fails the stage. The two rows are one
-    # unit of work standing in front of one boundary, which is why `p5.review` is
-    # driven by `p5.fix`'s handler rather than walked (`run.DRIVEN_STEPS`).
-    #
-    # `ov.docs` and `p5.fix` share one template and one slot list: there is no
-    # separate fix template, and the two calls differ only in whether a
-    # reviewer's findings are the input — which is a slot, filled with a named
-    # absence on the first pass. The template's name carries the stage the pair
-    # used to share; it is the prompt set's, not this table's, and renaming it is
-    # not this table's to do.
-    Step(
-        id="p5.review",
-        stage=_PHASE_5,
-        unit=Unit.SINGLE,
-        writer=Writer.DRIVER,
-        seat=META_REVIEW_SEAT,
-        template="phase-5-review.single.tmpl",
-        slots=("readme-path", "conventions-path"),
-        outputs=(FINDINGS,),
-        parses=(Parse.VERDICT,),
-    ),
-    # The row the walk runs: its handler dispatches the review above it and then
-    # makes this call, so the stage's two calls stand together in front of the
-    # boundary below.
-    Step(
-        id="p5.fix",
-        stage=_PHASE_5,
-        unit=Unit.SINGLE,
-        writer=Writer.DRIVER,
-        seat="tech-writer",
-        template="phase-5-overview-passage.single.tmpl",
-        slots=("kb-root", "remediation-source-path"),
-        outputs=(OVERVIEW_PROSE,),
-    ),
-    Step(
-        id="p5.record",
-        stage=_PHASE_5,
         unit=Unit.DRIVER_OP,
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,
@@ -582,8 +466,8 @@ def applies(step: Step, *, spend_inference: bool = True) -> bool:
     those rows off such a tree is the ledger (a recorded stage is not re-walked)
     and the launch guard that refuses to open a build over one.
 
-    A stage's ledger row never costs a model call — a record dispatches no seat
-    and invokes no tool that spawns one — which is what lets the walk continue
+    A stage's ledger row never costs a model call — a record makes none and
+    invokes no tool that makes one — which is what lets the walk continue
     past a stage whose work it dropped.
     """
     return spend_inference or not step.spends_inference

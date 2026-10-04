@@ -76,6 +76,8 @@ or UI Automation. Test across privilege levels (standard user, UAC prompt, admin
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

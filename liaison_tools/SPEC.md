@@ -18,6 +18,9 @@ package specifically; on any conflict, the root document governs and this one is
 | `msg-util.py` | The sole sanctioned mutator of a messages-file: `init` / `append` / `validate`. |
 | `relay-driver.py` | A scripted corpus-relay eval instrument, invoked directly rather than by a liaison agent. |
 
+One module is imported rather than invoked: `openai_chat`, the chat-completions request
+`post-openai.py` is built on, for a caller that wants it in-process (Importable Request, below).
+
 **Runtime requirement.** A consumer needs a `python3` on `PATH` and nothing else — no install step
 is ever a precondition for these commands running.
 
@@ -36,7 +39,7 @@ both are given. A missing or malformed parameter is a usage error, exit 1.
 | `ALLOW_HTTP` | no | exactly `1` opts in to plaintext http to a non-loopback host; `--allow-http` is the same opt-in, and either alone suffices | unset |
 | `MAX_TOKENS` | no | integer, sent as `max_tokens` | `32768` |
 | `ENABLE_THINKING` | no | `true` in any case enables and any other value disables; sent as `chat_template_kwargs.enable_thinking` | `true` |
-| `TEMPERATURE` | no | plain decimal in [0.0, 2.0] | `0.0` |
+| `TEMPERATURE` | no | plain decimal in [0.0, 2.0] | `1.0` |
 | `DEBUG_POST` | no | `true` in any case writes the request payload to stderr | off |
 | `DEBUG_RESPONSE` | no | `true` in any case writes the raw SSE stream and the reassembled output to stderr | off |
 | `USAGE_STATS_FILE` | no | path for the usage side channel (below) | unset |
@@ -82,6 +85,30 @@ material, and nothing about it reaches stdout.
 internal-whitespace check (API Key Handling). The model-resolution query is made once, and a
 transient failure of that query is not retried.
 
+## Importable Request (`openai_chat`)
+
+`liaison_tools.openai_chat` makes the request `post-openai.py` makes, for a Python caller with
+`liaison_tools`' parent directory on its import path. Stdlib only, like every command here.
+
+- **One request, no tools.** `post_chat_streaming` POSTs one SSE-streamed request to
+  `<base_url>/chat/completions` carrying the caller's messages, model, `max_tokens`, temperature
+  and, where given, `chat_template_kwargs.enable_thinking`; `include_usage` adds
+  `stream_options.include_usage`. No `tools` are ever offered. It returns the parsed chunks, their
+  payloads verbatim, the raw text and one of four stream statuses: clean, failed before any data,
+  a mid-stream error event, or ended short of `[DONE]`.
+- **The key is a value.** Every request takes it from the caller, and the module reads no
+  environment variable. `read_api_key` reads it from a key file by the rule API Key Handling
+  states, returning nothing for a missing file or an invalid key. The transport rules above hold for every request it makes: no redirect is followed,
+  and `validate_base_url` is the https-or-loopback check, its http opt-in the caller's argument.
+- **The reply's reading is shared with the command.** `reassemble_stream` gives the stdout
+  contract's text, `reassemble_content` the content text alone whatever tool call rode beside it,
+  and `classify_reply` complete, incomplete or empty by the same `finish_reason` rule as exits 0, 3
+  and 4.
+- **One embeddings batch.** `post_embeddings` POSTs the caller's model and texts to
+  `<base_url>/embeddings` and returns one vector per text, in the order given. A reply carrying
+  any other number of vectors is an error, as is a transport or HTTP failure; both raise.
+- Diagnostics go to stderr only, never stdout.
+
 ## API Key Handling
 
 `API_KEY_FILE` names a file whose entire content, leading/trailing whitespace trimmed, is the key.
@@ -91,9 +118,12 @@ whitespace.
 - The key is never placed on a command line or in an environment variable, so it is not exposed
   through `argv` or through process-environment inspection.
 - The key leaves process memory only as the `Authorization: Bearer <token>` header, sent on the
-  `/chat/completions` and `/models` requests over the transport rules stated above
+  `/chat/completions`, `/models` and `/embeddings` requests over the transport rules stated above
   (https-or-loopback, no redirects followed). No command in this package writes key material to
   stdout, stderr, a messages file, a usage file, or `relay-driver.py`'s output directory.
+- `openai_chat` takes the key as a value from its caller and holds the previous bullet for it:
+  where that caller got the key is the caller's to state, unless it read the key with
+  `read_api_key`.
 
 ## Messages-File Format and Legal Mutations (`msg-util.py`)
 

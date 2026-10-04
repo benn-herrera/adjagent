@@ -152,7 +152,7 @@ def _run(argv: Sequence[str], *, repo_root: Path, relay: bool) -> subprocess.Com
             # UnicodeDecodeError out of `subprocess.run` — past `except OSError`
             # below, past the rc mapping, and out of the driver as a traceback
             # with no baton and no exit.json. Undecodable bytes become U+FFFD
-            # and the row keeps its verdict (`inference.claude` does the same).
+            # and the row keeps its verdict.
             errors="replace",
             check=False,
         )

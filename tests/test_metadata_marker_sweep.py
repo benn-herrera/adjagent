@@ -71,7 +71,7 @@ _SKIP_DIRS = frozenset({"kb_write", "_vendor", "tests", "__pycache__", ".pytest_
 #: file). An allowlist rather than a denylist so a binary asset is never
 #: decoded; :func:`test_the_template_sweep_reaches_the_shipped_surfaces` is
 #: what keeps it from quietly shrinking the sweep toward nothing.
-_TEXT_SUFFIXES = frozenset({".py", ".md", ".tmpl", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg", ""})
+_TEXT_SUFFIXES = frozenset({".py", ".md", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg", ""})
 
 #: Modules that carry a marker token legitimately — five that read the format
 #: and the one that spells the tokens for the lint that matches them. Keyed by
@@ -185,11 +185,11 @@ def test_a_planted_marker_in_a_template_tree_is_caught(tmp_path: Path, token: st
 
 def test_a_planted_marker_in_a_brief_template_fails_the_lint(tmp_path: Path) -> None:
     """The `prompt_templates.lint` half of the sweep, with teeth."""
-    (tmp_path / "leak.single.tmpl").write_text("Then write `<!-- id: clm-xxxxxx -->` yourself.\n", encoding="utf-8")
+    (tmp_path / "leak.single.tmpl.md").write_text("Then write `<!-- id: clm-xxxxxx -->` yourself.\n", encoding="utf-8")
 
     findings = prompt_templates.lint(prompt_templates.template_paths(tmp_path), prohibited=steps.TEMPLATE_PROHIBITIONS)
 
-    assert [finding for finding in findings if finding.startswith("leak.single.tmpl:1:") and "<!-- id:" in finding]
+    assert [finding for finding in findings if finding.startswith("leak.single.tmpl.md:1:") and "<!-- id:" in finding]
 
 
 # --- half two: the code surface --------------------------------------------

@@ -1,6 +1,10 @@
-"""Stage D — dependency attribution. Partly mechanical; inferential only for direction.
+"""Stage D's narrowing: every edge candidate, classed and drafted. Mechanical throughout.
 
 **The candidate set is narrowed mechanically and the model never adds to it.**
+What this module returns is one :class:`Candidate` per ordered pair, whatever
+harvested it — a cross-reference anchor or a hand-written name
+(:mod:`hand_named`) — carrying the relations its class may be offered and the
+draft a build with no reader writes. :mod:`classify` asks about each one.
 Over stage B's cross-reference anchors, each end of a reference is attributed to
 a claim where a rule settles it, and left open where none does:
 
@@ -23,10 +27,10 @@ a claim where a rule settles it, and left open where none does:
   equation — the block's, where a claim-bearing block holds it, and otherwise the
   node the equation was minted as; a reference into a document hosting exactly
   one claim lands on that claim, there being no other.
-* where an end stays open the enumeration offers every claim it could be, and
-  the selection below is what attributes. Where **both** ends are settled *and
-  the source end was settled by proof containment*, the edge is authored
-  mechanically and no question is asked about it.
+* where an end stays open the enumeration offers every claim it could be. Where
+  **both** ends are settled *and the source end was settled by proof
+  containment*, the candidate is drafted *supported by*; every other candidate
+  is drafted *mention*.
 
 **Why a mechanically-derived edge is now authored where it once was withheld.**
 Three of the narrowings above used to be exclusions — an ``eqref`` contributed
@@ -260,16 +264,16 @@ acyclicity constraint**: two claims naming each other is the author's argument,
 and the measured corpus contains exactly such a 2-cycle. It **enters no
 solidity computation**, being carried on ``ClaimEntry.references`` rather than
 ``depends_on``, which is the tuple every scorer reads. And it **does not answer
-the question**: the same pair is still put to the model, because whether a
-naming is also a dependency is exactly what the narrowing could not decide. A
-pair the model returns is an upgrade rather than a second edge —
-:func:`references_beyond` is the difference the caller writes.
+the question**: the pair is still classified, because whether a naming is also
+a dependency is exactly what the narrowing could not decide. A candidate
+classified as a dependency is written as one and not also as a reference
+(:func:`written`).
 
 **Point 6 is satisfied by the check and not by abstention.** SPEC.md warns that
 a consumer taking cross-references as dependency edges would import the author's
 own cycles into a graph that must stay acyclic. That is a reason to check, and
-the check runs here over the mechanical edges alone before any question is asked
-and over the whole set before anything is written.
+the check runs here over the drafts before any question is asked and in
+:mod:`classify` over the classified set before anything is written.
 
 **A ring among the settled edges costs its own edges and not the build.** The
 cycle proves that the edges on it cannot all be dependencies. It does not prove
@@ -298,64 +302,39 @@ dropped. This is what separates the ruling from the three the corpus reversed
 above: those traded a fact for silence, and this trades a direction for a
 weaker, true statement.
 
-**A demoted pair is not reopened as a question.** The narrowing's questions are
-the pairs containment left open, and a ring's edges are not among them either
-way: containment did read a direction for each, and what the ring refuses is the
-*set*, not any one reading. Putting them to a model would enlarge the ask on
-exactly the corpora where the mechanical answer is least stable, and would make
-the recorded graph depend on a model being reachable — so a run with a model and
-a run without demote the same edges and record the same references.
+**A demoted pair is drafted *mention*, and classified like any other.** What the
+ring refuses is the *set* of directions containment read, not any one reading,
+so the draft gives up only the direction; the question of what each pair is
+stays open and is asked.
 
-**The model is asked for a selection and never for a verdict.** One bounded
-question per source claim, answered by returning the subset of an enumerated
-set of ids. Two mechanical checks bound it, both comparisons:
+**The class is a fact about the pair, never about its harvest.** A provenance
+whose source end proof containment settled offers *supported by* and *mention*:
+a proof of ``s`` citing ``t`` while ``t`` rests on ``s`` is circular unless it is
+a mention. A target that is a minted equation node offers the same two: an edge
+originating at a sink is provably wrong. Every other provenance offers all
+three. Two provenances reaching one pair intersect what they offer
+(:data:`OFFERED`), and every subset holds *supported by* and *mention*, so the
+intersection is never empty and the draft is always among it.
 
-* every returned id is in the candidate set that source was given — set
-  membership, no parsing;
-* the assembled edge set is acyclic **before anything is written**, through
-  :func:`kb_index_lib.compute_solidity` raising
-  :class:`kb_index_lib.SolidityCycleError`.
-
-**The pre-write check is the post-write gate, run early over the same graph.**
-:func:`kb_index_lib.compute_solidity` walks every claim and every support
-whether or not it is scored, so a cycle among the ``*pending*`` claims this
-build authors raises on either side of the write. The synthetic entries exist
-only because the proposed edge set is not on disk yet; nothing is written from
-them.
-
-**An answer that did not parse costs a re-ask of its own.** It arrived, so it is
-asked again — carrying the parse refusal's own message — and a second
-unparseable answer stops the stage naming the source claim. **That allowance is
-not the membership check's**: a source whose first answer did not parse still
-has that check ahead of it and reaches it with its re-ask intact. Only a call
-that did not *complete* escapes both, there being no answer to ask again about
-(:mod:`ask`).
-
-**An empty edge set is a legitimate output.** Claims whose candidate set is
-empty carry no edges, and chains terminating on dependency-free foundational
-claims is what SPEC's scoping describes rather than a gap to fill.
+**An empty candidate set is a legitimate output.** Claims with no candidate
+carry no edges, and chains terminating on dependency-free foundational claims is
+what SPEC's scoping describes rather than a gap to fill.
 
 **The narrowing is not the ask's preamble, and a run that cannot ask still
 runs it.** :func:`narrow` reads the tree, the authored graph and the inventory
-and asks nothing of anybody, so the edges it settles are the corpus's answer
-and not a model's. :func:`attribute_dependencies` takes ``selector=None`` for a
-run with no model reachable: the settled edges are checked for cycles and
-recorded exactly as they would be otherwise, and the open pairs are left open
-and unrecorded rather than guessed at. Discarding the settled half because the
-open half cannot be asked about would record every one of those claims as
-resting on nothing — a wrong answer arrived at silently, which is the thing this
-stage's rulings above exist to refuse.
+and asks nothing of anybody, so the drafts are the corpus's answer and not a
+model's. A run with no model reachable writes every candidate's draft.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from enum import StrEnum
+from types import MappingProxyType
 
-from .. import kb_index_lib, kb_pipeline
+from .. import kb_pipeline
 from ..kb_write import render
 from . import hand_named, prose
 from .graph import AuthoredGraph, ClaimNode
-from .hand_named import HandNamed
 from .inventory import (
     NOT_A_CLAIM_TARGET,
     PROOF_ENVIRONMENT,
@@ -366,7 +345,6 @@ from .inventory import (
     by_document,
     hosting_block,
 )
-from .report import AnswerFormatError, ClaimGraphError
 from .tree import Tree, strip_markers, unquote
 
 #: How the three target-end rules are named in the build's own report, so a
@@ -395,65 +373,95 @@ STRUCTURAL_KINDS: frozenset[str] = frozenset(
     | {"sec", "subsec", "ch", "chap", "app", "fig", "tab", "§", "§§"}
 )
 
-#: How many times one source is re-asked after an answer that did not parse.
-#: Spent under the ask's own refusal and nowhere else.
-PARSE_RETRY_BUDGET = 1
 
-#: How many times one source is re-asked after an answer that parsed and failed
-#: the membership check. Spent under that check's report and nowhere else, so a
-#: malformed first answer cannot consume it. The exit on exhausting either is a
-#: stop — not a degraded answer.
-CHECK_RETRY_BUDGET = 1
+class Relation(StrEnum):
+    """What a candidate's source is to its target: one meaning per member, mapped one to one onto classify's letters."""
 
-#: The most calls one source claim costs in one :func:`_ask`: the first ask, plus
-#: each allowance once. Derived rather than declared, so a seat alternating
-#: between the two failure classes cannot walk past the bound.
-CALL_BUDGET = 1 + PARSE_RETRY_BUDGET + CHECK_RETRY_BUDGET
+    SUPPORTED_BY = "supported-by"
+    IN_SUPPORT_OF = "in-support-of"
+    MENTION = "mention"
 
 
-class AttributionError(ClaimGraphError):
-    """A mechanical check over the returned selection failed twice."""
+class Harvest(StrEnum):
+    """What found a candidate. Counted on the report, and read by nothing else."""
+
+    REFERENCE = "reference"
+    HAND_NAMED = "hand-named"
+
+
+class CandidateClass(StrEnum):
+    """What one provenance of a pair is, read off facts :func:`narrow` holds. It does not travel past it."""
+
+    PROOF_DIRECTED = "proof-directed"
+    EQUATION_TARGET = "equation-target"
+    CLAIM_TO_CLAIM = "claim-to-claim"
+
+
+#: The relations each class may be offered. Every subset holds *supported by*
+#: and *mention*, so intersecting two never empties, and the draft is always
+#: offered.
+OFFERED: Mapping[CandidateClass, frozenset[Relation]] = MappingProxyType(
+    {
+        CandidateClass.PROOF_DIRECTED: frozenset({Relation.SUPPORTED_BY, Relation.MENTION}),
+        CandidateClass.EQUATION_TARGET: frozenset({Relation.SUPPORTED_BY, Relation.MENTION}),
+        CandidateClass.CLAIM_TO_CLAIM: frozenset(Relation),
+    }
+)
+
+
+def _class_of(*, directed: bool, target: ClaimNode) -> CandidateClass:
+    """One provenance's class: proof containment first, then a sink target, then neither.
+
+    A sink is a minted equation node (``target.equation``), never an ``eqref``
+    that resolved *through* an equation to a block's or a proof's claim.
+    """
+    if directed:
+        return CandidateClass.PROOF_DIRECTED
+    if target.equation is not None:
+        return CandidateClass.EQUATION_TARGET
+    return CandidateClass.CLAIM_TO_CLAIM
 
 
 @dataclass(frozen=True)
-class Question:
-    """One source claim, the candidates it may depend on, and where they came from.
+class Candidate:
+    """One ordered pair, whatever harvested it: the source's text names the target.
 
-    ``evidence`` is the passage each candidate was enumerated from — the
-    anchor's own paragraph, in the source document's words, collapsed to one line
-    (:func:`_reference_line`). It is what the ask shows instead of the whole
-    document: the pair is the question, and the prose the reference sits in is
-    the context that decides it. It is a **set** rather than one entry per
-    candidate: two references in one paragraph are enumerated from the same
-    passage, and showing it twice would say nothing the once does not.
+    ``offered`` is in :class:`Relation`'s order. ``passages`` are the pair's
+    own — the paragraph of each anchor or mention that produced it
+    (:func:`_reference_line`), sorted and deduplicated.
     """
 
     source: ClaimNode
-    candidates: tuple[ClaimNode, ...]
-    evidence: tuple[str, ...]
+    target: ClaimNode
+    offered: tuple[Relation, ...]
+    draft: Relation
+    passages: tuple[str, ...]
+    harvests: frozenset[Harvest]
 
-    def offered(self) -> frozenset[str]:
-        return frozenset(candidate.id for candidate in self.candidates)
+    @property
+    def pair(self) -> tuple[str, str]:
+        return (self.source.id, self.target.id)
 
 
-class Selector(Protocol):
-    """How stage D reaches inference. The seam every test replaces."""
+class Written(StrEnum):
+    """The register list a classified candidate lands in."""
 
-    def select(self, question: Question, *, report: str | None, cycle: str | None = None) -> tuple[str, ...]:
-        """The subset of ``question.candidates`` the source depends on.
+    DEPENDS = "depends"
+    REFERENCES = "references"
 
-        ``report`` is ``None`` on the first ask and carries the mechanical
-        failure the previous answer produced on the re-ask — never a critique,
-        never a previous answer, and never a request to try harder.
 
-        ``cycle`` is the acyclicity re-ask's, and is the cycle as a path. It
-        arrives instead of a ``report`` rather than beside one, because what is
-        asked under it differs: the selections stand, and one of them has to go.
+def written(candidate: Candidate, relation: Relation) -> tuple[Written, tuple[str, str]]:
+    """The one record ``candidate`` classified as ``relation`` writes.
 
-        Raises :class:`~.report.AnswerFormatError` where an answer arrived and
-        did not parse: it is the one failure this seam reports by exception
-        rather than in its return, there being no selection to return.
-        """
+    *In support of* reverses the edge — the target rests on the source — and
+    lands in the target's register entry. A dependency either way carries no
+    ``references`` record beside it.
+    """
+    if relation is Relation.SUPPORTED_BY:
+        return Written.DEPENDS, candidate.pair
+    if relation is Relation.IN_SUPPORT_OF:
+        return Written.DEPENDS, (candidate.target.id, candidate.source.id)
+    return Written.REFERENCES, candidate.pair
 
 
 # --- the mechanical narrowing ------------------------------------------------
@@ -701,8 +709,11 @@ def names_no_premise(word: str | None) -> bool:
     return kind in vocabulary or (kind.endswith("s") and kind[:-1] in vocabulary)
 
 
-def _reference_line(tree: Tree, anchor: Anchor) -> str:
-    """The author's words around the anchor — its whole paragraph, collapsed to one line.
+def _reference_line(tree: Tree, document: str, line: int) -> str:
+    """The author's words around a reference — its whole paragraph, collapsed to one line.
+
+    ``line`` is 0-based in the document's marker-stripped, unquoted numbering:
+    an anchor's own line, or a hand-written mention's (:class:`hand_named.HandNamed`).
 
     **A paragraph rather than a physical line, because the wrap is pandoc's.**
     The built markdown is hard-wrapped near 72 columns, so a physical line is a
@@ -710,7 +721,7 @@ def _reference_line(tree: Tree, anchor: Anchor) -> str:
     whichever side of a wrap it fell on, and the word saying what the reference is
     doing there — *By*, *using*, *follows from* — sits on the line above as
     readily as on the anchor's own. Read line by line over the built ModernCorp
-    tree, 0 of 22 values reaching :attr:`Question.evidence` carried any of by /
+    tree, 0 of 22 values reaching the ask's passages carried any of by /
     from / follows from / using / via / in view of / applying / combining / rests
     on / since / because / building on, and some were markup alone — half an
     anchor tag, cut at a wrap. Read paragraph by paragraph, 15 of 19 carry one.
@@ -732,8 +743,9 @@ def _reference_line(tree: Tree, anchor: Anchor) -> str:
     above — the defect this function exists to avoid, paid for a second time.
 
     **Marker-stripped and unquoted before the block is found, not after.** This
-    value is not read by this package: it becomes :attr:`Question.evidence` and
-    renders verbatim into the ask's reference-lines slot. A Tier-2 marker is
+    value is not read by this package: it becomes one of
+    :attr:`Candidate.passages` and renders verbatim into the ask's
+    reference-lines slot. A Tier-2 marker is
     appended to the end of the line its claim is located by, and this stage always
     runs over a tree two earlier passes have minted into — so an author who states
     a result by reference puts the anchor and the marker on one line, and the seat
@@ -742,13 +754,13 @@ def _reference_line(tree: Tree, anchor: Anchor) -> str:
     where the blank line separating two quoted paragraphs is written ``>``: read
     quoted, that line is not blank and the run swallows the whole quote.
     """
-    lines = unquote(strip_markers(tree.documents[anchor.document].text)).splitlines()
-    if anchor.line >= len(lines):
+    lines = unquote(strip_markers(tree.documents[document].text)).splitlines()
+    if line >= len(lines):
         return ""
-    start = anchor.line
+    start = line
     while start > 0 and lines[start - 1].strip():
         start -= 1
-    end = anchor.line + 1
+    end = line + 1
     while end < len(lines) and lines[end].strip():
         end += 1
     return render.collapse_prose(" ".join(lines[start:end]))
@@ -783,59 +795,64 @@ def cycle_edges(edges: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]
 
 @dataclass(frozen=True)
 class Attribution:
-    """What the narrowing produced: the edges it settled and the pairs it did not.
+    """What the narrowing produced: every candidate, classed and drafted.
 
-    ``routes`` counts the settled edges by the target-end rule that resolved
-    each, which is what the build's own log carries in place of a marker on the
-    edge: an edge authored here is an ordinary ``depends`` edge and nothing in
-    the KB distinguishes it from one a person wrote. ``demoted`` is out of it,
-    those edges no longer being dependencies.
+    ``candidates`` is one per ordered pair, sorted by it, a pair two harvests
+    reach merged into one (:class:`Candidate`).
 
-    ``references`` is every open pair, as a ``references`` edge — the same pairs
-    ``questions`` enumerates, recorded rather than discarded. The two are not
-    alternatives: a pair is offered to the model *and* recorded as a reference,
-    because what the corpus states is that the source names the target, and
-    whether that naming is also a dependency is the question. A pair the model
-    answers yes to is upgraded by the caller (:func:`attribute_dependencies`'s
-    return, differenced against this) rather than recorded twice.
+    ``routes`` counts the pairs drafted *supported by* by the target-end rule
+    that resolved each, which is what the build's own log carries in place of a
+    marker on the edge: an edge authored here is an ordinary ``depends`` edge and
+    nothing in the KB distinguishes it from one a person wrote. ``demoted`` is
+    out of it, those pairs being drafted *mention*.
 
-    ``demoted`` is the settled edges a ring took the direction off, and they are
-    in ``references`` too — carried separately only so the report can name them,
-    a demoted edge being indistinguishable from any other reference once it is
-    written.
+    ``demoted`` is the pairs containment settled that a ring took the direction
+    off — carried separately only so the report can name them.
 
     ``word_dropped`` is the pairs an anchor would have opened had the word
     before it not named a kind no premise relation can hold
-    (:func:`names_no_premise`), less any pair another anchor opened or settled
-    anyway. They are in neither ``questions`` nor ``references``: the author
-    pointed at a section or a figure, and the claims it hosts are what the
-    fallback routes offered in its place.
-
-    ``hand_named`` is the candidates a claim's printed name and number produced
-    (:mod:`hand_named`), less any pair a reference already opened or settled.
-    **Candidates only**: they are in neither ``questions`` nor ``references``,
-    and wait for a classification that offers them.
+    (:func:`names_no_premise`), less any pair that is a candidate anyway. They
+    are no candidate: the author pointed at a section or a figure, and the
+    claims it hosts are what the fallback routes offered in its place.
     """
 
-    edges: tuple[tuple[str, str], ...]
-    questions: tuple[Question, ...]
+    candidates: tuple[Candidate, ...]
     routes: Mapping[str, int]
-    references: tuple[tuple[str, str], ...] = ()
     demoted: tuple[tuple[str, str], ...] = ()
     word_dropped: tuple[tuple[str, str], ...] = ()
-    hand_named: tuple[HandNamed, ...] = ()
+
+    def _drafted(self, kind: Written) -> tuple[tuple[str, str], ...]:
+        records = (written(candidate, candidate.draft) for candidate in self.candidates)
+        return tuple(sorted({pair for written_as, pair in records if written_as is kind}))
+
+    @property
+    def edges(self) -> tuple[tuple[str, str], ...]:
+        """The ``depends`` edges the drafts write: what a build with no reader records."""
+        return self._drafted(Written.DEPENDS)
+
+    @property
+    def references(self) -> tuple[tuple[str, str], ...]:
+        """The ``references`` records the drafts write."""
+        return self._drafted(Written.REFERENCES)
+
+
+@dataclass
+class _Reached:
+    """One pair's provenances as the narrowing meets them, before they merge into a :class:`Candidate`."""
+
+    offered: frozenset[Relation]
+    passages: set[str]
+    harvests: set[Harvest]
 
 
 def narrow(
     tree: Tree, graph: AuthoredGraph, inventory: Inventory, record: kb_pipeline.NodePassRecord | None = None
 ) -> Attribution:
-    """Stage B's anchors, split into the edges containment settles and the pairs left open.
+    """Every edge candidate the corpus states, classed and drafted.
 
-    Deterministic and total: nothing is sampled, nothing is dropped silently,
-    and a source that ends with no candidate is absent rather than asked an
-    empty question. A pair the narrowing settled is never also asked about,
-    a ring's demoted edges included — what the ring refuses is the set, and
-    containment's reading of each member stands as the reference it becomes.
+    Deterministic and total: nothing is sampled and nothing is dropped
+    silently. Two harvests: stage B's anchors, read end by end, and
+    :func:`hand_named.harvest`. A pair either reaches is one candidate.
 
     ``record`` is the node pass's, whose verdicts decide the source end of a
     reference in readable prose (:func:`_source_end`). ``None`` is a record
@@ -845,6 +862,7 @@ def narrow(
     fences = by_document(inventory.fences)
     proofs = _proofs(graph, inventory)
     readable: dict[str, prose.Readable] = {}
+    passages: dict[tuple[str, int], str] = {}
 
     def judged(anchor: Anchor) -> tuple[prose.Standing, ClaimNode | None]:
         if anchor.document not in readable:
@@ -857,8 +875,16 @@ def narrow(
         return standing, None if claim is None else graph.nodes[claim]
 
     settled: dict[tuple[str, str], str] = {}
-    pairs: dict[str, dict[str, str]] = {}
+    reached: dict[tuple[str, str], _Reached] = {}
     unopened: set[tuple[str, str]] = set()
+
+    def reach(pair: tuple[str, str], *, offered: frozenset[Relation], at: tuple[str, int], harvest: Harvest) -> None:
+        if at not in passages:
+            passages[at] = _reference_line(tree, *at)
+        found = reached.setdefault(pair, _Reached(offered=offered, passages=set(), harvests=set()))
+        found.offered &= offered
+        found.passages.add(passages[at])
+        found.harvests.add(harvest)
 
     for anchor in inventory.anchors:
         if anchor.target is None:
@@ -888,287 +914,51 @@ def narrow(
             proofs.get(anchor.document, {}),
             judged(anchor),
         )
-        # The word before the anchor filters what would be asked and never what
-        # containment settles, and it gives way to a fragment or a label that
-        # named the claim itself: it speaks only where a fallback route chose the
-        # target for the author.
+        # The word before the anchor filters what a fallback route opened and
+        # never what containment settles, and it gives way to a fragment or a
+        # label that named the claim itself.
         unheld = route not in (BY_IDENTIFIER, BY_EQUATION) and names_no_premise(anchor.preceding_word)
 
         for source in from_ends:
             for target in to_ends:
                 if source.id == target.id:
                     continue
+                pair = (source.id, target.id)
                 if directed and route is not None:
-                    settled.setdefault((source.id, target.id), route)
+                    settled.setdefault(pair, route)
                 elif unheld:
-                    unopened.add((source.id, target.id))
-                else:
-                    pairs.setdefault(source.id, {}).setdefault(target.id, _reference_line(tree, anchor))
+                    unopened.add(pair)
+                    continue
+                offered = OFFERED[_class_of(directed=directed, target=target)]
+                reach(pair, offered=offered, at=(anchor.document, anchor.line), harvest=Harvest.REFERENCE)
+
+    for found in hand_named.harvest(tree, graph, inventory):
+        offered = OFFERED[_class_of(directed=False, target=graph.nodes[found.target])]
+        reach(
+            (found.source, found.target), offered=offered, at=(found.document, found.line), harvest=Harvest.HAND_NAMED
+        )
 
     demoted = cycle_edges(sorted(settled))
     on_ring = set(demoted)
-
     routes: dict[str, int] = {}
     for pair, name in settled.items():
         if pair not in on_ring:
             routes[name] = routes.get(name, 0) + 1
 
-    asked: list[Question] = []
-    referenced: list[tuple[str, str]] = []
-    for source_id, enumerated in sorted(pairs.items()):
-        # A pair another anchor already settled is decided; asking about it
-        # would offer a candidate whose answer changes nothing.
-        open_targets = {target: line for target, line in enumerated.items() if (source_id, target) not in settled}
-        if not open_targets:
-            continue
-        # The pair is recorded as a reference whether or not anybody is asked
-        # about it. The author wrote one claim's identifier inside another's
-        # text, in formal notation; that the narrowing cannot direct it does not
-        # make it nothing, and the alternative to recording it is recording that
-        # the two claims are unrelated.
-        referenced.extend((source_id, target_id) for target_id in sorted(open_targets))
-        asked.append(
-            Question(
-                source=graph.nodes[source_id],
-                candidates=tuple(graph.nodes[target_id] for target_id in sorted(open_targets)),
-                evidence=tuple(sorted(set(open_targets.values()))),
-            )
+    candidates = tuple(
+        Candidate(
+            source=graph.nodes[pair[0]],
+            target=graph.nodes[pair[1]],
+            offered=tuple(relation for relation in Relation if relation in found.offered),
+            draft=Relation.SUPPORTED_BY if pair in settled and pair not in on_ring else Relation.MENTION,
+            passages=tuple(sorted(found.passages)),
+            harvests=frozenset(found.harvests),
         )
-    reached = set(settled) | {(source, target) for source, enumerated in pairs.items() for target in enumerated}
-    return Attribution(
-        edges=tuple(sorted(pair for pair in settled if pair not in on_ring)),
-        questions=tuple(asked),
-        routes=routes,
-        references=tuple(referenced) + demoted,
-        demoted=demoted,
-        word_dropped=tuple(sorted(unopened - reached)),
-        hand_named=tuple(
-            candidate
-            for candidate in hand_named.harvest(tree, graph, inventory)
-            if (candidate.source, candidate.target) not in reached
-        ),
+        for pair, found in sorted(reached.items())
     )
-
-
-def references_beyond(narrowed: Attribution, edges: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
-    """The narrowing's references, less every pair that became a dependency.
-
-    A pair the selection returned is a dependency, and a dependency is already
-    the stronger statement that the source names the target — recording both
-    would put two records on one drawn stroke and report a relation conflict
-    about a graph that holds none. Where no model was asked, nothing is
-    subtracted and every open pair stands as a reference.
-    """
-    directed = set(edges)
-    return tuple(pair for pair in narrowed.references if pair not in directed)
-
-
-# --- the two mechanical checks ----------------------------------------------
-
-
-def check_membership(returned: Sequence[str], question: Question) -> tuple[str, ...]:
-    """The ids that were not offered. Set membership; no parsing."""
-    offered = question.offered()
-    return tuple(dict.fromkeys(node_id for node_id in returned if node_id not in offered))
-
-
-def _synthetic_entries(graph: AuthoredGraph, edges: Sequence[tuple[str, str]]) -> list[kb_index_lib.ClaimEntry]:
-    """The authored claims as the solidity computation reads them, with the edge set applied."""
-    outgoing: dict[str, list[kb_index_lib.DependsOnEdge]] = {}
-    for source, target in edges:
-        outgoing.setdefault(source, []).append(
-            kb_index_lib.DependsOnEdge(
-                source=source,
-                target=target,
-                relation="depends",
-                target_kind="claim",
-                target_solidity_recorded=None,
-                strength=None,
-                context=None,
-            )
-        )
-    return [
-        kb_index_lib.ClaimEntry(
-            id=node.id,
-            title=node.title,
-            canonical_path=node.document,
-            canonical_anchor="",
-            confidence=None,
-            solidity=None,
-            build_status=None,
-            rationale="",
-            depends_on=tuple(outgoing.get(node.id, ())),
-            strengthen_by=(),
-        )
-        for node in graph.nodes.values()
-    ]
-
-
-def _cycle_path(members: Sequence[str], edges: Sequence[tuple[str, str]]) -> tuple[str, ...]:
-    """One concrete cycle through ``members``, as a path the re-ask can be shown.
-
-    The solidity computation reports which claims are *in* a cycle; a report
-    naming a set is not something a re-ask can act on, and a path is. Falls back
-    to the member set only if no walk closes, which the computation's own
-    verdict says cannot happen — so the fallback is a report that degrades
-    rather than a claim that a cycle was not found.
-    """
-    within = set(members)
-    following: dict[str, list[str]] = {}
-    for source, target in edges:
-        if source in within and target in within:
-            following.setdefault(source, []).append(target)
-
-    path: list[str] = []
-    on_path: set[str] = set()
-    visited: set[str] = set()
-
-    def walk(node: str) -> tuple[str, ...]:
-        path.append(node)
-        on_path.add(node)
-        visited.add(node)
-        for following_node in sorted(following.get(node, ())):
-            if following_node in on_path:
-                return tuple(path[path.index(following_node) :]) + (following_node,)
-            if following_node not in visited:
-                closed = walk(following_node)
-                if closed:
-                    return closed
-        path.pop()
-        on_path.discard(node)
-        return ()
-
-    for start in sorted(within):
-        if start not in visited:
-            closed = walk(start)
-            if closed:
-                return closed
-    return tuple(sorted(within))
-
-
-def check_acyclic(graph: AuthoredGraph, edges: Sequence[tuple[str, str]]) -> tuple[str, ...]:
-    """``()`` when the edge set is acyclic, or the cycle as a concrete path.
-
-    The same call ``refresh`` and ``verify`` make afterward, run before anything
-    is written.
-    """
-    try:
-        kb_index_lib.compute_solidity(_synthetic_entries(graph, edges))
-    except kb_index_lib.SolidityCycleError as cycle:
-        return _cycle_path(cycle.cycle_members, edges)
-    return ()
-
-
-# --- the stage ---------------------------------------------------------------
-
-
-def _ask(selector: Selector, question: Question, *, report: str | None, cycle: str | None = None) -> tuple[str, ...]:
-    """One source's selection, with the membership check and one re-ask per failure class.
-
-    An answer that arrived malformed is re-asked against the parse refusal's own
-    message and costs :data:`PARSE_RETRY_BUDGET`; an answer that parsed and named
-    an id outside the candidate set is re-asked against the offending ids and
-    costs :data:`CHECK_RETRY_BUDGET`. Exhausting either stops the stage here
-    rather than under the ask, and however the two alternate this ask costs
-    :data:`CALL_BUDGET` calls at most.
-
-    ``cycle`` opens the acyclicity re-ask and is spent on its first call alone:
-    a malformed answer to it is re-asked under the refusal, which is the ordinary
-    ask again, because the constraint the cycle states is not what that answer
-    failed.
-    """
-    parse_retries = PARSE_RETRY_BUDGET
-    check_retries = CHECK_RETRY_BUDGET
-    for _ in range(CALL_BUDGET):
-        try:
-            returned = selector.select(question, report=report, cycle=cycle)
-        except AnswerFormatError as refusal:
-            if not parse_retries:
-                raise AttributionError(
-                    refusal.check,
-                    f"{question.source.id}: what came back did not parse twice: {refusal.detail}. Nothing "
-                    f"was written, and no selection is assumed for an answer that could not be read",
-                ) from refusal
-            parse_retries -= 1
-            report, cycle = refusal.detail, None
-            continue
-        outside = check_membership(returned, question)
-        if not outside:
-            return tuple(dict.fromkeys(returned))
-        if not check_retries:
-            raise AttributionError(
-                "candidate-membership",
-                f"{question.source.id}: {len(outside)} returned id(s) were not in the candidate set this "
-                f"claim was given, twice: {list(outside)[:5]}. The set was {sorted(question.offered())}",
-            )
-        check_retries -= 1
-        report, cycle = (
-            f"{len(outside)} of the ids you returned were not in the candidate set: {list(outside)}. "
-            f"The candidate set is exactly {sorted(question.offered())}. Return a subset of it."
-        ), None
-    raise AssertionError("unreachable: the last call finds both allowances spent, and returns or raises")
-
-
-def attribute_dependencies(
-    tree: Tree,
-    graph: AuthoredGraph,
-    inventory: Inventory,
-    selector: Selector | None,
-    record: kb_pipeline.NodePassRecord | None = None,
-) -> tuple[tuple[str, str], ...]:
-    """The authored dependency edges, as ``(source, target)`` claim-id pairs.
-
-    Every pair is either one containment settled or one the selector was offered
-    and returned, and the whole set is acyclic by the time this returns. A cycle
-    among the *selected* edges costs one re-ask of the claims on it, and a second
-    cycle stops the stage. A cycle among the settled edges costs neither: the
-    narrowing has already demoted it to ``references``, so the check over those
-    edges alone is the post-condition of that demotion rather than a stop with a
-    corpus finding behind it.
-
-    **``selector`` is ``None`` where no model is reachable**, and what that
-    changes is the asking and nothing else: :func:`narrow` is a pure function of
-    the tree, the authored graph and the inventory, so the edges containment
-    settles are the same edges either way and are recorded either way. The open
-    pairs stay open and unrecorded — a pair is open exactly because containment
-    did *not* decide it, and a build that guessed at the uncertain half would be
-    worse than one that dropped the certain half.
-    """
-    narrowed = narrow(tree, graph, inventory, record)
-
-    mechanical = check_acyclic(graph, narrowed.edges)
-    if mechanical:
-        raise AttributionError(
-            "mechanical-acyclicity",
-            f"the edges containment settles still close a cycle after demotion: {' -> '.join(mechanical)}. "
-            f"Every edge on a ring is demoted to a reference before this runs, so a cycle surviving here is "
-            f"a defect in that demotion and not a finding about the corpus; nothing was written",
-        )
-    if selector is None:
-        return narrowed.edges
-
-    selected = {question.source.id: _ask(selector, question, report=None) for question in narrowed.questions}
-
-    def edges_of(chosen: Mapping[str, tuple[str, ...]]) -> tuple[tuple[str, str], ...]:
-        asked = ((source, target) for source in chosen for target in chosen[source])
-        return tuple(sorted(set(narrowed.edges) | set(asked)))
-
-    cycle = check_acyclic(graph, edges_of(selected))
-    if not cycle:
-        return edges_of(selected)
-
-    path = " -> ".join(cycle)
-    on_cycle = set(cycle)
-    for question in narrowed.questions:
-        if question.source.id not in on_cycle:
-            continue
-        selected[question.source.id] = _ask(selector, question, report=None, cycle=path)
-
-    again = check_acyclic(graph, edges_of(selected))
-    if again:
-        raise AttributionError(
-            "acyclicity",
-            f"the authored edge set still closes a cycle after one re-ask: {' -> '.join(again)}. Nothing was "
-            f"written; solidity is undefined for the members of a dependency cycle",
-        )
-    return edges_of(selected)
+    return Attribution(
+        candidates=candidates,
+        routes=routes,
+        demoted=demoted,
+        word_dropped=tuple(sorted(unopened - set(reached))),
+    )

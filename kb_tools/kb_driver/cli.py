@@ -11,17 +11,11 @@ takes the run lock (``pre.lock``), lays out the run directory, starts logging,
 and hands control to the stage sequencer.
 
 A run is launchable with no file to compose first: ``--source`` (repeatable)
-carries the one ``[run]`` field that has no default, ``--permission-mode``
-overrides the mode ``config`` defaults, and every other field keeps the default
-``config`` holds. ``--config`` stays, and the two combine — the flag wins for
-the field it names, which is the precedence ``--decide`` already has over the
-config's ``[barriers.*]`` tables. Composing the flags and the file is
-``config.load``'s; this layer only reads which flags were given.
-
-The effective permission mode is announced on the way in, in the message rather
-than the log record's context, because the console tee prints messages alone: a
-run whose mode nobody chose still says what it is dispatching under and which
-flag changes it.
+carries the one ``[run]`` field that has no default, and every other field
+keeps the default ``config`` holds. ``--config`` stays, and the two combine —
+the flag wins for the field it names, which is the precedence ``--decide``
+already has over the config's ``[barriers.*]`` tables. Composing the flags and
+the file is ``config.load``'s; this layer only reads which flags were given.
 
 **One flag changes what a run is made of.** ``--no-inference`` promises that no
 model call is spent, and it is the sequencer's rather than this layer's: every
@@ -93,15 +87,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "source; given at all, it replaces [run] sources rather than extending it.",
     )
     p_run.add_argument(
-        config.PERMISSION_MODE_FLAG,
-        default=None,
-        metavar="<mode>",
-        help="The permission mode every dispatched call runs under, one of: "
-        + ", ".join(config.PERMISSION_MODES)
-        + f" (default: {config.DEFAULT_PERMISSION_MODE}). The driver spawns claude headless, so a mode "
-        "that gates a tool the build needs stops it with nobody to answer.",
-    )
-    p_run.add_argument(
         "--decide",
         action="append",
         default=[],
@@ -121,14 +106,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "it, so the build closes out without them. Not a bound and not a substitution — the stages around "
         "a dropped row run for real, each stage still records, and the boundary of a stage whose work was "
         "dropped says so.",
-    )
-    p_run.add_argument(
-        config.DOC_AUDIT_FLAG,
-        action="store_true",
-        help="Also run the document audit: one review of the KB's README.md and CONVENTIONS.md and one "
-        "revision answering it, after the build's last stage. A build is complete without it. Over a KB "
-        "whose build is already complete, the audit runs alone, with no rebuild; once recorded it does "
-        "not run again.",
     )
     p_run.add_argument(
         config.THROUGH_FLAG,
@@ -152,15 +129,11 @@ def _run_overrides(args: argparse.Namespace) -> dict[str, object]:
     overrides: dict[str, object] = {}
     if args.source:
         overrides["sources"] = tuple(args.source)
-    if args.permission_mode is not None:
-        overrides["permission_mode"] = args.permission_mode
     # A store_true reads False when it was never given, and False is a value
     # that would overwrite a config's own `true`. Only the flag actually
     # passed carries anything, which is this function's rule throughout.
     if args.no_inference:
         overrides["no_inference"] = True
-    if args.doc_audit:
-        overrides["doc_audit"] = True
     if args.through is not None:
         overrides["through"] = args.through
     return overrides
@@ -225,17 +198,12 @@ def _mode_run(args: argparse.Namespace, ctx: baton.BatonContext) -> tuple[int, b
             "run started",
             extra={"context": {"run_id": run_id, "invocation": cfg.invocation, "run_dir": str(paths.run_dir)}},
         )
-        _log.info(
-            "every dispatched call runs under permission mode %s; pass `%s <mode>` to change it",
-            cfg.run.permission_mode,
-            config.PERMISSION_MODE_FLAG,
-            extra={"context": {"run_id": run_id, "permission_mode": cfg.run.permission_mode}},
-        )
 
         if cfg.run.no_inference:
             # Not synthetic and not a bound: the rows are gone, the rest of the
             # build is real, and what it produced is a real KB built without
-            # them. Said on the way in for the same reason the mode is.
+            # them. Said on the way in, in the message text, because the console
+            # tee prints messages alone.
             _log.warning(
                 "no inference: every row that would cost a model call is dropped and the walk continues "
                 "past it, so this build closes out without them; each such stage's boundary records that "

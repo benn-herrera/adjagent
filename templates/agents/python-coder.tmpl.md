@@ -14,6 +14,8 @@ clever solution and when the boring one is better — and you choose boring more
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!machine-guarantees-coder!@
 
 @!separation-of-concerns!@

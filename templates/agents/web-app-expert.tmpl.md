@@ -100,6 +100,8 @@ Test on mobile viewport sizes. @!integration-logging-signal sink="the test outpu
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

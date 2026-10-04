@@ -6,6 +6,9 @@ the file crawl. Both the repo-wide link checker (``verify_md_links.py``) and
 the query CLI's on-demand reverse-find (``kb_cmd``) import these so there is
 exactly one copy of each primitive.
 
+Also the one rewrite of a link: ``rebase_inline_links``, for text copied from
+one document into a document in another directory.
+
 This is the *primitive* layer only. Link classification and gating (which
 links are broken, which gate the exit code) stay in ``verify_md_links.py`` —
 that logic is verifier-specific and not shared.
@@ -13,6 +16,7 @@ that logic is verifier-specific and not shared.
 Stdlib only.
 """
 
+import posixpath
 import re
 from pathlib import Path
 from urllib.parse import unquote
@@ -62,7 +66,17 @@ LINK_TEXT = r"(?:[^\[\]]|\[[^\[\]]*\])*"
 # The angle form is tried first; otherwise `[^)\s]+` would match `<a` and stop.
 # We deliberately do not handle titles `(url "title")`; targets here are file
 # paths without titles.
-LINK_RE = re.compile(rf"\[{LINK_TEXT}\]\(\s*(<[^>]*>|[^)\s]+)\s*\)")
+_DESTINATION = r"\(\s*(<[^>]*>|[^)\s]+)\s*\)"
+LINK_RE = re.compile(rf"\[{LINK_TEXT}\]{_DESTINATION}")
+
+# A destination alone, wherever a link text closes. Not LINK_RE: a linked image
+# `[![](a)](b)` is one LINK_RE match whose group names only `b`, and a rewrite
+# that moves `b` and leaves `a` leaves the image itself broken.
+_DESTINATION_RE = re.compile(rf"\]{_DESTINATION}")
+
+# A destination naming no file relative to the document it sits in: a URL
+# scheme, a scheme-relative or rooted path, a home-dir path, a same-page anchor.
+_UNMOVED_TARGET_RE = re.compile(r"^(?:[a-z][a-z0-9+.\-]*:|[/~#])", re.IGNORECASE)
 
 # A link reference DEFINITION: `[label]: destination "optional title"`, up to
 # three leading spaces per CommonMark. Without this, a destination declared here
@@ -116,7 +130,7 @@ _QUOTE_PREFIX = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
 # The `$` at both ends is what makes the multi-line reach safe: an odd backtick
 # in prose cannot open one, so no unpaired delimiter can blank a tract of
 # document and take real broken links down with it.
-_INLINE_MATH_RE = re.compile(r"\$`[^`]*`\$")
+INLINE_MATH_RE = re.compile(r"\$`[^`]*`\$")
 
 # An inline code span, line-bounded on purpose — see above for what pays for
 # the maths rule's licence to cross a newline and why this does not get it.
@@ -230,8 +244,42 @@ def strip_code(text: str) -> str:
     it; inline maths arrives as a code span and is neutralised by that rule
     alone only while it stays on one line, which a hard-wrapped span does not.
     """
-    body = "\n".join(blank_fenced_lines(text))
-    return _INLINE_CODE_RE.sub(_spaces, _INLINE_MATH_RE.sub(_spaces, body))
+    return _blank_inline_spans("\n".join(blank_fenced_lines(text)))
+
+
+def _blank_inline_spans(text: str) -> str:
+    """``text`` with its inline maths and code spans blanked, every offset kept."""
+    return _INLINE_CODE_RE.sub(_spaces, INLINE_MATH_RE.sub(_spaces, text))
+
+
+def rebase_inline_links(text: str, *, from_dir: str, to_dir: str) -> str:
+    """``text`` moved from a file in ``from_dir`` to a file in ``to_dir``, each relative link still naming its file.
+
+    Both directories are POSIX paths relative to one common root. Every inline
+    link or image destination outside a code or maths span is rewritten; one
+    :data:`_UNMOVED_TARGET_RE` matches is left as written, and an ``#anchor``
+    rides along unchanged. ``text`` is inline text — a heading, a title — so a
+    fenced block in it is not recognised as one.
+    """
+    if posixpath.normpath(from_dir or ".") == posixpath.normpath(to_dir or "."):
+        return text
+    pieces: list[str] = []
+    last = 0
+    for match in _DESTINATION_RE.finditer(_blank_inline_spans(text)):
+        start, end = match.span(1)
+        pieces += [text[last:start], _rebase_target(text[start:end], from_dir=from_dir, to_dir=to_dir)]
+        last = end
+    return "".join(pieces) + text[last:]
+
+
+def _rebase_target(raw: str, *, from_dir: str, to_dir: str) -> str:
+    angled = raw.startswith("<") and raw.endswith(">")
+    target = raw[1:-1] if angled else raw
+    if not target or _UNMOVED_TARGET_RE.match(target):
+        return raw
+    path, anchor_mark, anchor = target.partition("#")
+    rebased = posixpath.relpath(posixpath.join(from_dir, path), to_dir or ".") + anchor_mark + anchor
+    return f"<{rebased}>" if angled else rebased
 
 
 def strip_target(target: str) -> str:

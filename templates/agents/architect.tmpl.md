@@ -109,6 +109,8 @@ anything that would be decided better by the coder at implementation time.
 
 @!incumbent-search act="specify" moment="putting a new capability in a skeleton"!@
 
+@!prove-replacement-first variant="plan"!@
+
 @!dependency-vetting artifact="proposal"!@
 
 Output format for initial design:

@@ -3,7 +3,9 @@
 Ports the tool's former embedded self-test suite (the removed
 ``POST_OPENAI_TEST=1`` mode) into the house pytest layout: the SSE
 demux/reassembly and API-key-validation cases run the real functions against
-the ``test-fixture-*.txt`` fixtures beside this file, offline. The script's
+the ``test-fixture-*.txt`` fixtures beside this file, offline — the
+transaction's from ``openai_chat``, which the script imports, and the key-file
+read and usage side channel from the script itself. The script's
 filename is hyphenated (it is shell-invoked, never imported by the liaisons),
 so the module is loaded via ``importlib`` from its file path.
 
@@ -33,6 +35,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from liaison_tools import openai_chat
 from liaison_tools.tests._stub_server import serve_for_test
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -55,7 +58,7 @@ def _demux_fixture(name):
     with (_THIS_DIR / name).open("r", encoding="utf-8") as f:
         captured = io.StringIO()
         with contextlib.redirect_stderr(captured):
-            chunks, status = post_openai.demux_sse(f)
+            chunks, status = openai_chat.demux_sse(f)
     return chunks, status, captured.getvalue()
 
 
@@ -67,12 +70,12 @@ class TestSseDemuxAndReassembly(unittest.TestCase):
         # PROCESSING") and blank keep-alive lines present in the fixture.
         chunks, status, _ = _demux_fixture("test-fixture-stream.txt")
         self.assertEqual(status, 0)
-        self.assertEqual(post_openai.reassemble_stream(chunks), "Hello, world!")
+        self.assertEqual(openai_chat.reassemble_stream(chunks), "Hello, world!")
 
     def test_tool_calls_fixture_reassembles_single_call(self):
         chunks, status, _ = _demux_fixture("test-fixture-tool-calls.txt")
         self.assertEqual(status, 0)
-        text = post_openai.reassemble_stream(chunks)
+        text = openai_chat.reassemble_stream(chunks)
         self.assertTrue(text.startswith("TOOL_CALLS\n"))
         calls = json.loads(text[len("TOOL_CALLS\n") :])
         self.assertEqual(len(calls), 1)
@@ -85,7 +88,7 @@ class TestSseDemuxAndReassembly(unittest.TestCase):
         # the emitted list by index, not arrival.
         chunks, status, _ = _demux_fixture("test-fixture-multi-tc.txt")
         self.assertEqual(status, 0)
-        text = post_openai.reassemble_stream(chunks)
+        text = openai_chat.reassemble_stream(chunks)
         self.assertTrue(text.startswith("TOOL_CALLS\n"))
         calls = json.loads(text[len("TOOL_CALLS\n") :])
         self.assertEqual(len(calls), 2)
@@ -104,30 +107,30 @@ class TestSseDemuxAndReassembly(unittest.TestCase):
 
     def test_no_data_events_returns_status_1(self):
         lines = [": keep-alive comment\n", "\n", "event: ping\n"]
-        chunks, status = post_openai.demux_sse(iter(lines))
+        chunks, status = openai_chat.demux_sse(iter(lines))
         self.assertEqual(status, 1)
         self.assertEqual(chunks, [])
 
     def test_missing_done_returns_status_3(self):
         lines = ['data: {"choices":[{"delta":{"content":"hi"},"index":0}]}\n']
-        chunks, status = post_openai.demux_sse(iter(lines))
+        chunks, status = openai_chat.demux_sse(iter(lines))
         self.assertEqual(status, 3)
-        self.assertEqual(post_openai.reassemble_stream(chunks), "hi")
+        self.assertEqual(openai_chat.reassemble_stream(chunks), "hi")
 
 
 class TestApiKeyValidation(unittest.TestCase):
-    """_read_api_key file-format contract."""
+    """read_api_key file-format contract."""
 
     def test_good_key_fixture_trims_surrounding_whitespace(self):
-        key = post_openai._read_api_key(_THIS_DIR / "test-fixture-good-key.txt")
+        key = openai_chat.read_api_key(_THIS_DIR / "test-fixture-good-key.txt")
         self.assertEqual(key, "this-is_an-0-AccePtable-key-1")
 
     def test_bad_key_fixture_rejects_internal_whitespace(self):
-        key = post_openai._read_api_key(_THIS_DIR / "test-fixture-bad-key.txt")
+        key = openai_chat.read_api_key(_THIS_DIR / "test-fixture-bad-key.txt")
         self.assertIsNone(key)
 
     def test_missing_key_file_returns_none(self):
-        key = post_openai._read_api_key(_THIS_DIR / "no-such-key-file.txt")
+        key = openai_chat.read_api_key(_THIS_DIR / "no-such-key-file.txt")
         self.assertIsNone(key)
 
 
@@ -151,8 +154,8 @@ class TestUsageExtraction(unittest.TestCase):
         chunks, status, _ = _demux_fixture("test-fixture-usage.txt")
         self.assertEqual(status, 0)
         # The empty-choices usage chunk must not alter the reassembled text.
-        self.assertEqual(post_openai.reassemble_stream(chunks), "Hi there")
-        self.assertEqual(post_openai.extract_usage(chunks), self._EXPECTED)
+        self.assertEqual(openai_chat.reassemble_stream(chunks), "Hi there")
+        self.assertEqual(openai_chat.extract_usage(chunks), self._EXPECTED)
 
     def test_extract_from_non_streaming_completion_object(self):
         obj = {
@@ -161,20 +164,20 @@ class TestUsageExtraction(unittest.TestCase):
             "choices": [{"message": {"role": "assistant", "content": "hi"}, "index": 0}],
             "usage": {"prompt_tokens": 42, "completion_tokens": 7, "total_tokens": 49},
         }
-        self.assertEqual(post_openai.extract_usage([obj]), self._EXPECTED)
+        self.assertEqual(openai_chat.extract_usage([obj]), self._EXPECTED)
 
     def test_extract_nulls_when_api_provides_no_usage(self):
         chunks, status, _ = _demux_fixture("test-fixture-stream.txt")
         self.assertEqual(status, 0)
         self.assertEqual(
-            post_openai.extract_usage(chunks),
+            openai_chat.extract_usage(chunks),
             {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None, "model": None},
         )
 
     def test_extract_nulls_individual_missing_usage_fields(self):
         chunks = [{"model": "m1", "choices": [], "usage": {"total_tokens": 5}}]
         self.assertEqual(
-            post_openai.extract_usage(chunks),
+            openai_chat.extract_usage(chunks),
             {"prompt_tokens": None, "completion_tokens": None, "total_tokens": 5, "model": "m1"},
         )
 
@@ -201,44 +204,44 @@ class TestBaseUrlValidation(unittest.TestCase):
     """https is required off-loopback: the request carries a bearer token."""
 
     def test_https_is_accepted(self):
-        self.assertIsNone(post_openai.validate_base_url("https://api.example.com/v1", allow_http=False))
+        self.assertIsNone(openai_chat.validate_base_url("https://api.example.com/v1", allow_http=False))
 
     def test_http_loopback_is_accepted_for_local_inference(self):
         for url in ("http://127.0.0.1:8000/v1", "http://localhost:8000/v1", "http://[::1]:8000/v1"):
-            self.assertIsNone(post_openai.validate_base_url(url, allow_http=False), url)
+            self.assertIsNone(openai_chat.validate_base_url(url, allow_http=False), url)
 
     def test_http_off_loopback_is_refused(self):
-        err = post_openai.validate_base_url("http://api.example.com/v1", allow_http=False)
+        err = openai_chat.validate_base_url("http://api.example.com/v1", allow_http=False)
         self.assertIsNotNone(err)
         self.assertIn("https", err)
 
     def test_http_off_loopback_refusal_names_both_opt_ins(self):
-        err = post_openai.validate_base_url("http://api.example.com/v1", allow_http=False)
+        err = openai_chat.validate_base_url("http://api.example.com/v1", allow_http=False)
         self.assertIn("ALLOW_HTTP", err)
         self.assertIn("--allow-http", err)
 
     def test_non_url_is_refused(self):
         for url in ("api.example.com/v1", "/v1", "file:///etc/passwd"):
-            self.assertIsNotNone(post_openai.validate_base_url(url, allow_http=False), url)
+            self.assertIsNotNone(openai_chat.validate_base_url(url, allow_http=False), url)
 
     def test_http_off_loopback_accepted_when_allowed_and_silent(self):
         captured = io.StringIO()
         with contextlib.redirect_stderr(captured):
-            err = post_openai.validate_base_url("http://api.example.com/v1", allow_http=True)
+            err = openai_chat.validate_base_url("http://api.example.com/v1", allow_http=True)
         self.assertIsNone(err)
         self.assertEqual(captured.getvalue(), "")
 
     def test_https_accepted_quietly_even_when_allow_http_set(self):
         captured = io.StringIO()
         with contextlib.redirect_stderr(captured):
-            err = post_openai.validate_base_url("https://api.example.com/v1", allow_http=True)
+            err = openai_chat.validate_base_url("https://api.example.com/v1", allow_http=True)
         self.assertIsNone(err)
         self.assertEqual(captured.getvalue(), "")
 
     def test_loopback_accepted_quietly_even_when_allow_http_set(self):
         captured = io.StringIO()
         with contextlib.redirect_stderr(captured):
-            err = post_openai.validate_base_url("http://127.0.0.1:8000/v1", allow_http=True)
+            err = openai_chat.validate_base_url("http://127.0.0.1:8000/v1", allow_http=True)
         self.assertIsNone(err)
         self.assertEqual(captured.getvalue(), "")
 
@@ -251,17 +254,17 @@ class TestFinishReason(unittest.TestCase):
             {"choices": [{"delta": {"content": "a"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "length"}]},
         ]
-        self.assertEqual(post_openai.extract_finish_reason(chunks), "length")
+        self.assertEqual(openai_chat.extract_finish_reason(chunks), "length")
 
     def test_absent_reason_is_none(self):
-        self.assertIsNone(post_openai.extract_finish_reason([{"choices": [{"delta": {"content": "a"}}]}]))
+        self.assertIsNone(openai_chat.extract_finish_reason([{"choices": [{"delta": {"content": "a"}}]}]))
 
     def test_usage_chunk_with_empty_choices_is_skipped(self):
         chunks = [
             {"choices": [{"delta": {"content": "a"}, "finish_reason": "stop"}]},
             {"choices": [], "usage": {"total_tokens": 3}},
         ]
-        self.assertEqual(post_openai.extract_finish_reason(chunks), "stop")
+        self.assertEqual(openai_chat.extract_finish_reason(chunks), "stop")
 
 
 class TestModelErrorSniffing(unittest.TestCase):
@@ -269,18 +272,18 @@ class TestModelErrorSniffing(unittest.TestCase):
 
     def test_json_error_code_matches(self):
         raw = json.dumps({"error": {"code": "model_not_found", "message": "nope"}})
-        self.assertTrue(post_openai.is_model_error_text(raw))
+        self.assertTrue(openai_chat.is_model_error_text(raw))
 
     def test_json_error_message_matches(self):
         raw = json.dumps({"error": {"code": "bad_request", "message": "The model `x` does not exist"}})
-        self.assertTrue(post_openai.is_model_error_text(raw))
+        self.assertTrue(openai_chat.is_model_error_text(raw))
 
     def test_textual_fallback_matches_non_json(self):
-        self.assertTrue(post_openai.is_model_error_text("404: no such model here"))
+        self.assertTrue(openai_chat.is_model_error_text("404: no such model here"))
 
     def test_ordinary_error_body_is_not_a_model_error(self):
         raw = json.dumps({"error": {"code": "rate_limited", "message": "slow down"}})
-        self.assertFalse(post_openai.is_model_error_text(raw))
+        self.assertFalse(openai_chat.is_model_error_text(raw))
 
 
 def _start_sse_server(test, body_bytes):

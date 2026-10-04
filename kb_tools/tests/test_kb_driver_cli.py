@@ -26,6 +26,7 @@ import pytest
 
 from kb_tools import install_location, kb_util
 from kb_tools.kb_driver import baton, cli, config, ledger, runlog
+from kb_tools.tests import _chat_stub
 
 _THIS_DIR = Path(__file__).resolve().parent
 _PKG_PARENT = install_location.current().agents_dir
@@ -34,7 +35,6 @@ _MINI_KB = _THIS_DIR / "fixtures" / "mini-kb"
 MINIMAL = """
 [run]
 sources = ["AcmeWidgets.tex"]
-permission_mode = "acceptEdits"
 """
 
 
@@ -108,16 +108,14 @@ def test_a_run_outside_a_repository_reports_the_environment_and_still_lays_out_i
     assert not list(tmp_path.rglob("kb-driver.lock"))
 
 
-def test_a_flags_only_run_launches_naming_no_permission_mode_and_says_which_one_it_took(
+def test_a_flags_only_run_launches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One flag is the whole specification, and the run starts and states its mode.
+    """One flag is the whole specification, and the run starts.
 
     It ends at the environment fault (no repository under ``tmp_path``), which
     is past config load and past the run-directory layout — the two things a
-    file was previously required for. Two assertions matter: a launch that names
-    no permission mode reaches that point at all, and the mode it took is on the
-    console for an operator who did not know the flag existed.
+    file was previously required for.
     """
     monkeypatch.chdir(tmp_path)
 
@@ -126,8 +124,6 @@ def test_a_flags_only_run_launches_naming_no_permission_mode_and_says_which_one_
     out = capsys.readouterr().out
     assert code == baton.EXIT_ENVIRONMENT
     assert "re-run after the restore" in out
-    assert config.DEFAULT_PERMISSION_MODE in out
-    assert config.PERMISSION_MODE_FLAG in out
     assert not list(tmp_path.rglob("*.toml")), "nothing was composed on the way in"
     run_dir = Path((tmp_path / "runs" / "LATEST").read_text(encoding="utf-8").strip())
     assert json.loads((run_dir / "exit.json").read_text(encoding="utf-8"))["exit_code"] == baton.EXIT_ENVIRONMENT
@@ -200,6 +196,13 @@ def test_a_usage_error_still_leaves_a_card(capsys: pytest.CaptureFixture[str]) -
 
     assert code != 0
     assert "report this output verbatim and stop; do not interpret it" in capsys.readouterr().out
+
+
+def test_the_retired_audit_flag_is_an_unknown_argument(capsys: pytest.CaptureFixture[str]) -> None:
+    code = cli.main(["run", "--source", "a.tex", "--doc-audit"])
+
+    assert code != 0
+    assert "unrecognized arguments: --doc-audit" in capsys.readouterr().err
 
 
 def test_a_run_specifying_nothing_names_both_doors_for_the_field_with_no_default(
@@ -354,6 +357,9 @@ def test_a_killed_run_still_leaves_its_report(
         raise AssertionError("the signal never reached the run")
 
     monkeypatch.setattr(ledger, "preflight", _killed)
+    # Named so the walk reaches the step this case breaks: a run with a model
+    # call left to walk refuses an environment naming no server before it.
+    _chat_stub.name_server(monkeypatch, port=9, key_dir=consumer.parent)
 
     code, runs = _drive(consumer)
     out = capsys.readouterr().out
@@ -384,6 +390,9 @@ def test_a_boundary_error_mid_run_still_leaves_its_report(
         raise AssertionError("require did not raise")
 
     monkeypatch.setattr(ledger, "preflight", _boundary)
+    # Named so the walk reaches the step this case breaks: a run with a model
+    # call left to walk refuses an environment naming no server before it.
+    _chat_stub.name_server(monkeypatch, port=9, key_dir=consumer.parent)
 
     code, runs = _drive(consumer)
     out = capsys.readouterr().out

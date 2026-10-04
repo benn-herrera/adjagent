@@ -240,10 +240,10 @@ def test_out_of_order_record_is_exit_14(tmp_path: Path, capsys: pytest.CaptureFi
     """rc 4: the ledger refuses; the render that comes back carries the real position."""
     repo = _seeded_repo(tmp_path / "consumer")
 
-    outcome = ledger.record_stage(repo, stage="phase-5")
+    outcome = ledger.record_stage(repo, stage="overview-drafted")
 
     assert outcome.exit_code == baton.EXIT_ENVIRONMENT
-    assert "[ ] phase-5" in capsys.readouterr().out
+    assert "[ ] overview-drafted" in capsys.readouterr().out
     assert any("predecessors are unrecorded" in line for line in outcome.detail)
 
 
@@ -321,7 +321,7 @@ def test_a_failing_op_still_relays_its_whole_render(tmp_path: Path, capsys: pyte
     """The refusal render is display too: it carries the checklist and the units."""
     repo = _seeded_repo(tmp_path / "consumer")
 
-    outcome = ledger.record_stage(repo, stage="phase-5")
+    outcome = ledger.record_stage(repo, stage="overview-drafted")
 
     assert capsys.readouterr().out == outcome.stdout
     assert outcome.stdout.endswith("\n")

@@ -31,6 +31,7 @@ import pytest
 
 from kb_tools import kb_pipeline, kb_util
 from kb_tools.kb_driver import barriers, baton, config, ledger, run, runlog, steps
+from kb_tools.tests import _chat_stub
 
 #: The three head stages this file drives, and the row of each that does the
 #: work. Named off the table rather than transcribed: the rows are what carry
@@ -44,6 +45,15 @@ CLAIMS_DISCOVERED = "claims-discovered"
 def _up_to(stage: str) -> tuple[str, ...]:
     """Every stage before ``stage``, which is the recorded set a resume into it finds."""
     return kb_pipeline.STAGE_IDS[: kb_pipeline.STAGE_IDS.index(stage)]
+
+
+@pytest.fixture(autouse=True)
+def _named_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server named in the environment, so a walk with a model call left passes the launch check.
+
+    Nothing contacts it: the rows that would are the stubbed ledger op.
+    """
+    _chat_stub.name_server(monkeypatch, port=9, key_dir=tmp_path)
 
 
 @pytest.fixture(autouse=True)

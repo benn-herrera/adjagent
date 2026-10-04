@@ -16,7 +16,6 @@ from kb_tools.kb_driver import config, steps
 MINIMAL = """
 [run]
 sources = ["AcmeWidgets.tex"]
-permission_mode = "acceptEdits"
 """
 
 # A stand-in registry, injected so answer-set validation is testable without
@@ -43,13 +42,9 @@ def test_minimal_config_applies_every_default(tmp_path: Path) -> None:
     cfg = config.load(_write(tmp_path, MINIMAL))
 
     assert cfg.run.sources == ("AcmeWidgets.tex",)
-    assert cfg.run.permission_mode == "acceptEdits"
     assert cfg.run.charter_file == Path(kb_pipeline.CHARTER_RELPATH)
     assert cfg.run.runner is None
-    assert cfg.claude.command == ("claude",)
-    assert cfg.claude.env == {}
-    assert cfg.timeouts.single_seconds == config.DEFAULT_SINGLE_SECONDS
-    assert cfg.timeouts.by_step == {}
+    assert cfg.timeouts.silence_seconds == config.DEFAULT_SILENCE_SECONDS
     assert cfg.retry.backoff_seconds == config.DEFAULT_BACKOFF_SECONDS
     assert cfg.log.level == "INFO"
     assert cfg.log.run_dir == Path(config.default_run_dir())
@@ -60,19 +55,11 @@ def test_full_config_is_typed_through(tmp_path: Path) -> None:
     body = """
 [run]
 sources = ["a.tex", "b.tex"]
-permission_mode = "bypassPermissions"
 charter_file = "scratch/charter.md"
 runner = "make"
 
-[claude]
-command = ["claude", "--dangerously-skip-update"]
-env = { ANTHROPIC_LOG = "debug" }
-
 [timeouts]
-single_seconds = 60
 silence_seconds = 30
-[timeouts.by_step]
-"p5.review" = 14400
 
 [retry]
 transport_attempts = 2
@@ -91,9 +78,7 @@ note = "Approve."
     assert cfg.run.sources == ("a.tex", "b.tex")
     assert cfg.run.charter_file == Path("scratch/charter.md")
     assert cfg.run.runner == "make"
-    assert cfg.claude.command == ("claude", "--dangerously-skip-update")
-    assert cfg.claude.env == {"ANTHROPIC_LOG": "debug"}
-    assert cfg.timeouts.by_step == {"p5.review": 14400}
+    assert cfg.timeouts.silence_seconds == 30
     assert cfg.retry.transport_attempts == 2
     assert cfg.retry.backoff_seconds == (1, 2, 3)
     assert cfg.log.run_dir == Path("/var/tmp/kb-driver")
@@ -103,17 +88,6 @@ note = "Approve."
     assert decision.note == "Approve."
     assert decision.source == "config"
     assert decision.spec == "example-stage.example-kind=approve"
-
-
-@pytest.mark.parametrize("mode", config.PERMISSION_MODES)
-def test_every_probed_permission_mode_is_accepted(tmp_path: Path, mode: str) -> None:
-    body = f'[run]\nsources = ["a.tex"]\npermission_mode = "{mode}"\n'
-    assert config.load(_write(tmp_path, body)).run.permission_mode == mode
-
-
-def test_a_file_naming_no_permission_mode_gets_the_default(tmp_path: Path) -> None:
-    body = '[run]\nsources = ["a.tex"]\n'
-    assert config.load(_write(tmp_path, body)).run.permission_mode == config.DEFAULT_PERMISSION_MODE
 
 
 # ---------------------------------------------------------------------------
@@ -127,10 +101,8 @@ def test_flags_alone_specify_a_run_and_every_other_field_defaults() -> None:
 
     assert cfg.path is None
     assert cfg.run.sources == ("a.tex", "b.tex")
-    assert cfg.run.permission_mode == config.DEFAULT_PERMISSION_MODE
     assert cfg.run.charter_file == Path(kb_pipeline.CHARTER_RELPATH)
     assert cfg.run.runner is None
-    assert cfg.claude.command == config.DEFAULT_CLAUDE_COMMAND
     assert cfg.log.run_dir == Path(config.default_run_dir())
     assert cfg.decisions == {}
 
@@ -141,53 +113,36 @@ def test_a_flag_wins_over_the_file_for_the_field_it_names(tmp_path: Path) -> Non
 
     cfg = config.load(
         _write(tmp_path, body),
-        run_overrides={"sources": ("flagged.tex",), "permission_mode": "plan"},
+        run_overrides={"sources": ("flagged.tex",)},
         admissible=ADMISSIBLE,
     )
 
     assert cfg.run.sources == ("flagged.tex",), "a repeated --source replaces the list rather than extending it"
-    assert cfg.run.permission_mode == "plan"
     assert cfg.run.runner == "make", "a field no flag names keeps the file's value"
     assert cfg.decisions["example-stage.example-kind"].answer == "approve"
 
 
 def test_the_field_with_no_default_is_refused_naming_both_doors() -> None:
     with pytest.raises(config.ConfigError) as excinfo:
-        config.load(None, run_overrides={"permission_mode": "acceptEdits"})
+        config.load(None, run_overrides={"no_inference": True})
 
     message = str(excinfo.value)
     assert "[run] sources" in message
     assert config.SOURCE_FLAG in message
 
 
-def test_a_run_that_names_no_permission_mode_gets_the_headless_default() -> None:
-    """The mode is an override, not a requirement: a build launches without naming it."""
-    cfg = config.load(None, run_overrides={"sources": ("a.tex",)})
-
-    assert cfg.run.permission_mode == "bypassPermissions"
-    assert cfg.run.permission_mode == config.DEFAULT_PERMISSION_MODE
-
-
 def test_a_flag_value_is_refused_in_the_same_words_its_config_key_would_be() -> None:
     """One vocabulary for both doors: the flags carry no validation of their own."""
-    with pytest.raises(config.ConfigError, match="permission_mode"):
-        config.load(None, run_overrides={"sources": ("a.tex",), "permission_mode": "yolo"})
+    with pytest.raises(config.ConfigError, match=r"\[run\] through"):
+        config.load(None, run_overrides={"sources": ("a.tex",), "through": "no-such-stage"})
 
 
 @pytest.mark.parametrize(
     ("path", "overrides", "expected"),
     [
         (Path("driver-run.toml"), {}, "--config driver-run.toml"),
-        (
-            None,
-            {"sources": ("a.tex", "b c.tex"), "permission_mode": "auto"},
-            "--source a.tex --source 'b c.tex' --permission-mode auto",
-        ),
-        (
-            Path("driver-run.toml"),
-            {"permission_mode": "auto"},
-            "--config driver-run.toml --permission-mode auto",
-        ),
+        (None, {"sources": ("a.tex", "b c.tex")}, "--source a.tex --source 'b c.tex'"),
+        (Path("driver-run.toml"), {"no_inference": True}, f"--config driver-run.toml {config.NO_INFERENCE_FLAG}"),
         (None, {}, ""),
     ],
 )
@@ -250,19 +205,12 @@ def test_the_run_directory_flag_wins_over_the_file_and_reaches_the_resume_line(t
 @pytest.mark.parametrize(
     ("case", "body", "expected"),
     [
-        (
-            "unknown permission mode",
-            '[run]\nsources = ["a.tex"]\npermission_mode = "yolo"\n',
-            "permission_mode",
-        ),
-        ("missing sources", '[run]\npermission_mode = "auto"\n', "sources"),
-        ("empty sources", '[run]\nsources = []\npermission_mode = "auto"\n', "sources"),
-        ("sources not strings", '[run]\nsources = [1]\npermission_mode = "auto"\n', "sources"),
+        ("missing sources", '[run]\nrunner = "just"\n', "sources"),
+        ("empty sources", "[run]\nsources = []\n", "sources"),
+        ("sources not strings", "[run]\nsources = [1]\n", "sources"),
         ("missing [run]", '[log]\nlevel = "INFO"\n', "sources"),
         ("unknown runner", MINIMAL + 'runner = "cmake"\n', "runner"),
-        ("command not a list", MINIMAL + '[claude]\ncommand = "claude"\n', "command"),
-        ("env value not a string", MINIMAL + "[claude]\nenv = { A = 1 }\n", "env"),
-        ("timeout not an integer", MINIMAL + '[timeouts]\nsingle_seconds = "fast"\n', "single_seconds"),
+        ("timeout not an integer", MINIMAL + '[timeouts]\nsilence_seconds = "fast"\n', "silence_seconds"),
         ("timeout not positive", MINIMAL + "[timeouts]\nsilence_seconds = 0\n", "silence_seconds"),
         ("backoff not integers", MINIMAL + '[retry]\nbackoff_seconds = ["5s"]\n', "backoff_seconds"),
         ("unknown log level", MINIMAL + '[log]\nlevel = "CHATTY"\n', "level"),
@@ -284,39 +232,27 @@ def test_invalid_config_is_refused_naming_the_key(tmp_path: Path, case: str, bod
     assert expected in str(excinfo.value), case
 
 
-def test_a_per_step_timeout_naming_no_step_is_refused_naming_it_and_the_vocabulary(tmp_path: Path) -> None:
-    """A misspelled step id is inert, not partial: the default stays in force.
+@pytest.mark.parametrize(
+    ("body", "named"),
+    [
+        pytest.param('[claude]\ncommand = ["claude"]\n', "[claude]", id="the-cli-section"),
+        pytest.param('permission_mode = "bypassPermissions"\n', "permission_mode", id="the-permission-mode"),
+        pytest.param("[timeouts]\nsingle_seconds = 60\n", "single_seconds", id="the-total-bound"),
+        pytest.param('[timeouts.by_step]\n"ov.docs" = 14400\n', "by_step", id="the-per-step-total-bound"),
+    ],
+)
+def test_a_key_of_the_retired_cli_transport_is_refused_as_unknown_naming_it(
+    tmp_path: Path, body: str, named: str
+) -> None:
+    """Nothing reads them: every call is one request to the server the environment names.
 
-    Nothing reads a key no step answers to, so the run bounds that step by
-    ``single_seconds`` and reports itself configured. The vocabulary rides the
-    refusal because the id is a thing an operator types from memory.
+    A file still carrying one means something by it — a model, a mode, a bound —
+    and a build that ignored it would not be the build the file asks for.
     """
-    body = MINIMAL + '[timeouts.by_step]\n"p5.reveiw" = 14400\n'
+    with pytest.raises(config.ConfigError, match="unknown") as excinfo:
+        config.load(_write(tmp_path, MINIMAL + body))
 
-    with pytest.raises(config.ConfigError) as excinfo:
-        config.load(_write(tmp_path, body))
-
-    message = str(excinfo.value)
-    assert "p5.reveiw" in message, "the refusal names the key that is wrong"
-    assert "p5.review" in message, "…and the vocabulary it should have been drawn from"
-
-
-@pytest.mark.parametrize("seconds", [0, -60])
-def test_a_non_positive_per_step_timeout_is_refused_at_load(tmp_path: Path, seconds: int) -> None:
-    """The same bound the three scalar durations take, at the same door.
-
-    Unrefused, this value reaches ``call.Caller``'s own spawn boundary as a
-    boundary error three stages into a build, which reports a driver defect for
-    a number the config file supplied.
-    """
-    body = MINIMAL + f'[timeouts.by_step]\n"p5.review" = {seconds}\n'
-
-    with pytest.raises(config.ConfigError) as excinfo:
-        config.load(_write(tmp_path, body))
-
-    message = str(excinfo.value)
-    assert "p5.review" in message
-    assert "positive" in message
+    assert named in str(excinfo.value)
 
 
 @pytest.mark.parametrize("door", ["file", "flag"])
@@ -369,7 +305,6 @@ def test_every_recognized_run_key_still_loads(tmp_path: Path) -> None:
 [run]
 sources = ["a.tex"]
 bibliography = "refs.bib"
-permission_mode = "acceptEdits"
 charter_file = "scratch/charter.md"
 runner = "make"
 no_inference = true
@@ -379,7 +314,6 @@ through = "start"
 
     assert cfg.run.sources == ("a.tex",)
     assert cfg.run.bibliography == "refs.bib"
-    assert cfg.run.permission_mode == "acceptEdits"
     assert cfg.run.charter_file == Path("scratch/charter.md")
     assert cfg.run.runner == "make"
     assert cfg.run.no_inference is True
@@ -391,11 +325,7 @@ through = "start"
 # section with a vocabulary of its own to be checked against — the registry's
 # registered pairs.
 SECTION_VALID_KEYS = [
-    ("claude", '[claude]\ncommand = ["claude", "--x"]\nenv = { ANTHROPIC_LOG = "debug" }\n'),
-    (
-        "timeouts",
-        '[timeouts]\nsingle_seconds = 60\nsilence_seconds = 30\n[timeouts.by_step]\n"p5.review" = 14400\n',
-    ),
+    ("timeouts", "[timeouts]\nsilence_seconds = 30\n"),
     ("retry", "[retry]\ntransport_attempts = 2\nbackoff_seconds = [1, 2]\n"),
     ("log", '[log]\nlevel = "DEBUG"\nrun_dir = "/var/tmp/kb-driver"\n'),
 ]
@@ -424,42 +354,6 @@ def test_every_recognized_key_of_a_section_still_loads(tmp_path: Path, section: 
     consult by some route other than ``.get`` would be refused as unknown.
     Each section's whole valid vocabulary, given alone, must load clean."""
     config.load(_write(tmp_path, MINIMAL + body))
-
-
-def test_a_present_by_step_table_is_not_an_unknown_timeouts_key(tmp_path: Path) -> None:
-    """``by_step`` is a key of ``[timeouts]`` whose value is a nested table.
-
-    The helper that fetches it reads it through ``.get`` like any scalar, so a
-    legitimately present nested table registers as read; fetched any other way
-    it would be reported as an unknown key of its own parent.
-    """
-    body = MINIMAL + '[timeouts.by_step]\n"p5.review" = 14400\n'
-
-    cfg = config.load(_write(tmp_path, body))
-
-    assert cfg.timeouts.by_step == {"p5.review": 14400}
-
-
-@pytest.mark.parametrize(
-    ("case", "body", "key"),
-    [
-        ("per-step table", '[claude.model_by_step]\n"p2.5.claims" = "haiku"\n', "model_by_step"),
-        ("bare model", '[claude]\nmodel = "haiku"\n', "model"),
-    ],
-)
-def test_model_key_is_rejected_at_load_naming_the_key(tmp_path: Path, case: str, body: str, key: str) -> None:
-    # An explicit --model overrides a seat's frontmatter pin, so the driver
-    # never passes it and no model key may be honored. Exit 13's baton reports
-    # the named key, so the key must appear in the message.
-    with pytest.raises(config.ConfigError) as excinfo:
-        config.load(_write(tmp_path, MINIMAL + body))
-    message = str(excinfo.value)
-    assert key in message, case
-    assert "--model" in message, case
-    # The general unknown-key refusal would also catch a model key. It runs
-    # second and never fires, so one key never draws two reports, and the one
-    # it draws is the one saying why no such key exists.
-    assert "unknown key" not in message, case
 
 
 def test_missing_config_file_is_a_config_error(tmp_path: Path) -> None:
@@ -540,27 +434,28 @@ def test_decide_pair_is_checked_against_the_registry() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key", ["no_inference", "doc_audit"])
-def test_each_mode_flag_defaults_off_and_is_carried_through(tmp_path: Path, key: str) -> None:
-    assert getattr(config.load(_write(tmp_path, MINIMAL)).run, key) is False
-    assert getattr(config.load(_write(tmp_path, MINIMAL), run_overrides={key: True}).run, key) is True
-    assert getattr(config.load(_write(tmp_path, MINIMAL + f"{key} = true\n")).run, key) is True
+def test_the_mode_flag_defaults_off_and_is_carried_through(tmp_path: Path) -> None:
+    assert config.load(_write(tmp_path, MINIMAL)).run.no_inference is False
+    assert config.load(_write(tmp_path, MINIMAL), run_overrides={"no_inference": True}).run.no_inference is True
+    assert config.load(_write(tmp_path, MINIMAL + "no_inference = true\n")).run.no_inference is True
 
 
-def test_the_mode_flags_are_rendered_into_the_resume_line_and_the_bound_is_not() -> None:
+def test_the_retired_audit_key_is_refused_at_load(tmp_path: Path) -> None:
+    """``doc_audit`` named a stage the pipeline no longer has, so a file carrying it means nothing runnable."""
+    with pytest.raises(config.ConfigError, match="doc_audit"):
+        config.load(_write(tmp_path, MINIMAL + "doc_audit = true\n"))
+
+
+def test_the_mode_flag_is_rendered_into_the_resume_line_and_the_bound_is_not() -> None:
     """What a resume must keep, and what it must drop.
 
-    A resume dropping a mode flag would change the build half way through,
-    spending the calls it was told to do without or completing without the
-    audit it was asked for. A resume keeping the bound would stop in the same
-    place forever, which is what resuming is for.
+    A resume dropping the mode flag would change the build half way through,
+    spending the calls it was told to do without. A resume keeping the bound
+    would stop in the same place forever, which is what resuming is for.
     """
-    line = config.invocation(
-        None,
-        {"sources": ("a.tex",), "no_inference": True, "doc_audit": True, "through": "start"},
-    )
+    line = config.invocation(None, {"sources": ("a.tex",), "no_inference": True, "through": "start"})
 
-    assert line == f"--source a.tex {config.NO_INFERENCE_FLAG} {config.DOC_AUDIT_FLAG}"
+    assert line == f"--source a.tex {config.NO_INFERENCE_FLAG}"
     assert config.THROUGH_FLAG not in line
 
 

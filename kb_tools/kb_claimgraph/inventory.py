@@ -233,7 +233,17 @@ from enum import Enum
 from typing import Protocol, TypeVar
 
 from .report import ClaimGraphError
-from .tree import ANCHOR_RE, LIST_SEPARATOR, Document, Tree, anchor_labels, resolve, strip_markers, unquote
+from .tree import (
+    ANCHOR_RE,
+    ANCHOR_RENDERING_RE,
+    LIST_SEPARATOR,
+    Document,
+    Tree,
+    anchor_labels,
+    resolve,
+    strip_markers,
+    unquote,
+)
 
 #: Display names whose blocks state a result, case-folded. Every member is a
 #: display name a surveyed corpus declares.
@@ -396,7 +406,7 @@ class Block:
     own text and nothing may normalise it. ``title`` is read by a person — a
     register heading, an entry in stage D's enumeration — so it carries the words
     that span shows and not the reader's markup carrying them
-    (:func:`_readable`).
+    (:func:`page_text`).
 
     Both are ``None`` together, on a block whose display line yields neither
     (module docstring). That block is a claim site nothing downstream can name or
@@ -763,18 +773,19 @@ def _read_display_line(display: str) -> tuple[str, str] | None:
     return None if printed is None else (_plain(printed), printed)
 
 
-def _readable(title: str) -> str:
-    """``title`` as the words the page shows: the reader's citation markup off, its rendering kept.
+def page_text(text: str) -> str:
+    """``text`` as the words the page shows: citation and cross-reference markup off, what each renders kept.
 
-    Point 12's optional argument is *rendered* LaTeX, so an author who titled a
-    block with a ``\\citet`` titled it with the span point 10 wraps every citation
-    in — attribute, tags and all. What a reader of that line sees is the span's
-    contents, and that is what a heading and an enumeration entry carry.
+    A block's optional argument (point 12) and a prose claim's opening sentence
+    are both *rendered* LaTeX, so a ``\\citet`` in either arrives as the span
+    point 10 wraps every citation in, and a ``\\ref`` as the anchor point 7
+    rewrites it to — attribute, tags and all. What a reader of that line sees is
+    each one's contents, and that is what a title carries.
 
-    The locator is untouched by this. It is matched against the document's own
-    bytes, and those still carry the span.
+    A locator is untouched by this. It is matched against the document's own
+    bytes, and those still carry the markup.
     """
-    return CITATION_SPAN_RE.sub(r"\g<rendering>", title).strip()
+    return ANCHOR_RENDERING_RE.sub(r"\g<rendering>", CITATION_SPAN_RE.sub(r"\g<rendering>", text)).strip()
 
 
 def _extended(display: str, span: str) -> str | None:
@@ -849,7 +860,7 @@ def _blocks(document: Document) -> list[Block]:
                 document=document.path,
                 environment=environment,
                 identifier=match.group("identifier"),
-                title=None if title is None else _readable(title),
+                title=None if title is None else page_text(title),
                 display=display,
                 start=number,
                 end=end,
@@ -858,10 +869,10 @@ def _blocks(document: Document) -> list[Block]:
     return found
 
 
-def _fences(document: Document) -> list[MathFence]:
-    """Every display-maths fence, quoted or not, with the labels inside it."""
-    lines = unquote(document.text).splitlines()
-    found: list[MathFence] = []
+def math_fence_extents(lines: Sequence[str]) -> tuple[list[tuple[int, int]], int | None]:
+    """Each display-maths fence over unquoted ``lines`` as (opening line, line after the closer), and the
+    opening line of a fence left unclosed at the end, if one is."""
+    extents: list[tuple[int, int]] = []
     opened: int | None = None
     for number, line in enumerate(lines):
         stripped = line.strip()
@@ -869,23 +880,30 @@ def _fences(document: Document) -> list[MathFence]:
             if stripped == FENCE_OPEN:
                 opened = number
         elif stripped.startswith(FENCE_CLOSE):
-            body = "\n".join(lines[opened + 1 : number])
-            found.append(
-                MathFence(
-                    document=document.path,
-                    start=opened,
-                    end=number + 1,
-                    labels=tuple(EQUATION_LABEL_RE.findall(body)),
-                )
-            )
+            extents.append((opened, number + 1))
             opened = None
-    if opened is not None:
+    return extents, opened
+
+
+def _fences(document: Document) -> list[MathFence]:
+    """Every display-maths fence, quoted or not, with the labels inside it."""
+    lines = unquote(document.text).splitlines()
+    extents, unclosed = math_fence_extents(lines)
+    if unclosed is not None:
         raise ClaimGraphError(
             "math-fence",
-            f"{document.path}:{opened + 1}: a display-maths fence opens and never closes. Point 9 makes the "
+            f"{document.path}:{unclosed + 1}: a display-maths fence opens and never closes. Point 9 makes the "
             f"fence a guarantee, and an unclosed one swallows every claim site after it",
         )
-    return found
+    return [
+        MathFence(
+            document=document.path,
+            start=start,
+            end=end,
+            labels=tuple(EQUATION_LABEL_RE.findall("\n".join(lines[start + 1 : end - 1]))),
+        )
+        for start, end in extents
+    ]
 
 
 def _anchors(document: Document, blocks: Sequence[Block], tree: Tree) -> list[Anchor]:

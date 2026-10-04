@@ -93,16 +93,18 @@ _harness-value harness key:
     @"{{just_executable()}}" --justfile "{{PROJECT_ROOT}}/justfile" _harness-value "{{harness}}" "{{key}}"
 
 # Several installed copies fail rather than pick one: a caller could not tell
-# which copy a driver run there was launched against.
+# which copy a driver run there was launched against. Installed means the
+# entry module exists: a reset removes the tracked sources but leaves ignored
+# `__pycache__/*.pyc`, which still imports as a namespace package.
 [private]
-[doc("print [harness.<key>] of the one harness whose kb_tools repo has installed (<repo>/<project-harness-dir>/agents/kb_tools); nothing if none is installed; fails if several are")]
+[doc("print [harness.<key>] of the one harness whose kb_tools repo has installed (<repo>/<project-harness-dir>/agents/kb_tools/kb_util.py is a file); nothing if none is installed; fails if several are")]
 _installed-harness-value repo key:
     #!/usr/bin/env bash
     set -euo pipefail
     found=()
     for name in $(just _harness-names); do
         harness_dir="$(just _harness-value "${name}" project-harness-dir)"
-        if [[ -d "{{repo}}/${harness_dir}/agents/kb_tools" ]]; then
+        if [[ -f "{{repo}}/${harness_dir}/agents/kb_tools/kb_util.py" ]]; then
             found+=("${name}")
         fi
     done
@@ -133,11 +135,11 @@ _installed-harness-value repo key:
 # are "this install cannot tell me whether a run is live", never "no lock" —
 # an installed toolchain that recognises the op and fails for any other
 # reason (a real resolution failure) still refuses. The two are told apart by
-# argparse's own behaviour: an unrecognised subcommand or flag is rejected by
-# the parser itself, before any op runs, and that rejection always opens with
-# a `usage:` line — the op's own failures never do. Reading that line is
-# asking the CLI's own public error-reporting shape, not a second definition
-# of anything `kb_driver.runlog` owns.
+# asking for `show-run-lock --help` first: argparse answers that before any
+# op's handler runs, exiting 0 where the op exists and 2 — its documented
+# parse-error status — where it does not. The op's own failures share that
+# 2, so the main call's status cannot carry the distinction, and its text
+# cannot either: Python 3.14+ argparse colours `usage:` under FORCE_COLOR.
 [private]
 [doc("refuse if a live driver run holds dir's run lock, naming the holder, or if dir holds toolchains under more than one harness; silent no-op on a stale or absent lock, on a dir with no toolchain installed yet, or on a toolchain too old to recognise show-run-lock")]
 guard-run-lock dir: _venv
@@ -149,16 +151,19 @@ guard-run-lock dir: _venv
         exit 0
     fi
     set +e
+    (cd "${dir}" && PYTHONPATH="${harness_dir}/agents" "{{VENV_PYTHON}}" -m kb_tools.kb_util show-run-lock --help > /dev/null 2>&1)
+    probe_rc=$?
+    set -e
+    if [[ "${probe_rc}" -eq 2 ]]; then
+        # The installed toolchain predates the op and cannot answer this
+        # question at all, same as none installed.
+        exit 0
+    fi
+    set +e
     output="$(cd "${dir}" && PYTHONPATH="${harness_dir}/agents" "{{VENV_PYTHON}}" -m kb_tools.kb_util show-run-lock 2>&1)"
     rc=$?
     set -e
     if [[ "${rc}" -ne 0 ]]; then
-        if [[ "${output}" == usage:* ]]; then
-            # argparse itself rejected the invocation before show-run-lock's
-            # own handler ever ran — the installed toolchain predates the op
-            # and cannot answer this question at all, same as none installed.
-            exit 0
-        fi
         printf 'error: show-run-lock could not resolve a repository root under %s (exit %s):\n%s\n' "${dir}" "${rc}" "${output}" >&2
         exit 1
     fi
@@ -277,11 +282,14 @@ stage-arxiv-corpus-candidates *args:
 # deciding, for a repo this recipe knows nothing about, which commit counts as
 # "before the install" — that decision belongs to whoever staged the fixture
 # by hand the first time.
-[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed agent set, kb-root/, and scratch directory above that tag; every --* flag forwards verbatim to the root install recipe")]
+[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed agent set, kb-root/, and scratch directory above that tag; dir is absolute or relative to the directory just was invoked from; every --* flag forwards verbatim to the root install recipe")]
 stage-fixture dir *args:
     #!/usr/bin/env bash
     set -euo pipefail
     dir="{{dir}}"
+    # just runs a recipe from the justfile's directory, so a relative path a
+    # caller typed is relative to where they typed it, not to here.
+    [[ "${dir}" = /* ]] || dir="{{invocation_directory()}}/${dir}"
     if [[ ! -d "${dir}/.git" ]]; then
         printf 'error: %s is not a git repository — this recipe re-anchors and reinstalls an already-committed fixture, it does not create one from scratch.\n' "${dir}" >&2
         exit 1
@@ -295,7 +303,7 @@ stage-fixture dir *args:
     printf 'staging %s: resetting to `cleared` (discards any kb-build ledger commits and the installed agent set, kb-root/ and scratch directory committed or left above it), then reinstalling the current agent set.\n' "${dir}" >&2
     git -C "${dir}" reset --hard cleared > /dev/null
     rm -rf ${scratch:+"${dir}/${scratch}"} "${dir}/kb-root"
-    ( cd "{{justfile_directory()}}/.." && just install "kb-testing/${dir}" {{args}} )
+    ( cd "{{justfile_directory()}}/.." && just install "${dir}" {{args}} )
     git -C "${dir}" add -A
     git -C "${dir}" -c user.name=kb-testing -c user.email=kb-testing@invalid commit -qm "agent defs installed"
     git -C "${dir}" tag -d staged > /dev/null 2>&1 || true
@@ -418,11 +426,10 @@ KB_DRIVER_ARXIV_DIR := justfile_directory() / ".." / ".claude-temp" / "kb-driver
 # directly by any recipe body.
 KB_DRIVER_ARXIV_CANDIDATE_DIR := justfile_directory() / ".." / ".claude-temp" / "kb-driver-arxiv-candidates"
 
-# No config file, no charter, and no `--permission-mode`: `--no-inference`
-# (hardwired below, not read from any variable or argument — nothing this
-# recipe accepts can countermand it) means no dispatched call ever needs a
-# permission mode answered, sources arrive as repeated `--source` flags, and
-# a charter is optional.
+# No config file and no charter: `--no-inference` (hardwired below, not read
+# from any variable or argument — nothing this recipe accepts can countermand
+# it) means no model call is made and no server need be named, sources arrive
+# as repeated `--source` flags, and a charter is optional.
 #
 # `id_safe` mirrors stage-arxiv-paper's own `tr '/' '_'` mapping from id to
 # staged directory name; the two must agree on this mapping since this
@@ -886,13 +893,58 @@ kb-driver-kill:
 # Neither side's flags are enumerated here, so neither can drift from its owner.
 # The env file is sourced only inside the launched subshell and is never read
 # or printed by this recipe.
-[doc("restage a hand-staged fixture, then launch a with-inference kb_driver build over it detached (pid file, console log and run dir under KB_DRIVER_LIVE_DIR, so kb-driver-harvest/-kill apply) and return; env_file (required) is sourced into the driver's environment only; sources are the fixture's top-level .tex files holding \\documentclass; usage: kb-driver-fixture dir env_file [stage-fixture flags] [-- kb_driver run flags], e.g. `kb-driver-fixture test-data/transient/ModernCorp <env> --family=qwen3 -- --through document-graph`")]
+#
+# Leading `--resume` and `--sources=a.tex,b.tex` (either order, before any
+# stage-fixture flag): `--sources` replaces the computed source list with
+# exactly the named files, in order; it is checked after staging, against the
+# tree the driver will see. With `--resume` the subset goes to the driver as-is
+# and the ledger is the driver's concern.
+#
+# A leading `--resume` (before any stage-fixture flag) skips staging — no reset,
+# no reinstall — and launches the same `kb_driver run`, which picks up from the
+# ledger (the fixture's `kb-build: <stage>` commits). It refuses a fixture with
+# no installed toolchain or no such commit, since there is then nothing to resume.
+[doc("restage a hand-staged fixture (or, with a leading --resume, skip staging and continue from its ledger), then launch a with-inference kb_driver build over it detached (pid file, console log and run dir under KB_DRIVER_LIVE_DIR, so kb-driver-harvest/-kill apply) and return; env_file (required) is sourced into the driver's environment only and names the server every model call of the build goes to, in liaison_tools' format (API_BASE_URL, MODEL, API_KEY_FILE, ALLOW_HTTP); sources are the fixture's top-level .tex files holding \\documentclass, or exactly the files a leading --sources=a.tex,b.tex names (relative to dir, in that order, each holding \\documentclass); dir and env_file are absolute or relative to the directory just was invoked from, env_file ~ expanded; usage: kb-driver-fixture dir env_file [--resume] [--sources=a.tex,b.tex,...] [stage-fixture flags] [-- kb_driver run flags], e.g. `kb-driver-fixture test-data/transient/ModernCorp ~/.config/reaper-qwen3.8-flash-next.env --family=qwen3`")]
 kb-driver-fixture dir env_file *args: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     dir="${1}"
     env_file="${2}"
     shift 2
+    resume=""
+    named=()
+    have_named=""
+    while [[ "$#" -gt 0 ]]; do
+        case "${1}" in
+            --resume) resume=1 ;;
+            --sources=*)
+                if [[ -n "${have_named}" ]]; then
+                    printf 'error: --sources given twice.\n' >&2
+                    exit 1
+                fi
+                have_named=1
+                IFS=, read -r -a named <<< "${1#--sources=}"
+                ;;
+            *) break ;;
+        esac
+        shift
+    done
+    if [[ -n "${have_named}" ]]; then
+        if [[ "${#named[@]}" -eq 0 ]]; then
+            printf 'error: --sources names no file.\n' >&2
+            exit 1
+        fi
+        for name in "${named[@]}"; do
+            if [[ -z "${name}" ]]; then
+                printf 'error: --sources holds an empty file name.\n' >&2
+                exit 1
+            fi
+            if [[ "$(printf '%s\n' "${named[@]}" | grep -cxF -- "${name}")" -gt 1 ]]; then
+                printf 'error: --sources names %s more than once.\n' "${name}" >&2
+                exit 1
+            fi
+        done
+    fi
     stage_args=()
     driver_args=()
     while [[ "$#" -gt 0 && "${1}" != "--" ]]; do
@@ -905,6 +957,8 @@ kb-driver-fixture dir env_file *args: _venv
     fi
     # just runs a recipe from the justfile's directory, so a relative path a
     # caller typed is relative to where they typed it, not to here.
+    [[ "${dir}" = /* ]] || dir="{{invocation_directory()}}/${dir}"
+    env_file="${env_file/#\~/${HOME}}"
     [[ "${env_file}" = /* ]] || env_file="{{invocation_directory()}}/${env_file}"
     if [[ ! -f "${env_file}" || ! -r "${env_file}" ]]; then
         printf 'error: env file %s is not a readable file.\n' "${env_file}" >&2
@@ -916,21 +970,51 @@ kb-driver-fixture dir env_file *args: _venv
         exit 1
     fi
 
-    just stage-fixture "${dir}" ${stage_args[@]+"${stage_args[@]}"}
+    if [[ -n "${resume}" ]]; then
+        if [[ "${#stage_args[@]}" -gt 0 ]]; then
+            printf 'error: --resume skips staging, so stage-fixture flags (%s) have nothing to apply to; put driver flags after `--`.\n' "${stage_args[*]}" >&2
+            exit 1
+        fi
+        just guard-run-lock "${dir}"
+    else
+        just stage-fixture "${dir}" ${stage_args[@]+"${stage_args[@]}"}
+    fi
 
     sources=()
-    while IFS= read -r tex; do
-        if grep -qF '\documentclass' "${dir}/${tex}"; then
+    if [[ -n "${have_named}" ]]; then
+        for tex in "${named[@]}"; do
+            if [[ ! -f "${dir}/${tex}" ]]; then
+                printf 'error: --sources file %s does not exist in %s.\n' "${tex}" "${dir}" >&2
+                exit 1
+            fi
+            if ! grep -qF '\documentclass' "${dir}/${tex}"; then
+                printf 'error: --sources file %s holds no \\documentclass.\n' "${tex}" >&2
+                exit 1
+            fi
             sources+=(--source "${tex}")
-        fi
-    done < <(cd "${dir}" && LC_ALL=C find . -maxdepth 1 -name '*.tex' -type f | sed 's|^\./||' | LC_ALL=C sort)
+        done
+    else
+        while IFS= read -r tex; do
+            if grep -qF '\documentclass' "${dir}/${tex}"; then
+                sources+=(--source "${tex}")
+            fi
+        done < <(cd "${dir}" && LC_ALL=C find . -maxdepth 1 -name '*.tex' -type f | sed 's|^\./||' | LC_ALL=C sort)
+    fi
     if [[ "${#sources[@]}" -eq 0 ]]; then
         printf 'error: %s holds no top-level .tex file with \\documentclass — nothing to build.\n' "${dir}" >&2
         exit 1
     fi
     harness_dir="$(just _installed-harness-value "${dir}" project-harness-dir)"
     if [[ -z "${harness_dir}" ]]; then
-        printf 'error: %s holds no installed kb_tools after staging.\n' "${dir}" >&2
+        if [[ -n "${resume}" ]]; then
+            printf 'error: %s holds no installed kb_tools — nothing to resume.\n' "${dir}" >&2
+        else
+            printf 'error: %s holds no installed kb_tools after staging.\n' "${dir}" >&2
+        fi
+        exit 1
+    fi
+    if [[ -n "${resume}" && -z "$(git -C "${dir}" log -1 --format=%h --grep='^kb-build: ' 2>/dev/null)" ]]; then
+        printf 'error: %s has no `kb-build:` ledger commit — nothing to resume; run without --resume.\n' "${dir}" >&2
         exit 1
     fi
 
@@ -1095,40 +1179,38 @@ measure-sheet +pairs:
     done
     python3 "{{justfile_directory()}}/tools/measure-sheet.py" "${resolved[@]}"
 
-# The finished build whose recorded claim-graph asks the two recipes below
-# replay and compare. Both run with PYTHONPATH at its own installed copy,
-# so the seat, the no-tools fragment and the answer parses are
-# the toolchain copy that build ran — not this tree's, which moves on.
+# The project whose installed toolchain replays recorded claim-graph asks:
+# PYTHONPATH at its installed agents directory, so the reader and its system
+# prompt are that install's. The toolchain must carry
+# kb_claimgraph/letters.py. Override it on the command line:
+# `just -f kb-testing/justfile ASK_REPLAY_FIXTURE=<dir> replay-claimgraph-asks ...`.
 ASK_REPLAY_FIXTURE := justfile_directory() / "test-data" / "transient" / "ModernCorp"
 
-[private]
-[doc("print ASK_REPLAY_FIXTURE's installed agents directory, the PYTHONPATH entry for its kb_tools; fails if it has none")]
-_ask-replay-agents-dir:
+[doc("replay recorded claim-graph letter-ask groups (records letters.ask_group wrote) through ASK_REPLAY_FIXTURE's installed production reader; env_file is the build's env file, whose API_* part (liaison_tools format: API_BASE_URL, MODEL, API_KEY_FILE, ALLOW_HTTP) the replay uses (absolute, or relative to the directory just was invoked from, ~ expanded), sourced into the replay's environment only and never printed; one line per call and a W_eff summary per level on stdout, replay records under .claude-temp/ask-replay/; trailing args forward (--concurrency 1 4 8, --record PATH, --out DIR)")]
+replay-claimgraph-asks env_file record *args: _venv
     #!/usr/bin/env bash
     set -euo pipefail
+    env_file="{{env_file}}"
+    record="{{record}}"
+    # just runs a recipe from the justfile's directory, so a relative path a
+    # caller typed is relative to where they typed it, not to here.
+    env_file="${env_file/#\~/${HOME}}"
+    [[ "${env_file}" = /* ]] || env_file="{{invocation_directory()}}/${env_file}"
+    [[ "${record}" = /* ]] || record="{{invocation_directory()}}/${record}"
+    if [[ ! -f "${env_file}" || ! -r "${env_file}" ]]; then
+        printf 'error: env file %s is not a readable file.\n' "${env_file}" >&2
+        exit 1
+    fi
     harness_dir="$(just _installed-harness-value "{{ASK_REPLAY_FIXTURE}}" project-harness-dir)"
     if [[ -z "${harness_dir}" ]]; then
         printf 'error: %s has no installed kb_tools under any harness — stage it first.\n' "{{ASK_REPLAY_FIXTURE}}" >&2
         exit 1
     fi
-    printf '%s\n' "{{ASK_REPLAY_FIXTURE}}/${harness_dir}/agents"
-
-[doc("replay ASK_REPLAY_FIXTURE's recorded claim-graph asks against the model a liaison env file names, into .claude-temp/ask-replay/<model>/; resumable; trailing args forward (--concurrency N, --timeout S, --ask STEM)")]
-replay-claimgraph-asks env_file *args: _venv
-    #!/usr/bin/env bash
-    set -euo pipefail
-    env_file="{{env_file}}"
-    # just runs a recipe from the justfile's directory, so a relative path a
-    # caller typed is relative to where they typed it, not to here.
-    [[ "${env_file}" = /* ]] || env_file="{{invocation_directory()}}/${env_file}"
-    agents_dir="$(just _ask-replay-agents-dir)"
-    PYTHONPATH="${agents_dir}" "{{VENV_PYTHON}}" "{{justfile_directory()}}/tools/replay-claimgraph-asks.py" \
-        --fixture "{{ASK_REPLAY_FIXTURE}}" --env-file "${env_file}" "${@:2}"
-
-[doc("compare replayed claim-graph asks (model directories under .claude-temp/ask-replay/) with ASK_REPLAY_FIXTURE's own answers; writes summary.md and disagreements.tsv beside them")]
-compare-claimgraph-asks +models: _venv
-    #!/usr/bin/env bash
-    set -euo pipefail
-    agents_dir="$(just _ask-replay-agents-dir)"
-    PYTHONPATH="${agents_dir}" "{{VENV_PYTHON}}" "{{justfile_directory()}}/tools/compare-claimgraph-asks.py" \
-        --fixture "{{ASK_REPLAY_FIXTURE}}" "$@"
+    (
+        set -a
+        . "${env_file}"
+        set +a
+        PYTHONPATH="{{ASK_REPLAY_FIXTURE}}/${harness_dir}/agents" exec "{{VENV_PYTHON}}" \
+            "{{justfile_directory()}}/tools/replay-claimgraph-asks.py" \
+            --record "${record}" "${@:3}"
+    )

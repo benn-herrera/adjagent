@@ -87,6 +87,8 @@ Wayland where relevant. Test with AppArmor/SELinux confined execution.
 
 @!incumbent-search!@
 
+@!prove-replacement-first variant="change"!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@

@@ -8,10 +8,11 @@ defect.
 
 | Module | Role |
 |---|---|
-| `post-openai.py` | The wire transport. Builds and POSTs one SSE-streamed chat-completions request, demuxes and reassembles the stream, classifies the outcome (complete / incomplete / empty / error), and emits the canonical stdout contract. |
+| `openai_chat.py` | The wire transport, importable. Builds and POSTs one SSE-streamed chat-completions request (`post_chat_streaming`), demuxes and reassembles the stream, and classifies the reply (`classify_reply`: complete / incomplete / empty). Beside it, one non-streamed embeddings batch (`post_embeddings`) through the same no-redirect opener. `read_api_key` reads a key file; the requests take the key as a value, and nothing here reads the environment. |
+| `post-openai.py` | The wire transport's command. Reads the environment and the key file (through `openai_chat.read_api_key`), runs one request through `openai_chat` (retrying once on a model-not-found error), and emits the canonical stdout contract, the exit codes and the usage side channel. |
 | `msg-util.py` | The messages-file mutator. Three modes (`init`/`append`/`validate`) over a JSON turn array, with a lock + scratch-file + atomic-replace discipline protecting concurrent read-modify-write. |
 | `relay-driver.py` | The corpus-relay eval instrument. Composes `post-openai.py` and `msg-util.py` into a scripted, budgeted READ/LIST/GREP question-answering loop against a read-only corpus. |
-| `__init__.py` | Package marker only, so `tests/` collects under a stable module path. The tools themselves are hyphenated — not legal module names — so nothing in the package imports another; each is a command, and the tests load the ones they exercise by file path through `importlib`. |
+| `__init__.py` | Package marker, so `tests/` collects under a stable module path and `openai_chat` imports as `liaison_tools.openai_chat`. The tools themselves are hyphenated — not legal module names — so no tool imports another; each is a command, and the tests load the ones they exercise by file path through `importlib`. `post-openai.py` imports `openai_chat` as a top-level module when run as a command, its own directory leading `sys.path`, and through the package when loaded by path from a process that imports it. |
 | `tests/` | The verification suite (see Test Layout, below); excluded from the shipped-package install per root `SPEC.md`. |
 
 Root `ARCHITECTURE.md`'s "Liaisons + liaison_tools" bullet (Subsystem Map) states the one-paragraph
@@ -19,7 +20,7 @@ version of the composition this document expands: `guest-liaison.md` and `mad-gu
 share these helpers rather than each reimplementing the wire protocol or the messages-file format,
 and `relay-driver.py` composes the same two helpers into a separate, scripted loop.
 
-## Wire Transport Internals (`post-openai.py`)
+## Wire Transport Internals (`openai_chat.py`, `post-openai.py`)
 
 **One opener, redirects refused.** `_OPENER = urllib.request.build_opener(_NoRedirectHandler)` is
 the single `urllib` opener every request in the module goes through.
@@ -27,11 +28,14 @@ the single `urllib` opener every request in the module goes through.
 a `3xx` — the mechanism behind SPEC's "redirects are never followed" guarantee, because `urllib`'s
 default handler copies request headers, `Authorization` included, to the redirect target.
 
-**Key containment.** `post-openai.py` is the only file in the package that opens the key file,
-reading it straight into memory with `Path.read_text`. `msg-util.py` never touches it, and
-`relay-driver.py` passes `API_KEY_FILE`'s path through to the transport without reading it. SPEC's
-API Key Handling guarantees rest on that confinement: a key read added anywhere else is a second
-place the key can leak from.
+**Key containment.** `openai_chat.read_api_key` is the one function that opens a key file,
+reading it straight into memory with `Path.read_text`; the requests take the key as a value, and
+`openai_chat` reads no environment variable. `post-openai.py` reads `API_KEY_FILE` through it, and
+so does any in-process caller outside the package that needs a key from a key file (`kb_tools`'
+claim-graph reader). `msg-util.py` never touches the key file, and `relay-driver.py` passes
+`API_KEY_FILE`'s path through to the transport without reading it. SPEC's API Key Handling
+guarantees rest on that confinement: a key read added anywhere else is a second place the key can
+leak from.
 
 **SSE demux (`demux_sse`).** Reads a line iterator, ignores blank lines and `:`-prefixed comments,
 and only inspects `data:`-prefixed lines. `[DONE]` ends the stream cleanly; a line whose parsed JSON
@@ -41,7 +45,9 @@ error), or 3 (stream ended without `[DONE]` but had data). `chunk_payloads`, whe
 each payload string verbatim for `DEBUG_RESPONSE` dumps; `raw_buffer` collects every raw line for
 error reporting.
 
-**Reassembly (`reassemble_stream`).** Accumulates `delta.content` strings into one buffer and
+**Reassembly (`reassemble_stream`, `reassemble_content`).** `reassemble_content` concatenates the
+`delta.content` strings alone — the text a reply wrote, whatever tool call rode beside it.
+`reassemble_stream` accumulates `delta.content` strings into one buffer and
 `delta.tool_calls` into a dict keyed by the API's own `index`, merging `id`/`type`/`function.name`
 (last-non-null wins) and concatenating `function.arguments` fragments in arrival order. If any
 tool-call slots were populated, the output is `TOOL_CALLS\n` plus the JSON-serialized ordered list;
@@ -61,8 +67,9 @@ lookup, exact-or-unambiguous-substring match) and retries the whole streaming ca
 resolved name, emitting warnings either way. This retry is not attempted a second time if it also
 fails.
 
-**Exit-code assembly.** `COMPLETE_FINISH_REASONS = {"stop", "tool_calls", "function_call"}` is the
-sole table `main()` checks a `finish_reason` against; anything else marks the reply `incomplete`.
+**Exit-code assembly.** `openai_chat.COMPLETE_FINISH_REASONS = {"stop", "tool_calls",
+"function_call"}` is the sole table a `finish_reason` is checked against, by `classify_reply`;
+anything else marks the reply `incomplete`. `main()` maps the classification to the exit codes.
 The usage side-channel write happens before the incomplete/empty branch is evaluated — deliberately,
 per the inline comment, because the call completed and the tokens were spent regardless of the
 reply's usability.
@@ -179,13 +186,14 @@ that reads the API key.
 | Module | Covers |
 |---|---|
 | `test_post_openai.py` | SSE demux/reassembly and API-key-format validation against `test-fixture-*.txt` fixtures (offline); an end-to-end subprocess class against a stubbed local `http.server` endpoint, proving the stdout contract byte-for-byte in both shapes. Documented gaps: `/models` listing and substring model-resolution retry, and real mid-stream connection drops — `is_model_error_text`, the pure sniffing those paths pivot on, is covered. |
+| `test_openai_chat.py` | What an in-process caller reaches that the command does not: `classify_reply`'s table, `reassemble_content` beside a tool call, and the request's optional fields (`stream_options` only when asked, no `tools`) against a stubbed endpoint; `post_embeddings` returning vectors in input order from an out-of-order reply, and refusing a short one. |
 | `test_msg-util.py` | The three properties an adversarial review found missing (module docstring's own naming): `LC-S1` a failed write must not exit 0, `LC-S2` concurrent appends must not lose turns, `LC-S3` scratch must land on the target's filesystem — plus `LC-M3`, the `validate` verb, and a killed lock holder not blocking the next mutation. |
 | `test_relay_driver.py` | The reply classifier, path confinement (traversal/absolute/symlink-escape), the protocol-block append contract, the budget state machine, the loop-top round-trip guard, and READ/LIST/GREP servicing against a fixture corpus; an end-to-end subprocess class against a stubbed SSE endpoint proving a full scripted run (answer file, `stats.csv` with real token totals, `messages.json` shape). |
 
 Per-suite case counts are not recorded here — nothing would check them; `just test liaison_tools`
 reports the live numbers.
 
-All three suites are stdlib-only and never touch the network beyond `127.0.0.1` (per each module's
+All four suites are stdlib-only and never touch the network beyond `127.0.0.1` (per each module's
 own docstring). Run via `just test liaison_tools` (or `just test` for the full tooling suite:
 `kb_tools` + `liaison_tools` + `gen_defs`), which sets `PYTHONPATH` to the repository root so the
 shipped packages import as top-level packages — the same import shape a consumer gets with
@@ -198,6 +206,7 @@ shipped packages import as top-level packages — the same import shape a consum
 | `guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body | `guest-session/<topic>/messages.json` + `tmp/` |
 | `mad-guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body | `liaison-messages.json` + `tmp/` inside the run directory its referee hands it, which differs between a review run and a design run |
 | `relay-driver.py` | `post-openai.py` (sole transport), `msg-util.py` (sole messages-file mutator) | its own, under `--output-dir` (SPEC.md, `relay-driver.py`) |
+| `kb_tools/inference/liaison_tools.py` | `openai_chat`, imported in-process; the key is a value it reads from the `claude` CLI's environment (`kb_tools/ARCHITECTURE.md`, the `inference/` row) | none: it writes the capture its caller names |
 
 Frontmatter stripping is not a tool here: each liaison definition runs the `sed` range itself. No
 layout above is asserted or checked by anything in this package (SPEC.md, Paths).

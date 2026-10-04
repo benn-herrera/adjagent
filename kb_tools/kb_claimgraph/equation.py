@@ -43,8 +43,8 @@ authored bytes happens.
 a maths fence that could source an edge is a cross-reference, and a reference
 sealed inside a fence reaches the tree as no anchor at all (155 of them over the
 corpus, the class the plan rules out of scope). So an equation node is named by
-references and names none, which is why adding a corpus's worth of them leaves
-:func:`attribute.check_acyclic` with nothing new to find.
+references and names none, which is why adding a corpus's worth of them closes
+no cycle.
 """
 
 from collections.abc import Iterable

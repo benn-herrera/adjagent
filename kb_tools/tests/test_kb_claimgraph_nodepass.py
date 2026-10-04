@@ -1,27 +1,28 @@
-"""The node pass: verdicts on reference-bearing prose, the record, and the node set it fixes.
+"""The node pass: one letter ask per paragraph, the verdicts, the record, and the node set it fixes.
 
-**The inference is fixed at the :class:`~kb_tools.kb_claimgraph.identify.Identifier`
-seam.** The fake reads the leaf the stage hands it — its render and the
-paragraphs it owes a verdict — composes the answer text a seat would return, and
-hands it to the production parse. So verdict completeness, every refusal, the
-record-then-KB-then-landed order, completion of a stopped run, the per-leaf
-write, stage D's use of the verdicts and the equation stage's are all exercised,
-and none of it depends on the wording of a prompt.
+**The inference is fixed at the :class:`~kb_tools.kb_claimgraph.letters.LetterReader`
+seam.** The fake resolves the paragraph each question names against the leaf on
+disk and answers by the phrases that paragraph holds. So which paragraphs are
+asked, every default and its cause, the record-then-KB-then-landed order,
+completion of a stopped run, the per-leaf write, stage D's use of the verdicts
+and the equation stage's are all exercised, and none of it depends on the
+wording of a prompt.
 
 The corpus puts each case on its own leaf:
 
-* **alpha** hosts a theorem and two paragraphs holding references — one a claim,
-  one not — and a third paragraph holding none, which a record may start in;
+* **alpha** hosts a theorem and three paragraphs holding references — one a
+  claim, one not, and one too short to open a claim that is asked all the same —
+  and a fourth holding none, which is a claim;
 * **beta** hosts no block, and its one reference-bearing paragraph is a claim
   carrying its own equation;
-* **gamma** hosts no block, states nothing, and holds the one equation that only
-  alpha's not-a-claim paragraph names;
+* **gamma** hosts no block, states nothing, carries a markup-only paragraph, and
+  holds the one equation that only alpha's not-a-claim paragraph names;
 * **delta** hosts a lemma and nothing else to read but its heading.
 """
 
 import shutil
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -36,10 +37,12 @@ from kb_tools.kb_claimgraph import (
     graph,
     identify,
     inventory,
+    letters,
     prose,
     tree,
     write,
 )
+from kb_tools.kb_claimgraph.assemble import BLOCKLESS_REASON
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_claimgraph.report import ClaimGraphError
 from kb_tools.kb_write import ops, render
@@ -81,6 +84,8 @@ for the notation used above, and at
 <a href="delta.md#lem:delta" data-reference-type="ref" data-reference="lem:delta">Lemma 1</a>
 for where it is set.
 
+Compare <a href="delta.md#lem:delta" data-reference-type="ref" data-reference="lem:delta">Lemma 1</a>.
+
 A closing remark states that the admissible set is closed under limits.
 """
 
@@ -105,6 +110,8 @@ The notation below follows
 <a href="alpha.md#thm:alpha" data-reference-type="ref" data-reference="thm:alpha">Theorem 1</a>
 throughout.
 
+<div class="center">
+
 ``` math
 \\gamma = 0 \\label{{eq:gamma}}
 ```
@@ -128,64 +135,56 @@ _TREE = {
     "vol/delta.md": _DELTA,
 }
 
-_P1_TITLE = "Sharpness of the alpha bound"
-_BETA_TITLE = "The beta bound on interior states"
-_REMARK_TITLE = "Closure of the admissible set under limits"
-_GAMMA_REASON = "The section fixes the notation other sections use and states no result of its own."
+#: Each title is its paragraph's first sentence as the page shows it — derived,
+#: so these are what the rule yields over the corpus above, not what a seat chose.
+_P1_TITLE = (
+    "The alpha bound follows from Lemma 1 and from the estimate 1, and it is the sharpest bound the method gives."
+)
+_BETA_TITLE = "Beta relies on Theorem 1 together with the estimate"
+_REMARK_TITLE = "A closing remark states that the admissible set is closed under limits."
 
-#: What the seat says about each leaf. A verdict is keyed by a phrase of the
-#: paragraph it judges, and a record by the opening of its sentence; the fake
-#: resolves both against the leaf it is handed.
-_PLAN: dict[str, dict] = {
-    "vol/alpha.md": {
-        "records": [("A closing remark states", _REMARK_TITLE)],
-        "verdicts": {"The alpha bound follows": _P1_TITLE, "only points the reader": None},
-    },
-    "vol/beta.md": {"verdicts": {"Beta relies on": _BETA_TITLE}},
-    "vol/gamma.md": {"verdicts": {"The notation below follows": None}, "reason": _GAMMA_REASON},
+_CLAIM = ask.ParagraphLetter.CLAIM.value
+_NOT_A_CLAIM = ask.ParagraphLetter.NOT_A_CLAIM.value
+
+#: What the seat says, keyed by a phrase of the paragraph it is said about. Any
+#: paragraph holding none of them is answered not a claim.
+_ANSWERS: dict[str, str] = {
+    "The alpha bound follows": _CLAIM,
+    "A closing remark states": _CLAIM,
+    "Beta relies on": _CLAIM,
 }
 
 
-class VerdictIdentifier:
-    """An :class:`identify.Identifier` answering from :data:`_PLAN` through the production parse.
+def _excerpt(repo: Path, document: str, locator: str) -> str:
+    documents = tree.read(repo / "kb-root")
+    rendered = identify.reading_of(documents.documents[document], inventory.scan(documents)).render
+    return next(span.excerpt for span in map(rendered.span_of, rendered.paragraphs) if span.locator == locator)
 
-    ``withhold`` names verdict phrases left out of a leaf's first answer, which
-    is how an answer missing a verdict is expressed; ``always_withhold`` leaves
-    them out of every answer.
+
+class PhraseReader:
+    """A :class:`letters.LetterReader` answering each paragraph by the phrases it holds.
+
+    ``stop_on`` names a leaf whose first ask raises :class:`ask.AskError`, as a
+    call that never completed would. ``asked`` is every question put, as the
+    leaf and the paragraph's own words.
     """
 
-    def __init__(self, plan=None, *, withhold: frozenset[str] = frozenset(), always_withhold: bool = False):
-        self._plan = _PLAN if plan is None else plan
-        self._withhold = withhold
-        self._always = always_withhold
-        self.asks: list[tuple[str, tuple[str, ...]]] = []
+    def __init__(self, repo: Path, answers: Mapping[str, str] | None = None, *, stop_on: str | None = None):
+        self._repo = repo
+        self._answers = _ANSWERS if answers is None else answers
+        self._stop_on = stop_on
+        self.asked: list[tuple[str, str]] = []
 
-    def identify(self, reading, *, report, missing=()):
-        del report
-        first = reading.document not in [document for document, _ in self.asks]
-        self.asks.append((reading.document, tuple(missing)))
-        plan = self._plan.get(reading.document, {})
-        rendered = reading.render
-        records = [
-            identify.Record(quote=quote, label=_label_opening(rendered, quote), title=title)
-            for quote, title in plan.get("records", ())
-        ]
-        verdicts = []
-        for name, paragraph in reading.paragraph_ids().items():
-            text = rendered.span_of(paragraph).excerpt
-            for phrase, title in plan.get("verdicts", {}).items():
-                if phrase in text and not (phrase in self._withhold and (first or self._always)):
-                    verdicts.append(identify.Verdict(paragraph=name, title=title))
-        says_nothing = not records and not verdicts and not reading.may_decline
-        answer = ask.identify_answer_block(records, plan.get("reason", ""), verdicts, nothing_further=says_nothing)
-        return ask.parse_identify_answer(answer, document=reading.document)
+    def __call__(self, question: letters.LetterQuestion) -> letters.Reply:
+        if question.group == self._stop_on:
+            self._stop_on = None
+            raise ask.AskError("inference-failed", f"{question.group}: the call never completed")
+        excerpt = _excerpt(self._repo, question.group, question.item)
+        self.asked.append((question.group, excerpt))
+        return letters.Reply(text=next((said for phrase, said in self._answers.items() if phrase in excerpt), "B"))
 
-    def re_ask(self, reading, unresolved):
-        raise AssertionError(f"{reading.document}: every record here resolves on the first ask")
-
-
-def _label_opening(rendered, quote: str) -> str:
-    return next(sentence.label for sentence in rendered.sentences if sentence.text.startswith(quote))
+    def groups(self) -> list[str]:
+        return list(dict.fromkeys(group for group, _ in self.asked))
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +206,16 @@ def _declare(repo: Path) -> None:
     assert not report.failed, report.lines()
 
 
-def _discover(repo: Path, identifier) -> list[str]:
-    report = discover.build(kb_root=repo / "kb-root", repo_root=repo, scratch=_scratch(repo), identifier=identifier)
+def _discover(repo: Path, reader: letters.LetterReader) -> list[str]:
+    """The run's report lines where it failed, and nothing where it did not."""
+    report = discover.build(kb_root=repo / "kb-root", repo_root=repo, scratch=_scratch(repo), reader=reader)
     return report.lines() if report.failed else []
+
+
+def _discover_report(repo: Path, reader: letters.LetterReader) -> list[str]:
+    report = discover.build(kb_root=repo / "kb-root", repo_root=repo, scratch=_scratch(repo), reader=reader)
+    assert not report.failed, report.lines()
+    return report.lines()
 
 
 def _mint_equations(repo: Path) -> None:
@@ -233,7 +239,7 @@ def declared(declared_build: Path, tmp_path: Path) -> Path:
 @pytest.fixture(scope="module")
 def discovered_build(declared_build: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     repo = copy_build(declared_build, tmp_path_factory.mktemp("nodepass-discovered") / "consumer")
-    assert _discover(repo, VerdictIdentifier()) == []
+    assert _discover(repo, PhraseReader(repo)) == []
     with held_unchanged(repo, name="nodepass discovered"):
         yield repo
 
@@ -258,15 +264,20 @@ def _reading(repo: Path, path: str) -> identify.Reading:
     return identify.reading_of(documents.documents[path], sites)
 
 
-def _paragraph(reading: identify.Reading, phrase: str) -> str:
-    rendered = reading.render
-    return next(
-        name for name, paragraph in reading.paragraph_ids().items() if phrase in rendered.span_of(paragraph).excerpt
-    )
+def _verdicts(repo: Path, path: str) -> dict[str, kb_pipeline.ParagraphVerdict]:
+    """``path``'s recorded verdicts, by the opening words of the paragraph each judges."""
+    reading = _reading(repo, path)
+    entry = kb_pipeline.read_node_pass(repo).leaves[path]
+    by_line = {verdict.line: verdict for verdict in entry.verdicts}
+    return {
+        reading.render.span_of(paragraph).excerpt[:24]: by_line[paragraph.start]
+        for paragraph in reading.render.paragraphs
+        if paragraph.start in by_line
+    }
 
 
 # ---------------------------------------------------------------------------
-# 1 — what is owed a verdict
+# 1 — which paragraphs are asked
 # ---------------------------------------------------------------------------
 
 
@@ -279,184 +290,196 @@ def test_the_readable_prose_leaves_out_claim_proof_and_definition_blocks(declare
     assert set(range(block.start, block.end)) <= reading.excluded
 
 
-def test_a_paragraph_holding_a_resolving_reference_is_owed_a_verdict_and_no_other_is(declared: Path):
+def test_a_paragraph_holding_a_resolving_reference_is_obligated_and_no_other_is(declared: Path):
     alpha = _reading(declared, "vol/alpha.md")
     owed = [alpha.render.span_of(paragraph).excerpt for paragraph in alpha.obligated]
 
-    assert len(owed) == 2
-    assert owed[0].startswith("The alpha bound follows") and owed[1].startswith("This paragraph only points")
+    assert [excerpt[:24] for excerpt in owed] == [
+        "The alpha bound follows ",
+        "This paragraph only poin",
+        'Compare <a href="delta.m',
+    ]
     assert _reading(declared, "vol/delta.md").obligated == ()
 
 
-def test_a_leaf_hosting_a_block_may_not_decline_and_a_blockless_one_may(declared: Path):
-    assert not _reading(declared, "vol/alpha.md").may_decline
-    assert _reading(declared, "vol/gamma.md").may_decline
+def test_every_obligated_paragraph_is_asked_whatever_its_words(declared: Path):
+    """``Compare Lemma 1.`` is three words, which opens no claim, and it holds a reference: it is asked."""
+    compare = next(
+        paragraph
+        for paragraph in identify.asked_paragraphs(_reading(declared, "vol/alpha.md"))
+        if paragraph.span.excerpt.startswith("Compare")
+    )
+    assert not any(identify._opens_a_claim(sentence, ()) for sentence in compare.span.sentences)
 
-
-# ---------------------------------------------------------------------------
-# 2 — the checks over an answer's verdicts
-# ---------------------------------------------------------------------------
-
-
-def _answer(reading, *, verdicts=(), records=(), reason="", nothing_further=False) -> identify.Checked:
-    return identify.check_answer(
-        identify.Answer(
-            claims=tuple(records), verdicts=tuple(verdicts), no_claim=reason, nothing_further=nothing_further
-        ),
-        reading,
+    reader = PhraseReader(declared)
+    assert _discover(declared, reader) == []
+    assert any(excerpt.startswith("Compare") for _, excerpt in reader.asked)
+    assert _verdicts(declared, "vol/alpha.md")['Compare <a href="delta.m'].judgement is (
+        kb_pipeline.Judgement.NOT_A_CLAIM
     )
 
 
-def test_a_verdict_naming_no_paragraph_owed_one_is_refused_and_leaves_that_paragraph_missing(declared: Path):
-    reading = _reading(declared, "vol/alpha.md")
-    kept = _paragraph(reading, "only points the reader")
-    checked = _answer(reading, verdicts=[identify.Verdict("S99", "A title"), identify.Verdict(kept, None)])
-
-    assert any("'S99'" in refusal for refusal in checked.refusals)
-    assert checked.missing == (_paragraph(reading, "The alpha bound follows"),)
-
-
-def test_a_second_verdict_for_one_paragraph_is_refused(declared: Path):
-    reading = _reading(declared, "vol/alpha.md")
-    one = _paragraph(reading, "The alpha bound follows")
-    checked = _answer(reading, verdicts=[identify.Verdict(one, _P1_TITLE), identify.Verdict(one, None)])
-
-    assert any("second verdict" in refusal for refusal in checked.refusals)
-    assert [claim.title for claim in checked.claims] == [_P1_TITLE]
-
-
-def test_a_claim_verdict_titled_as_the_leaf_s_block_is_refused(declared: Path):
-    """I8: a register entry is bound back to its site by title, so no two of one document's claims share one."""
-    reading = _reading(declared, "vol/alpha.md")
-    one = _paragraph(reading, "The alpha bound follows")
-    checked = _answer(reading, verdicts=[identify.Verdict(one, "Alpha result")])
-
-    assert one in checked.missing
-    assert checked.claims == ()
-
-
-def test_a_record_starting_in_a_paragraph_owed_a_verdict_costs_that_record(declared: Path):
-    reading = _reading(declared, "vol/alpha.md")
-    label = _label_opening(reading.render, "The alpha bound follows")
-    checked = _answer(reading, records=[identify.Record("The alpha bound follows from", label, "A record")])
-
-    assert checked.claims == ()
-    assert any("owed a verdict" in refusal for refusal in checked.refusals)
-
-
-def test_a_no_claim_sentence_from_a_leaf_hosting_a_block_is_refused(declared: Path):
-    checked = _answer(_reading(declared, "vol/delta.md"), reason="Delta states nothing more.")
-
-    assert checked.no_claim == ""
-    assert any("hosting claims" in refusal for refusal in checked.refusals)
-
-
-def test_a_yes_verdict_s_claim_is_its_whole_paragraph(declared: Path):
-    reading = _reading(declared, "vol/beta.md")
-    paragraph = reading.obligated[0]
-    checked = _answer(reading, verdicts=[identify.Verdict(_paragraph(reading, "Beta relies on"), _BETA_TITLE)])
-
-    (claim,) = checked.claims
-    assert claim.excerpt == reading.render.span_of(paragraph).excerpt
-    assert claim.line == paragraph.start
-    assert "``` math" in claim.excerpt
-
-
-def test_a_malformed_verdict_block_costs_that_block_and_the_blocks_beside_it_still_read():
-    good = ask.identify_answer_block(verdicts=[identify.Verdict("S3-S4", None)])
-    titled = f"{ask.PARAGRAPH_NOT_A_CLAIM_OPEN}\nparagraph: S9\ntitle: A title\n{ask.PARAGRAPH_NOT_A_CLAIM_CLOSE}\n"
-    untitled = f"{ask.PARAGRAPH_CLAIM_OPEN}\nparagraph: S12\n{ask.PARAGRAPH_CLAIM_CLOSE}\n"
-
-    answer = ask.parse_identify_answer(good + titled + untitled, document="d.md")
-
-    assert answer.verdicts == (identify.Verdict("S3-S4", None),)
-    assert len(answer.refusals) == 2
-    assert any("unknown field 'title'" in refusal for refusal in answer.refusals)
-    assert any("missing required field(s): title" in refusal for refusal in answer.refusals)
-
-
-def test_an_answer_carrying_no_block_is_unreadable_for_every_leaf():
-    """The format is ours and its parser stays strict: every answer says something positive."""
-    with pytest.raises(identify.AnswerFormatError):
-        ask.parse_identify_answer("nothing here\n", document="d.md")
-    assert ask.parse_identify_answer(ask.identify_answer_block(nothing_further=True), document="d.md") == (
-        identify.Answer(nothing_further=True)
-    )
-
-
-def test_nothing_further_carrying_text_costs_that_block():
-    text = f"{ask.NOTHING_FURTHER_OPEN}\nA sentence.\n{ask.NOTHING_FURTHER_CLOSE}\n"
-    answer = ask.parse_identify_answer(text, document="d.md")
-
-    assert not answer.nothing_further and len(answer.refusals) == 1
-
-
-def test_nothing_further_from_a_leaf_hosting_no_block_is_refused(declared: Path):
-    """A blockless leaf says it states nothing with its own sentence, which is written into its frontmatter."""
+def test_a_markup_only_paragraph_holding_no_reference_is_not_asked(declared: Path):
     reading = _reading(declared, "vol/gamma.md")
-    checked = _answer(
-        reading, verdicts=[identify.Verdict(_paragraph(reading, "The notation below"), None)], nothing_further=True
-    )
+    assert any(sentence.text == '<div class="center">' for sentence in reading.render.sentences)
 
-    assert any("nothing further" in refusal for refusal in checked.refusals)
-    assert checked.reason_failures
+    reader = PhraseReader(declared)
+    assert _discover(declared, reader) == []
+    assert [excerpt for group, excerpt in reader.asked if group == "vol/gamma.md"] == [
+        "The notation below follows "
+        '<a href="alpha.md#thm:alpha" data-reference-type="ref" data-reference="thm:alpha">Theorem 1</a> throughout.'
+    ]
+    assert list(_verdicts(declared, "vol/gamma.md")) == ["The notation below follo"]
 
 
 def test_a_leaf_whose_only_readable_text_is_its_heading_is_asked_nothing(declared: Path):
-    identifier = VerdictIdentifier()
-    assert _discover(declared, identifier) == []
+    reader = PhraseReader(declared)
+    assert _discover(declared, reader) == []
 
-    assert "vol/delta.md" not in [document for document, _ in identifier.asks]
+    assert "vol/delta.md" not in reader.groups()
     entry = kb_pipeline.read_node_pass(declared).leaves["vol/delta.md"]
     assert entry.outcome is kb_pipeline.LeafOutcome.NOTHING_TO_READ
 
 
 # ---------------------------------------------------------------------------
-# 3 — the budgets: a missing verdict earns its own re-ask, and a second miss stops
+# 2 — what an answer comes to: a claim, its title, and the defaults
 # ---------------------------------------------------------------------------
 
 
-def test_a_missing_verdict_earns_a_re_ask_naming_it(declared: Path):
-    identifier = VerdictIdentifier(withhold=frozenset({"only points the reader"}))
-    found = identify.infer_claims(_reading(declared, "vol/alpha.md"), identifier)
+def _judged(reading: identify.Reading, says: Mapping[str, bool | None]) -> identify.Identification:
+    """``reading`` judged with each asked paragraph answered by the first phrase of ``says`` it holds."""
+    answers = [
+        (asked, next((said for phrase, said in says.items() if phrase in asked.span.excerpt), False))
+        for asked in identify.asked_paragraphs(reading)
+    ]
+    return identify.judge(reading, answers)
 
-    missed = _paragraph(_reading(declared, "vol/alpha.md"), "only points the reader")
-    assert identifier.asks == [("vol/alpha.md", ()), ("vol/alpha.md", (missed,))]
-    assert len(found.verdicts) == 2
+
+def test_a_yes_s_claim_is_its_whole_paragraph(declared: Path):
+    reading = _reading(declared, "vol/beta.md")
+    paragraph = reading.obligated[0]
+
+    (claim,) = _judged(reading, {"Beta relies on": True}).claims
+    assert claim.excerpt == reading.render.span_of(paragraph).excerpt
+    assert claim.line == paragraph.start
+    assert claim.title == _BETA_TITLE
+    assert "``` math" in claim.excerpt
 
 
-def test_a_second_miss_stops_the_stage_naming_the_document_and_the_paragraph(declared: Path):
-    identifier = VerdictIdentifier(withhold=frozenset({"only points the reader"}), always_withhold=True)
-    with pytest.raises(identify.IdentificationError) as refusal:
-        identify.infer_claims(_reading(declared, "vol/alpha.md"), identifier)
+def test_a_reply_with_no_letter_defaults_and_its_references_follow_the_unjudged_rule(declared: Path):
+    """Twice unreadable, alpha's pointer paragraph is defaulted: its references count as if nobody read it."""
+    reader = PhraseReader(declared, {**_ANSWERS, "only points the reader": "Maybe."})
+    lines = _discover_report(declared, reader)
 
-    missed = _paragraph(_reading(declared, "vol/alpha.md"), "only points the reader")
-    assert refusal.value.check == "verdict-coverage"
-    assert "vol/alpha.md" in refusal.value.detail and missed in refusal.value.detail
-    assert len(identifier.asks) == 1 + identify.VERDICT_RETRY_BUDGET
+    pointer = _verdicts(declared, "vol/alpha.md")["This paragraph only poin"]
+    assert (pointer.judgement, pointer.cause) == (kb_pipeline.Judgement.DEFAULTED, kb_pipeline.DefaultCause.NO_LETTER)
+    assert sum("only points the reader" in excerpt for _, excerpt in reader.asked) == 2, "asked, and once more"
+    assert any("stage-C-defaulted" in line and "no-letter=1" in line for line in lines), lines
+
+    documents, sites, _ = _read(declared)
+    to_gamma = next(anchor for anchor in sites.anchors if anchor.label == "eq:gamma")
+    entry = kb_pipeline.read_node_pass(declared).leaves["vol/alpha.md"]
+    assert prose.standing(to_gamma, prose.readable(documents.documents["vol/alpha.md"], sites), entry) is (
+        prose.Standing.UNJUDGED
+    )
+    _mint_equations(declared)
+    assert _minted(declared) == {"eq:beta", "eq:gamma"}, "an unjudged reference still counts toward minting"
+    narrowed, nodes = _narrowed(declared)
+    assert (nodes["Alpha result"].id, nodes["Equation (`eq:gamma`) — Gamma"].id) in _pairs(narrowed)
+
+
+_REPEATED = "The gamma bound holds on every interior state."
+
+
+def test_an_unplaceable_yes_is_recorded_defaulted_and_the_stage_continues(declared: Path):
+    """Two paragraphs with the same words: neither has a slice of its own, so neither can be marked."""
+    leaf = declared / "kb-root" / "vol" / "gamma.md"
+    leaf.write_text(leaf.read_text(encoding="utf-8") + f"\n{_REPEATED}\n\n{_REPEATED}\n", encoding="utf-8")
+
+    lines = _discover_report(declared, PhraseReader(declared, {**_ANSWERS, "gamma bound holds": _CLAIM}))
+
+    entry = kb_pipeline.read_node_pass(declared).leaves["vol/gamma.md"]
+    defaulted = [verdict for verdict in entry.verdicts if verdict.judgement is kb_pipeline.Judgement.DEFAULTED]
+    assert [verdict.cause for verdict in defaulted] == [kb_pipeline.DefaultCause.UNPLACEABLE] * 2
+    assert (entry.state, entry.outcome, entry.claims) == (
+        kb_pipeline.ReadState.LANDED,
+        kb_pipeline.LeafOutcome.NO_CLAIM,
+        (),
+    )
+    assert any("stage-C-defaulted" in line and "unplaceable=2" in line and "vol/gamma.md" in line for line in lines)
+    assert kb_pipeline.read_node_pass(declared).leaves["vol/beta.md"].state is kb_pipeline.ReadState.LANDED
+
+
+def test_titles_are_unique_in_their_leaf_and_the_author_s_own_words():
+    """A repeated opening takes its paragraph's position; markup is reduced to what the page shows; long is cut."""
+    long = " ".join(["The operator is monotone on the cone"] * 6) + "."
+    body = (
+        "<!-- kb-frontmatter\nkind: leaf\n-->\n\n"
+        "The bound holds on the cone. It is sharp.\n\n"
+        "The bound holds on the cone. It is not sharp here.\n\n"
+        'As <a href="b.md#lem:x" data-reference-type="ref" data-reference="lem:x">Lemma 2</a> and '
+        '<span class="citation" data-cites="smith2020">Smith (2020)</span> give, the map contracts.\n\n'
+        f"{long}\n"
+    )
+    reading = identify.Reading(document="vol/leaf.md", text=body, body=body)
+    every_paragraph_says_yes = {"": True}
+    titles = [claim.title for claim in _judged(reading, every_paragraph_says_yes).claims]
+
+    assert titles[:3] == [
+        "The bound holds on the cone.",
+        "The bound holds on the cone. (¶2)",
+        "As Lemma 2 and Smith (2020) give, the map contracts.",
+    ]
+    assert len(titles[3]) <= identify.TITLE_MAX_CHARS
+    assert titles[3].endswith("…") and long.startswith(titles[3][:-1])
+    assert long[len(titles[3]) - 1] == " ", "cut at a word boundary"
+    assert titles == [claim.title for claim in _judged(reading, every_paragraph_says_yes).claims]
+
+
+def test_titles_are_identical_across_two_runs(declared_build: Path, tmp_path: Path):
+    runs = [copy_build(declared_build, tmp_path / name) for name in ("one", "two")]
+    for repo in runs:
+        assert _discover(repo, PhraseReader(repo)) == []
+
+    first, second = (kb_pipeline.read_node_pass(repo).leaves for repo in runs)
+    assert first == second
+    assert {claim.title for entry in first.values() for claim in entry.claims} == {
+        _P1_TITLE,
+        _REMARK_TITLE,
+        _BETA_TITLE,
+    }
+    assert _titles_in_register(runs[0]) == _titles_in_register(runs[1])
 
 
 # ---------------------------------------------------------------------------
-# 4 — the pass end to end: every leaf read, every paragraph judged, the KB final
+# 3 — the pass end to end: every leaf read, every paragraph judged, the KB final
 # ---------------------------------------------------------------------------
 
 
-def test_every_leaf_is_asked_and_every_obligated_paragraph_carries_exactly_one_verdict(discovered: Path):
-    """Acceptance 2, over a leaf hosting a block and a blockless one holding an equation alike."""
+def test_every_leaf_is_asked_and_every_asked_paragraph_carries_exactly_one_verdict(discovered: Path):
+    """Every obligated paragraph among them, over a leaf hosting a block and a blockless one alike."""
     record = kb_pipeline.read_node_pass(discovered)
     documents, sites, _ = _read(discovered)
 
     for path, entry in record.leaves.items():
-        owed = sorted(
+        reading = identify.reading_of(documents.documents[path], sites)
+        judged = [verdict.line for verdict in entry.verdicts]
+        assert judged == sorted({asked.paragraph.start for asked in identify.asked_paragraphs(reading)}), path
+        owed = {
             paragraph.start for paragraph in prose.obligated(prose.readable(documents.documents[path], sites), sites)
-        )
-        assert sorted(verdict.line for verdict in entry.verdicts) == owed, path
-    assert len(record.leaves["vol/alpha.md"].verdicts) == 2
+        }
+        assert owed <= set(judged), path
+    assert [verdict.judgement for verdict in record.leaves["vol/alpha.md"].verdicts] == [
+        kb_pipeline.Judgement.CLAIM,
+        kb_pipeline.Judgement.NOT_A_CLAIM,
+        kb_pipeline.Judgement.NOT_A_CLAIM,
+        kb_pipeline.Judgement.CLAIM,
+    ]
     assert len(record.leaves["vol/gamma.md"].verdicts) == 1
 
 
 def test_a_hosting_leaf_keeps_its_block_claim_and_every_claim_is_marked(discovered: Path):
-    """I7: the block claim is carried forward, and marker coverage holds over the final set."""
+    """The block claim is carried forward, and marker coverage holds over the final set."""
     kb_root = discovered / "kb-root"
     text = (kb_root / "vol" / "alpha.md").read_text(encoding="utf-8")
     fields = kb_index_lib.parse_frontmatter(text)
@@ -467,7 +490,7 @@ def test_a_hosting_leaf_keeps_its_block_claim_and_every_claim_is_marked(discover
     assert verify_kb_metadata.check_tier2_coverage([(kb_root / "vol" / "alpha.md", fields)], set()) == []
 
 
-def test_a_yes_verdict_s_marker_sits_on_its_paragraph_s_first_line(discovered: Path):
+def test_a_yes_s_marker_sits_on_its_paragraph_s_first_line(discovered: Path):
     reading = _reading(discovered, "vol/alpha.md")
     paragraph = next(p for p in reading.obligated if "The alpha bound" in reading.render.span_of(p).excerpt)
     node = _by_title(_read(discovered)[2])[_P1_TITLE]
@@ -480,9 +503,11 @@ def test_a_blockless_leaf_takes_its_claim_and_loses_the_declared_pass_s_reason(d
     assert len(fields["claims"]) == 1 and "no-claim" not in fields
 
 
-def test_a_blockless_leaf_stating_nothing_carries_its_own_reason(discovered: Path):
+def test_a_blockless_leaf_stating_nothing_keeps_the_declared_pass_s_reason(discovered: Path):
+    """Whether a leaf was read is build record: the KB says only that it carries no claim."""
     fields = kb_index_lib.parse_frontmatter((discovered / "kb-root" / "vol" / "gamma.md").read_text(encoding="utf-8"))
-    assert fields["no-claim"] == _GAMMA_REASON
+    assert fields["no-claim"] == BLOCKLESS_REASON
+    assert kb_pipeline.read_node_pass(discovered).leaves["vol/gamma.md"].outcome is kb_pipeline.LeafOutcome.NO_CLAIM
 
 
 def test_an_attribute_the_node_pass_does_not_own_is_carried_forward(declared: Path):
@@ -491,14 +516,17 @@ def test_an_attribute_the_node_pass_does_not_own_is_carried_forward(declared: Pa
         leaf.read_text(encoding="utf-8").replace("kind: leaf\n", 'kind: leaf\npath-stable: "alpha-stable"\n', 1),
         encoding="utf-8",
     )
-    assert _discover(declared, VerdictIdentifier()) == []
+    assert _discover(declared, PhraseReader(declared)) == []
     assert kb_index_lib.parse_frontmatter(leaf.read_text(encoding="utf-8"))["path-stable"] == "alpha-stable"
 
 
 def test_no_file_under_kb_root_carries_build_state(discovered: Path):
-    """Acceptance 3: verdicts and read states are the record's, and no reserved literal is left to reserve."""
+    """Verdicts and read states are the record's, and no reserved literal is left to reserve."""
     texts = kb_index_lib.document_texts(discovered / "kb-root")
-    state_words = [state.value for state in kb_pipeline.ReadState] + [kb_pipeline.Judgement.NOT_A_CLAIM.value]
+    state_words = [state.value for state in kb_pipeline.ReadState] + [
+        kb_pipeline.Judgement.NOT_A_CLAIM.value,
+        kb_pipeline.Judgement.DEFAULTED.value,
+    ]
 
     for path, text in texts.items():
         fields = kb_index_lib.parse_frontmatter(text) or {}
@@ -508,7 +536,7 @@ def test_no_file_under_kb_root_carries_build_state(discovered: Path):
 
 
 # ---------------------------------------------------------------------------
-# 5 — the record is the checkpoint: a stopped run completes, and asks nothing twice
+# 4 — the record is the checkpoint: a stopped run completes, and asks nothing twice
 # ---------------------------------------------------------------------------
 
 
@@ -532,34 +560,50 @@ def _titles_in_register(repo: Path) -> list[str]:
     return [entry.title for entry in kb_index_lib.parse_claim_quality_file(register, repo / "kb-root")]
 
 
+def test_a_stop_after_leaf_k_resumes_asking_from_leaf_k_plus_1(declared: Path):
+    """A call that never completes stops the stage; the leaves before it are landed and never asked again."""
+    stopped = PhraseReader(declared, stop_on="vol/beta.md")
+    lines = _discover(declared, stopped)
+    assert any("inference-failed" in line for line in lines), lines
+    assert stopped.groups() == ["vol/alpha.md"]
+    leaves = kb_pipeline.read_node_pass(declared).leaves
+    assert leaves["vol/alpha.md"].state is kb_pipeline.ReadState.LANDED
+    assert leaves["vol/beta.md"].state is kb_pipeline.ReadState.UNREAD
+
+    resumed = PhraseReader(declared)
+    assert _discover(declared, resumed) == []
+    assert resumed.groups() == ["vol/beta.md", "vol/gamma.md"]
+    assert _titles_in_register(declared).count(_P1_TITLE) == 1
+
+
 def test_a_run_stopped_after_a_leaf_s_record_entry_asks_it_nothing_and_mints_once(declared: Path, monkeypatch):
-    """Acceptance 8, stopped before the leaf's first KB write."""
+    """Stopped before the leaf's first KB write."""
     _stop_once(monkeypatch, write, "land_leaf", on="vol/alpha.md")
-    assert _discover(declared, VerdictIdentifier()) != []
+    assert _discover(declared, PhraseReader(declared)) != []
     assert kb_pipeline.read_node_pass(declared).leaves["vol/alpha.md"].state is kb_pipeline.ReadState.PLANNED
 
-    resumed = VerdictIdentifier()
+    resumed = PhraseReader(declared)
     assert _discover(declared, resumed) == []
-    assert "vol/alpha.md" not in [document for document, _ in resumed.asks]
+    assert "vol/alpha.md" not in resumed.groups()
     assert _titles_in_register(declared).count(_P1_TITLE) == 1
     assert _titles_in_register(declared).count(_REMARK_TITLE) == 1
 
 
 def test_a_run_stopped_between_a_leaf_s_insert_and_its_frontmatter_takes_the_ids_it_minted(declared: Path, monkeypatch):
-    """Acceptance 8, stopped mid-write: the entries it inserted are hosted by nobody, and are taken, not doubled."""
+    """Stopped mid-write: the entries it inserted are hosted by nobody, and are taken, not doubled."""
     _stop_once(monkeypatch, ops, "set_frontmatter", on="cinf-vol_alpha.md")
-    assert _discover(declared, VerdictIdentifier()) != []
+    assert _discover(declared, PhraseReader(declared)) != []
     assert _titles_in_register(declared).count(_P1_TITLE) == 1
 
-    resumed = VerdictIdentifier()
+    resumed = PhraseReader(declared)
     assert _discover(declared, resumed) == []
-    assert "vol/alpha.md" not in [document for document, _ in resumed.asks]
+    assert "vol/alpha.md" not in resumed.groups()
     assert _titles_in_register(declared).count(_P1_TITLE) == 1
     assert _titles_in_register(declared).count(_REMARK_TITLE) == 1
 
 
 # ---------------------------------------------------------------------------
-# 6 — phase 2 reads the verdicts: stage D, and the equations
+# 5 — phase 2 reads the verdicts: stage D, and the equations
 # ---------------------------------------------------------------------------
 
 
@@ -568,7 +612,7 @@ def _minted(repo: Path) -> set[str]:
 
 
 def test_an_equation_named_only_from_prose_judged_not_a_claim_is_not_minted(discovered: Path):
-    """Acceptance 5, and I6's other half: an equation a counting reference names is."""
+    """And an equation a counting reference names is."""
     _mint_equations(discovered)
     assert _minted(discovered) == {"eq:beta"}
 
@@ -592,14 +636,11 @@ def _narrowed(repo: Path) -> tuple[attribute.Attribution, dict[str, graph.ClaimN
 
 
 def _pairs(narrowed: attribute.Attribution) -> set[tuple[str, str]]:
-    offered = {
-        (question.source.id, candidate.id) for question in narrowed.questions for candidate in question.candidates
-    }
-    return set(narrowed.edges) | set(narrowed.references) | offered
+    return {candidate.pair for candidate in narrowed.candidates}
 
 
 def test_a_reference_in_prose_judged_not_a_claim_yields_no_pair(discovered: Path):
-    """Acceptance 6: alpha's pointer paragraph contributes no candidate and no references edge.
+    """Alpha's pointer paragraph contributes no candidate.
 
     Read over one tree with and without the record, so the only thing that
     differs is the verdicts: unjudged, the pointer paragraph's references offer
@@ -620,7 +661,7 @@ def test_a_reference_in_prose_judged_not_a_claim_yields_no_pair(discovered: Path
 
 
 def test_a_reference_in_a_yes_paragraph_has_that_claim_alone_as_its_source(discovered: Path):
-    """Acceptance 6: the lemma reference in alpha's first paragraph runs from its claim, not from the theorem."""
+    """The lemma reference in alpha's first paragraph runs from its claim, not from the theorem."""
     _mint_equations(discovered)
     narrowed, nodes = _narrowed(discovered)
     to_lemma = {source for source, target in _pairs(narrowed) if target == nodes["Delta lemma"].id}
@@ -641,15 +682,8 @@ def test_a_reference_nobody_judged_keeps_today_s_rule(declared: Path):
 
 
 # ---------------------------------------------------------------------------
-# 7 — the node set is fixed when equations-minted ends
+# 6 — the node set is fixed when equations-minted ends
 # ---------------------------------------------------------------------------
-
-
-class _SelectsNothing:
-    """A stage-D selector answering every question with the empty selection."""
-
-    def select(self, question, *, report, cycle=None):
-        return ()
 
 
 def _ids(repo: Path) -> set[str]:
@@ -657,15 +691,13 @@ def _ids(repo: Path) -> set[str]:
 
 
 def test_only_the_node_pass_mints_prose_claims_and_no_later_stage_moves_the_node_set(declared: Path):
-    """Acceptances 1 and 4, driving each claim-graph stage in turn against a fixed inference."""
+    """Driving each claim-graph stage in turn against a fixed inference."""
     after_declared = _ids(declared)
-    assert _discover(declared, VerdictIdentifier()) == []
+    assert _discover(declared, PhraseReader(declared)) == []
     after_discovered = _ids(declared)
     _mint_equations(declared)
     after_equations = _ids(declared)
-    report = depends.build(
-        kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), selector=_SelectsNothing()
-    )
+    report = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=None)
     assert not report.failed, report.lines()
     after_depends = _ids(declared)
 
@@ -682,7 +714,7 @@ def test_only_the_node_pass_mints_prose_claims_and_no_later_stage_moves_the_node
 
 
 # ---------------------------------------------------------------------------
-# 8 — the record is committed at the node pass's boundary and outlives the build
+# 7 — the record is committed at the node pass's boundary and outlives the build
 # ---------------------------------------------------------------------------
 
 
@@ -697,7 +729,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def test_the_record_lands_in_the_node_pass_boundary_commit_and_stands_after_the_last(consumer: Path):
-    """Acceptance 9, through the ledger's own sweep."""
+    """Through the ledger's own sweep."""
     shutil.rmtree(consumer / ".git")
     _git(consumer, "init", "-q")
     _git(consumer, "add", "-A")
@@ -705,7 +737,7 @@ def test_the_record_lands_in_the_node_pass_boundary_commit_and_stands_after_the_
 
     _declare(consumer)
     kb_pipeline._record(consumer, kb_pipeline.stage_by_id("claims-declared"))
-    assert _discover(consumer, VerdictIdentifier()) == []
+    assert _discover(consumer, PhraseReader(consumer)) == []
     kb_pipeline._record(consumer, kb_pipeline.stage_by_id("claims-discovered"))
 
     assert kb_pipeline.NODE_PASS_RELPATH in _git(consumer, "show", "--name-only", "--format=", "HEAD").split()

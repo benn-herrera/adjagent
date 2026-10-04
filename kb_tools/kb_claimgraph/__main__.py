@@ -14,8 +14,9 @@ than creating half of it itself.
 
 import argparse
 import sys
+from functools import partial
 
-from .. import __version__, kb_pipeline, kb_util
+from .. import __version__, inference, kb_pipeline, kb_util
 from . import ask, conform, depends, discover, equations
 from .build import build
 
@@ -40,8 +41,8 @@ EXIT_NO_SPINE = 3
 #: clean-worktree gate.
 SCRATCH_SUBDIR = "claimgraph"
 
-#: Where the discovered pass records each ask — the prompt it put and the
-#: stream the call emitted — beside the write passes' values files.
+#: Where the inference-spending passes record their asks — each group's ask
+#: record and each call's captured stream — beside the write passes' values files.
 ASKS_SUBDIR = "asks"
 
 #: Every pass number the stage table declares an invocation for, in order.
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "pass 1 only — which nodes to mint: 'block-hosted' authors the claims the author marked over a "
             "fresh tree and is mechanical end to end; 'full' runs the node pass over every leaf the "
-            "block-hosted run recorded unread, spending one inference per leaf; 'equations' mints the "
+            "block-hosted run recorded unread, spending one letter ask per paragraph it reads; 'equations' mints the "
             "referenced equations nothing else holds, mechanically, once the node pass has judged the prose"
         ),
     )
@@ -143,37 +144,39 @@ def main(argv: list[str] | None = None) -> int:
         + (f"; runs over what {precondition.id} left" if precondition else "")
     )
 
-    # The seat resolves against the consuming repository's own installed agent
-    # set, which is what `cwd` decides — the same root every other tool here
-    # walks up to.
+    # Refused rather than run empty: every claim discovery mints comes out of a
+    # reading a model performs, so there is no half of it that asks nobody. A
+    # run of it under the flag would mint nothing and then fail its own exit
+    # condition, reporting a corpus fault for a wiring one.
+    if stage.id == _CLAIMS_DISCOVERED and arguments.no_inference:
+        print(
+            f"{kb_util.NO_INFERENCE_FLAG} names no run of {stage.display}: every claim it mints comes "
+            f"from a reading a model performs, so it has no part that asks nobody. A build spending "
+            f"none omits this stage rather than running it.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
     scratch = repo_root / kb_util.scratch_dirname() / SCRATCH_SUBDIR
     asks = scratch / ASKS_SUBDIR
+    reader = partial(ask.ask_without_tools, captures=asks)
+    if stage.id in (_DEPENDS_ATTRIBUTED, _CLAIMS_DISCOVERED) and not arguments.no_inference:
+        try:
+            inference.check_environment()
+        except ValueError as refusal:
+            print(f"{stage.display} spends inference, and the environment names no server: {refusal}", file=sys.stderr)
+            return EXIT_USAGE
+
     if stage.id == _DEPENDS_ATTRIBUTED:
         report = depends.build(
             kb_root=kb_root,
             repo_root=repo_root,
             scratch=scratch,
-            selector=None if arguments.no_inference else ask.ModelSelector(cwd=repo_root, workspace=asks),
+            reader=None if arguments.no_inference else reader,
+            asks=asks,
         )
     elif stage.id == _CLAIMS_DISCOVERED:
-        # Refused rather than run empty: every claim this stage mints comes out
-        # of a reading a model performs, so there is no half of it that asks
-        # nobody. A run of it under the flag would mint nothing and then fail
-        # its own exit condition, reporting a corpus fault for a wiring one.
-        if arguments.no_inference:
-            print(
-                f"{kb_util.NO_INFERENCE_FLAG} names no run of {stage.display}: every claim it mints comes "
-                f"from a reading a model performs, so it has no part that asks nobody. A build spending "
-                f"none omits this stage rather than running it.",
-                file=sys.stderr,
-            )
-            return EXIT_USAGE
-        report = discover.build(
-            kb_root=kb_root,
-            repo_root=repo_root,
-            scratch=scratch,
-            identifier=ask.ModelIdentifier(cwd=repo_root, workspace=asks),
-        )
+        report = discover.build(kb_root=kb_root, repo_root=repo_root, scratch=scratch, reader=reader, record_dir=asks)
     elif stage.id == _EQUATIONS_MINTED:
         report = equations.build(kb_root=kb_root, repo_root=repo_root, scratch=scratch)
     else:

@@ -1,37 +1,42 @@
-"""The KB's overview document, assembled from the build's own derived facts.
+"""The KB's overview document: the packaged template, filled once by the build.
 
-The build used to ask a seat to compose ``<kb-root>/README.md`` whole, counts
-included, and a second seat to check those counts by recounting. Every one of
-them already sits in ``.index/`` or in the tree, so the composition is
-mechanical and the check was two model calls spent moving integers out of a
-JSONL file. This module is the mechanical half: :func:`facts` reads them,
-:func:`fill` substitutes them into the packaged template, and the one thing
-neither can produce — the passage saying what this corpus is and where a reader
-starts — arrives as one more entry in the same mapping, written by the seat that
-read the corpus.
-
-**Every fact is read, never recomputed.** The claim-graph half comes through
-``kb_cmd.index``, which is the ``.index/`` query interface, and the tree half
-through ``kb_index_lib.kb_files``, which is the KB document walk. A second
-derivation of a number the index already carries would be a second answer to one
-question, and the pair would disagree the first time either side moved.
+``<kb-root>/README.md`` is written at ``overview-drafted`` and nothing re-renders
+it, so it states only what stays true as the KB is edited. Every count and the
+document listing are left to the commands the template names; what is filled
+here is the project's name, the ``*pending*`` literal, and the passage saying
+what this corpus is and where a reader starts — written by a model from the
+excerpts :func:`compose_excerpts` takes out of the tree, and arriving as one
+more entry in the same mapping.
 
 **A slot the caller has no value for is a refusal, never a blank.** The template
-and the fact set are written by different hands; the one failure that must not
-be silent is a KB shipping a README with ``{claim-count}`` in it, so
+and the value set are written by different hands; the one failure that must not
+be silent is a KB shipping a README with ``{project-name}`` in it, so
 :func:`fill` names every unfilled slot and writes nothing.
+
+**The excerpts are a fixed list, in a fixed order, under two caps.** The entry
+point, then for each document it lists, that document's index and then its own
+opening prose where it has one — the child its index links as
+``outline.OWN_PROSE_TITLE``. Nothing else in the tree is read, so the size
+follows the number of volumes rather than the size of the corpus. Each body
+loses its metadata block and its up-link, and each Markdown link is reduced to
+its text, so no path reaches the prompt; any other markup stands. A body over
+:data:`EXCERPT_DOCUMENT_CHARS`, or one that would take the whole past
+:data:`EXCERPTS_TOTAL_CHARS`, is cut at a paragraph boundary and the cut is
+returned for the caller to report. This module must not import
+``kb_claimgraph``, whose tree reader would otherwise serve: ``kb_claimgraph``
+imports ``kb_driver``, which imports this module.
 
 Stdlib only.
 """
 
+import posixpath
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
-from . import kb_index_lib, kb_pipeline, kb_schema, kb_util
-from .kb_cmd import index as index_query
-from .kb_graph.style import CENSUS_RELATIONS
-from .kb_write.values import DOCUMENT_KINDS
+from . import kb_index_lib, kb_links, kb_pipeline, kb_schema
+from .kb_docgraph.outline import OWN_PROSE_TITLE
 
 #: The packaged template this module fills, under ``kb_tools/installed/``. Named
 #: through ``kb_pipeline`` so the document's name has one spelling and the
@@ -43,7 +48,7 @@ TEMPLATE_DOC = kb_pipeline.OVERVIEW_DOC
 #: ``installed/`` would be a second name for one fact.
 PROJECT_NAME_SLOT = kb_pipeline.PROJECT_NAME_FIELD.strip("{}")
 
-#: The one slot no read of the KB fills — what this corpus argues, what it leaves
+#: The one slot the toolchain cannot fill — what this corpus argues, what it leaves
 #: out, and which document a reader opens first. It is the whole of what the
 #: stage asks a seat for, and the whole of what the seat returns.
 PROSE_SLOT = "overview-passage"
@@ -54,14 +59,9 @@ PROSE_SLOT = "overview-passage"
 # an unfilled slot, which is loud rather than silent.
 _SLOT_RE = re.compile(r"\{([a-z][a-z0-9-]*)\}")
 
-# What a slot carries where the KB has nothing to put in it. A slot is never
-# filled with the empty string: a document that silently loses a sentence's
-# subject reads as a truncated document rather than as an honest zero.
-_ABSENT = "(none)"
-
 
 class TemplateError(ValueError):
-    """The template and the fact set disagree about which slots exist."""
+    """The template and the value set disagree about which slots exist."""
 
 
 # --- the substitution --------------------------------------------------------
@@ -77,7 +77,7 @@ def fill(template: str, values: Mapping[str, str]) -> str:
 
     One pass, so a value that happens to contain brace text is content rather
     than a slot of its own. A value the template never names is not an error:
-    the fact set is the toolchain's and the template picks from it.
+    the value set is the toolchain's and the template picks from it.
     """
     missing = [name for name in slots(template) if name not in values]
     if missing:
@@ -104,146 +104,163 @@ def template_text() -> str:
     return source.read_text(encoding="utf-8")
 
 
-def assemble(*, kb_root: Path, project_name: str, prose: Mapping[str, str]) -> str:
-    """The overview document: the packaged template, the derived facts, the seat's prose.
+def assemble(*, project_name: str, prose: Mapping[str, str]) -> str:
+    """The overview document: the packaged template, its fixed values, the seat's prose.
 
-    ``prose`` is what no read of the KB produces — the seat's answer — keyed by
-    the slot the template holds it in. It is merged over the derived facts so the
-    two sets are one mapping, which is what lets a slot the template names be
-    served by either without this function knowing which.
+    ``prose`` is the seat's answer, keyed by the slot the template holds it in.
+    It is merged over :func:`facts` so the two sets are one mapping, which is
+    what lets a slot the template names be served by either without this
+    function knowing which.
     """
-    return fill(template_text(), {**facts(kb_root=kb_root, project_name=project_name), **prose})
+    return fill(template_text(), {**facts(project_name=project_name), **prose})
 
 
-# --- the facts ---------------------------------------------------------------
+# --- the values --------------------------------------------------------------
 
 
-def facts(*, kb_root: Path, project_name: str) -> dict[str, str]:
-    """Every derived fact the overview document can state, as template values.
-
-    Read from the two places a finished build leaves them: ``.index/`` for the
-    claim graph, and the document tree for the topography. Nothing here reads the
-    corpus, and nothing here judges.
-    """
-    index_dir = kb_root / kb_util.INDEX_DIRNAME
+def facts(*, project_name: str) -> dict[str, str]:
+    """Every value the template can name besides the seat's passage."""
     return {
         PROJECT_NAME_SLOT: project_name,
-        **_graph_facts(index_query.load(index_dir)),
-        **_index_file_facts(index_dir),
-        **_tree_facts(kb_root),
-    }
-
-
-def _graph_facts(index: index_query.Index) -> dict[str, str]:
-    """What ``.index/`` says about the claim graph: the nodes, the edges, the scoring.
-
-    Both censuses run over a **declared vocabulary** rather than over the counts
-    they are counting. A census that iterated a dict would order its terms by
-    whatever the corpus happened to hold first, and would omit the kinds this
-    corpus has none of — and a kind omitted is a kind a reader cannot tell from
-    one this KB does not populate.
-    """
-    stats = index.stats
-    node_counts = {kind: stats[kb_schema.node_kind_plural(kind)] for kind in kb_schema.NODE_KINDS}
-
-    relations: dict[str, int] = {}
-    for edge in index.all_depends_on_edges:
-        relations[edge.relation] = relations.get(edge.relation, 0) + 1
-    # A relation outside the declared census order still reaches the line, after
-    # the declared ones and in name order — the rule `RELATION_PRECEDENCE`
-    # already states for a relation it does not name.
-    relation_order = CENSUS_RELATIONS + tuple(sorted(set(relations) - set(CENSUS_RELATIONS)))
-
-    pending = index.pending_count
-
-    return {
-        **{f"{kind}-count": str(count) for kind, count in node_counts.items()},
-        "node-kind-counts": _names(
-            f"{node_counts[kind]} {kb_schema.node_kind_plural(kind)}" for kind in kb_schema.NODE_KINDS
-        ),
-        "edge-count": str(len(index.all_depends_on_edges)),
-        # A block rather than a line: an edge class is a list item in the
-        # document. Which artifact holds them is not here, because it is one
-        # artifact for all four classes (SPEC.md, Claim-Graph Nodes and Edges)
-        # — invariant prose, which is the template's, not a fact that varies.
-        "edge-class-counts": _lines(f"- {term} — {relations.get(term, 0)}" for term in relation_order),
-        "scored-count": str(len(index.all_claims) - pending),
-        "pending-count": str(pending),
         "pending-literal": kb_schema.PENDING_LITERAL,
     }
 
 
-def _index_file_facts(index_dir: Path) -> dict[str, str]:
-    """Which derived artifacts this build populated, and which it left empty.
+# --- the excerpts the passage is written from ---------------------------------
 
-    Read off the directory rather than off a list of filenames, so an artifact
-    the emitter gains is reported by that alone; an empty one is a fact about the
-    corpus (no experiments, no supports) and not a defect.
+#: The most of one document's body the excerpts carry, in characters.
+EXCERPT_DOCUMENT_CHARS = 12_000
+
+#: The most the excerpts carry altogether, in characters, separators included.
+EXCERPTS_TOTAL_CHARS = 48_000
+
+# A document's boundary line, carrying the document's title and never its path.
+_SEPARATOR = "==> {title} <=="
+
+# What joins a title to the title of the document it was reached from.
+_TITLE_JOIN = " › "
+
+_PARAGRAPH_BREAK = "\n\n"
+
+_HEADING_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class ExcerptCut:
+    """One document the caps shortened: by its title, what was kept and what was cut, in characters."""
+
+    title: str
+    kept_chars: int
+    cut_chars: int
+
+
+@dataclass(frozen=True)
+class Excerpts:
+    """The composed excerpts, and every cut the caps made to them."""
+
+    text: str
+    cuts: tuple[ExcerptCut, ...]
+
+
+@dataclass(frozen=True)
+class _Document:
+    title: str
+    body: str
+
+
+def _link_text(match: "re.Match[str]") -> str:
+    """The text of one ``kb_links.LINK_RE`` match, which captures only the destination."""
+    return match.string[match.start() + 1 : match.string.rindex("](", match.start(), match.start(1))]
+
+
+def _links(text: str) -> list[tuple[str, str]]:
+    """Every link in ``text``, as (link text, destination), in document order."""
+    return [(_link_text(match), match.group(1).strip("<>")) for match in kb_links.LINK_RE.finditer(text)]
+
+
+def _without_uplink(text: str) -> str:
+    """``text`` less its first line, where that line is the link up to the parent."""
+    first, _, rest = text.lstrip("\n").partition("\n")
+    return rest if first.lstrip().startswith(f"[{kb_index_lib.UPLINK_MARKER}") else text
+
+
+def _body(text: str) -> str:
+    """A document as an excerpt carries it: no metadata block, no up-link, every link reduced to its text."""
+    body = _without_uplink(kb_index_lib.strip_frontmatter(text))
+    return kb_links.LINK_RE.sub(_link_text, body).strip("\n")
+
+
+def _heading(text: str) -> str:
+    match = _HEADING_RE.search(text)
+    return match.group(1) if match else ""
+
+
+def _excerpted_documents(kb_root: Path) -> list[_Document]:
+    """The documents the excerpts carry, in reading order."""
+    entry_text = kb_index_lib.strip_frontmatter(
+        (kb_root / kb_index_lib.ENTRY_POINT_FILENAME).read_text(encoding="utf-8")
+    )
+    documents = [_Document(title=_heading(entry_text), body=_body(entry_text))]
+    for volume_title, target in dict.fromkeys(_links(entry_text)):
+        index_path = posixpath.normpath(target)
+        index_text = (kb_root / index_path).read_text(encoding="utf-8")
+        documents.append(_Document(title=volume_title, body=_body(index_text)))
+        own_prose = [
+            dest
+            for text, dest in _links(_without_uplink(kb_index_lib.strip_frontmatter(index_text)))
+            if text == OWN_PROSE_TITLE
+        ]
+        if own_prose:
+            leaf_path = posixpath.normpath(posixpath.join(posixpath.dirname(index_path), own_prose[0]))
+            documents.append(
+                _Document(
+                    title=f"{volume_title}{_TITLE_JOIN}{OWN_PROSE_TITLE}",
+                    body=_body((kb_root / leaf_path).read_text(encoding="utf-8")),
+                )
+            )
+    return documents
+
+
+def _cut_to(body: str, limit: int) -> str:
+    """The longest run of ``body``'s leading paragraphs that fits in ``limit`` characters."""
+    if len(body) <= limit:
+        return body
+    kept: list[str] = []
+    size = 0
+    for paragraph in body.split(_PARAGRAPH_BREAK):
+        grown = size + len(paragraph) + (len(_PARAGRAPH_BREAK) if kept else 0)
+        if grown > limit:
+            break
+        kept.append(paragraph)
+        size = grown
+    return _PARAGRAPH_BREAK.join(kept)
+
+
+def _assemble_excerpts(documents: Sequence[_Document]) -> Excerpts:
+    pieces: list[str] = []
+    cuts: list[ExcerptCut] = []
+    used = 0
+    for document in documents:
+        head = _SEPARATOR.format(title=document.title) + "\n"
+        joiner = len(_PARAGRAPH_BREAK) if pieces else 0
+        room = min(EXCERPT_DOCUMENT_CHARS, EXCERPTS_TOTAL_CHARS - used - joiner - len(head))
+        body = _cut_to(document.body, room) if room > 0 else ""
+        if len(body) < len(document.body):
+            cuts.append(
+                ExcerptCut(title=document.title, kept_chars=len(body), cut_chars=len(document.body) - len(body))
+            )
+        if not body:
+            continue
+        pieces.append(head + body)
+        used += joiner + len(head) + len(body)
+    return Excerpts(text=_PARAGRAPH_BREAK.join(pieces), cuts=tuple(cuts))
+
+
+def compose_excerpts(kb_root: Path) -> Excerpts:
+    """The excerpts of the tree under ``kb_root`` that the overview passage is written from.
+
+    Byte-deterministic: the same tree gives the same text. Each document opens
+    with a boundary line carrying its title; a document the caps emptied is left
+    out, and listed among the cuts with the rest.
     """
-    counts = {path.name: len(kb_index_lib.read_jsonl(path)) for path in sorted(index_dir.glob("*.jsonl"))}
-    return {
-        "populated-index-files": _names(name for name, count in counts.items() if count),
-        "empty-index-files": _names(name for name, count in counts.items() if not count),
-    }
-
-
-def _tree_facts(kb_root: Path) -> dict[str, str]:
-    """What the document tree is: its documents, their kinds, and its shape."""
-    kinds = {
-        path.relative_to(kb_root).as_posix(): _document_kind(path.read_text(encoding="utf-8"))
-        for path in kb_index_lib.kb_files(kb_root)
-    }
-    return {
-        "document-count": str(len(kinds)),
-        "leaf-count": str(sum(1 for kind in kinds.values() if kind == "leaf")),
-        "document-tree": _render_tree(kinds),
-    }
-
-
-def _document_kind(text: str) -> str:
-    """A document's structural-position label, off the frontmatter the build stamped."""
-    frontmatter = kb_index_lib.parse_frontmatter(text) or {}
-    kind = frontmatter.get("kind", "")
-    return kind if kind in DOCUMENT_KINDS else ""
-
-
-def _render_tree(kinds: Mapping[str, str]) -> str:
-    """The tree as an indented listing, each document under the directory holding it.
-
-    **The order is declared here and is not the source's own section order.** A
-    directory's own ``index.md`` comes first, then its other documents by name,
-    then its subdirectories by name — the shape a reader walks down, and the one
-    place an index can sit above what it indexes. Where a document falls among
-    its siblings *in the source* is carried by its parent index's child-link list
-    (SPEC.md, the Document-Tree Contract, point 4) and by nothing ``.index/``
-    holds, so it is not this listing's to reproduce.
-    """
-    tree: dict = {}
-    for path, kind in kinds.items():
-        node = tree
-        *directories, name = path.split("/")
-        for directory in directories:
-            node = node.setdefault(directory, {})
-        node[name] = kind
-    return _lines(_tree_lines(tree, depth=0))
-
-
-def _tree_lines(node: Mapping[str, object], *, depth: int) -> Iterator[str]:
-    indent = "  " * depth
-    documents = (name for name, value in node.items() if isinstance(value, str))
-    for name in sorted(documents, key=lambda name: (name != kb_index_lib.INDEX_FILENAME, name)):
-        kind = node[name]
-        yield f"{indent}{name}  ({kind})" if kind else f"{indent}{name}"
-    for name in sorted(name for name, value in node.items() if not isinstance(value, str)):
-        yield f"{indent}{name}/"
-        yield from _tree_lines(node[name], depth=depth + 1)  # type: ignore[arg-type]
-
-
-def _lines(items: Iterable[str]) -> str:
-    """A block of lines, or a named absence — a slot is never filled with nothing."""
-    return "\n".join(items) or _ABSENT
-
-
-def _names(items: Iterable[str]) -> str:
-    """A comma-joined list, or a named absence."""
-    return ", ".join(items) or _ABSENT
+    return _assemble_excerpts(_excerpted_documents(kb_root))

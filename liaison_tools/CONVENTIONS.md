@@ -8,10 +8,11 @@ root.
 - **These files are edited in place.** `liaison_tools/` is a shipped package — never rendered, and
   so never bannered here (root SPEC.md, Deployed Surfaces). There is no `templates/` counterpart to
   go looking for, and no banner forbidding the edit.
-- **A capability a caller needs and these tools lack is extended here.** `post-openai.py` is the
-  only transport and `msg-util.py` the only messages-file mutator any caller uses (SPEC.md,
-  Components). Add the capability to the tool; an inline `jq`, `sed`, or python snippet in a caller
-  is never the fix, and neither is a second mutator in this package.
+- **A capability a caller needs and these tools lack is extended here.** `openai_chat` is the
+  only transport — `post-openai.py` is its command — and `msg-util.py` the only messages-file
+  mutator any caller uses (SPEC.md, Components). Add the capability to the tool; an inline `jq`,
+  `sed`, or python snippet in a caller is never the fix, and neither is a second mutator in this
+  package.
 - **stdlib-only.** All three tools state the invariant in their own module docstrings, and it binds
   anything added beside them — `tests/` included, which runs on `unittest` under the pytest runner
   rather than on pytest's own fixtures.

@@ -96,7 +96,7 @@ class BatonContext:
     """Everything a baton can substitute. Absent fields render as placeholders."""
 
     #: The flags that reproduce this run — ``--config <path>``, the
-    #: ``--source``/``--permission-mode`` set, or both. The resume line is a
+    #: ``--source`` set, or both. The resume line is a
     #: command the operator is told to run, so it carries what this run was
     #: launched with rather than the one door it might have used.
     invocation: str = ""

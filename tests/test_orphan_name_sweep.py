@@ -63,7 +63,7 @@ _UNSWEPT_PARTS = frozenset({"_vendor", "tests"})
 
 #: Text filetypes the corpus reads (`""` is an extensionless text file). An
 #: allowlist rather than a denylist, so a committed binary is never decoded.
-_TEXT_SUFFIXES = frozenset({".py", ".md", ".tmpl", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg", ""})
+_TEXT_SUFFIXES = frozenset({".py", ".md", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg", ""})
 
 #: A Python identifier. Counting these is equivalent to a `\b<name>\b` scan for
 #: identifier-shaped names, and is one pass over the corpus instead of one per

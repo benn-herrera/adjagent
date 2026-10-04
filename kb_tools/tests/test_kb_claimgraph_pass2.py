@@ -1,12 +1,12 @@
 """The discovered pass: its entry condition, and dependency attribution end to end.
 
-**Every test here runs against a fake inference.** The seam is
-:class:`kb_tools.kb_claimgraph.ask.SeatAsk` — a seat and a prompt in, response
-text and an `Outcome` out — and the fake reads the prompt the stage actually
-composed and answers from a fixed table. So the ask, the reply parse, both
-transport failure paths, the candidate-membership check, the acyclicity check
-and the write are all exercised, and none of it needs a model to be reachable: a
-check that cannot run without one is a check that does not run.
+**Every test here runs against a fake reader.** The seam is
+:class:`kb_tools.kb_claimgraph.letters.LetterReader` — a composed letter
+question in, a reply out — and the fake answers from a fixed table keyed by the
+candidate the question names. So the narrowing, the classify asks, the re-ask
+and the default, the classification record, ring demotion and the write are all
+exercised, and none of it needs a model to be reachable: a check that cannot run
+without one is a check that does not run.
 
 The consuming repository is stood up the way a consumer's is: the real runner
 snippet, imported by the line the installer writes, over the installed package.
@@ -22,14 +22,28 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_util, refresh_kb_metadata, verify_kb_metadata
-from kb_tools.inference import Outcome
+from kb_tools import kb_index_lib, kb_pipeline, kb_util, refresh_kb_metadata, verify_kb_metadata
+from kb_tools.inference import liaison_tools
 from kb_tools.kb_claimgraph import __main__ as cli
-from kb_tools.kb_claimgraph import ask, assemble, attribute, conform, depends, graph, inventory, report, tree, write
+from kb_tools.kb_claimgraph import (
+    ask,
+    assemble,
+    attribute,
+    classify,
+    conform,
+    depends,
+    graph,
+    inventory,
+    letters,
+    report,
+    tree,
+    write,
+)
 from kb_tools.kb_claimgraph.build import build
-from kb_tools.kb_claimgraph.report import AnswerFormatError
+from kb_tools.kb_driver import prompt_templates
 from kb_tools.kb_write import render
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
+from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
 # The last stage reaches the KB through the consuming project's runner targets,
@@ -184,108 +198,52 @@ _TREE = {
 # The fake inference
 # ---------------------------------------------------------------------------
 
-#: The shape :func:`ask.compose_prompt` writes one claim on. Read rather than
-#: assumed: a fake that guessed the prompt's layout would keep answering after
-#: the ask changed under it.
-_CLAIM_LINE_RE = re.compile(r"^- `(clm-[a-z0-9]+)` — (.+) \(stated in `", re.MULTILINE)
 
-_RETRY_HEADING = "## A previous answer failed a mechanical check"
+class FakeReader:
+    """A :class:`letters.LetterReader` answering from a table keyed by ``(source title, target title)``.
 
-#: The malformation a live run stopped on, over on C-inf's side: one prose block
-#: whose two markers carry different numbers. Stage D composes no prose at all,
-#: so beside its answer this is both a block nothing names and a block that does
-#: not close — and either way, what fails is the parse.
-_MISMATCHED_PROSE_BLOCK = f"<<<{ask.PROSE_NAME} 2\nAn afterthought\n{ask.PROSE_NAME} 3\n"
-
-
-def _read_prompt(prompt: str) -> tuple[tuple[str, str], list[tuple[str, str]]]:
-    """The prompt's source claim and its candidates, each as ``(id, title)``."""
-    claims = _CLAIM_LINE_RE.findall(prompt)
-    return claims[0], claims[1:]
-
-
-class FakeInference:
-    """An :class:`ask.SeatAsk` answering from a fixed table keyed by claim title.
-
-    A table value is a title — resolved against the candidates the prompt
-    offered — or a literal id, which is how an answer outside the candidate set
-    is expressed without the fake needing to know what the check does with it.
-
-    ``outcome`` is what the layer below would have said about the call, which is
-    how the two transport failure paths are exercised without a subprocess.
-    ``trailing`` and ``on_retry_trailing`` are text returned beside the answer on
-    the ask and on the re-ask — which is how an answer that arrives and does not
-    parse is expressed without hand-composing the block that does.
+    A value is the reply text on every call, or a tuple of replies, one per
+    call, for a candidate whose first answer and re-ask differ. A candidate the
+    table does not name is answered ``default``. ``fail_on`` names a source
+    whose group's calls never complete, which is how a stop mid-stage is
+    expressed without a subprocess.
     """
 
     def __init__(
         self,
-        answers: dict[str, tuple[str, ...]],
+        repo: Path,
+        answers: dict[tuple[str, str], str | tuple[str, ...]] | None = None,
         *,
-        on_retry: dict[str, tuple[str, ...]] | None = None,
-        outcome: Outcome = Outcome.OK,
-        trailing: str = "",
-        on_retry_trailing: str = "",
+        default: str = ask.ClassifyLetter.MENTION,
+        fail_on: str | None = None,
     ):
-        self._answers = answers
-        self._on_retry = on_retry
-        self._outcome = outcome
-        self._trailing = trailing
-        self._on_retry_trailing = on_retry_trailing
-        self.seats: list[str] = []
-        self.prompts: list[str] = []
+        _, _, authored = _read(repo)
+        self._titles = {node.id: node.title for node in authored.nodes.values()}
+        self._answers = answers or {}
+        self._default = default
+        self._fail_on = fail_on
+        self._calls: Counter[tuple[str, str]] = Counter()
+        self.questions: list[letters.LetterQuestion] = []
 
-    def __call__(
-        self, *, seat: str, prompt: str, cwd: Path | None = None, capture_path: Path | None = None
-    ) -> tuple[str, Outcome]:
-        del cwd, capture_path
-        self.seats.append(seat)
-        self.prompts.append(prompt)
-        (source_id, source_title), candidates = _read_prompt(prompt)
-        retrying = _RETRY_HEADING in prompt
-        table = self._on_retry if (retrying and self._on_retry is not None) else self._answers
-        by_title = {title: node_id for node_id, title in candidates}
-        chosen = [by_title.get(wanted, wanted) for wanted in table.get(source_title, ())]
-        trailing = self._on_retry_trailing if retrying else self._trailing
-        return ask.answer_block(source_id, chosen) + trailing, self._outcome
+    def __call__(self, question: letters.LetterQuestion) -> letters.Reply:
+        key = (self._titles[question.group], self._titles[question.item])
+        if key[0] == self._fail_on:
+            raise ask.AskError("inference-failed", f"{key}: the call never completed")
+        self.questions.append(question)
+        answer = self._answers.get(key, self._default)
+        if isinstance(answer, tuple):
+            answer = answer[self._calls[key]]
+        self._calls[key] += 1
+        return letters.Reply(text=answer)
 
-
-#: One scripted call: what to select — a candidate title or a literal id, on the
-#: same terms as the table above — and text returned beside the answer, a
-#: mismatched prose block being how an answer that does not parse is expressed.
-_Turn = tuple[tuple[str, ...], str]
+    def asked(self) -> set[tuple[str, str]]:
+        """Every candidate put to this reader, as ``(source title, target title)``."""
+        return {(self._titles[question.group], self._titles[question.item]) for question in self.questions}
 
 
-class ScriptedInference:
-    """An :class:`ask.SeatAsk` answering one scripted turn per call, keyed by source claim.
-
-    :class:`FakeInference` answers one thing on the ask and another on every
-    re-ask, which cannot express a source whose first two answers fail
-    *different* classes — and which class each answer failed is the whole of
-    what a sequence is about. A source with no script selects nothing, which is
-    a complete answer; a call past the last scripted turn is the call bound
-    broken, and fails here rather than looping.
-    """
-
-    def __init__(self, script: dict[str, tuple[_Turn, ...]]):
-        self._script = script
-        self._taken: Counter[str] = Counter()
-        self.prompts: list[str] = []
-
-    def __call__(
-        self, *, seat: str, prompt: str, cwd: Path | None = None, capture_path: Path | None = None
-    ) -> tuple[str, Outcome]:
-        del seat, cwd, capture_path
-        self.prompts.append(prompt)
-        (source_id, source_title), candidates = _read_prompt(prompt)
-        turns = self._script.get(source_title, ())
-        if not turns:
-            return ask.answer_block(source_id, ()), Outcome.OK
-        assert self._taken[source_title] < len(turns), f"{source_title}: a call past the last scripted turn"
-        wanted, trailing = turns[self._taken[source_title]]
-        self._taken[source_title] += 1
-        by_title = {title: node_id for node_id, title in candidates}
-        return ask.answer_block(source_id, [by_title.get(name, name) for name in wanted]) + trailing, Outcome.OK
+def _closing_letters(prompt: str) -> set[str]:
+    """The letters a classify prompt's closing question names, past the candidate's statement."""
+    return set(re.findall(r"\b[A-Z]\b", prompt.rsplit("````````````", maxsplit=1)[1]))
 
 
 # ---------------------------------------------------------------------------
@@ -353,10 +311,6 @@ def declared_build(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 def declared(declared_build: Path, tmp_path: Path) -> Path:
     """This test's own copy of ``consumer`` after the declared pass has run and its gates are green."""
     return copy_build(declared_build, tmp_path / "consumer")
-
-
-def _selector(inference: ask.SeatAsk, *, cwd: Path = Path(".")) -> ask.ModelSelector:
-    return ask.ModelSelector(cwd=cwd, ask=inference)
 
 
 def _read(repo: Path):
@@ -456,7 +410,7 @@ def test_a_marker_on_a_wrapped_anchor_s_first_line_leaves_the_anchor_checked(dec
 
 
 # ---------------------------------------------------------------------------
-# 2 — the mechanical narrowing
+# 2 — the mechanical narrowing: candidates, classes and drafts
 # ---------------------------------------------------------------------------
 
 
@@ -466,24 +420,26 @@ def _narrowed(declared: Path):
 
 
 def _pairs(narrowed: attribute.Attribution) -> set[tuple[str, str]]:
-    return {(question.source.id, candidate.id) for question in narrowed.questions for candidate in question.candidates}
+    return {candidate.pair for candidate in narrowed.candidates}
+
+
+def _candidate(narrowed: attribute.Attribution, source: str, target: str) -> attribute.Candidate:
+    return next(candidate for candidate in narrowed.candidates if candidate.pair == (source, target))
 
 
 def _settled(ids: dict[str, str]) -> set[tuple[str, str]]:
-    """The two edges the fixture's proofs settle with no model asked, per the tests below."""
+    """The two pairs the fixture's proofs direct, drafted *supported by* per the tests below."""
     return {(ids["Beta lemma"], ids["Gamma two"]), (ids["Gamma one"], ids["Alpha result"])}
 
 
-def test_the_candidate_set_is_narrowed_the_way_the_plan_narrows_it(declared: Path):
-    ids, narrowed = _narrowed(declared)
-
-    assert _pairs(narrowed) == {
+def _open(ids: dict[str, str]) -> set[tuple[str, str]]:
+    """The six pairs containment directs nothing about, drafted *mention*."""
+    return {
         # a single-claim document's prose reference, resolved at both ends —
         # neither of which says which way an edge between them runs
         (ids["Alpha result"], ids["Beta lemma"]),
         (ids["Beta lemma"], ids["Gamma one"]),
-        # a two-claim document leaves the SOURCE open; Gamma one's own pair with
-        # Alpha is settled below and is therefore not also asked about
+        # a two-claim document leaves the SOURCE open
         (ids["Gamma two"], ids["Alpha result"]),
         # a section reference into a single-claim document names that claim, and
         # one into a two-claim document offers both
@@ -493,19 +449,27 @@ def test_the_candidate_set_is_narrowed_the_way_the_plan_narrows_it(declared: Pat
     }
 
 
-def test_containment_settles_the_edges_a_proof_directs_and_no_model_is_asked(declared: Path):
+def test_every_pair_a_reference_reaches_is_one_candidate(declared: Path):
+    """Settled or open, a pair is one candidate; Gamma one's pair with Alpha is reached twice and merged."""
+    ids, narrowed = _narrowed(declared)
+
+    assert _pairs(narrowed) == _settled(ids) | _open(ids)
+    assert len(narrowed.candidates) == len(_pairs(narrowed))
+    assert all(candidate.harvests == {attribute.Harvest.REFERENCE} for candidate in narrowed.candidates)
+
+
+def test_containment_drafts_supported_by_and_everything_else_drafts_mention(declared: Path):
     """Both arms of the proof-to-claim binding, and the route each target resolved by.
 
     Beta's proof carries no opening argument, so it binds to the block directly
     above it; Gamma's names its own theorem in its opening run, which is what
-    lets a proof bind across a block it does not follow.
+    lets a proof bind across a block it does not follow. A draft is what a run
+    with no reader writes, and nothing more: every candidate is still asked.
     """
     ids, narrowed = _narrowed(declared)
 
-    assert set(narrowed.edges) == {
-        (ids["Beta lemma"], ids["Gamma two"]),
-        (ids["Gamma one"], ids["Alpha result"]),
-    }
+    assert set(narrowed.edges) == _settled(ids)
+    assert set(narrowed.references) == _open(ids)
     assert narrowed.routes == {attribute.BY_IDENTIFIER: 1, attribute.BY_EQUATION: 1}
 
 
@@ -545,9 +509,8 @@ def test_a_reference_inside_a_proof_that_resolves_to_no_claim_contributes_nothin
 def test_the_anchor_naming_what_a_proof_proves_is_not_read_as_a_dependency(declared: Path):
     """Gamma's proof opens by naming Theorem 1; that reference is its subject, not its warrant."""
     ids, narrowed = _narrowed(declared)
-    reached = set(narrowed.edges) | _pairs(narrowed)
-    assert (ids["Gamma one"], ids["Gamma one"]) not in reached
-    assert (ids["Gamma two"], ids["Gamma one"]) not in reached
+    assert (ids["Gamma one"], ids["Gamma one"]) not in _pairs(narrowed)
+    assert (ids["Gamma two"], ids["Gamma one"]) not in _pairs(narrowed)
 
 
 def test_an_anchor_naming_a_definition_block_contributes_no_pair(declared: Path):
@@ -578,23 +541,19 @@ def test_an_anchor_naming_a_definition_block_contributes_no_pair(declared: Path)
     # to carry a name stage B classified rather than one nobody has looked at.
     assert {block.environment.casefold() for block in named} <= inventory.NOT_A_CLAIM_TARGET
 
-    narrowed = attribute.narrow(documents, authored, sites)
-    reached = set(narrowed.edges) | set(narrowed.references) | _pairs(narrowed)
+    reached = _pairs(attribute.narrow(documents, authored, sites))
     assert (ids["Beta lemma"], ids["Alpha result"]) not in reached
     assert (ids["Alpha result"], ids["Gamma one"]) not in reached
     assert (ids["Alpha result"], ids["Gamma two"]) not in reached
 
 
 def test_an_anchor_naming_a_remark_block_from_a_proof_authors_no_edge(declared: Path, monkeypatch: pytest.MonkeyPatch):
-    """The refusal's other shape: both ends settled, so the pair is an *edge*.
+    """The refusal's other shape: both ends settled, so the pair would be drafted an *edge*.
 
-    The definition case above manufactures candidates — every one of its anchors
-    has an undirected source end, so a model still decides. This one does not.
     Beta's proof names a remark in alpha.md: containment directs the source end
     onto the claim that proof establishes, and alpha hosts exactly one claim, so
-    the sole-claim route settles the target and the graph records Beta's lemma
-    as resting on a result nobody referenced — mechanically, with no question
-    asked.
+    the sole-claim route would settle the target and draft Beta's lemma as
+    resting on a result nobody referenced.
 
     The monkeypatch is the non-vacuity guard. Asserting only that the edge is
     absent would pass just as well on a fixture whose anchor never reached the
@@ -612,41 +571,39 @@ def test_an_anchor_naming_a_remark_block_from_a_proof_authors_no_edge(declared: 
     assert not remark.claim_bearing and remark.environment.casefold() in inventory.NOT_A_CLAIM_TARGET
 
     manufactured = (ids["Beta lemma"], ids["Alpha result"])
-    narrowed = attribute.narrow(documents, authored, sites)
-    assert manufactured not in set(narrowed.edges) | set(narrowed.references) | _pairs(narrowed)
+    assert manufactured not in _pairs(attribute.narrow(documents, authored, sites))
 
     monkeypatch.setattr(attribute, "NOT_A_CLAIM_TARGET", inventory.NOT_A_CLAIM_TARGET - {"remark"})
     assert manufactured in set(attribute.narrow(documents, authored, sites).edges)
 
 
 def test_a_fragment_naming_a_block_resolves_the_target_to_that_block_s_claim(declared: Path):
-    """gamma.md hosts two claims; beta's prose reference names one of them by its source label."""
+    """gamma.md hosts two claims; beta's prose reference names one of them by its source label.
+
+    Gamma two is Beta's candidate too, through its proof — not through the prose
+    reference, which would have offered both had its fragment named neither.
+    """
     ids, narrowed = _narrowed(declared)
-    asked = {question.source.id: question for question in narrowed.questions}
-    assert asked[ids["Beta lemma"]].offered() == {ids["Gamma one"]}
+    beta = {
+        candidate.target.id: candidate for candidate in narrowed.candidates if candidate.source.id == ids["Beta lemma"]
+    }
+    assert set(beta) == {ids["Gamma one"], ids["Gamma two"]}
+    assert beta[ids["Gamma one"]].draft is attribute.Relation.MENTION
+    assert beta[ids["Gamma two"]].draft is attribute.Relation.SUPPORTED_BY
 
 
 def test_a_section_reference_resolves_only_where_the_target_hosts_one_claim(declared: Path):
     """Delta's two section references: one document with a single claim, one with two."""
     ids, narrowed = _narrowed(declared)
-    asked = {question.source.id: question for question in narrowed.questions}
-    assert asked[ids["Delta result"]].offered() == {
+    assert {candidate.target.id for candidate in narrowed.candidates if candidate.source.id == ids["Delta result"]} == {
         ids["Alpha result"],
         ids["Gamma one"],
         ids["Gamma two"],
     }
 
 
-def test_edges_containment_settles_are_never_also_asked_about(declared: Path):
-    """A pair another anchor already decided is not offered as a candidate for it."""
-    ids, narrowed = _narrowed(declared)
-    assert (ids["Gamma one"], ids["Alpha result"]) in narrowed.edges
-    assert (ids["Gamma one"], ids["Alpha result"]) not in _pairs(narrowed)
-    assert ids["Gamma one"] not in {question.source.id for question in narrowed.questions}
-
-
-def test_the_evidence_is_the_anchor_s_paragraph_and_not_the_wrap_it_landed_in(declared: Path):
-    """``Question.evidence`` carries the words around the anchor, not one hard-wrapped line.
+def test_the_passage_is_the_anchor_s_paragraph_and_not_the_wrap_it_landed_in(declared: Path):
+    """A candidate's passage carries the words around the anchor, not one hard-wrapped line.
 
     Alpha's closing paragraph is four physical lines and each anchor sits alone on
     one of them, so the words stating what the reference is doing — *Alpha is
@@ -657,21 +614,20 @@ def test_the_evidence_is_the_anchor_s_paragraph_and_not_the_wrap_it_landed_in(de
     The blank line above the paragraph is the other half of the unit. The claim,
     definition and remark blockquotes above it are not the sentence the anchor
     sits in, and a run that reached them would be a second way of showing the
-    seat something the candidate lines already say.
+    seat something the candidate's statement already says.
     """
     ids, narrowed = _narrowed(declared)
-    asked = {question.source.id: question for question in narrowed.questions}
-    assert asked[ids["Alpha result"]].evidence == (
+    assert _candidate(narrowed, ids["Alpha result"], ids["Beta lemma"]).passages == (
         'Alpha is argued from <a href="beta.md#thm:beta" data-reference-type="ref" '
         'data-reference="thm:beta">Lemma 2</a>, and it reads a term settled in '
         '<a href="gamma.md#def:gamma" data-reference-type="ref" data-reference="def:gamma">Definition 2</a>.',
     )
 
 
-def test_a_marker_on_a_reference_line_is_not_shown_to_the_seat_that_picks_a_direction(declared: Path):
-    """``Question.evidence`` is authored prose, and a marker is not prose.
+def test_a_marker_on_a_reference_line_is_not_shown_to_the_seat_that_classifies_it(declared: Path):
+    """A candidate's passage is authored prose, and a marker is not prose.
 
-    The line renders verbatim into the ask's reference-lines slot, and this
+    The passage renders verbatim into the ask's reference-lines slot, and this
     stage always runs over a tree two earlier passes have minted into — so
     unlike the anchor check above, nothing has to go wrong for the two to meet.
     A Tier-2 marker is appended to the end of the line its claim is located by,
@@ -700,76 +656,342 @@ def test_a_marker_on_a_reference_line_is_not_shown_to_the_seat_that_picks_a_dire
 
     shown = [
         line
-        for question in narrowed.questions
-        for line in question.evidence
+        for candidate in narrowed.candidates
+        for line in candidate.passages
         if "beta.md#thm:beta" in line and "Gamma one" in line
     ]
-    assert len(shown) == 1, f"the planted reference reached no question, so this would pass vacuously: {shown}"
+    assert len(shown) == 1, f"the planted reference reached no candidate, so this would pass vacuously: {shown}"
     assert marker not in shown[0], shown[0]
 
 
-# ---------------------------------------------------------------------------
-# 3 — the two mechanical checks
-# ---------------------------------------------------------------------------
-
-
-def test_the_acyclicity_check_rejects_a_planted_cycle(declared: Path):
-    _, _, authored = _read(declared)
-    ids = _titles(authored)
-    ring = [
-        (ids["Alpha result"], ids["Beta lemma"]),
-        (ids["Beta lemma"], ids["Gamma one"]),
-        (ids["Gamma one"], ids["Alpha result"]),
-    ]
-    cycle = attribute.check_acyclic(authored, ring)
-    assert cycle and cycle[0] == cycle[-1]
-    assert set(cycle) == {ids["Alpha result"], ids["Beta lemma"], ids["Gamma one"]}
-    assert attribute.check_acyclic(authored, ring[:2]) == ()
-
-
-def test_a_selection_closing_a_cycle_costs_one_re_ask_and_then_stops(declared: Path):
-    """The check runs over the whole set, so a selection closing on a settled edge is caught.
-
-    Gamma one's dependency on Alpha is the one Gamma's proof settled; the two
-    selections below close a ring through it, which is a cycle no re-ask of
-    Gamma one could break — it was never asked. What is re-asked is the claims
-    on the ring that *were*.
-    """
-    documents, sites, authored = _read(declared)
-    closing = {"Alpha result": ("Beta lemma",), "Beta lemma": ("Gamma one",)}
-    unrepentant = FakeInference(closing, on_retry=closing)
-    with pytest.raises(attribute.AttributionError) as refusal:
-        attribute.attribute_dependencies(documents, authored, sites, _selector(unrepentant))
-    assert refusal.value.check == "acyclicity"
-
-    relenting = FakeInference(closing, on_retry={**closing, "Alpha result": ()})
-    edges = attribute.attribute_dependencies(documents, authored, sites, _selector(relenting))
-    ids = _titles(authored)
-    assert set(edges) == _settled(ids) | {(ids["Beta lemma"], ids["Gamma one"])}
-    assert _RETRY_HEADING in relenting.prompts[-1]
-
-
-def _plant_a_mutual_proof_cycle(declared: Path) -> None:
-    """Alpha's proof rests on Beta and Beta's on Alpha: a ring of settled edges alone.
-
-    The tree is edited rather than fixtured because a corpus this shape is the
-    pathology, not the norm.
-    """
-    kb = declared / "kb-root" / "vol"
-    proof_of = (
-        '\n> **proof**\n>\n> *Proof of <a href="{proved}" data-reference-type="ref" '
-        'data-reference="{proved_label}">1</a>.* It rests on '
-        '<a href="{rests_on}" data-reference-type="ref" data-reference="{rests_label}">2</a>. ◻\n'
+@pytest.mark.parametrize(
+    "directed, equation, expected",
+    [
+        (True, None, attribute.CandidateClass.PROOF_DIRECTED),
+        (True, "eq:x", attribute.CandidateClass.PROOF_DIRECTED),
+        (False, "eq:x", attribute.CandidateClass.EQUATION_TARGET),
+        # An `eqref` resolving *through* an equation to a block's claim lands on
+        # a node with no `equation`: a claim target, not a sink.
+        (False, None, attribute.CandidateClass.CLAIM_TO_CLAIM),
+    ],
+)
+def test_a_provenance_is_classed_on_containment_and_on_the_target_node(directed, equation, expected):
+    target = graph.ClaimNode(
+        id="clm-tttttt", document="vol/t.md", title="T", locator=None, identifier=None, equation=equation
     )
-    for leaf, proved, rests_on in (("alpha.md", "thm:alpha", "thm:beta"), ("beta.md", "thm:beta", "thm:alpha")):
-        other = "beta.md" if leaf == "alpha.md" else "alpha.md"
-        (kb / leaf).write_text(
-            (kb / leaf).read_text(encoding="utf-8")
-            + proof_of.format(
-                proved=f"{leaf}#{proved}", proved_label=proved, rests_on=f"{other}#{rests_on}", rests_label=rests_on
-            ),
-            encoding="utf-8",
-        )
+    assert attribute._class_of(directed=directed, target=target) is expected
+
+
+def test_every_offered_subset_holds_supported_by_and_mention_and_only_a_claim_pair_is_offered_more():
+    """Intersecting two subsets never empties, and the draft is always offered."""
+    assert set(attribute.OFFERED) == set(attribute.CandidateClass)
+    for subset in attribute.OFFERED.values():
+        assert {attribute.Relation.SUPPORTED_BY, attribute.Relation.MENTION} <= subset
+    assert [cls for cls, subset in attribute.OFFERED.items() if attribute.Relation.IN_SUPPORT_OF in subset] == [
+        attribute.CandidateClass.CLAIM_TO_CLAIM
+    ]
+
+
+def test_each_class_is_offered_its_own_letters_on_the_composed_prompt(declared: Path, tmp_path: Path):
+    """Beta's proof-directed pair is offered A or C; its prose pair A, B or C; a merged pair the intersection.
+
+    Gamma one's pair with Alpha is reached by its proof (proof-directed) and by
+    gamma's closing prose (claim to claim), so it is offered what both allow.
+    The equation-target class has no instance in this corpus and is put to a
+    reader directly.
+    """
+    ids, narrowed = _narrowed(declared)
+    reader = FakeReader(declared)
+    classify.classify(
+        narrowed.candidates,
+        graph=_read(declared)[2],
+        statement=lambda node: node.title,
+        reader=reader,
+        repo_root=tmp_path,
+    )
+    offered = {(q.group, q.item): (q.offered, _closing_letters(q.prompt)) for q in reader.questions}
+
+    two, three = ("A", "C"), ("A", "B", "C")
+    assert offered[(ids["Beta lemma"], ids["Gamma two"])] == (two, set(two))
+    assert offered[(ids["Gamma one"], ids["Alpha result"])] == (two, set(two))
+    assert offered[(ids["Beta lemma"], ids["Gamma one"])] == (three, set(three))
+    assert all(offered[pair] == (three, set(three)) for pair in _open(ids))
+
+    source = graph.ClaimNode(id="clm-ssssss", document="vol/s.md", title="S", locator=None, identifier=None)
+    sink = graph.ClaimNode(
+        id="clm-eeeeee",
+        document="vol/s.md",
+        title="Equation (`eq:x`) — S",
+        locator=None,
+        identifier=None,
+        equation="eq:x",
+    )
+    equation_reader = _Always("C")
+    classify.classify(
+        [_synthetic(source, sink, attribute.CandidateClass.EQUATION_TARGET)],
+        graph=graph.AuthoredGraph(nodes={source.id: source, sink.id: sink}),
+        statement=lambda node: node.title,
+        reader=equation_reader,
+        repo_root=tmp_path / "equation",
+    )
+    (question,) = equation_reader.questions
+    assert question.offered == two and _closing_letters(question.prompt) == set(two)
+
+
+#: Fixture templates for the classify ask, standing in for the working ones so
+#: the goldens below pin the composer and move with nothing a wording edit
+#: touches. They carry every slot kind the working template does: per-call
+#: ``dyn.`` slots, composer-filled letters, the ``classify-options`` alternative
+#: in both its letter sets, and the ``correction`` alternative — every
+#: alternative's fragment ending without a newline.
+_FIXTURE_TEMPLATES = {
+    ask.LETTER_TEMPLATES[letters.Kind.CLASSIFY]: (
+        "Source @!dyn.claim-line!@\n"
+        "@!dyn.claim-text!@\n"
+        "Passages:\n"
+        "@!dyn.reference-lines!@\n"
+        "Candidate @!dyn.candidate-line!@\n"
+        "@!dyn.candidate-text!@\n"
+        "Cited in @!dyn.candidate-passages!@.\n"
+        "@!classify-options!@@!correction!@\n"
+    ),
+    prompt_templates.ALTERNATIVES["classify-options-three"]: (
+        "Answer @!letter-supported-by!@, @!letter-in-support-of!@ or @!letter-mention!@."
+    ),
+    prompt_templates.ALTERNATIVES["classify-options-two"]: "Answer @!letter-supported-by!@ or @!letter-mention!@.",
+    prompt_templates.ALTERNATIVES[ask.LETTER_CORRECTION]: "\n\nAgain; it read:\n@!dyn.returned!@\nOne letter.",
+}
+
+#: One group: a claim candidate offered all three letters, and an equation
+#: candidate offered two whose passages share the group's numbering.
+_GOLDEN_GROUP = ask.ClassifyGroup(
+    graph.ClaimNode("clm-aaaaaa", "vol/a.md", "Theorem 1", "**Theorem 1**.", "thm:one"),
+    "**Theorem 1**. The map has a unique fixed point.\n",
+)
+_GOLDEN_CANDIDATES = (
+    ask.ClassifyItem(
+        graph.ClaimNode("clm-bbbbbb", "vol/b.md", "Lemma 2", "**Lemma 2**.", "lem:two"),
+        "**Lemma 2**. The map is a contraction.\n",
+        ("vol/a.md:7: By Lemma 2 the map contracts.",),
+        tuple(ask.ClassifyLetter),
+    ),
+    ask.ClassifyItem(
+        graph.ClaimNode("clm-cccccc", "vol/b.md", "Equation (3)", None, None, equation="eq:three"),
+        "$$ k = \\sup |f'| $$",
+        ("vol/a.md:9: with $k$ as in (3).", "vol/a.md:7: By Lemma 2 the map contracts."),
+        (ask.ClassifyLetter.SUPPORTED_BY, ask.ClassifyLetter.MENTION),
+    ),
+)
+
+#: Every ask of the group opens with these bytes: the source claim and the
+#: group's passages, numbered P1… across every candidate, end before the first
+#: item slot.
+_GOLDEN_PREFIX = """\
+Source - `clm-aaaaaa` — Theorem 1 (stated in `vol/a.md`: **Theorem 1**.)
+**Theorem 1**. The map has a unique fixed point.
+Passages:
+P1: vol/a.md:7: By Lemma 2 the map contracts.
+P2: vol/a.md:9: with $k$ as in (3).
+Candidate """
+
+#: Each candidate names its own passages by the group's numbers, and its closing
+#: line names exactly the letters it is offered.
+_GOLDEN_ITEMS = (
+    """\
+- `clm-bbbbbb` — Lemma 2 (stated in `vol/b.md`: **Lemma 2**.)
+**Lemma 2**. The map is a contraction.
+Cited in P1.
+Answer A, B or C.""",
+    """\
+- `clm-cccccc` — Equation (3) (stated in `vol/b.md`)
+$$ k = \\sup |f'| $$
+Cited in P1, P2.
+Answer A or C.""",
+)
+
+#: A re-ask is the first ask with the correction after the question, carrying
+#: what came back stripped.
+_GOLDEN_CORRECTION = """
+
+Again; it read:
+I would say B, probably.
+One letter."""
+
+
+@pytest.mark.parametrize("returned", [None, "  I would say B, probably.\n"], ids=["first-ask", "re-ask"])
+@pytest.mark.parametrize("candidate", [0, 1], ids=["three-letters", "two-letters"])
+def test_the_classify_ask_composes_byte_for_byte_from_fixture_templates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, candidate: int, returned: str | None
+):
+    compose_from_fixture_templates(monkeypatch, tmp_path, _FIXTURE_TEMPLATES)
+    entry = ask.classify_asks(_GOLDEN_GROUP, _GOLDEN_CANDIDATES)[candidate]
+
+    correction = "" if returned is None else _GOLDEN_CORRECTION
+    assert entry.compose(returned) == _GOLDEN_PREFIX + _GOLDEN_ITEMS[candidate] + correction + "\n"
+
+
+# ---------------------------------------------------------------------------
+# 3 — classification
+# ---------------------------------------------------------------------------
+
+
+class _Always:
+    """A reader replying the same text to every call."""
+
+    def __init__(self, text: str):
+        self._text = text
+        self.questions: list[letters.LetterQuestion] = []
+
+    def __call__(self, question: letters.LetterQuestion) -> letters.Reply:
+        self.questions.append(question)
+        return letters.Reply(text=self._text)
+
+
+def _synthetic(source: graph.ClaimNode, target: graph.ClaimNode, cls: attribute.CandidateClass) -> attribute.Candidate:
+    offered = tuple(relation for relation in attribute.Relation if relation in attribute.OFFERED[cls])
+    return attribute.Candidate(
+        source=source,
+        target=target,
+        offered=offered,
+        draft=attribute.Relation.MENTION,
+        passages=("By (1) the bound holds.",),
+        harvests=frozenset({attribute.Harvest.REFERENCE}),
+    )
+
+
+def test_an_equation_candidate_answering_b_is_malformed_and_takes_its_draft(tmp_path: Path):
+    """*In support of* would originate an edge at a sink, so B is not offered and reads as no letter."""
+    source = graph.ClaimNode(id="clm-ssssss", document="vol/s.md", title="S", locator=None, identifier=None)
+    sink = graph.ClaimNode(
+        id="clm-eeeeee",
+        document="vol/s.md",
+        title="Equation (`eq:x`) — S",
+        locator=None,
+        identifier=None,
+        equation="eq:x",
+    )
+    reader = _Always(ask.ClassifyLetter.IN_SUPPORT_OF)
+
+    classified = classify.classify(
+        [_synthetic(source, sink, attribute.CandidateClass.EQUATION_TARGET)],
+        graph=graph.AuthoredGraph(nodes={source.id: source, sink.id: sink}),
+        statement=lambda node: node.title,
+        reader=reader,
+        repo_root=tmp_path,
+    )
+
+    assert len(reader.questions) == 2, "one re-ask, then the draft"
+    assert classified.outcomes == {(source.id, sink.id): kb_pipeline.ClassifyOutcome.DEFAULTED}
+    assert classified.relations == {(source.id, sink.id): attribute.Relation.MENTION}
+    assert classified.edges == () and classified.references == ((source.id, sink.id),)
+
+
+def test_b_writes_the_edge_target_to_source_and_no_reference(declared: Path, runner_gate: None):
+    """*In support of*: Beta needs Alpha, so the edge lands in Beta's entry and Alpha's names nothing."""
+    ids, _ = _narrowed(declared)
+    reader = FakeReader(declared, {("Alpha result", "Beta lemma"): ask.ClassifyLetter.IN_SUPPORT_OF})
+
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
+
+    assert not outcome.failed, outcome.lines()
+    assert (ids["Beta lemma"], ids["Alpha result"]) in _register_edges(declared)
+    assert (ids["Alpha result"], ids["Beta lemma"]) not in _register_edges(declared)
+    references = _register_references(declared)
+    assert (ids["Alpha result"], ids["Beta lemma"]) not in references
+    assert (ids["Beta lemma"], ids["Alpha result"]) not in references
+
+
+def test_a_malformed_reply_is_re_asked_once_then_takes_the_draft_named_on_the_report(declared: Path):
+    """A reply that arrived is asked for again once; the second miss costs the candidate, not the stage."""
+    ids, _ = _narrowed(declared)
+    reader = FakeReader(declared, {("Beta lemma", "Gamma two"): ("I think A", "A, probably")})
+
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
+
+    assert not outcome.failed, outcome.lines()
+    assert [q.item for q in reader.questions].count(ids["Gamma two"]) == 3, "Beta's two asks, and Delta's one"
+    assert (ids["Beta lemma"], ids["Gamma two"]) in _register_edges(declared), "the draft containment directed"
+    defaulted = next(line for line in outcome.lines() if "stage-D-defaulted" in line)
+    assert f"{ids['Beta lemma']} -> {ids['Gamma two']}" in defaulted
+
+
+def _plant_a_mutual_prose_reference(declared: Path) -> None:
+    """Alpha's prose already names Beta; this is Beta's prose naming Alpha back.
+
+    In prose rather than in a proof, so containment directs neither and both are
+    claim-to-claim candidates drafted *mention*.
+    """
+    beta = declared / "kb-root" / "vol" / "beta.md"
+    beta.write_text(
+        beta.read_text(encoding="utf-8")
+        + '\nBeta is contrasted with\n<a href="alpha.md#thm:alpha" data-reference-type="ref" '
+        'data-reference="thm:alpha">Theorem 1</a>, which it does not rest on.\n',
+        encoding="utf-8",
+    )
+
+
+def test_a_classified_two_cycle_demotes_both_edges_to_references_and_names_them(declared: Path, runner_gate: None):
+    """Two answers that cannot both be dependencies: both directions go, both relationships stay."""
+    _plant_a_mutual_prose_reference(declared)
+    ids, _ = _narrowed(declared)
+    ring = {(ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])}
+    supported = ask.ClassifyLetter.SUPPORTED_BY
+    reader = FakeReader(
+        declared, {("Alpha result", "Beta lemma"): supported, ("Beta lemma", "Alpha result"): supported}
+    )
+
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
+
+    assert not outcome.failed, outcome.lines()
+    assert ring.isdisjoint(_register_edges(declared))
+    assert ring <= _register_references(declared)
+    verdict = next(line for line in outcome.lines() if "stage-D-classify" in line)
+    assert "2 classified edges lay on a cycle" in verdict
+    assert all(f"{source} -> {target}" in verdict for source, target in ring)
+    kb = declared / "kb-root"
+    assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
+    assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
+
+
+def test_a_classification_record_an_earlier_build_left_is_not_this_builds_resume_point(consumer: Path):
+    """The declared pass starts this build's record empty, as it starts the node pass's record unread."""
+    earlier = kb_pipeline.CandidateEntry(offered=("A", "C"), letter="A", outcome=kb_pipeline.ClassifyOutcome.ANSWERED)
+    kb_pipeline.write_classification(
+        consumer, kb_pipeline.ClassificationRecord().with_entries({("clm-aaaaaa", "clm-bbbbbb"): earlier})
+    )
+
+    outcome = build(kb_root=consumer / "kb-root", repo_root=consumer, scratch=_scratch(consumer))
+
+    assert not outcome.failed, outcome.lines()
+    assert dict(kb_pipeline.read_classification(consumer).candidates) == {}
+
+
+def test_a_stop_mid_stage_resumes_asking_only_the_candidates_not_recorded(declared: Path):
+    """A call that never completes stops the stage; every group already answered stays answered."""
+    ids, narrowed = _narrowed(declared)
+    # Groups are asked in ascending source id and ids are minted at random, so
+    # the stop is put on the last group: every other one lands before it.
+    last = max(source for source, _ in _pairs(narrowed))
+    stopping = FakeReader(declared, fail_on=next(title for title, node_id in ids.items() if node_id == last))
+
+    stopped = depends.build(
+        kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=stopping
+    )
+
+    assert stopped.failed and any("inference-failed" in line for line in stopped.lines()), stopped.lines()
+    recorded = set(kb_pipeline.read_classification(declared).candidates)
+    stopped_group = {pair for pair in _pairs(narrowed) if pair[0] == last}
+    assert recorded and stopped_group and recorded.isdisjoint(stopped_group)
+
+    resuming = FakeReader(declared)
+    resumed = depends.build(
+        kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=resuming
+    )
+
+    assert not resumed.failed, resumed.lines()
+    asked = {(q.group, q.item) for q in resuming.questions}
+    assert asked == _pairs(narrowed) - recorded
+    assert set(kb_pipeline.read_classification(declared).candidates) == _pairs(narrowed)
 
 
 @pytest.mark.parametrize(
@@ -808,12 +1030,35 @@ def test_the_demoted_set_is_a_property_of_the_edges_and_not_of_their_order():
     assert forward == attribute.cycle_edges(sorted(edges, key=lambda edge: edge[1]))
 
 
-def test_a_ring_among_the_settled_edges_is_demoted_rather_than_stopping_the_stage(declared: Path):
+def _plant_a_mutual_proof_cycle(declared: Path) -> None:
+    """Alpha's proof rests on Beta and Beta's on Alpha: a ring of settled pairs alone.
+
+    The tree is edited rather than fixtured because a corpus this shape is the
+    pathology, not the norm.
+    """
+    kb = declared / "kb-root" / "vol"
+    proof_of = (
+        '\n> **proof**\n>\n> *Proof of <a href="{proved}" data-reference-type="ref" '
+        'data-reference="{proved_label}">1</a>.* It rests on '
+        '<a href="{rests_on}" data-reference-type="ref" data-reference="{rests_label}">2</a>. ◻\n'
+    )
+    for leaf, proved, rests_on in (("alpha.md", "thm:alpha", "thm:beta"), ("beta.md", "thm:beta", "thm:alpha")):
+        other = "beta.md" if leaf == "alpha.md" else "alpha.md"
+        (kb / leaf).write_text(
+            (kb / leaf).read_text(encoding="utf-8")
+            + proof_of.format(
+                proved=f"{leaf}#{proved}", proved_label=proved, rests_on=f"{other}#{rests_on}", rests_label=rests_on
+            ),
+            encoding="utf-8",
+        )
+
+
+def test_a_containment_ring_drafts_mention_and_is_still_asked(declared: Path, tmp_path: Path):
     """Two proofs each proving what the other rests on: the ring cannot all be dependencies.
 
     That is not proof the corpus reasons circularly, and it says nothing about
-    the paper's other edges — so the ring's edges become references, the rest
-    stand, and nobody is asked about any of it.
+    the paper's other pairs — so the ring's drafts become *mention*, the rest
+    stand, and each ring pair is put to a reader like any other candidate.
     """
     _plant_a_mutual_proof_cycle(declared)
 
@@ -823,176 +1068,15 @@ def test_a_ring_among_the_settled_edges_is_demoted_rather_than_stopping_the_stag
     narrowed = attribute.narrow(documents, authored, sites)
 
     assert set(narrowed.demoted) == ring
-    assert set(narrowed.edges) == _settled(ids), "the edges off the ring are untouched"
+    assert set(narrowed.edges) == _settled(ids), "the drafts off the ring are untouched"
     assert ring <= set(narrowed.references)
-    assert attribute.check_acyclic(authored, narrowed.edges) == ()
+    assert attribute.cycle_edges(narrowed.edges) == ()
 
-    # The paper's open pairs are still put to the model; the ring's edges are
-    # not among them. What the ring refuses is the set, not containment's
-    # reading of any one member, so there is nothing to ask about them.
-    assert ring.isdisjoint(_pairs(narrowed))
-    edges = attribute.attribute_dependencies(documents, authored, sites, _selector(FakeInference({})))
-    assert set(edges) == _settled(ids)
-
-
-def test_the_correction_lands_beneath_the_ask_and_the_cycle_re_ask_is_its_own_template(declared: Path):
-    """The two seams stage D's templates carry, checked as bytes rather than as substrings.
-
-    The correction is a fragment spliced into a slot inside a line, so the file
-    itself carries no trailing newline and the template supplies the breaks
-    around it. Nothing about a ``.tmpl`` says so, and an editor adding the
-    customary final newline moves every prompt by one blank line.
-    """
-    documents, sites, authored = _read(declared)
-    question = attribute.narrow(documents, authored, sites).questions[0]
-    first = ask.compose_prompt(question, report=None)
-
-    assert first.endswith("key is admitted.\n")
-    assert ask.compose_prompt(question, report="two ids were not offered") == first.rstrip("\n") + (
-        "\n\n## A previous answer failed a mechanical check\n\ntwo ids were not offered\n"
+    reader = FakeReader(declared)
+    classify.classify(
+        narrowed.candidates, graph=authored, statement=lambda node: node.title, reader=reader, repo_root=tmp_path
     )
-    # A whole ask of its own — the claim and its candidates are in it, not just
-    # the constraint — and it is not held to the ask above beyond that: the
-    # template exists so that what it asks may differ.
-    cycle = ask.compose_cycle_prompt(question, cycle="clm-a -> clm-b -> clm-a")
-    assert f"- `{question.candidates[0].id}` — " in cycle
-    assert cycle.endswith(
-        f"\n\n{_RETRY_HEADING}\n\nThe selections returned so far close a dependency cycle: "
-        f"clm-a -> clm-b -> clm-a. A claim graph must be acyclic. Re-answer for {question.source.id} "
-        f"without the selection that closes it.\n"
-    )
-
-
-def test_an_id_outside_the_candidate_set_costs_one_re_ask_and_then_stops(declared: Path):
-    documents, sites, authored = _read(declared)
-    inventing = FakeInference({"Alpha result": ("clm-zzzzzz",)})
-    with pytest.raises(attribute.AttributionError) as refusal:
-        attribute.attribute_dependencies(documents, authored, sites, _selector(inventing))
-    assert refusal.value.check == "candidate-membership"
-    asked_twice = [prompt for prompt in inventing.prompts if _read_prompt(prompt)[0][1] == "Alpha result"]
-    assert len(asked_twice) == 2 and _RETRY_HEADING in asked_twice[1]
-
-
-def test_an_answer_for_another_claim_is_refused_by_the_parser():
-    with pytest.raises(AnswerFormatError) as refusal:
-        ask.parse_answer(ask.answer_block("clm-bbbbbb", []), claim="clm-aaaaaa")
-    assert refusal.value.check == "answer-format"
-
-
-def test_a_malformed_answer_costs_the_re_ask_and_the_selection_still_lands(declared: Path):
-    """An answer that arrived is one the seat can be asked for again."""
-    documents, sites, authored = _read(declared)
-    inference = FakeInference({"Alpha result": ("Beta lemma",)}, trailing=_MISMATCHED_PROSE_BLOCK)
-
-    edges = attribute.attribute_dependencies(documents, authored, sites, _selector(inference))
-
-    ids = _titles(authored)
-    assert set(edges) == _settled(ids) | {(ids["Alpha result"], ids["Beta lemma"])}
-    alpha = [prompt for prompt in inference.prompts if _read_prompt(prompt)[0][1] == "Alpha result"]
-    assert len(alpha) == 2 and _RETRY_HEADING in alpha[1]
-
-
-def test_a_second_malformed_answer_stops_the_stage_naming_the_source_claim(declared: Path):
-    documents, sites, authored = _read(declared)
-    inference = FakeInference({}, trailing=_MISMATCHED_PROSE_BLOCK, on_retry_trailing=_MISMATCHED_PROSE_BLOCK)
-    with pytest.raises(attribute.AttributionError) as refusal:
-        attribute.attribute_dependencies(documents, authored, sites, _selector(inference))
-
-    assert refusal.value.check == "answer-format"
-    assert refusal.value.detail.startswith(_read_prompt(inference.prompts[0])[0][0])
-    assert "Nothing was written" in refusal.value.detail
-    assert len(inference.prompts) == 2
-
-
-#: The three answers one source can give, in the classes they fail: one that did
-#: not parse, one that parsed and named an id nobody offered, and one that stands.
-_DID_NOT_PARSE: _Turn = ((), _MISMATCHED_PROSE_BLOCK)
-_OUTSIDE_THE_SET: _Turn = (("clm-zzzzzz",), "")
-_STANDS: _Turn = (("Beta lemma",), "")
-
-
-def test_a_parse_failure_and_a_membership_failure_each_spend_their_own_allowance(declared: Path):
-    """One shared budget spent on the parse left the check that never ran with none."""
-    documents, sites, authored = _read(declared)
-    inference = ScriptedInference({"Alpha result": (_DID_NOT_PARSE, _OUTSIDE_THE_SET, _STANDS)})
-
-    edges = attribute.attribute_dependencies(documents, authored, sites, _selector(inference))
-
-    ids = _titles(authored)
-    assert set(edges) == _settled(ids) | {(ids["Alpha result"], ids["Beta lemma"])}
-    alpha = [prompt for prompt in inference.prompts if _read_prompt(prompt)[0][1] == "Alpha result"]
-    assert len(alpha) == attribute.CALL_BUDGET == 3
-    assert "two markers carry one number" in alpha[1].split(_RETRY_HEADING)[1]
-    assert "not in the candidate set" in alpha[2].split(_RETRY_HEADING)[1]
-
-
-@pytest.mark.parametrize(
-    "turns, check",
-    [
-        ((_DID_NOT_PARSE, _OUTSIDE_THE_SET, _DID_NOT_PARSE), "answer-format"),
-        ((_OUTSIDE_THE_SET, _DID_NOT_PARSE, _OUTSIDE_THE_SET), "candidate-membership"),
-    ],
-)
-def test_failures_alternating_between_the_two_classes_stop_at_the_call_bound(declared: Path, turns, check: str):
-    """Two allowances of one are two calls, not a seat alternating its way past them."""
-    documents, sites, authored = _read(declared)
-    inference = ScriptedInference({"Alpha result": turns})
-
-    with pytest.raises(attribute.AttributionError) as refusal:
-        attribute.attribute_dependencies(documents, authored, sites, _selector(inference))
-
-    assert refusal.value.check == check
-    alpha = [prompt for prompt in inference.prompts if _read_prompt(prompt)[0][1] == "Alpha result"]
-    assert len(alpha) == attribute.CALL_BUDGET == 3
-
-
-@pytest.mark.parametrize(
-    "block",
-    [
-        '<<<KB-CLAIMGRAPH-DEPENDS\n{"claim": "clm-aaaaaa"}\nKB-CLAIMGRAPH-DEPENDS\n',
-        '<<<KB-CLAIMGRAPH-DEPENDS\n{"claim": "clm-aaaaaa", "depends-on": [], "why": "…"}\nKB-CLAIMGRAPH-DEPENDS\n',
-        "there is no block here at all\n",
-    ],
-)
-def test_the_answer_vocabulary_is_closed_and_total(block):
-    """A key left out is refused, and so is a key added — including a verdict nobody asked for."""
-    with pytest.raises(AnswerFormatError):
-        ask.parse_answer(block, claim="clm-aaaaaa")
-
-
-@pytest.mark.parametrize(
-    "outcome, calls",
-    [
-        # The layer below retries nothing, so the bound is here: an outcome it
-        # calls retryable is re-issued identically and then stops; one it calls
-        # unretryable stops on the first return, because three identical
-        # rejections of the same invocation are one fault reported three times.
-        (Outcome.SILENCE, ask.TRANSPORT_ATTEMPTS),
-        (Outcome.TIMEOUT, ask.TRANSPORT_ATTEMPTS),
-        (Outcome.TRANSPORT_FAILURE, ask.TRANSPORT_ATTEMPTS),
-        # The two the driver's own transport classified and this path did not:
-        # a result the CLI marked errored is not an answer to validate, and a
-        # command that is not runnable is an environment fault reported once.
-        (Outcome.RESULT_ERROR, ask.TRANSPORT_ATTEMPTS),
-        (Outcome.CLI_REJECTION, 1),
-        (Outcome.SPAWN_FAILURE, 1),
-    ],
-)
-def test_a_call_that_did_not_complete_stops_the_stage_on_the_layer_s_own_verdict(declared, outcome, calls):
-    documents, sites, authored = _read(declared)
-    failing = FakeInference({}, outcome=outcome)
-    with pytest.raises(ask.AskError) as refusal:
-        attribute.attribute_dependencies(documents, authored, sites, _selector(failing))
-    assert refusal.value.check == "inference-failed"
-    assert len(failing.prompts) == calls
-    assert len(set(failing.prompts)) == 1, "a re-issue changes nothing about the ask"
-
-
-def test_the_ask_names_one_seat_and_asks_it_everything(declared: Path):
-    documents, sites, authored = _read(declared)
-    inference = FakeInference({})
-    attribute.attribute_dependencies(documents, authored, sites, _selector(inference))
-    assert set(inference.seats) == {ask.SEAT}
+    assert ring <= {(q.group, q.item) for q in reader.questions}
 
 
 # ---------------------------------------------------------------------------
@@ -1000,34 +1084,34 @@ def test_the_ask_names_one_seat_and_asks_it_everything(declared: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_the_discovered_pass_runs_end_to_end_against_a_fake_inference(declared: Path, runner_gate: None):
-    """Pass 1's output in, edges authored through the write API, the runner's gates green."""
-    inference = FakeInference(
+def test_the_discovered_pass_runs_end_to_end_against_a_fake_reader(declared: Path, runner_gate: None):
+    """Pass 1's output in, edges authored through the write API, the runner's gates green.
+
+    Every candidate is asked once, containment's drafts included; a candidate
+    answered *supported by* writes a dependency and no reference beside it.
+    """
+    supported = ask.ClassifyLetter.SUPPORTED_BY
+    reader = FakeReader(
+        declared,
         {
-            "Alpha result": (),
-            "Beta lemma": ("Gamma one",),
-            "Gamma two": ("Alpha result",),
-            "Delta result": (),
-        }
+            ("Beta lemma", "Gamma two"): supported,
+            ("Gamma one", "Alpha result"): supported,
+            ("Beta lemma", "Gamma one"): supported,
+            ("Gamma two", "Alpha result"): supported,
+        },
     )
-    report = depends.build(
-        kb_root=declared / "kb-root",
-        repo_root=declared,
-        scratch=_scratch(declared),
-        selector=_selector(inference),
-    )
+    report = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
     assert not report.failed, report.lines()
-    assert len(inference.prompts) == 4
 
     _, _, authored = _read(declared)
     ids = _titles(authored)
-    # What the seat selected, and what containment settled without asking it —
-    # both reaching the register as ordinary `depends` bullets, nothing in the
-    # KB telling one from the other.
-    assert _register_edges(declared) == _settled(ids) | {
-        (ids["Beta lemma"], ids["Gamma one"]),
-        (ids["Gamma two"], ids["Alpha result"]),
-    }
+    assert len(reader.questions) == len(_settled(ids) | _open(ids))
+    raised = _settled(ids) | {(ids["Beta lemma"], ids["Gamma one"]), (ids["Gamma two"], ids["Alpha result"])}
+    assert _register_edges(declared) == raised
+    assert _register_references(declared) == _open(ids) - raised
+
+    record = kb_pipeline.read_classification(declared)
+    assert {entry.outcome for entry in record.candidates.values()} == {kb_pipeline.ClassifyOutcome.ANSWERED}
 
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
@@ -1041,16 +1125,11 @@ def test_a_run_over_a_tree_the_declared_pass_never_wrote_asks_nobody_and_authors
     and the declared pass is what writes it. Nothing is asked and no values file
     is composed on the way to the refusal.
     """
-    inference = FakeInference({})
-    outcome = depends.build(
-        kb_root=consumer / "kb-root",
-        repo_root=consumer,
-        scratch=_scratch(consumer),
-        selector=_selector(inference),
-    )
+    reader = _Always("C")
+    outcome = depends.build(kb_root=consumer / "kb-root", repo_root=consumer, scratch=_scratch(consumer), reader=reader)
     assert outcome.failed, outcome.lines()
     assert any("node-pass-record" in line for line in outcome.lines()), outcome.lines()
-    assert inference.prompts == []
+    assert reader.questions == []
     assert not (_scratch(consumer) / "3-add-depends-on.toml").exists()
 
 
@@ -1071,38 +1150,6 @@ def test_the_write_op_is_the_only_thing_that_composes_an_edge(declared: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_a_run_with_no_model_records_the_edges_containment_settled(declared: Path, monkeypatch, capsys):
-    """Through the shipped command line, which is what a seat is told to run.
-
-    The narrowing asks nobody, so its edges are the corpus's answer whether or
-    not a model is reachable — and dropping them would record every one of these
-    claims as resting on nothing.
-    """
-    ids, narrowed = _narrowed(declared)
-    monkeypatch.chdir(declared)
-
-    assert cli.main(["--pass", "2", kb_util.NO_INFERENCE_FLAG]) == cli.EXIT_OK
-    lines = capsys.readouterr().out
-
-    assert _register_edges(declared) == _settled(ids) == set(narrowed.edges)
-    assert "no model asked" in lines
-    kb = declared / "kb-root"
-    assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
-    assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
-
-
-def test_the_pairs_containment_left_open_are_neither_asserted_nor_denied(declared: Path):
-    """A build that invented the uncertain half would be worse than one dropping the certain half."""
-    ids, narrowed = _narrowed(declared)
-
-    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), selector=None)
-
-    assert not outcome.failed, outcome.lines()
-    recorded = _register_edges(declared)
-    assert recorded == _settled(ids)
-    assert recorded.isdisjoint(_pairs(narrowed)), "an open pair is one containment did not decide"
-
-
 def _entries(kb: Path) -> list[kb_index_lib.ClaimEntry]:
     """Every claim entry on disk, through the production parser."""
     return kb_index_lib.parse_claim_quality_file(kb / "vol" / "claim-quality.md", kb)
@@ -1113,47 +1160,41 @@ def _register_references(repo: Path) -> set[tuple[str, str]]:
     return {(entry.id, edge.target) for entry in _entries(repo / "kb-root") for edge in entry.references}
 
 
-def test_every_open_pair_is_recorded_as_a_reference_and_is_still_asked_about(declared: Path):
-    """The two are not alternatives: the note is not the answer to the question.
+def test_a_run_with_no_model_writes_every_candidate_s_draft(declared: Path, monkeypatch, capsys):
+    """Through the shipped command line, which is what a seat is told to run.
 
-    What the narrowing could not settle is the direction of dependence. That the
-    source's own text names the target is not in doubt, so it is recorded — and
-    the pair still goes to the model, because suppressing the ask would trade
-    the answer for the note.
+    The narrowing asks nobody, so its drafts are the corpus's answer whether or
+    not a model is reachable: the pairs containment directs as dependencies, and
+    every other pair as a reference, each recorded as drafted.
     """
-    _ids, narrowed = _narrowed(declared)
-
-    assert set(narrowed.references) == _pairs(narrowed)
-    assert set(narrowed.references).isdisjoint(narrowed.edges)
-
-
-def test_a_run_with_no_model_records_every_open_pair_as_a_reference(declared: Path):
     ids, narrowed = _narrowed(declared)
+    monkeypatch.chdir(declared)
 
-    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), selector=None)
+    assert cli.main(["--pass", "2", kb_util.NO_INFERENCE_FLAG]) == cli.EXIT_OK
+    lines = capsys.readouterr().out
 
-    assert not outcome.failed, outcome.lines()
-    # The dependency set is exactly what containment settled, unchanged.
-    assert _register_edges(declared) == _settled(ids)
-    # And the pairs it could not direct are recorded rather than discarded.
-    assert _register_references(declared) == _pairs(narrowed)
-
+    assert _register_edges(declared) == _settled(ids) == set(narrowed.edges)
+    assert _register_references(declared) == _open(ids) == set(narrowed.references)
+    assert "no model was asked" in lines
+    record = kb_pipeline.read_classification(declared)
+    assert set(record.candidates) == _pairs(narrowed)
+    assert {entry.outcome for entry in record.candidates.values()} == {kb_pipeline.ClassifyOutcome.DRAFTED}
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
 
 
-def test_a_pair_the_selection_raises_to_a_dependency_is_not_also_a_reference(declared: Path):
-    """One fact, one record: the upgrade replaces the note rather than doubling it."""
-    _ids, narrowed = _narrowed(declared)
-    raised = narrowed.references[0]
+def test_a_drafted_candidate_is_asked_by_a_later_run_that_has_a_reader(declared: Path):
+    """A draft records that no reader was there, not an answer a reader gave."""
+    ids, narrowed = _narrowed(declared)
+    assert not depends.build(
+        kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=None
+    ).failed
 
-    remaining = attribute.references_beyond(narrowed, [*narrowed.edges, raised])
+    reader = FakeReader(declared)
+    depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
 
-    assert raised not in remaining
-    assert set(remaining) == set(narrowed.references) - {raised}
-    # With nobody asked, nothing is subtracted.
-    assert attribute.references_beyond(narrowed, narrowed.edges) == narrowed.references
+    assert {(q.group, q.item) for q in reader.questions} == _pairs(narrowed)
 
 
 def test_a_reference_does_not_reach_the_solidity_of_any_claim(declared: Path):
@@ -1161,7 +1202,7 @@ def test_a_reference_does_not_reach_the_solidity_of_any_claim(declared: Path):
     kb = declared / "kb-root"
     before = kb_index_lib.compute_solidity(_entries(kb))
 
-    outcome = depends.build(kb_root=kb, repo_root=declared, scratch=_scratch(declared), selector=None)
+    outcome = depends.build(kb_root=kb, repo_root=declared, scratch=_scratch(declared), reader=None)
     assert not outcome.failed, outcome.lines()
     assert _register_references(declared), "the fixture must actually author references for this to bind"
 
@@ -1174,27 +1215,17 @@ def test_a_mutual_reference_pair_does_not_stop_the_stage(declared: Path):
     The acyclicity gate runs over ``depends`` alone, so a corpus whose claims
     name each other mutually builds and its registers verify.
     """
-    # Alpha's prose already names Beta; this is Beta's prose naming Alpha back.
-    # In prose rather than in a proof, so containment directs neither and both
-    # stay open pairs.
-    beta = declared / "kb-root" / "vol" / "beta.md"
-    beta.write_text(
-        beta.read_text(encoding="utf-8")
-        + '\nBeta is contrasted with\n<a href="alpha.md#thm:alpha" data-reference-type="ref" '
-        'data-reference="thm:alpha">Theorem 1</a>, which it does not rest on.\n',
-        encoding="utf-8",
-    )
+    _plant_a_mutual_prose_reference(declared)
     ids, narrowed = _narrowed(declared)
     ring = ((ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"]))
     assert set(ring) <= set(narrowed.references)
 
     # The counterfactual the class exists to avoid: the same two pairs read as
     # dependencies close a cycle. The gate never sees them, so it still passes.
-    authored = _read(declared)[2]
-    assert attribute.check_acyclic(authored, list(ring)) != ()
-    assert attribute.check_acyclic(authored, narrowed.edges) == ()
+    assert attribute.cycle_edges(list(ring)) != ()
+    assert attribute.cycle_edges(narrowed.edges) == ()
 
-    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), selector=None)
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=None)
 
     assert not outcome.failed, outcome.lines()
     assert set(ring) <= _register_references(declared)
@@ -1203,8 +1234,8 @@ def test_a_mutual_reference_pair_does_not_stop_the_stage(declared: Path):
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
 
 
-def test_a_ring_among_the_settled_edges_costs_its_own_edges_and_not_the_paper(declared: Path):
-    """End to end, with nobody to ask: the paper still gets a graph, and it says which edges went.
+def test_a_ring_among_the_settled_pairs_costs_its_own_edges_and_not_the_paper(declared: Path):
+    """End to end, with nobody to ask: the paper still gets a graph, and it says which pairs went.
 
     This is the case a 50-paper sweep met three times, each of which produced no
     graph at all for the paper — the ring's edges are the only ones it may cost.
@@ -1213,56 +1244,18 @@ def test_a_ring_among_the_settled_edges_costs_its_own_edges_and_not_the_paper(de
     ids, narrowed = _narrowed(declared)
     ring = {(ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])}
 
-    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), selector=None)
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=None)
 
     assert not outcome.failed, outcome.lines()
     assert _register_edges(declared) == _settled(ids)
     assert ring <= _register_references(declared)
-    verdict = next(line for line in outcome.lines() if "stage-D-attribute" in line)
-    assert "2 settled edges lay on a cycle" in verdict
-    assert all(f"{source} -> {target}" in verdict for source, target in narrowed.demoted)
+    line = next(line for line in outcome.lines() if "stage-D-containment-ring" in line)
+    assert "2 pairs containment directed lay on a cycle" in line
+    assert all(f"{source} -> {target}" in line for source, target in narrowed.demoted)
 
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
-
-
-@pytest.mark.parametrize(
-    "demoted, expected",
-    [
-        ((), "no settled edge lay on a cycle, so none was demoted"),
-        ((("clm-aaaaaa", "clm-bbbbbb"),), "1 settled edges lay on a cycle"),
-        ((("clm-aaaaaa", "clm-bbbbbb"), ("clm-bbbbbb", "clm-aaaaaa")), "clm-aaaaaa -> clm-bbbbbb"),
-    ],
-)
-def test_the_verdict_line_names_what_a_ring_cost_and_says_so_when_nothing_did(demoted, expected):
-    """One line, both forms, and the demoted edges named — nothing else records which they were."""
-    finding = depends._attribute_finding(edges=7, settled=7, offered=3, demoted=demoted, asked=False)
-
-    assert finding.status == report.PASS
-    assert finding.check == "stage-D-attribute"
-    assert "no model asked" in finding.detail
-    assert expected in finding.detail
-
-
-@pytest.mark.parametrize(
-    "offered, sources, asked, expected",
-    [
-        (0, 0, True, "none — the narrowing left no candidate pair open"),
-        (0, 0, False, "none — the narrowing left no candidate pair open"),
-        (6, 4, True, "none — every one of 6 candidate pairs over 4 claims was put to a model"),
-        (6, 4, False, "6 candidate pairs over 4 claims were put to no model — this build asked none"),
-    ],
-)
-def test_the_report_tells_a_corpus_with_no_open_pairs_from_a_build_that_could_not_ask(
-    offered: int, sources: int, asked: bool, expected: str
-):
-    """Three states, one line, and the zero form said in as many words."""
-    finding = depends._unasked_finding(offered=offered, sources=sources, asked=asked)
-
-    assert finding.status == report.FACT
-    assert finding.check == "stage-D-unasked"
-    assert expected in finding.detail
 
 
 def test_claim_discovery_has_no_run_that_asks_nobody(declared: Path, monkeypatch, capsys):
@@ -1272,3 +1265,17 @@ def test_claim_discovery_has_no_run_that_asks_nobody(declared: Path, monkeypatch
     assert cli.main(["--pass", "1", "--scope", "full", kb_util.NO_INFERENCE_FLAG]) == cli.EXIT_USAGE
 
     assert kb_util.NO_INFERENCE_FLAG in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["--pass", "2"], ["--pass", "1", "--scope", "full"]], ids=["pass-2", "discovery"])
+def test_a_run_spending_inference_with_no_server_named_exits_naming_the_variable(
+    argv: list[str], declared: Path, monkeypatch, capsys
+):
+    """A message on stderr and the exit the driver reads as an environment fault, never a traceback."""
+    monkeypatch.chdir(declared)
+
+    assert cli.main(argv) == cli.EXIT_USAGE
+
+    err = capsys.readouterr().err
+    assert liaison_tools.BASE_URL_ENV in err
+    assert "Traceback" not in err
