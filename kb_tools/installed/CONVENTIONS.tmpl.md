@@ -42,8 +42,9 @@ Authored: leaf content, leaf frontmatter, register entry text, dependency member
 rigor (`confidence` on a claim, `quality` on a support). Derived and regenerated: solidity, build
 status, the parenthetical solidity annotations, subtree aggregates, the `Leaf references:` line in
 each register entry, and everything under `.index/`. **A hand-edited derived field is a verifier
-failure**, not a shortcut — the value is overwritten and the drift is reported. `claim-graph.svg` is
-derived too, and refresh overwrites it on every run.
+failure**, not a shortcut — the value is overwritten and the drift is reported. The claim-graph
+pictures (`claim-graph*.svg` at the KB root and in volume directories) are derived too and owned by
+`kb-refresh`; nothing verifies them, so never hand-edit one.
 
 Authored does not mean typed. Everything authored except leaf prose is metadata, and metadata is
 written only by the `kb_util` write ops: you supply values, the op composes the format, proves what

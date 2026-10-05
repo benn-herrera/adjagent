@@ -1,0 +1,6 @@
+{"claim_id": "clm-aaa001", "leaf_path": "alpha/results.md", "leaf_kind": "leaf", "tier2_marked": true}
+{"claim_id": "clm-aaa002", "leaf_path": "alpha/results.md", "leaf_kind": "leaf", "tier2_marked": false}
+{"claim_id": "clm-aaa003", "leaf_path": "alpha/results.md", "leaf_kind": "leaf", "tier2_marked": true}
+{"claim_id": "clm-aaa004", "leaf_path": "alpha/results.md", "leaf_kind": "leaf", "tier2_marked": true}
+{"claim_id": "clm-bbb002", "leaf_path": "beta/governance.md", "leaf_kind": "leaf", "tier2_marked": true}
+{"claim_id": "clm-bbb003", "leaf_path": "beta/missing.md", "leaf_kind": "leaf", "tier2_marked": true}

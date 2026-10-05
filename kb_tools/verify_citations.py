@@ -321,12 +321,6 @@ def check_citations(path: str, text: str, kb_root: Path, source: Path) -> list[F
     return findings
 
 
-def _domain_of(canonical_path: str) -> str:
-    """A node's domain: its top-level directory under kb-root."""
-    parts = Path(canonical_path).parts
-    return parts[0] if len(parts) > 1 else ""
-
-
 def load_node_domains(index_dir: Path) -> dict[str, str]:
     """id -> domain, from the derived node register."""
     claims = index_dir / kb_util.CLAIMS_FILENAME
@@ -341,7 +335,7 @@ def load_node_domains(index_dir: Path) -> dict[str, str]:
         except json.JSONDecodeError:
             continue
         if "id" in record and "canonical_path" in record:
-            domains[record["id"]] = _domain_of(record["canonical_path"])
+            domains[record["id"]] = kb_index_lib.node_domain(record["canonical_path"])
     return domains
 
 

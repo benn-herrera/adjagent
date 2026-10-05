@@ -189,7 +189,7 @@ def test_the_sweep_can_see() -> None:
 def test_the_sweep_reaches_the_modules_and_the_corpus_reaches_their_callers() -> None:
     """Named ends of both halves, so neither can shrink toward nothing unnoticed."""
     swept = {_where(module) for module in swept_modules(_SWEPT_ROOT)}
-    for relative in ("kb_tools/kb_pipeline.py", "kb_tools/kb_driver/run.py", "kb_tools/kb_graph/svg.py"):
+    for relative in ("kb_tools/kb_pipeline.py", "kb_tools/kb_driver/run.py"):
         assert relative in swept, relative
 
     corpus = {_where(path) for path in _corpus()}

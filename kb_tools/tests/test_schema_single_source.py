@@ -410,12 +410,7 @@ class TestNodeKindVocabularySingleSourced(unittest.TestCase):
         """Each table is already proven total when its module imports; this is
         the standing form, so a site that stopped using ``kind_table`` is not
         silently exempt."""
-        from kb_tools.kb_graph import svg
-
-        cases = (
-            ("kb_cmd.index node builders", kb_cmd_index._NODE_BUILDERS),
-            ("kb_graph.svg node fills", svg._FILL_BY_KIND),
-        )
+        cases = (("kb_cmd.index node builders", kb_cmd_index._NODE_BUILDERS),)
         for what, table in cases:
             with self.subTest(site=what):
                 self.assertEqual(tuple(table), NODE_KINDS)

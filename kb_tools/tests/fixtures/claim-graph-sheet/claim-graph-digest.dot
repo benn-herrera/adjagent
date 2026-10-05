@@ -1,0 +1,15 @@
+digraph "claim-graph-digest" {
+  graph [rankdir=LR nodesep=0.5 ranksep=1.2 pad=0.3 fontname="Helvetica"]
+  node [shape=plaintext fontname="Helvetica" fontsize=10]
+  edge [fontname="Helvetica" fontsize=9 arrowsize=0.8]
+  "v_0" [href="alpha/index.md" label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#888888" bgcolor="#fafafa"><tr><td align="left"><b>Alpha Volume</b></td></tr><tr><td align="left">8 nodes: 1 blocks, 2 equations, 3 prose, 1 supports, 1 experiments</td></tr><tr><td align="left">2 unattached</td></tr><tr><td align="left">within: 2 cited · 1 inferred · 1 strengthens · 1 supports</td></tr><tr><td align="left" href="alpha/claim-graph.svg"><font color="#1f6fb2">claim graph →</font></td></tr></table>>]
+  "v_1" [href="beta/index.md" label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#888888" bgcolor="#fafafa"><tr><td align="left"><b>Beta &amp; &quot;Gamma&quot; &lt;draft&gt;</b></td></tr><tr><td align="left">3 nodes: 2 blocks, 1 prose</td></tr><tr><td align="left">0 unattached</td></tr><tr><td align="left" href="beta/claim-graph.svg"><font color="#1f6fb2">claim graph →</font></td></tr></table>>]
+  "v_2" [href="entry-point.md" label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#888888" bgcolor="#fafafa"><tr><td align="left"><b>Sheet Fixture KB</b></td></tr><tr><td align="left">3 nodes: 1 invariants, 1 axioms, 1 works</td></tr><tr><td align="left">0 unattached</td></tr></table>>]
+  "v_0" -> "v_1" [label="1 cut" color="#c0392b" style=dotted penwidth=1.2 arrowhead=open constraint=false]
+  "v_0" -> "v_2" [label="1 cited" penwidth=1.2 color="#222222"]
+  "v_1" -> "v_0" [label="1 cited" penwidth=1.2 color="#222222"]
+  "v_1" -> "v_2" [label="1 cited · 1 rests-on" penwidth=1.5 color="#222222"]
+  legend [shape=plaintext label=<<table border="1" cellborder="0" cellspacing="2" cellpadding="3" color="#999999"><tr><td colspan="2" align="left"><b>legend</b></td></tr><tr><td><font color="#222222"><b>━━━▶</b></font></td><td align="left">cited — depends, marked in the text; points to the premise</td></tr><tr><td><font color="#7d3c98"><b>╍╍╍◆</b></font></td><td align="left">rests-on — points to the cited work</td></tr><tr><td><font color="#c0392b"><b>┈┈┈▷</b></font></td><td align="left">cut — a depends cut to break a circle; no premise</td></tr></table>>]
+  "sheet-link" [shape=plaintext fontsize=10 fontcolor="#1f6fb2" label="← full claim graph" href="claim-graph.svg"]
+  { rank=max; "sheet-link" }
+}

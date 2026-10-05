@@ -18,7 +18,7 @@ function aushare() {
   for p in "$@"; do [[ -L "${p}" ]] && echo "aushare: skipping symlink ${p}" 1>&2 || paths+=("${p}"); done
   (( ${#paths} )) || return 1
   sudo chown -hR ${owner}:agent-group "${paths[@]}"
-  sudo chmod -R g+w "${paths[@]}"
+  sudo chmod -R g+rw "${paths[@]}"
   echo "${paths[@]}" "and any children are now owned by ${owner}:agent-group and group writable"
 }
 

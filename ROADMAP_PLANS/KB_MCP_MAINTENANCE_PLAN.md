@@ -49,7 +49,7 @@ Each invariant names what it prevents.
 6. **No git in maintenance tooling.** Git writes exist only in the build ledger
    (`kb_tools/kb_pipeline.py`, `add -A` and `commit` at lines 1334–1345); git reads only in
    `kb_util.preflight_report` (lines 684, 709) and the ledger readers (`kb_pipeline.py:1227`,
-   `1247`). A monopoly test on the pattern of `kb_tools/tests/test_pandoc_monopoly.py` holds that
+   `1247`). A monopoly test on the pattern of `kb_tools/tests/test_binary_monopoly.py` holds that
    set fixed. Tools may *print* a suggestion to commit. *Prevents:* a "helpful" commit inside a
    promote or move.
 7. **No model call in the tool surface, and no prompt in code.** Region checks return the build's

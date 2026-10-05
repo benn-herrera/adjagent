@@ -254,7 +254,7 @@ def asked_paragraphs(reading: Reading) -> tuple[Asked, ...]:
 
 
 #: The longest a prose claim's title runs. A title labels the claim — a register
-#: heading, a sheet box, an ask's claim line beside the statement itself — and
+#: heading, an ask's claim line beside the statement itself — and
 #: summarises nothing, so it needs to be short and no more.
 TITLE_MAX_CHARS = 120
 

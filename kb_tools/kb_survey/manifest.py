@@ -500,6 +500,8 @@ def write_text_atomic(text: str, path: Path) -> None:
     directory — ``os.replace`` is atomic within a filesystem, not across them.
 
     A failed write takes its temporary with it, rather than leaving one per attempt.
+    The file's mode follows the process umask, as a plain ``open`` would give it, not
+    ``mkstemp``'s 0600.
 
     The manifest is one caller and the expanded streams beside it are the other: the
     manifest names those streams as read targets, so a torn one is a locator pointing
@@ -508,6 +510,9 @@ def write_text_atomic(text: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
     try:
+        current = os.umask(0)
+        os.umask(current)
+        os.fchmod(handle, 0o666 & ~current)
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
             stream.write(text)
         os.replace(temporary, path)

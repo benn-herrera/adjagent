@@ -658,76 +658,68 @@ Index).
 
 ### The Claim-Graph Sheet
 
-**A KB carries a picture of its claim graph at `<kb-root>/claim-graph.svg`: a derived view
-`refresh` renders, which no verifier reads.** The sheet is derived from `.index/` alone and authored
-by nobody: it draws every node, and it draws the **premise relations** — `depends`, `supports`,
-`strengthens`, `rests-on`. **`references` are not among them.** The sheet is a picture of what one
-claim rests on, and that class asserts no such thing (Edge classes, above): it enters no solidity
-computation, gates nothing, and is under no acyclicity constraint, which is why the index already
-carries it on a field of its own rather than among the edges that compute. The drawing reads the
-same separation the index is built on rather than re-deciding it edge by edge, and a claim no
-premise relation touches is drawn as unattached, which is what it is.
+**A KB carries pictures of its claim graph: `claim-graph.svg` at its root always, and where two or
+more volumes hold nodes, `claim-graph-digest.svg` beside it and a `claim-graph.svg` in the directory
+of each volume that holds a node.** The KB-root bucket is not a volume, so a KB whose nodes sit in
+one volume carries the root sheet alone, and a volume holding no node has no sheet and no digest
+box. All are derived views that `refresh` draws on every run and no verifier reads. They come from
+`.index/`, the titles the entry point and each volume index carry, the leaves that host the claims,
+and the two claim-graph build records beside `kb-root/` (`kb-build-unmarked.json`,
+`kb-build-classification.json`). Nobody authors any of them, and a hand edit lasts until the next
+refresh. The two root sheets link to each other.
 
-**The sheet is drawn as concentric rings, one per layer of the argument, and the conclusions are at
-the centre.** How far out a claim stands is how much of the corpus stands under it: the deepest
-claims take the innermost ring and the corpus's bedrock is the outermost one, so the picture reads
-as an argument closing in on what it concludes rather than as a stack to be scrolled. A claim no
-premise relation touches is outside the rings altogether, in a grid block below them, whose height
-is still the measure of how much of the KB the argument does not attach.
+**The full sheet draws every node, and every edge a reader can rest on.** Each volume is a cluster
+titled with the volume's own title and its counts. The nodes at the KB root, framework nodes and
+external works, form one more cluster, titled with the entry point's own title. A node is filled by
+its build band where it carries one and by its kind where it does not. A claim's kind is read at its
+marker in the leaf hosting it: inside a maths fence it is an equation; in a labelled blockquote
+(point 12), whose first line opens with the block's bold name, a labelled block, framed bold;
+anywhere else, prose. A claim whose hosting leaf carries no marker for it, or cannot be read, takes
+its kind from its title, and the report counts those claims — except equations, which carry no
+marker by rule (Claim-Graph Nodes and Edges, above) and are always read by their title. Every node
+links to its canonical path and anchor, and its tooltip carries its full title. Each premise
+relation is drawn with the premise below what rests on it.
 
-**A stroke may cross a claim box that is neither of its ends, and that is a real loss.** The
-arrangement the sheet was drawn with before this one could promise it did not — every stroke there
-ran between adjacent layers and through a placeholder that held a space of its own — and no ring
-arrangement can, the space between two rings being the same space every stroke crossing them has to
-use. What is preserved is what a crossing means, as far as the sheet has room to say it: two strokes
-that cross carry the bridge glyph saying which passes over which wherever the geometry admits a
-glyph, and where it does not the crossing is drawn plain — an ordinary crossing of two whole
-strokes, never a stroke left broken, so the reader loses which of the two passes over and never the
-stroke itself. **How often that happened is never silent**: the render op's own census states the
-crossing count and how many of those crossings carry a glyph, so a reader of the build is told what
-the picture is not saying rather than left to take every crossing for a marked one. And a stroke
-passing under a box is drawn under it rather than over, so no box is ever obscured by one.
+**A `depends` edge is drawn as cited or inferred, and a `references` edge only where it was cut.**
+An edge is *inferred* where the unmarked build record answered that the claim's text points at the
+other with no mark, and *cited* otherwise, absent records included. A `references` row is *cut*
+where the classification build record chose `depends` for its pair: a dependency removed to break a
+cycle, drawn marked as no premise and outside the layering. No other `references` edge is drawn,
+because it asserts nothing about what rests on what (Edge classes, above). Those three words are the
+only provenance a sheet names. Each sheet draws its `depends` edges transitively reduced: an edge
+whose premise its claim still reaches through the other drawn `depends` edges is not drawn, so
+everything a claim rests on stays reachable along the strokes while a missing stroke is not a
+missing edge. No other relation takes part in that reduction. An edge naming an id that no record
+carries is drawn to a node marked as having none. A node that no drawn edge touches is not drawn as
+a box. It is listed in its volume's unattached table, and the table's length measures how much of
+the volume the graph does not reach. The legend shows what that sheet draws and nothing else.
 
-**A premise another drawn route already carries is drawn as that route and not as a second stroke.**
-Where a claim rests directly on a premise *and* reaches it through a third claim, the sheet draws
-the route: the drawn edge set is the premise relations reduced transitively, so every premise
-relation the index records is still walkable on the page and none of them is drawn twice over. What
-that buys is the long strokes, which are what a reader loses a sheet to — a stroke crossing N layers
-takes a placeholder of its own in each of the N−1 between it, and a stroke a route implies is
-overwhelmingly one that crosses.
+**A volume's sheet draws that volume's nodes and their one-hop neighbours.** It draws only edges
+with at least one end in the volume, and gathers the neighbours from elsewhere in one cluster per
+volume of origin. Its links are relative to the volume's own directory.
 
-**Reachability is preserved and directness is not, and the second half is a real loss.** A reader of
-the sheet can still walk from a claim to everything it rests on, however far down; what the picture
-no longer says is whether the claim cites a given premise *itself* or only through the claims
-between. That question is answered by `.index/` and by the claim's own register entry, and by
-nothing on the sheet — **and the sheet signals nothing about it**: there is no second stroke, no
-mark on a node, no listing in a `<title>`, the elision being general enough that a mark for it would
-land on most of the picture. What is said instead is a count, in the render op's own census, so that
-no reader of a build takes the drawn strokes for the whole premise set.
-
-**A node is never cut off by this.** A stroke is elided only where the route that replaces it stays,
-so no claim loses its last stroke, no claim falls into the unattached block and no component of the
-graph splits in two. Where the premise relation holds a cycle, the reduction leaves the ring
-standing rather than eliding it whole — each member of a ring has a route to itself, and reading
-that as redundancy would strand every claim on it.
-
-That boundary is on the drawing and nowhere else: the claim graph itself is never reduced to fit a
-rendering, `.index/` carries every record — `references` and premise alike — regardless of what the
-sheet does with it, and no consumer of the index sees fewer edges than it always has. So the sheet
-is kept fresh by the tool that already owns that index: **`refresh` renders it on every run**, a
-render that fails fails the refresh, and a hand edit lasts until the next refresh. The picture is
-how a reader understands the graph at all, and an artifact someone must remember to regenerate is
-wrong exactly when it is trusted.
+**The digest draws one box per volume that holds a node.** Each box links to its volume's index and
+to its volume's sheet, and carries its counts: nodes by kind, unattached nodes, and edges within the
+volume by provenance and relation. Where edges cross between two volumes, a bundle joins them,
+labelled with its count by provenance and relation and weighted by how many premises it carries.
 
 **Nothing about the graph gates the drawing.** A cycle, an edge naming an id no record carries, an
-isolated node, a whole disconnected component, no edges at all, one node, none: each is a true
-picture of the KB that produced it and each is drawn. The earliest point a sheet can exist is the
-first `refresh` over an index, and that is where it starts existing — a spine with ten claims and
-nothing attributed yet is precisely when the picture of ten unconnected claims is worth having.
+isolated node, a disconnected component, no edges at all, one node, none: each is a true picture of
+the KB that produced it, and each is drawn. The earliest a sheet can exist is the first `refresh`
+over an index, and that is when it starts existing.
 
-The render is deterministic (Corpus Invariants, below). **Perceptual locality is not promised**: a
-one-edge change may rearrange the sheet completely, and where the rearrangement reads better that is
-a feature. Cross-run comparison is the machine's job, over the records, not the picture's.
+**The sheets are drawn by Graphviz `dot` (Corpus Invariants, below), and its absence is never a
+failure.** Where `dot` is absent, `refresh` still does all its other work and exits as it otherwise
+would. Where a sheet the volume rule calls for does not exist yet, it writes a placeholder in its
+place: a small picture whose visible text says that Graphviz `dot` draws this diagram and where to
+get it. A sheet that already
+exists, drawn or placeholder, is left as it is. The report names each sheet as a placeholder or as
+kept, and gives the missing-binary message once. The sheets are drawn on the first refresh that
+finds `dot`. A `dot` that is present and refuses the input fails the refresh, because that is a
+defect in what the toolchain composed and not a property of the KB.
+
+**Perceptual locality is not promised.** A one-edge change may rearrange the sheet completely.
+Comparing runs is the machine's job, over the records, not the picture's.
 
 ## Agent-Mediated Editing
 
@@ -1004,12 +996,13 @@ outside those sections may not.
 
 ## Corpus Invariants
 
-- **Stdlib-only for Python, with one enumerated exception that is not a Python dependency at all.**
+- **Stdlib-only for Python, with two enumerated exceptions, neither of them a Python dependency at
+  all.**
   No third-party Python package and no required virtualenv in committed tooling. `pytest` (+
   `black`/`isort` for formatting) live only in the dev `.venv` the test/format targets provision;
   nothing under `kb_tools/` imports them at runtime.
 
-  The single exception is **the `pandoc` binary** — the reader `kb_docgraph` converts LaTeX sources
+  The first exception is **the `pandoc` binary** — the reader `kb_docgraph` converts LaTeX sources
   through, reached exclusively via `kb_tools/pandoc.py` (ARCHITECTURE.md, Module Inventory). It is a
   different *kind* of exception than the one it replaced, not a renamed copy of it: the vendored
   LaTeX parser this toolchain used to read sources with shipped inside the repository, so a
@@ -1022,6 +1015,14 @@ outside those sections may not.
   redistribution question a vendored copy would raise are none of them designed here — prototype
   scope, left open rather than assumed closed. (Changing that scope is a design decision, not an
   implementer's — see CONVENTIONS.md.)
+
+  The second is **Graphviz's `dot` binary**, which `refresh` draws the claim-graph sheets with (The
+  Claim-Graph Sheet, above), reached exclusively via `kb_tools/dot.py`. It is a system binary
+  assumed present, as pandoc is. Its absence is a named failure too, `kb_tools.dot.DotMissingError`,
+  naming the binary and its install page. Unlike pandoc's, that absence stops nothing. The sheets
+  are a view nothing verifies, so `refresh` stands placeholders where they would be and completes,
+  and a build's environment check reports the binary as absent without refusing to proceed. No
+  Graphviz Python package is used.
 - **Cross-reference resolution is a join, and both of its ends are specified here.** A claim graph's
   dependency candidates are found by matching a reference against the thing it names, and the two
   values matched are put there by two different parts of the reader. Neither end is an
@@ -1075,7 +1076,9 @@ outside those sections may not.
   this is the statement such a check would be written against.
 - **Determinism.** `refresh` against a fixed canonical state is byte-identical (no timestamps,
   random ids, or environment-dependent paths in records). Mint-time randomness never enters the
-  rebuild.
+  rebuild. The claim-graph sheets are byte-identical for a fixed canonical state *and a fixed `dot`
+  release*. Each SVG records that release in its generator comment, and two releases may lay one
+  graph out differently.
 - **Single-source / anti-drift.** Paths, the KB directory name, command names, the build-band
   ladder, the id grammar, the package version (`__version__` in `__init__.py`, reported by every
   CLI's `--version`), and every shared computation have exactly one definition; consumers import it.

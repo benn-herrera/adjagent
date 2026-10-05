@@ -1,9 +1,9 @@
 """Stage G — refresh, then the build-time check, in-process.
 
-Refresh rebuilds the derived index and the claim-graph sheet from what the
-earlier stages authored; :func:`kb_tools.kb_util.run_build_verify` then runs the
-standard check and the citation-grammar check over the result. Each verifier
-prints its own report as it runs.
+Refresh rebuilds the derived index from what the earlier stages authored;
+:func:`kb_tools.kb_util.run_build_verify` then runs the standard check and the
+citation-grammar check over the result. Each verifier prints its own report as
+it runs.
 
 **This is the loop that works: it exits on return codes.** There is no fix loop
 here and no seat to run one. Every check compares one mechanical product against

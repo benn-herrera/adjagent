@@ -27,15 +27,6 @@ derived from. `supports` and `strengthens` run the other way, from evidence to t
 `rests-on` leaves the corpus: it points at a work this KB cites and does not contain. A
 `references` edge records that one result's own text names another, and nothing rests on it.
 
-The graph is drawn too: [`claim-graph.svg`](claim-graph.svg) beside this file draws every node
-and not every edge. It draws no `references` edge. Of the other classes, edges sharing a source and
-target share one stroke, and a stroke is left off wherever the drawn strokes already lead from its
-premise to what rests on it. So everything a node rests on is reachable along the strokes, but a
-missing stroke is not a missing edge — `.index/` carries every edge. A node only `references` edges
-touch is drawn unattached, in the block below the rest. Nodes are coloured by standing and edges by
-what they carry. It is rendered from `.index/` by the refresh target and authored by nobody — read
-it, never edit it.
-
 A claim carrying no confidence value reads {pending-literal} wherever it appears, and so does its
 solidity: that says *unscored*, not *low* and not *doubted*.
 

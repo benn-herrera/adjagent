@@ -12,6 +12,8 @@ field that could hold one.
 
 import inspect
 import json
+import os
+import stat
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields, replace
@@ -182,6 +184,20 @@ def test_the_write_is_atomic_and_leaves_no_temporary_behind(tmp_path: Path) -> N
 
     assert path.read_text(encoding="utf-8") == mf.to_json(_manifest())
     assert sorted(p.name for p in tmp_path.iterdir()) == ["survey-manifest.json"]
+
+
+@pytest.mark.parametrize(("umask", "expected_mode"), [(0o027, 0o640), (0o002, 0o664)])
+def test_the_atomic_write_lands_with_the_mode_the_process_umask_gives_a_plain_open(
+    tmp_path: Path, umask: int, expected_mode: int
+) -> None:
+    path = tmp_path / "out.txt"
+    previous = os.umask(umask)
+    try:
+        mf.write_text_atomic("text", path)
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(os.stat(path).st_mode) == expected_mode
 
 
 def test_concurrent_writers_of_one_manifest_all_succeed_and_leave_it_intact(tmp_path: Path) -> None:

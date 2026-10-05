@@ -73,21 +73,15 @@ import functools
 import re
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from kb_tools import __version__, install_location
+from kb_tools import __version__, dot, install_location, pandoc
 
 KB_DIRNAME = "kb-root"
 INDEX_DIRNAME = ".index"
 CLAIMS_FILENAME = "claims.jsonl"
-
-# The claim-graph sheet, at rest beside `claim-quality.md` rather than inside
-# `.index/`: it is a derived view of that directory, and refresh regenerates
-# `.index/` wholesale while verify diffs a dry-run rebuild against it, so an
-# artifact written there would be clobbered or flagged.
-CLAIM_GRAPH_FILENAME = "claim-graph.svg"
 
 # No INVARIANTS_FILENAME here: the corpus-invariant source is `invariants.md`
 # (`AGENTS.md` is the legacy spelling), and `kb_index_lib` owns both names.
@@ -278,11 +272,6 @@ OP_SHOW_RUN_LOCK = "show-run-lock"
 #: Spelled with underscores because a caller reads them into variables of the
 #: same names.
 RUN_LOCK_KEYS: tuple[str, ...] = ("state", "pid", "run_id", "started", "lock")
-
-# The claim-graph renderer: reads the derived index and emits one SVG sheet.
-# `kb_graph.ops` takes its report tag from this token, so the op's name and the
-# name its report lines carry are one string.
-OP_RENDER_CLAIM_GRAPH = "render-claim-graph"
 
 # The nine metadata write ops. Their
 # semantics live in `kb_write.ops`, which imports this module — so the direction
@@ -583,6 +572,7 @@ def uninstall_targets(repo_root: Path, runner: str | None = None) -> str:
 PASS = "PASS"
 FAIL = "FAIL"
 FACT = "FACT"
+NOTE = "NOTE"
 
 _ITEM_NAME_WIDTH = 17
 
@@ -600,7 +590,7 @@ def to_stderr(text: str) -> None:
 
 @dataclass(frozen=True)
 class PreflightItem:
-    """One reported item. ``FACT`` items describe state and never gate."""
+    """One reported item. ``FACT`` items describe state and ``NOTE`` items an absence; neither gates."""
 
     status: str
     name: str
@@ -670,6 +660,16 @@ def document_tree_present(repo_root: Path) -> bool:
     if not (kb / ENTRY_POINT_FILENAME).is_file():
         return False
     return any(entry.is_dir() and entry.name != INDEX_DIRNAME for entry in kb.iterdir())
+
+
+def _binary_item(
+    name: str, version: Callable[[], str], failure: type[Exception], *, unavailable: str
+) -> PreflightItem:
+    """``PASS`` with the binary's version, else ``unavailable`` with its seam's own message — the absent binary's included."""
+    try:
+        return PreflightItem(PASS, name, version())
+    except failure as exc:
+        return PreflightItem(unavailable, name, str(exc))
 
 
 def preflight_report(repo_root: Path) -> list[PreflightItem]:
@@ -751,6 +751,11 @@ def preflight_report(repo_root: Path) -> list[PreflightItem]:
             )
         else:
             items.append(PreflightItem(PASS, "worktree-clean", "no uncommitted entries"))
+
+    # The two system binaries, each named and reported through its own seam. A build cannot read its
+    # sources without pandoc; without dot, refresh stands placeholders where the sheets would be.
+    items.append(_binary_item(pandoc.BINARY, pandoc.version, pandoc.PandocError, unavailable=FAIL))
+    items.append(_binary_item(dot.BINARY, dot.version, dot.DotError, unavailable=NOTE))
 
     # Non-gating facts. The kb-root tri-state is reported and never acted on
     # here: the one place it decides anything is the driver's launch guard,
@@ -1200,26 +1205,6 @@ def _handle_show_run_lock(args: argparse.Namespace) -> int:
     return 0
 
 
-def _handle_render_claim_graph(args: argparse.Namespace) -> int:
-    """The renderer's adapter: the report to stderr, the document to its own path.
-
-    Everything this op says goes to stderr and stdout stays empty: the op's
-    product is a file, and a caller redirecting stdout must not collect a census
-    it did not ask for.
-
-    The semantics are ``kb_graph.ops``' — the exit code included — and the
-    import is local, as ``kb_write.ops``' and ``kb_pipeline``'s are: that package
-    reaches this module for the KB path vocabulary, so the dependency is only
-    ever resolved in that direction, at call time.
-    """
-    from kb_tools.kb_graph import ops as graph_ops
-
-    result = graph_ops.render(kb_root=kb_root(find_repo_root()), out=args.out, domain=args.domain)
-    for line in result.lines():
-        to_stderr(line)
-    return result.exit_code
-
-
 def _handle_write_op(args: argparse.Namespace) -> int:
     """One adapter for all nine write ops — root discovery, the call, the report.
 
@@ -1383,12 +1368,11 @@ def build_parser() -> argparse.ArgumentParser:
     ``--version`` and the subparsers action itself, so a guard that stopped
     there would pass over a surface it cannot see.
     """
-    # Local imports: both packages import this module at their top level, so the
-    # dependency is only ever resolved in this direction at call time. They are
-    # here rather than in a handler because what is wanted from them — the stage
-    # ids, the domain sentinel — is help text, needed while the parser is built.
+    # Local import: that module imports this one at its top level, so the
+    # dependency is only ever resolved in this direction at call time. It is
+    # here rather than in a handler because what is wanted from it — the stage
+    # ids — is help text, needed while the parser is built.
     from kb_tools import kb_pipeline
-    from kb_tools.kb_graph import model as graph_model
 
     parser = argparse.ArgumentParser(
         prog="python3 -m kb_tools.kb_util",
@@ -1409,7 +1393,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Declaration order is the order a build meets these ops: the environment
     # and the spine, then the runner include line, then the ledger, then the
-    # survey and its validator, then the renderer that draws what they built.
+    # survey and its validator.
 
     preflight_help = (
         "print the build-environment report — git root, docent commands, scratch dir and its "
@@ -1541,40 +1525,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to the built KB tree; the op walks it and is told nothing else",
     )
     validate_build.set_defaults(handler=_handle_validate_build)
-
-    render_claim_graph_help = (
-        "render the claim graph to one standalone SVG sheet: a box per node carrying its id and "
-        "title, hyperlinked to the node's definition in the KB, edges coloured by the strength they "
-        "carry, height reading as derivation depth. Reads the derived index and writes exactly one "
-        f"file — {KB_DIRNAME}/{CLAIM_GRAPH_FILENAME}, or the path --out names — and nothing else "
-        f"anywhere: {KB_DIRNAME}/{INDEX_DIRNAME}/ is refresh's and is never written to. A defective "
-        "graph is the picture's subject rather than an error, so a cycle, an edge naming an id no "
-        "record carries, an isolated node and a disconnected component each draw as their own mark "
-        "and still exit 0. Exit 0 the sheet was written, 2 the environment is unfit (no repo root, "
-        f"{INDEX_DIRNAME}/ missing or unreadable, a record that will not parse, --out's parent "
-        "absent), 7 refused with nothing written (--domain names no domain in the corpus, or --out "
-        f"resolves inside {INDEX_DIRNAME}/)"
-    )
-    render_claim_graph = add_parser(
-        OP_RENDER_CLAIM_GRAPH, help=render_claim_graph_help, description=render_claim_graph_help
-    )
-    render_claim_graph.add_argument(
-        "--out",
-        type=Path,
-        metavar="PATH",
-        help=f"write the sheet here instead of {KB_DIRNAME}/{CLAIM_GRAPH_FILENAME}; the parent "
-        f"directory must already exist, and a path resolving inside {INDEX_DIRNAME}/ is refused",
-    )
-    render_claim_graph.add_argument(
-        "--domain",
-        metavar="NAME",
-        help="draw one domain's subgraph — every node attributed to it, plus every node one edge "
-        "away in another domain drawn outline-only, because no edge is ever dropped from a sheet. A "
-        "node's domain is the first path component of its canonical path, matched by exact string "
-        f"equality and never by prefix; a node hosted at the KB root takes {graph_model.DOMAIN_ROOT!r}. "
-        "Without it the whole corpus is drawn",
-    )
-    render_claim_graph.set_defaults(handler=_handle_render_claim_graph)
 
     # The metadata write ops, in declaration order: the births, then
     # the register updates, then those that write a document's own metadata.

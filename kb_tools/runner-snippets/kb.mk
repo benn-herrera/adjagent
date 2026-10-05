@@ -25,6 +25,7 @@
 
 KB_SNIPPET_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 KB_PY_ENV := PYTHONPATH=$(abspath $(KB_SNIPPET_DIR)../..)
+PYTHON ?= python3
 
 .PHONY: kb-verify kb-refresh kb-stats
 
@@ -37,12 +38,12 @@ KB_PY_ENV := PYTHONPATH=$(abspath $(KB_SNIPPET_DIR)../..)
 # the report nothing.
 kb-verify:
 	@rc=0; \
-	$(KB_PY_ENV) python3 -m kb_tools.verify_md_links || rc=1; \
-	$(KB_PY_ENV) python3 -m kb_tools.verify_kb_metadata || rc=1; \
+	$(KB_PY_ENV) $(PYTHON) -m kb_tools.verify_md_links || rc=1; \
+	$(KB_PY_ENV) $(PYTHON) -m kb_tools.verify_kb_metadata || rc=1; \
 	exit $$rc
 
 kb-refresh:
-	$(KB_PY_ENV) python3 -m kb_tools.refresh_kb_metadata
+	$(KB_PY_ENV) $(PYTHON) -m kb_tools.refresh_kb_metadata
 
 kb-stats:
-	$(KB_PY_ENV) python3 -m kb_tools.kb_cmd stats
+	$(KB_PY_ENV) $(PYTHON) -m kb_tools.kb_cmd stats

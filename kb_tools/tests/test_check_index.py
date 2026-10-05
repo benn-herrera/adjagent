@@ -178,12 +178,6 @@ class TestCheckIndex(unittest.TestCase):
         finally:
             self._restore_index_file(name, original)
 
-    def test_refresh_mints_the_claim_graph_sheet_and_verify_passes(self):
-        """The ordinary path: the fixture was refreshed at setup, so a sheet exists."""
-        sheet = self.kb_root / kb_util.CLAIM_GRAPH_FILENAME
-        self.assertTrue(sheet.is_file(), "refresh left no claim-graph sheet")
-        self.assertEqual(_run_checker(self.kb_root).returncode, 0)
-
     def test_check_detects_referential_integrity_violation(self):
         """A synthetic depends-on edge to a nonexistent target fails ref-integrity.
 

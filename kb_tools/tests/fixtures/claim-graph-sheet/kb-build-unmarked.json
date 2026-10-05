@@ -1,0 +1,37 @@
+{
+  "about": "Fixture: the unmarked-reference build record the claim-graph sheet reads.",
+  "planned": [
+    [
+      "clm-aaa003",
+      "clm-aaa001"
+    ],
+    [
+      "clm-bbb001",
+      "clm-aaa001"
+    ]
+  ],
+  "pairs": [
+    {
+      "source": "clm-aaa003",
+      "target": "clm-aaa001",
+      "offered": [
+        "A",
+        "B"
+      ],
+      "letter": "A",
+      "outcome": "answered",
+      "confidence": null
+    },
+    {
+      "source": "clm-bbb001",
+      "target": "clm-aaa001",
+      "offered": [
+        "A",
+        "B"
+      ],
+      "letter": "B",
+      "outcome": "answered",
+      "confidence": null
+    }
+  ]
+}

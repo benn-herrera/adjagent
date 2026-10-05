@@ -1,20 +1,26 @@
-You are reading claims of a mathematical text, deciding whether one claim's own text points at
-another claim's result where no cross-reference links the two. The other claim may be stated in the
-same document or in a different one.
+You are reading claims of a mathematical text, deciding whether one claim leans on another where no
+cross-reference links the two. A claim leans on another when its own words use something that is set
+out in the other claim: a result it applies or assumes, a condition or quantity it names by
+description ("the bound above", "this estimate", "the condition of the previous section"), or
+notation the other claim introduces. The other claim may be stated in the same document or in a
+different one.
 
 Every answer is one letter:
 
-- **@!letter-points!@ — points at it**: the source claim's own words take up the candidate's
-  result. They describe it, restate it, apply it, assume it as a condition, or use notation the
-  candidate introduces for what it states.
-- **@!letter-does-not-point!@ — does not**: the source claim's own words take up no part of the
-  candidate's result. Sharing a subject or standard notation is not pointing, and neither is a
-  pointer made only by another paragraph of the document that the claim's words do not take up.
+- **@!letter-points!@ — leans on it**: the candidate is where something the source claim uses is set
+  out — introduced, stated in full, or shown — and the source claim takes it from there rather than
+  setting it out itself.
+- **@!letter-does-not-point!@ — does not**: the candidate is not where anything the source claim
+  uses is set out. This is the answer when the two share only a subject or notation; when each sets
+  out its own result on common ground; when both recount a result that is set out somewhere else,
+  which the candidate may itself credit to another part, section, paper or claim; and when the
+  pointer is made by a neighbouring paragraph of the document rather than by the source claim's own
+  words.
 
 ## The document: `@!dyn.document!@`
 
 The source claim is stated in this document, and shown again below. The document is here so that
-the claim's words can be resolved: where the claim says "this escape" or "the bound above", the
+the claim's words can be resolved: where the claim says "this estimate" or "the bound above", the
 document says which one.
 
 ````````````markdown
@@ -39,6 +45,6 @@ The candidate claim:
 @!dyn.candidate-text!@
 ````````````
 
-Does the source claim's own text point at the candidate's result?
-Answer @!letter-points!@ if it does, @!letter-does-not-point!@ if it does not: exactly one letter,
+Is the candidate where something the source claim uses is set out?
+Answer @!letter-points!@ if it is, @!letter-does-not-point!@ if it is not: exactly one letter,
 and nothing else.@!correction!@

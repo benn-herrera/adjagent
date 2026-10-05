@@ -350,3 +350,29 @@ with one of them is the defect.
     answer partly wrong has no item-level default; and `letters.LetterReader`'s `confidence` has
     no multi-label form. What would reopen it is a K the yes rate justifies whose per-pair cost the
     build cannot carry.
+
+18. **Edge provenance on the `depends-on` record itself.** The sheet's provenance words — cited,
+    inferred, cut — are recovered from the build records at the repository root
+    (`kb-build-unmarked.json`, `kb-build-classification.json`), so a KB without them draws every
+    `depends` as cited, and a `references` row cut from a reversed pair is not recognised. The
+    record carries `relation` and `context` only. Carrying provenance on the record is a metadata
+    format change; item 20 is the form it would take.
+
+19. **Metadata format versioning, semver, stamped in the entry point's frontmatter.** Today's
+    formats are `0.9.0`. `1.0.0` is one major bump: standard YAML frontmatter in place of the
+    comment block, YAML build records, and the index as a YAML stream in flow style, one record per
+    line so line tooling keeps working. The tool reads and writes the current version only; an
+    older stamp is migrated at load by an isolated module (stream in, stream out, no file I/O)
+    chaining N→N+1 transforms; a newer stamp refuses with "update the tool". In a shared repository
+    the oldest user updates. Reference implementation lands in kbase first; kb_tools adopts it.
+
+20. **The demoted relation.** A reference-class edge only the build's cycle breaking creates, from
+    a `depends`; outside the premise walk and the acyclicity check, as `references` is; no write op
+    creates one, one write op resolves it; `kb-verify` lists each as a finding; the sheet draws it
+    as the cut of a circle with its origin, cited or inferred. A minor bump riding with the stamp
+    of item 19. Reference implementation lands in kbase first; kb_tools adopts it.
+
+21. **Jointly established units.** A strongly connected component of the claim graph that a person
+    promotes into one node carrying the solidity its members share; the DAG constraint then holds
+    over units. A later major bump. Reference implementation lands in kbase first; kb_tools
+    adopts it.

@@ -4,7 +4,7 @@ Everything the package learns from a LaTeX source comes back through these four
 calls, and nothing else in it names the ``pandoc`` binary or builds an argv for
 it. Replacing the reader is then one module's rewrite rather than the package's
 goal;
-``tests/test_pandoc_monopoly.py`` is what says the monopoly still holds on each
+``tests/test_binary_monopoly.py`` is what says the monopoly still holds on each
 run.
 
 The binary is assumed present on the system. This module neither installs nor

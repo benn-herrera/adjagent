@@ -12,20 +12,6 @@ root.
   `[doc]` states the argv it hands you). Reaching an op these tools already expose is running them,
   read-only or not. Write the script read-only; nothing checks that. The report a measurement lands
   in cites the script by path.
-- **A rendered sheet is measured by `measure-sheet`, which imports nothing from `kb_tools`.**
-  `kb-testing/tools/measure-sheet.py`, through the `measure-sheet` recipe (`kb-testing/justfile`),
-  is the channel for every figure a row reads off a claim-graph SVG — `measure-kb-roots` holds
-  kb-roots in memory and never sees one. **It takes no constant from the renderer, not even
-  `BOX_WIDTH`**: an instrument holding a sheet to the generator's own geometry has adopted that
-  geometry as the definition of correct, and can then detect staleness and nothing else. Box size
-  and column pitch are read off the document. A figure that cannot be is not imported — the column
-  goes.
-- **A sheet is reported by its `.svg` path, never by a PNG.** The sheet is vector: the reader sets
-  their own zoom, and the `title` tooltips and the hyperlinks into the KB are live there and gone
-  the moment it is rasterised. `render-png` (`kb-testing/justfile`) exists because a model cannot
-  open an SVG and must rasterise to look at one at all — that image is the instrument, the same way
-  `measure-sheet` is, and neither is the deliverable. A report hands over the sheets and may name
-  the crops it read; it does not substitute them for it.
 - **Never spell a harness path.** `.claude`, `.opencode`, their `-temp` scratch directories and the
   `<harness-dir>/agents` PYTHONPATH entry come from `install_location` through `kb_util`'s
   functions, called where the value is used and never at import: the package is imported from the
@@ -34,15 +20,16 @@ root.
   subprocess sets its PYTHONPATH to `install_location.current().agents_dir` — the installed layout
   `tests/conftest.py` stands up — never to the source tree, from which the child cannot locate
   itself.
-- **`pandoc.py` is the only module that names the `pandoc` binary.** It is the single enumerated
-  stdlib-only exception (SPEC.md, Corpus Invariants), and the property that makes it enumerable is
-  that nothing else in the package builds an argv for it or imports it — enforced by
-  `tests/test_pandoc_monopoly.py`. A second call site is a defect: it is a second place that knows
-  how LaTeX gets read, and the seam exists so that replacing the reader is one module's work rather
-  than a sweep.
-- **Adding a second stdlib exception is a design decision, not an implementer's.** SPEC.md
-  enumerates exactly one (the `pandoc` binary, reached through `pandoc.py`); proposing another goes
-  to the architect, not into a patch.
+- **`pandoc.py` and `dot.py` are the only modules that name their binaries.** Each is one of the two
+  enumerated stdlib-only exceptions (SPEC.md, Corpus Invariants). What makes them enumerable is that
+  nothing else in the package builds an argv for either or spells either name in a string it hands
+  anywhere. A preflight item or a report line that names a binary takes the name and the message
+  from the seam. This is enforced by `tests/test_binary_monopoly.py`. A second call site is a
+  defect: it is a second place that knows how its binary is driven, and the seam exists so that
+  replacing either binary is one module's work rather than a sweep.
+- **Adding a third stdlib exception is a design decision, not an implementer's.** SPEC.md
+  enumerates exactly two (the `pandoc` and `dot` binaries, reached through `pandoc.py` and
+  `dot.py`); proposing another goes to the architect, not into a patch.
 - **A `kb_claimgraph` stage never exits on a model's opinion.** Every stage exits on a comparison
   between two artifacts or a verifier's return code (`gate.py`, ARCHITECTURE.md's Claim Graph
   section) — a new stage does not get to add a third kind of exit. This is a scar, not a preference:
@@ -86,7 +73,8 @@ root.
   byte for byte with a golden held in the test. A test that renders a working template and compares
   it with a stored copy is a checksum of the wording: every prompt edit breaks it and it guards no
   behaviour. A test over the working templates checks structure only: every slot filled, the slot
-  order, the shared prefix.
+  order, the shared prefix. No test asserts a prompt's prose; what a test may key on is the
+  offered letters, the slot set, the system fragment and the closing line's letters.
 - **A `dyn.` slot the caller supplies under one alternative lives in that alternative's fragment and
   nowhere else.** Composition refuses an unsupplied slot and an unused value alike.
 - **A register holds four entry kinds, and `RegisterEntry.kind` is where you learn which.** `clm`,

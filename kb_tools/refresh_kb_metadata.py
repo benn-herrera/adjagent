@@ -17,9 +17,9 @@ Currently regenerates:
       ``kb_index_lib.compute_solidity``
     * the ``(solidity X)`` annotation in every claim-target depends-on bullet,
       synced to the depended-on claim's computed solidity
-    * the claim-graph sheet at ``<kb-root>/claim-graph.svg``, a pure derived
-      view of the ``.index/`` this run just wrote — which is why refresh is
-      where it is minted, and why ``verify_kb_metadata`` is where it is checked
+    * the claim-graph sheets, ``claim-graph.svg`` and ``claim-graph-digest.svg``
+      at the KB root, drawn from the index just written through
+      ``claim_sheet.render``
 
 Future: bootstrap directive blockquote text (currently hand-maintained).
 
@@ -33,12 +33,7 @@ import re
 import sys
 from pathlib import Path
 
-from kb_tools import __version__, kb_index_lib, kb_schema, kb_util
-
-# The claim-graph sheet's renderer, reached only through its op — which takes
-# no argv and exits nothing. The sheet is a derived view of the `.index/` this
-# module writes, which is what makes refresh the one place it is minted.
-from kb_tools.kb_graph import ops as graph_ops
+from kb_tools import __version__, claim_sheet, kb_index_lib, kb_schema, kb_util
 
 # The shared writer. This module composes no metadata
 # format of its own: the frontmatter-field splice and the register
@@ -555,19 +550,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"[refresh-index] Wrote {written} file(s) under " f"{INDEX_DIR.as_posix()}/ ({unchanged} unchanged).")
 
-    # Phase 3: the claim-graph sheet, from the index phase 2 just wrote. The
-    # only precondition is that that index loads — no property of the graph is
-    # one, so a spine with nothing attributed to it yet draws its unconnected
-    # claims rather than waiting for a completeness nobody has reached. Here and
-    # at no later point: the gate that follows a claim-graph pass runs refresh
-    # and then verify, so a sheet minted after a verify would go missing exactly
-    # on the halted build a reader most wants to look at.
-    sheet = graph_ops.render(kb_root=KB)
-    if sheet.exit_code != graph_ops.EXIT_RENDERED:
-        print("\n" + "\n".join(sheet.lines()), file=sys.stderr)
-        return 1
-    print(f"[refresh-sheet] Wrote {sheet.written}.")
-    return 0
+    # Phase 3: the claim-graph sheets, last, so nothing above depends on `dot`.
+    sheets = claim_sheet.render(KB)
+    for line in sheets.lines:
+        print(line, file=sys.stderr if sheets.failed else sys.stdout)
+    return 1 if sheets.failed else 0
 
 
 if __name__ == "__main__":

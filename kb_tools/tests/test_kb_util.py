@@ -32,7 +32,16 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from kb_tools import install_location, kb_pipeline, kb_schema, kb_util, refresh_kb_metadata, verify_citations
+from kb_tools import (
+    dot,
+    install_location,
+    kb_pipeline,
+    kb_schema,
+    kb_util,
+    pandoc,
+    refresh_kb_metadata,
+    verify_citations,
+)
 from kb_tools.kb_driver import baton, runlog
 from kb_tools.kb_survey import manifest as survey_manifest
 from kb_tools.kb_survey import skeleton as survey_skeleton
@@ -517,20 +526,6 @@ def _refreshed_repo(root: Path, **extra: str) -> Path:
     return repo
 
 
-@pytest.mark.parametrize("sheet", ["absent", "stale"])
-def test_neither_check_reads_the_claim_graph_sheet(tmp_path: Path, sheet: str) -> None:
-    repo = _refreshed_repo(tmp_path / "repo")
-    path = repo / "kb-root" / kb_util.CLAIM_GRAPH_FILENAME
-    if sheet == "absent":
-        path.unlink()
-    else:
-        edited = path.read_text(encoding="utf-8").replace("</svg>", "<!-- hand-edited -->\n</svg>")
-        path.write_text(edited, encoding="utf-8")
-
-    assert not kb_util.run_kb_verify(repo).failed
-    assert not kb_util.run_build_verify(repo).failed
-
-
 def test_the_standard_check_runs_no_citation_check(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo = _refreshed_repo(tmp_path / "repo", **{"kb-root/vol/index.md": _CITATION_SHAPED_PROSE})
     capsys.readouterr()
@@ -837,6 +832,57 @@ def test_preflight_flags_a_dirty_worktree_with_a_count(tmp_path: Path) -> None:
     assert "FAIL" in line
     assert "2 uncommitted entries" in line
     assert "stash" in line
+
+
+def test_preflight_reports_pandoc_with_its_version(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path / "consumer")
+
+    result = _run_installer(repo, "preflight")
+
+    line = _item(result.stdout, pandoc.BINARY)
+    assert "PASS" in line
+    assert line.rstrip().endswith(pandoc.version())
+
+
+def test_preflight_fails_on_an_absent_pandoc_with_its_seams_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _git_repo(tmp_path / "consumer")
+    monkeypatch.setattr(pandoc, "BINARY", "kb-tools-no-such-binary")
+    with pytest.raises(pandoc.PandocMissingError) as missing:
+        pandoc.version()
+
+    result = _run_installer(repo, "preflight")
+
+    assert result.returncode == 1
+    line = _item(result.stdout, "kb-tools-no-such-binary")
+    assert "FAIL" in line
+    assert line.endswith(str(missing.value))
+
+
+def test_preflight_notes_an_absent_dot_without_failing(tmp_path: Path) -> None:
+    """The suite's own state: ``conftest.py`` points the binary away."""
+    repo = _git_repo(tmp_path / "consumer")
+    with pytest.raises(dot.DotMissingError) as missing:
+        dot.version()
+
+    result = _run_installer(repo, "preflight")
+
+    assert result.returncode == 0, result.stdout
+    line = _item(result.stdout, dot.BINARY)
+    assert f"{kb_util.NOTE} {dot.BINARY}" in line
+    assert line.endswith(str(missing.value))
+
+
+def test_preflight_passes_dot_with_its_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _git_repo(tmp_path / "consumer")
+    monkeypatch.setattr(dot, "version", lambda: "16.1.0")
+
+    result = _run_installer(repo, "preflight")
+
+    assert result.returncode == 0, result.stdout
+    line = _item(result.stdout, dot.BINARY)
+    assert "PASS" in line and line.rstrip().endswith("16.1.0")
 
 
 @pytest.mark.parametrize(

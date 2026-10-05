@@ -459,3 +459,5 @@ in the review/design directory.
 The deployed runtime (`agents/`, `commands/`) is stdlib-only Python and shell with no third-party
 dependencies. `pytest`, `black`, and `isort` are dev/test-only tools, installed into a local `.venv`
 by the `just test` and `just format-python` recipes.
+
+pandoc (John MacFarlane and contributors) and Graphviz `dot` (Graphviz authors) are run as external programs and are not bundled.

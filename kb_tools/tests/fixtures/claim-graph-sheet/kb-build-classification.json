@@ -1,0 +1,41 @@
+{
+  "about": "Fixture: the classification build record the claim-graph sheet reads.",
+  "candidates": [
+    {
+      "source": "clm-aaa003",
+      "target": "clm-aaa001",
+      "offered": [
+        "A",
+        "B",
+        "C"
+      ],
+      "letter": "A",
+      "outcome": "answered",
+      "confidence": null
+    },
+    {
+      "source": "clm-aaa004",
+      "target": "clm-bbb003",
+      "offered": [
+        "A",
+        "B",
+        "C"
+      ],
+      "letter": "A",
+      "outcome": "answered",
+      "confidence": null
+    },
+    {
+      "source": "clm-bbb003",
+      "target": "clm-aaa004",
+      "offered": [
+        "A",
+        "B",
+        "C"
+      ],
+      "letter": "C",
+      "outcome": "answered",
+      "confidence": null
+    }
+  ]
+}

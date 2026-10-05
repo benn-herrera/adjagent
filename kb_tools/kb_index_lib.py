@@ -867,6 +867,17 @@ def _posix_relative(path: Path, kb_root: Path) -> str:
     return path.relative_to(kb_root).as_posix()
 
 
+def node_domain(canonical_path: str) -> str:
+    """A node's domain: its top-level directory under kb-root, ``""`` for a node at the root."""
+    parts = Path(canonical_path).parts
+    return parts[0] if len(parts) > 1 else ""
+
+
+def tier2_markers(text: str) -> list[tuple[int, tuple[str, ...]]]:
+    """Each ``<!-- claim-quality: … -->`` marker in ``text``: its offset, and the claim ids its body names."""
+    return [(found.start(), tuple(_CLAIM_ID_RE.findall(found.group(1)))) for found in _TIER2_INLINE_RE.finditer(text)]
+
+
 def kb_files(kb_root: Path):
     """Iterate non-excluded .md files under kb_root — **the** KB document walk.
 
@@ -1802,13 +1813,7 @@ def parse_leaf(path: Path, kb_root: Path) -> LeafRecord | None:
     experiments_ref = tuple(i for i in (fm.get("experiments", []) or ()) if i.startswith("exp-"))
     # Tier 2 markers: scan body (minus the frontmatter block) for
     # `<!-- claim-quality: <id> ... -->` markers and intersect with claims.
-    scrubbed = strip_frontmatter(text)
-    marker_bodies = _TIER2_INLINE_RE.findall(scrubbed)
-    marked: set[str] = set()
-    for body in marker_bodies:
-        for cid in _CLAIM_ID_RE.findall(body):
-            if cid in claims:
-                marked.add(cid)
+    marked = {cid for _, ids in tier2_markers(strip_frontmatter(text)) for cid in ids if cid in claims}
     return LeafRecord(
         path=_posix_relative(path, kb_root),
         kind=kind,

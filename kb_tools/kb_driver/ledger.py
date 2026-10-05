@@ -411,7 +411,7 @@ def _gate_step(op: str, *, returncode: int, stdout: str, stderr: str) -> Outcome
 
 
 def refresh(repo_root: Path) -> Outcome:
-    """Rebuild the derived index and the claim-graph sheet, in this process."""
+    """Rebuild the derived index, in this process."""
     runlog.require(repo_root.is_dir(), "ledger op needs an existing repo root", repo_root=str(repo_root))
     argv = ["--kb-root", str(kb_util.kb_root(repo_root))]
     code, stdout, stderr = _captured(lambda: refresh_kb_metadata.main(argv))

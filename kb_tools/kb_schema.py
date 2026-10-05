@@ -17,7 +17,8 @@ Four vocabularies live here:
   / ``sup`` kind tokens that make up a canonical node id,
 * the **node-kind vocabulary** — :data:`NODE_KINDS`, every value a
   ``node_type`` takes, which a census, a breakdown, a union or an ordering
-  iterates rather than spelling, and
+  iterates rather than spelling, with :data:`EDGE_RELATIONS` beside it for
+  every value an edge's ``relation`` takes, and
 * the **derived-field placeholders** — the identity value of each field
   ``refresh`` computes and nothing else may.
 
@@ -285,6 +286,11 @@ NODE_KINDS: tuple[str, ...] = ("claim", "support", "experiment", "invariant", "a
 #: carrying no scoring fields. A subset of :data:`NODE_KINDS`, spelled here
 #: because "is this node bedrock?" is a question several consumers ask.
 FRAMEWORK_KINDS: tuple[str, ...] = ("invariant", "axiom")
+
+#: Every value an edge's ``relation`` takes, in SPEC.md's Edge classes order. A
+#: site that styles or counts per relation reads this rather than spelling the
+#: list, and checks a per-relation table against it.
+EDGE_RELATIONS: tuple[str, ...] = ("depends", "strengthens", "supports", "rests-on", "references")
 
 _T = TypeVar("_T")
 

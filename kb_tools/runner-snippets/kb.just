@@ -23,6 +23,7 @@
 # `set shell` — nothing here needs bash.
 
 KB_PYTHONPATH := parent_directory(parent_directory(source_directory()))
+PYTHON := "python3"
 
 # Composite, not sequential: both verifiers run, and the recipe carries the
 # worst outcome. Two plain lines stop at the first failure, so a report would
@@ -34,14 +35,14 @@ KB_PYTHONPATH := parent_directory(parent_directory(source_directory()))
 [doc("verify KB link integrity and claim-graph metadata")]
 kb-verify:
     @rc=0; \
-    PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.verify_md_links || rc=1; \
-    PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.verify_kb_metadata || rc=1; \
+    PYTHONPATH="{{ KB_PYTHONPATH }}" {{PYTHON}} -m kb_tools.verify_md_links || rc=1; \
+    PYTHONPATH="{{ KB_PYTHONPATH }}" {{PYTHON}} -m kb_tools.verify_kb_metadata || rc=1; \
     exit $rc
 
 [doc("refresh mechanically maintained KB metadata")]
 kb-refresh:
-    PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.refresh_kb_metadata
+    PYTHONPATH="{{ KB_PYTHONPATH }}" {{PYTHON}} -m kb_tools.refresh_kb_metadata
 
 [doc("print KB claim-graph stats")]
 kb-stats:
-    PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.kb_cmd stats
+    PYTHONPATH="{{ KB_PYTHONPATH }}" {{PYTHON}} -m kb_tools.kb_cmd stats
