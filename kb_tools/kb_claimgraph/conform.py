@@ -129,8 +129,8 @@ def _spine(tree: Tree) -> None:
 
 
 def _markdown_links(tree: Tree) -> None:
-    """Point 7, for the link form the repo-wide dead-link gate can see."""
-    broken = verify_md_links.scan(tree.root, check_ids_enabled=False)
+    """Point 7, for the link form the dead-link gate can see."""
+    broken = verify_md_links.scan_tree(tree.root, repo_root=tree.root)
     if broken:
         first = broken[0]
         raise _refuse(
@@ -277,16 +277,13 @@ def pass_two_gate(tree: Tree) -> PassTwoState:
     )
 
 
-def spine_seeded(kb_root: Path, *, targets_installed: bool) -> str | None:
+def spine_seeded(kb_root: Path) -> str | None:
     """Why the claim-graph spine is absent, or ``None`` when it is there.
 
-    ``graph-init`` is what installs it, and this stage assumes it has run rather
-    than seeding anything itself: the two writes it makes — the derived-index
-    directory and the runner include line — belong to the verb that owns them,
-    and stage G is the include line's only consumer.
+    The spine is the derived-index directory ``graph-init`` creates. This stage
+    assumes that verb has run rather than seeding anything itself, and checks
+    only that the directory exists.
     """
     if not (kb_root / kb_util.INDEX_DIRNAME).is_dir():
         return f"{kb_root.name}/{kb_util.INDEX_DIRNAME}/ does not exist"
-    if not targets_installed:
-        return "the runner file carries no KB include line, so there are no refresh and verify targets to run"
     return None

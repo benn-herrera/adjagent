@@ -122,7 +122,8 @@ class Ledger:
             start_build=lambda *, charter: ledger.Outcome(baton.EXIT_OK),
             advance_step=self._advance,
             show_status=lambda *, relay: ledger.Outcome(baton.EXIT_OK, stdout=_render(self.recorded)),
-            run_target=lambda *, target: ledger.Outcome(baton.EXIT_OK),
+            refresh=lambda: ledger.Outcome(baton.EXIT_OK),
+            build_verify=lambda: ledger.Outcome(baton.EXIT_OK),
         )
 
 

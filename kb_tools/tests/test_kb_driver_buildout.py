@@ -5,8 +5,8 @@ distillation stages (``phase-0`` through ``phase-3``) that used to derive it
 from a LaTeX survey are gone, replaced by a separately-authored pandoc front
 end. What survives here is everything downstream of an already-built tree:
 
-* **``phase-3a`` is a gate and a record, and nothing between them.** The three
-  verifiers run behind ``kb-refresh``; green records the stage and red stops the
+* **``phase-3a`` is a gate and a record, and nothing between them.** The
+  build-time check runs behind refresh; green records the stage and red stops the
   run. No round is spent and no model is called, because each verifier
   compares one mechanically-produced artifact against another and a red one is
   a defect in a tool or in what was authored.
@@ -17,8 +17,8 @@ end. What survives here is everything downstream of an already-built tree:
 The fixture's ``repo`` starts at the state the pandoc pipeline hands off: a KB
 spine, with every domain's leaves already distilled (:func:`distilled`) by the
 case that needs them — this driver writes no document tree of its own, and the
-tree is the only thing it is told about the corpus. The ledger and the runner
-targets are the two seams
+tree is the only thing it is told about the corpus. The ledger, refresh and the
+build-time check are the seams
 ``test_kb_driver_run.py`` also uses. The templates are local stand-ins named
 for the real ones, and their prose is not what this suite is about.
 """
@@ -155,9 +155,9 @@ def render_for(recorded: Sequence[str]) -> str:
 class FakeLedger:
     """The recorded-stage set as a tool would report it, plus what each op was told.
 
-    ``verify`` is a sequence consumed one per ``kb-verify`` run, the last
+    ``verify`` is a sequence consumed one per build-time check, the last
     repeating, so a case states the gate's verdict without reaching into the
-    stage that reads it.
+    stage that reads it. ``refresh`` is every refresh's outcome.
     """
 
     def __init__(
@@ -167,11 +167,14 @@ class FakeLedger:
         verify: Sequence[ledger.Outcome] = (),
         preflight_stdout: str = PREFLIGHT,
         refuses: Sequence[str] = (),
+        refresh: ledger.Outcome = ledger.Outcome(baton.EXIT_OK),
     ) -> None:
         self.recorded = list(recorded)
         #: Each stage's boundary-commit body, as the record row supplied it.
         self.notes: dict[str, str] = {}
-        self.targets: list[str] = []
+        #: The gate steps run, in order: ``"refresh"`` and ``"verify"``.
+        self.gate_steps: list[str] = []
+        self._refresh = refresh
         self._repo_root: Path | None = None
         self._verify = list(verify)
         self._verifies = 0
@@ -190,9 +193,13 @@ class FakeLedger:
         self.notes[stage] = note
         return ledger.Outcome(baton.EXIT_OK)
 
-    def _run_target(self, *, target: str) -> ledger.Outcome:
-        self.targets.append(target)
-        if target != kb_util.TARGET_VERIFY or not self._verify:
+    def _run_refresh(self) -> ledger.Outcome:
+        self.gate_steps.append("refresh")
+        return self._refresh
+
+    def _build_verify(self) -> ledger.Outcome:
+        self.gate_steps.append("verify")
+        if not self._verify:
             return ledger.Outcome(baton.EXIT_OK)
         outcome = self._verify[min(self._verifies, len(self._verify) - 1)]
         self._verifies += 1
@@ -209,7 +216,8 @@ class FakeLedger:
             start_build=lambda *, charter: ledger.Outcome(baton.EXIT_OK),
             advance_step=self._advance,
             show_status=lambda *, relay: ledger.Outcome(baton.EXIT_OK, stdout=render_for(self.recorded)),
-            run_target=self._run_target,
+            refresh=self._run_refresh,
+            build_verify=self._build_verify,
         )
 
 
@@ -222,7 +230,8 @@ def red_gate(*paths: str) -> ledger.Outcome:
     """
     faults = [f"[verify] {kb_util.FAIL} {path}: broken link" for path in paths]
     report = "\n".join(["[verify] metadata gate red", *faults])
-    return ledger.Outcome(baton.EXIT_GATE_RED, stdout=report + "\n", detail=("kb-verify exited 1", *faults))
+    head = "verify (links rc=1, metadata rc=0, citations rc=0) exited 1"
+    return ledger.Outcome(baton.EXIT_GATE_RED, stdout=report + "\n", detail=(head, *faults))
 
 
 GREEN = ledger.Outcome(baton.EXIT_OK, stdout="[verify] green\n")
@@ -394,18 +403,18 @@ def test_the_gate_refreshes_before_it_verifies(repo: Path, tmp_path: Path, templ
         stages=("phase-3a",),
     )
 
-    assert fake.targets == [kb_util.TARGET_REFRESH, kb_util.TARGET_VERIFY]
+    assert fake.gate_steps == ["refresh", "verify"]
     assert fake.recorded[-1] == "phase-3a"
 
 
 def test_a_red_gate_stops_the_run_and_records_nothing(repo: Path, tmp_path: Path, templates: Path) -> None:
     """No round, no model call, no cap: a failed verifier ends the walk where it stands.
 
-    Each of the three verifiers compares one mechanically-produced artifact
-    against another, so a red one is a defect in a tool or in what was authored
-    — not work a model call could close, and not a barrier anyone can
-    answer. The verifier's own report is in the run log; what reaches the caller
-    is the target that failed and exit 11.
+    Each verifier compares one mechanically-produced artifact against another,
+    so a red one is a defect in a tool or in what was authored — not work a
+    model call could close, and not a barrier anyone can answer. The verifier's
+    own report is in the run log; what reaches the caller is the step that
+    failed and exit 11.
     """
     distilled(repo)
     faulted = f"{kb_util.KB_DIRNAME}/{DOMAINS[1]}/{DOMAINS[1]}.md"
@@ -435,24 +444,25 @@ def test_a_red_gate_stops_the_run_and_records_nothing(repo: Path, tmp_path: Path
     assert "--decide" not in card
 
 
-def test_an_environment_fault_stops_the_run_the_same_way_a_red_gate_does(
-    repo: Path, tmp_path: Path, templates: Path
-) -> None:
-    """Exit 14, and the restore line the ledger composed — never a fix cycle."""
+def test_a_red_refresh_stops_the_run_before_the_check_runs(repo: Path, tmp_path: Path, templates: Path) -> None:
+    """Nothing downstream can read an index that was never rebuilt, so no check runs over it."""
     distilled(repo)
-    missing = ledger.Outcome(baton.EXIT_ENVIRONMENT, detail=("no justfile or Makefile — restore: install targets",))
+    red = ledger.Outcome(baton.EXIT_GATE_RED, detail=("refresh exited 1",))
+    fake = FakeLedger(recorded=RECORDED_THROUGH_3A_PREDECESSOR, refresh=red)
 
     result = drive(
         repo_root=repo,
         tmp_path=tmp_path,
         templates=templates,
         script=Script({}),
-        fake=FakeLedger(recorded=RECORDED_THROUGH_3A_PREDECESSOR, verify=[missing]),
+        fake=fake,
         stages=("phase-3a",),
     )
 
-    assert result.exit_code == baton.EXIT_ENVIRONMENT
-    assert any("restore:" in line for line in result.detail)
+    assert result.exit_code == baton.EXIT_GATE_RED
+    assert "refresh exited 1" in result.detail
+    assert fake.gate_steps == ["refresh"]
+    assert "phase-3a" not in fake.recorded
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +579,7 @@ def test_a_resume_with_a_model_call_left_refuses_an_environment_naming_no_server
     assert result.exit_code == baton.EXIT_ENVIRONMENT
     assert liaison_tools.BASE_URL_ENV in result.detail[0]
     assert any(line.startswith("restore:") for line in result.detail)
-    assert fake.targets == [] and script.calls == []
+    assert fake.gate_steps == [] and script.calls == []
     assert fake.recorded == list(RECORDED_THROUGH_3A_PREDECESSOR)
 
 

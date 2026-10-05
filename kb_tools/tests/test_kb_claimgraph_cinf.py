@@ -21,10 +21,8 @@ a fixture with a blank line on each side would have hidden. One second fence
 
 The consuming repository is stood up the way a consumer's is: the real runner
 snippet, imported by the line the installer writes, over the installed package.
-That is what makes the last stage's targets the real ones.
 """
 
-import shutil
 import tomllib
 from collections import Counter
 from collections.abc import Iterator, Mapping
@@ -41,14 +39,6 @@ from kb_tools.kb_write import ops, render
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
-
-pytestmark = [
-    pytest.mark.skipif(
-        shutil.which("just") is None,
-        reason="claim discovery's last stage runs the consuming project's runner targets",
-    ),
-    pytest.mark.usefixtures("claimgraph_gate_in_process"),
-]
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +567,7 @@ def discovered(discovered_build: Path, tmp_path: Path) -> Path:
     return copy_build(discovered_build, tmp_path / "consumer")
 
 
-def test_the_run_exits_zero_and_the_runner_s_gates_are_green(discovered: Path):
+def test_the_run_exits_zero_and_refresh_and_verify_are_green(discovered: Path):
     kb = discovered / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
@@ -674,7 +664,7 @@ def test_block_coverage_is_untouched(discovered: Path):
     assert len(claims) == 1
 
 
-def test_body_preservation_holds_over_the_discovery_run(declared: Path, runner_gate: None):
+def test_body_preservation_holds_over_the_discovery_run(declared: Path):
     """Every line added belongs to a frontmatter block; every line rewritten gained a marker."""
     before = _texts(declared / "kb-root")
     assert not _discover(declared, FixedReader()).failed

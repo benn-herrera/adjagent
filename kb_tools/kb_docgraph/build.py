@@ -196,8 +196,8 @@ def _validate(trees: Sequence[VolumeTree], *, kb_root: Path) -> list[Finding]:
 
 
 def _check_links(kb_root: Path) -> list[Finding]:
-    """Point 7's first half, through the repository-wide dead-link gate."""
-    broken = verify_md_links.scan(kb_root, check_ids_enabled=False)
+    """Point 7's first half, through the dead-link gate's crawl."""
+    broken = verify_md_links.scan_tree(kb_root, repo_root=kb_root)
     if broken:
         return [
             Finding(

@@ -41,8 +41,9 @@ either fails at the gate or passes and leaves the graph quietly wrong.
 Authored: leaf content, leaf frontmatter, register entry text, dependency membership, and local
 rigor (`confidence` on a claim, `quality` on a support). Derived and regenerated: solidity, build
 status, the parenthetical solidity annotations, subtree aggregates, the `Leaf references:` line in
-each register entry, `claim-graph.svg`, and everything under `.index/`. **A hand-edited derived
-field is a verifier failure**, not a shortcut — the value is overwritten and the drift is reported.
+each register entry, and everything under `.index/`. **A hand-edited derived field is a verifier
+failure**, not a shortcut — the value is overwritten and the drift is reported. `claim-graph.svg` is
+derived too, and refresh overwrites it on every run.
 
 Authored does not mean typed. Everything authored except leaf prose is metadata, and metadata is
 written only by the `kb_util` write ops: you supply values, the op composes the format, proves what
@@ -86,4 +87,5 @@ citation that reproduces its source has become a second copy of it. Where a refe
 warrants no graph edge, the exemption is the entry's `no-edge` reason, supplied to the op that
 writes the entry and standing in no other form.
 
-The verifier enforces the exact shapes, and the ops refuse values that would not survive it.
+The ops refuse citation values that do not take the exact shapes. `kb-verify` does not check them;
+the build's own check enforces them, and it runs only inside the build.

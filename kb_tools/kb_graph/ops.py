@@ -7,10 +7,7 @@ argparse, reads no ``sys.argv`` and calls no ``sys.exit``. It returns a
 printing and exiting are the surface's.
 
 :func:`compose` is the same work stopping one step short, at the markup: what a
-caller that wants the bytes rather than the file asks for. ``verify``'s
-freshness gate is that caller — it renders the sheet the index on disk would
-produce and byte-compares it against the sheet beside it, the way it diffs a
-dry-run rebuild of ``.index/`` against the files there.
+caller that wants the bytes rather than the file asks for.
 
 **The only precondition is that the index loads.** No property of the graph is
 one: zero edges, one node, every node isolated, a graph with nothing in it at

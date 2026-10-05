@@ -41,8 +41,8 @@ The stages, in order:
 * **E, :mod:`assemble`** — arrangement. No new fact enters.
 * **F, :mod:`write`** — the write passes, through the write API and nothing
   else.
-* **G, :mod:`gate`** — the runner's refresh and verify targets. Exits on the
-  return code.
+* **G, :mod:`gate`** — refresh, then the build-time check, in-process. Exits
+  on the return codes.
 
 **Every metadata byte goes through the write API.** Nothing here composes a
 frontmatter block, a register entry or a marker as text. **No number is authored

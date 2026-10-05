@@ -11,6 +11,8 @@ Run via the project's test target (pytest).
 import tempfile
 from pathlib import Path
 
+from kb_tools.tests._in_process import run_main
+
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
@@ -204,14 +206,45 @@ def test_case_only_difference_is_broken_on_every_platform(tmp_path: Path) -> Non
 def test_a_file_written_between_two_scans_in_one_process_is_found_by_the_second(tmp_path: Path) -> None:
     """A directory listing lives for one scan: the second scan reads the directory as it now stands."""
     vml = _load_module()
-    _tree(tmp_path)
+    kb = tmp_path / "kb-root"
+    kb.mkdir()
+    _tree(kb)
     # The link to plain.md is what makes the first scan list sub/ at all.
-    (tmp_path / "doc.md").write_text("[x](sub/plain.md)\n[y](sub/later.md)\n", encoding="utf-8")
+    (kb / "doc.md").write_text("[x](sub/plain.md)\n[y](sub/later.md)\n", encoding="utf-8")
     assert [f.target for f in vml.scan(tmp_path, check_ids_enabled=False)] == ["sub/later.md"]
 
-    (tmp_path / "sub" / "later.md").write_text("# t\n", encoding="utf-8")
+    (kb / "sub" / "later.md").write_text("# t\n", encoding="utf-8")
 
     assert vml.scan(tmp_path, check_ids_enabled=False) == []
+
+
+def test_only_kb_root_is_crawled_and_targets_resolve_against_the_repo(tmp_path: Path) -> None:
+    """A dead link outside kb-root/ is not the gate's; one inside is, and may reach the repo."""
+    vml = _load_module()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "x.md").write_text("[a](missing.md)\n", encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "x.pdf").write_text("pdf\n", encoding="utf-8")
+    kb = tmp_path / "kb-root"
+    kb.mkdir()
+    (kb / "leaf.md").write_text("[a](missing.md)\n[b](../assets/x.pdf)\n[c](../assets/gone.pdf)\n", encoding="utf-8")
+
+    findings = vml.scan(tmp_path, check_ids_enabled=False)
+
+    assert sorted((f.file.relative_to(tmp_path).as_posix(), f.kind, f.target) for f in findings) == [
+        ("kb-root/leaf.md", "broken intra", "../assets/gone.pdf"),
+        ("kb-root/leaf.md", "broken intra", "missing.md"),
+    ]
+
+
+def test_root_without_kb_root_is_exit_2(tmp_path: Path) -> None:
+    vml = _load_module()
+    (tmp_path / "x.md").write_text("[a](missing.md)\n", encoding="utf-8")
+
+    result = run_main(vml.main, ["--root", str(tmp_path)])
+
+    assert result.returncode == 2
+    assert str(tmp_path.resolve() / "kb-root") in result.stderr
 
 
 def test_reference_style_definitions_are_checked(tmp_path: Path) -> None:

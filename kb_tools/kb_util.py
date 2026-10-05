@@ -831,11 +831,15 @@ def _seed_runner(repo_root: Path, runner: str | None) -> str | None:
 
 @dataclass(frozen=True)
 class KbVerifyCodes:
-    """The three verifiers' return codes from one :func:`run_kb_verify`."""
+    """Each verifier's return code from one :func:`run_kb_verify` or :func:`run_build_verify`.
+
+    ``citations`` is ``None`` where the verifier did not run: the standard
+    check does not include it.
+    """
 
     links: int
     metadata: int
-    citations: int
+    citations: int | None = None
 
     @property
     def failed(self) -> bool:
@@ -843,27 +847,43 @@ class KbVerifyCodes:
         return bool(self.links or self.metadata or self.citations)
 
     def detail(self) -> str:
-        """All three codes, so a red report shows which verifiers ran and not only the one that failed."""
-        return f"links rc={self.links}, metadata rc={self.metadata}, citations rc={self.citations}"
+        """Every code that ran, so a red report shows which verifiers ran and not only the one that failed."""
+        detail = f"links rc={self.links}, metadata rc={self.metadata}"
+        return detail if self.citations is None else f"{detail}, citations rc={self.citations}"
 
 
-def run_kb_verify(repo_root: Path, *, skip_frontmatter_presence: bool) -> KbVerifyCodes:
-    """md-links, then kb-metadata, then citations, in-process, every one run whatever the one before returned.
+def run_kb_verify(repo_root: Path, *, skip_frontmatter_presence: bool = False) -> KbVerifyCodes:
+    """The standard check a running KB owes: md-links, then kb-metadata, each run whatever the other returned.
 
     The in-process statement of the runner's ``kb-verify`` target; the runner
     snippets are its shell statement. ``skip_frontmatter_presence`` excludes
     that one metadata check and is ``graph-init``'s alone (:func:`graph_init_kb`).
     """
     # Local import: the verifiers import this module.
-    from kb_tools import verify_citations, verify_kb_metadata, verify_md_links
+    from kb_tools import verify_kb_metadata, verify_md_links
 
-    kb = str(kb_root(repo_root))
     links = verify_md_links.main(["--root", str(repo_root)])
     metadata = verify_kb_metadata.main(
-        ["--kb-root", kb, *(["--skip-frontmatter-presence"] if skip_frontmatter_presence else [])]
+        [
+            "--kb-root",
+            str(kb_root(repo_root)),
+            *(["--skip-frontmatter-presence"] if skip_frontmatter_presence else []),
+        ]
     )
-    citations = verify_citations.main(["--kb-root", kb])
-    return KbVerifyCodes(links=links, metadata=metadata, citations=citations)
+    return KbVerifyCodes(links=links, metadata=metadata)
+
+
+def run_build_verify(repo_root: Path, *, skip_frontmatter_presence: bool = False) -> KbVerifyCodes:
+    """The build-time check: :func:`run_kb_verify`, then citations, each run whatever the others returned.
+
+    In-process only; no runner target runs it. ``skip_frontmatter_presence``
+    reaches the metadata verifier exactly as it does through :func:`run_kb_verify`.
+    """
+    from kb_tools import verify_citations
+
+    standard = run_kb_verify(repo_root, skip_frontmatter_presence=skip_frontmatter_presence)
+    citations = verify_citations.main(["--kb-root", str(kb_root(repo_root))])
+    return KbVerifyCodes(links=standard.links, metadata=standard.metadata, citations=citations)
 
 
 #: This seeder's report-line tag, one word so a reader scanning a mixed
@@ -886,7 +906,7 @@ def graph_init_kb(repo_root: Path, runner: str | None = None) -> int:
 
     Runs the ``preflight`` suite first, then — over a ``kb-root/`` that already
     holds a document tree — the index directory, the runner include line,
-    refresh, and the same three gates the ``kb-verify`` target runs, minus one:
+    refresh, and the build-time check (:func:`run_build_verify`), minus one:
     ``verify_kb_metadata``'s frontmatter-presence check is excluded from this
     pass alone (``--skip-frontmatter-presence``), because kb_docgraph's tree
     carries no frontmatter by contract (SPEC.md, Document-Tree Contract point
@@ -954,7 +974,7 @@ def graph_init_kb(repo_root: Path, runner: str | None = None) -> int:
     # complete" to "the spine is correctly installed over the tree that is
     # there," not what the check itself asserts elsewhere.
     print(f"{GRAPH_INIT_TAG} verify: (frontmatter presence excluded from this pass — see NOTE below)")
-    verified = run_kb_verify(repo_root, skip_frontmatter_presence=True)
+    verified = run_build_verify(repo_root, skip_frontmatter_presence=True)
     if verified.failed:
         to_stderr(f"{GRAPH_INIT_TAG} verify FAILED ({verified.detail()}).")
         return 1

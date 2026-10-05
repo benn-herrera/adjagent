@@ -2004,15 +2004,13 @@ class TestFrontmatterListShapes(unittest.TestCase):
 
 
 class TestSlugifyHeading(unittest.TestCase):
-    """Heading anchors must be the ones GitHub actually emits."""
+    """Heading anchors collapse each whitespace run to one hyphen (stored-format invariant)."""
 
-    def test_em_dash_leaves_two_hyphens(self):
-        # GitHub drops the em-dash and hyphenates each surviving space, so the
-        # collapsing `\s+` form produced an anchor no renderer resolves.
-        self.assertEqual(lib._slugify_heading("Solidity — the dep gate"), "solidity--the-dep-gate")
+    def test_em_dash_collapses_to_one_hyphen(self):
+        self.assertEqual(lib._slugify_heading("Solidity — the dep gate"), "solidity-the-dep-gate")
 
     def test_any_punctuation_between_spaces_has_the_same_shape(self):
-        self.assertEqual(lib._slugify_heading("Rule : applied"), "rule--applied")
+        self.assertEqual(lib._slugify_heading("Rule : applied"), "rule-applied")
 
     def test_ordinary_heading_unchanged(self):
         self.assertEqual(lib._slugify_heading("The dep gate"), "the-dep-gate")

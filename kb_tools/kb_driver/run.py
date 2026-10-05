@@ -51,7 +51,7 @@ row of this table mints anything, either: the three ``kb_claimgraph``
 invocations mint mechanically, inside the tool, checked by that tool's own gate
 and by ``phase-3a``'s verify coverage.
 
-**No stage repairs a gate.** ``phase-3a`` runs the three verifiers and either
+**No stage repairs a gate.** ``phase-3a`` runs the build-time check and either
 records or stops: what each of them compares is one mechanically-produced
 artifact against another, so a red one is a defect in a tool or in what was
 authored and there is nothing for a model to remediate in the KB.
@@ -201,10 +201,11 @@ class LedgerOps:
     # gate keyed on the note's wording would be a check reading prose.
     advance_step: Callable[..., ledger.Outcome]
     show_status: Callable[..., ledger.Outcome]
-    # The consuming repo's `kb-refresh` / `kb-verify`, which the `refresh` and
-    # `gate` row subtypes run. A nonzero target is a red gate (exit 11) and the
-    # mapping lives in the adapter, not here.
-    run_target: Callable[..., ledger.Outcome]
+    # Refresh and the build-time check, which the `gate` row subtype runs. A
+    # nonzero step is a red gate (exit 11) and the mapping lives in the
+    # adapter, not here.
+    refresh: Callable[..., ledger.Outcome]
+    build_verify: Callable[..., ledger.Outcome]
 
 
 def ledger_ops_for(repo_root: Path) -> LedgerOps:
@@ -221,7 +222,8 @@ def ledger_ops_for(repo_root: Path) -> LedgerOps:
             repo_root, stage=stage, note=note, no_inference=no_inference
         ),
         show_status=lambda *, relay: ledger.show_status(repo_root, relay=relay),
-        run_target=lambda *, target: ledger.run_target(repo_root, target=target),
+        refresh=lambda: ledger.refresh(repo_root),
+        build_verify=lambda: ledger.build_verify(repo_root),
     )
 
 
@@ -892,21 +894,16 @@ class Runner:
         self._recorded = self._recorded | {stage}
         self._display()
 
-    # --- the runner targets: the `gate` row subtype --------------------------
-
-    def _run_target(self, target: str) -> ledger.Outcome:
-        return self.ops.run_target(target=target)
+    # --- the `gate` row subtype ----------------------------------------------
 
     def _gate(self) -> ledger.Outcome:
-        """A ``gate`` row: ``kb-refresh`` then ``kb-verify``. Returns verify's outcome.
+        """A ``gate`` row: refresh, then the build-time check. Returns the check's outcome.
 
-        A refresh that cannot run at all ends the run here — nothing downstream
-        can read an index that was never rebuilt. Only verify's outcome is a
-        gate verdict; an exit 14 (no runner target installed) is an environment
-        fault rather than a finding about the KB.
+        A refresh that fails ends the run here — nothing downstream can read an
+        index that was never rebuilt. Only the check's outcome is a gate verdict.
         """
-        self._halt_unless(self._run_target(kb_util.TARGET_REFRESH))
-        return self._run_target(kb_util.TARGET_VERIFY)
+        self._halt_unless(self.ops.refresh())
+        return self.ops.build_verify()
 
     @property
     def _kb_root(self) -> Path:
@@ -915,17 +912,17 @@ class Runner:
     # --- phase-3a ------------------------------------------------------------
 
     def _p3a_gate(self, step: steps.Step) -> None:
-        """``p3a.gate``: ``kb-refresh`` then ``kb-verify``, green or the run stops.
+        """``p3a.gate``: refresh, then the build-time check, green or the run stops.
 
-        There is no repair round here and no model call to run one. Each of the three
-        verifiers compares one mechanically-produced artifact against another —
+        There is no repair round here and no model call to run one. Each
+        verifier compares one mechanically-produced artifact against another —
         every edge resolving among the claims that exist, the graph acyclic, the
         derived index against the authored bytes — so a red one is a defect in a
         tool or in what was authored, and neither is answered by rewriting the
-        KB. The verifier's whole report reaches the run log at INFO
-        (``ledger.run_target``); what reaches the card is which target failed
-        and the lines of its report that name the failure, bounded
-        (``ledger._failure_detail``). No barrier is raised, so the card is the
+        KB. The verifiers' whole report reaches the run log at INFO
+        (``ledger._gate_step``); what reaches the card is which step failed,
+        every verifier's return code, and the lines of its report that name the
+        failure, bounded (``ledger._failure_detail``). No barrier is raised, so the card is the
         no-answer one rather than the answer-substituting one.
         """
         del step

@@ -1,4 +1,4 @@
-"""Subprocess adapter over the sanctioned `kb_tools` ops, front ends and runner targets.
+"""Adapter over the sanctioned `kb_tools` ops, front ends, refresh and the build-time check.
 
 The ledger is the git commit trail, and it is written only by ``kb_util
 start-build`` / ``advance-step``, invoked as a subprocess. Nothing
@@ -19,7 +19,7 @@ a driver exit code in exactly one place:
 | ``show-status`` | 0 · 2 | 0 · 14 |
 | ``kb_docgraph`` | 0 · 1 · 2 | 0 · 11 · 14 |
 | ``kb_claimgraph`` | 0 · 1 · 2 · 3 | 0 · 11 · 14 · 14 |
-| runner target | 0 · other | 0 · 11 |
+| refresh, build-time check (in-process) | 0 · other | 0 · 11 |
 
 An rc outside its op's vocabulary is a driver/tool contract violation, not a
 pipeline outcome: it routes through :func:`runlog.require` and exits 15.
@@ -32,17 +32,22 @@ exists to prevent.
 Stdlib only.
 """
 
+import contextlib
+import io
 import os
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
-from .. import install_location, kb_util
+from .. import install_location, kb_util, refresh_kb_metadata
 from . import baton, runlog
 
 _log = runlog.logger("ledger")
+
+_T = TypeVar("_T")
 
 # The running interpreter, not a bare ``python3``: the tool and the driver must
 # be the same 3.11+ runtime, and PATH resolution could disagree.
@@ -91,19 +96,12 @@ _CLAIMGRAPH_EXITS = {
 #: How many of a failing op's own report lines ride the :class:`Outcome`'s
 #: detail — which is what the relay card puts under its ASK, and what an
 #: operator pastes into a message body. The whole report reaches the run log
-#: either way (:func:`_front_end`, :func:`run_target`), so this bounds the
+#: either way (:func:`_front_end`, :func:`_gate_step`), so this bounds the
 #: paste rather than the evidence: a 500-line traceback must not bury the card
 #: under it.
 FAILURE_DETAIL_LINES = 40
 
 _ELIDED = "… {count} line(s) of the report omitted here — the whole of it is in the run log …"
-
-# The two maintenance targets, and `kb_util`'s hint function for each — the
-# single source of runner detection, reused rather than reimplemented.
-_TARGET_HINTS = {
-    kb_util.TARGET_REFRESH: kb_util.refresh_cmd,
-    kb_util.TARGET_VERIFY: kb_util.verify_cmd,
-}
 
 
 @dataclass(frozen=True)
@@ -146,9 +144,8 @@ def _run(argv: Sequence[str], *, repo_root: Path, relay: bool) -> subprocess.Com
             capture_output=True,
             text=True,
             encoding="utf-8",
-            # A runner target is a consuming repo's own recipe: its stdout is
-            # whatever the verifiers, and anything they shell out to, happen to
-            # print. One non-UTF-8 byte in that stream would otherwise raise
+            # A child's stdout is whatever the tool, and anything it shells out
+            # to, happen to print. One non-UTF-8 byte in that stream would otherwise raise
             # UnicodeDecodeError out of `subprocess.run` — past `except OSError`
             # below, past the rc mapping, and out of the driver as a traceback
             # with no baton and no exit.json. Undecodable bytes become U+FFFD
@@ -238,7 +235,7 @@ def _kb_util(*args: str) -> tuple[str, ...]:
 def _front_end(repo_root: Path, *, module: str, flags: Sequence[str], exits: Mapping[int, int]) -> Outcome:
     """Run one build front end as a subprocess and map its rc.
 
-    The report is not relayed on the way through, for ``run_target``'s reason:
+    The report is not relayed on the way through, for :func:`_gate_step`'s reason:
     a tool report the driver acts on is evidence, and it is on the returned
     :class:`Outcome` and in the run log either way. A **failing** one is
     relayed, because there it is the whole of what the operator has to read and
@@ -254,7 +251,7 @@ def _front_end(repo_root: Path, *, module: str, flags: Sequence[str], exits: Map
         relay=False,
     )
     if outcome.stdout.strip():
-        # The whole report, in the record — as `run_target` already does with a
+        # The whole report, in the record — as `_gate_step` already does with a
         # gate's. Without it a *green* front end's report reaches nowhere at
         # all: it is not relayed (below), and a record naming only the op and
         # the code drops the census the run produced. A build whose value is
@@ -380,40 +377,19 @@ def show_status(repo_root: Path, *, relay: bool = True) -> Outcome:
     )
 
 
-# --- the runner targets ------------------------------------------------------
+# --- the gate steps: refresh and the build-time check, in-process ----------
 
 
-def _target_argv(repo_root: Path, target: str) -> tuple[str, ...] | None:
-    """``('just'|'make', target)`` from the detected runner file, or None when there is none.
-
-    Detection is ``kb_util``'s, reused rather than reimplemented: its hint is
-    ``"<runner> <target>"`` when a runner file exists at the root, and the raw
-    ``python3 -m kb_tools.<module>`` fallback when none does. The fallback names
-    one module, not the target's whole gate, so it is not a substitute — a repo
-    with no runner file has no target to run.
-    """
-    hint = _TARGET_HINTS[target](repo_root)
-    if not hint.endswith(f" {target}"):
-        return None
-    argv = tuple(hint.split())
-    runlog.require(len(argv) == 2, "unexpected runner hint shape", target=target, hint=hint)
-    return argv
+def _captured(call: Callable[[], _T]) -> tuple[_T, str, str]:
+    """``call()`` with its stdout and stderr captured: the value, then both streams."""
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        value = call()
+    return value, stdout.getvalue(), stderr.getvalue()
 
 
-def run_target(repo_root: Path, *, target: str) -> Outcome:
-    """Run the consuming repo's ``kb-refresh`` / ``kb-verify`` target.
-
-    Nonzero is a red gate (exit 11). A repo with no runner file has no target
-    to run at all, which is an environment fault (exit 14) with a named restore.
-
-    Neither does a repo whose runner file never had the KB include line
-    installed. That case has to be caught *before* spawning, because the runner
-    answers an unknown recipe the same way a verifier answers a broken KB — a
-    nonzero exit — and exit 11 says the KB failed a check it was really put
-    through. Left unchecked, a repo that never installed the targets would stop
-    the build as though its knowledge base were broken.
-    ``kb_util.targets_installed`` is the predicate behind that reading, asked
-    here because running a target is where the answer decides an exit.
+def _gate_step(op: str, *, returncode: int, stdout: str, stderr: str) -> Outcome:
+    """Map one in-process gate step's rc: 0 passes, anything else is a red gate (exit 11).
 
     A gate's report is **not relayed**. The display relay carries what a
     session pastes into its message body, and a non-barrier terminal baton says
@@ -423,38 +399,27 @@ def run_target(repo_root: Path, *, target: str) -> Outcome:
     :func:`_failure_detail` puts the lines that name the failure on the
     outcome's detail, which the card carries under its ASK.
     """
-    runlog.require(target in _TARGET_HINTS, "not a KB maintenance target", target=target)
-    argv = _target_argv(repo_root, target)
-    if argv is None:
-        return Outcome(
-            baton.EXIT_ENVIRONMENT,
-            detail=(
-                f"no justfile or Makefile at {repo_root}, so there is no '{target}' target — restore: "
-                f"run 'python3 -m kb_tools.kb_util {kb_util.OP_INSTALL_TARGETS} --runner just|make' "
-                f"and commit the change",
-            ),
-        )
-    if not kb_util.targets_installed(repo_root):
-        return Outcome(
-            baton.EXIT_ENVIRONMENT,
-            detail=(
-                f"{repo_root} has a runner file, but it does not carry the KB include line, so "
-                f"'{target}' is not a target it can run — restore: run "
-                f"'python3 -m kb_tools.kb_util {kb_util.OP_INSTALL_TARGETS}' from the repo root "
-                f"and commit the change",
-            ),
-        )
-    outcome = _outcome(
-        argv,
-        repo_root=repo_root,
-        op=" ".join(argv),
-        exits={0: baton.EXIT_OK},
-        otherwise=baton.EXIT_GATE_RED,
-        relay=False,
-    )
-    if outcome.stdout.strip():
-        _log.info(
-            "gate report",
-            extra={"context": {"target": target, "exit_code": outcome.exit_code, "report": outcome.stdout}},
-        )
-    return outcome
+    if stderr.strip():
+        _log.error("ledger op wrote to stderr", extra={"context": {"op": op, "stderr": stderr.strip()}})
+    exit_code = baton.EXIT_OK if returncode == 0 else baton.EXIT_GATE_RED
+    if stdout.strip():
+        _log.info("gate report", extra={"context": {"op": op, "exit_code": exit_code, "report": stdout}})
+    if exit_code == baton.EXIT_OK:
+        return Outcome(exit_code, stdout=stdout)
+    result = subprocess.CompletedProcess(args=[op], returncode=returncode, stdout=stdout, stderr=stderr)
+    return Outcome(exit_code, stdout=stdout, detail=_failure_detail(op, result))
+
+
+def refresh(repo_root: Path) -> Outcome:
+    """Rebuild the derived index and the claim-graph sheet, in this process."""
+    runlog.require(repo_root.is_dir(), "ledger op needs an existing repo root", repo_root=str(repo_root))
+    argv = ["--kb-root", str(kb_util.kb_root(repo_root))]
+    code, stdout, stderr = _captured(lambda: refresh_kb_metadata.main(argv))
+    return _gate_step("refresh", returncode=code, stdout=stdout, stderr=stderr)
+
+
+def build_verify(repo_root: Path) -> Outcome:
+    """The build-time check (``kb_util.run_build_verify``), in this process; every verifier's code names the op."""
+    runlog.require(repo_root.is_dir(), "ledger op needs an existing repo root", repo_root=str(repo_root))
+    codes, stdout, stderr = _captured(lambda: kb_util.run_build_verify(repo_root))
+    return _gate_step(f"verify ({codes.detail()})", returncode=int(codes.failed), stdout=stdout, stderr=stderr)

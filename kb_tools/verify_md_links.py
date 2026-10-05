@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Repo-wide Markdown link-integrity checker.
+"""KB Markdown link-integrity checker.
 
-Crawls every `.md` file under the consuming repo's root (auto-detected by
-walking up from the cwd; see `kb_util.find_repo_root`), extracts Markdown
-links `[text](target)`, and reports broken file targets. Also folds in a
+Crawls every `.md` file under the consuming repo's `kb-root/` (the repo root is
+auto-detected by walking up from the cwd; see `kb_util.find_repo_root`; nothing
+outside `kb-root/` is crawled), extracts Markdown links `[text](target)`, and
+reports broken file targets, resolved against the repo root. Also folds in a
 consumer-side id-validity check: hashed claim/experiment/support ids
 (`clm-`/`exp-`/`sup-` + 6 [a-z0-9]) cited in prose must resolve to a node
 in the KB's `claims.jsonl` (located via `kb_util`).
@@ -17,7 +18,7 @@ Link classification:
     legitimately stale/in-flux; handling is controlled by --inter-repo.
 
 Gating:
-  EVERY crawled `.md` file gates: any broken intra-repo link or unknown-id
+  Every crawled `.md` file under `kb-root/` gates: any broken intra-repo link or unknown-id
   citation flips the exit code, regardless of which file it originates from —
   there is no warn-only tier. (Crawl exclusions in `kb_links.SKIP_DIRS` /
   `kb_links.SKIP_SEGMENT_RUNS` still apply — those trees, e.g. test fixtures with
@@ -237,10 +238,19 @@ def check_ids(md_file: Path, body: str, known_ids: set[str]) -> list[Finding]:
 
 
 def scan(repo_root: Path, check_ids_enabled: bool) -> list[Finding]:
+    """The gate's crawl: every `.md` under `kb-root/`, link targets resolved against `repo_root`."""
     known_ids = load_known_ids(repo_root) if check_ids_enabled else None
+    return scan_tree(kb_util.kb_root(repo_root), repo_root=repo_root, known_ids=known_ids)
+
+
+def scan_tree(tree: Path, *, repo_root: Path, known_ids: set[str] | None = None) -> list[Finding]:
+    """Findings for every `.md` under `tree`, link targets resolved against `repo_root`.
+
+    ``known_ids`` of ``None`` skips the id-validity check.
+    """
     listings: dict[Path, frozenset[str]] = {}
     findings: list[Finding] = []
-    for md_file in iter_markdown_files(repo_root):
+    for md_file in iter_markdown_files(tree):
         try:
             text = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
@@ -306,6 +316,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.root is not None:
         repo_root = args.root.resolve()
+        if not kb_util.kb_root(repo_root).is_dir():
+            print(f"FAIL: no '{kb_util.KB_DIRNAME}/' directory at {kb_util.kb_root(repo_root)}", file=sys.stderr)
+            return 2
     else:
         try:
             repo_root = find_repo_root().resolve()

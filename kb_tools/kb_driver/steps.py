@@ -411,9 +411,9 @@ STEPS: tuple[Step, ...] = (
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
     # --- phase-3a — validation gate -------------------------------------------
-    # Gate and record, and nothing between them: `kb-refresh` then `kb-verify`,
-    # green or the run stops. The repair dispatch this stage used to drive is gone
-    # with its subject — every gate the three verifiers run compares one
+    # Gate and record, and nothing between them: refresh, then the build-time
+    # check, green or the run stops. The repair dispatch this stage used to drive is gone
+    # with its subject — every gate the verifiers run compares one
     # mechanically-produced artifact against another, so a red one is a defect
     # in a tool or in what was authored, and neither is a seat's to rewrite in
     # the KB.

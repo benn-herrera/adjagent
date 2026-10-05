@@ -44,7 +44,7 @@ root.
   enumerates exactly one (the `pandoc` binary, reached through `pandoc.py`); proposing another goes
   to the architect, not into a patch.
 - **A `kb_claimgraph` stage never exits on a model's opinion.** Every stage exits on a comparison
-  between two artifacts or a subprocess return code (`gate.py`, ARCHITECTURE.md's Claim Graph
+  between two artifacts or a verifier's return code (`gate.py`, ARCHITECTURE.md's Claim Graph
   section) — a new stage does not get to add a third kind of exit. This is a scar, not a preference:
   an earlier pipeline ran two review loops until a reviewer stopped finding problems, against
   reviewer instructions that made problems inexhaustible — one resolving severity ambiguity toward

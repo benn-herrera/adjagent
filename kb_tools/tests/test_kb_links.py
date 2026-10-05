@@ -111,6 +111,28 @@ def test_strip_code_blanks_inline_maths(label: str, text: str, targets: list[str
     assert [m.group(1) for m in kb_links.LINK_RE.finditer(stripped)] == targets, label
 
 
+@pytest.mark.parametrize(
+    ("label", "text", "expected"),
+    [
+        ("single-backtick span", "a `x` b", "a " + " " * 3 + " b"),
+        ("double-backtick span holding a backtick", "a `` c`d `` b", "a " + " " * 9 + " b"),
+        # A shorter or longer run inside a span is content, so the pairing
+        # does not shift and the later span on the line is still a span.
+        (
+            "a span holding a longer run, then a second span",
+            "`` ```* `` then `\\bigl[b\\bigr](\\xi)`",
+            " " * 10 + " then " + " " * 20,
+        ),
+        ("unpaired backtick blanks nothing", "it`s odd [a](b.md)", "it`s odd [a](b.md)"),
+        ("line count kept", "`` x ``\n[a](b.md)", " " * 7 + "\n[a](b.md)"),
+    ],
+)
+def test_strip_code_pairs_code_spans_by_run_length(label: str, text: str, expected: str) -> None:
+    stripped = kb_links.strip_code(text)
+    assert stripped == expected, label
+    assert len(stripped) == len(text), label
+
+
 def test_strip_code_is_the_fence_scanner_plus_inline_spans() -> None:
     """``strip_code`` must not carry a second, divergent fence scanner."""
     text = "````\n```\n````\n[link](ghost.md)\n"

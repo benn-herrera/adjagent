@@ -31,8 +31,8 @@ Stages, in order:
   injected :class:`~.letters.LetterReader`, which is why this pipeline takes a
   reader rather than building one.
 * **F′, :func:`write.write_edges`** — pass 3 of the write path, one batch.
-* **G, :mod:`gate`** — the runner's refresh and verify targets. Exits on the
-  return code.
+* **G, :mod:`gate`** — refresh, then the build-time check, in-process. Exits
+  on the return codes.
 
 **Nothing here exits on a model's opinion.** Every stage ends on a comparison
 between two artifacts or on a return code; a reply carrying no offered letter

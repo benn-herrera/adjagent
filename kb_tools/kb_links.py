@@ -2,7 +2,7 @@
 
 Single source for the low-level Markdown scanning the repo does in more than
 one place: neutralizing code spans, the inline-link regex, target cleanup, and
-the file crawl. Both the repo-wide link checker (``verify_md_links.py``) and
+the file crawl. Both the KB link checker (``verify_md_links.py``) and
 the query CLI's on-demand reverse-find (``kb_cmd``) import these so there is
 exactly one copy of each primitive.
 
@@ -134,7 +134,10 @@ INLINE_MATH_RE = re.compile(r"\$`[^`]*`\$")
 
 # An inline code span, line-bounded on purpose — see above for what pays for
 # the maths rule's licence to cross a newline and why this does not get it.
-_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+# CommonMark's pairing: a maximal run of n backticks opens, and only the next
+# maximal run of exactly n closes; a run of any other length inside is content,
+# and an opener with no closer on its line is literal text and blanks nothing.
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)")
 
 # What a closing delimiter may carry and still close. A quoted fence sitting
 # inside an emphasised run has the emphasis' own delimiter written onto its

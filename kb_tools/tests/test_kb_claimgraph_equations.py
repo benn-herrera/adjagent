@@ -27,7 +27,6 @@ The tree below is written to put each of those on a different document, so a
 failure names which one.
 """
 
-import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -38,11 +37,6 @@ from kb_tools.kb_claimgraph import attribute, equation, equations, graph, invent
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
-
-pytestmark = pytest.mark.skipif(
-    shutil.which("just") is None,
-    reason="the declared pass's last stage runs the consuming project's runner targets",
-)
 
 _UPLINK = "[↑ Vol](index.md)"
 _ENTRY_POINT = "# Knowledge Base\n\n- [Vol](vol/index.md)\n"

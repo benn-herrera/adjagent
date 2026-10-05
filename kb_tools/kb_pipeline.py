@@ -429,7 +429,7 @@ class PipelineError(RuntimeError):
 # be recorded.
 #
 # Coverage checks EXISTENCE, per unit, and existence is not quality.
-# `_check_verify_gates` is the one exception: it runs the three verifiers, and
+# `_check_verify_gates` is the one exception: it runs the build-time check, and
 # judging the work is theirs alone. Every path checked is one the established layout contract
 # already names, and where a stage's units are enumerated from an artifact the
 # toolchain wrote, that artifact also names them — nothing here invents a
@@ -750,7 +750,7 @@ def _check_references_found(ctx: CheckContext) -> CoverageReport:
 
 
 def _check_verify_gates(ctx: CheckContext) -> CoverageReport:
-    """The three verifiers, green. Three stages share it, each for its own reason.
+    """The build-time check (``kb_util.run_build_verify``), green. Three stages share it, each for its own reason.
 
     ``phase-3a`` is the tail's entry gate. ``equations-minted`` is the node
     set's close, handed to a stage that reads the graph whole. ``depends-attributed`` is the head's
@@ -763,7 +763,7 @@ def _check_verify_gates(ctx: CheckContext) -> CoverageReport:
     matching what is authored — which is the same question its own tool exits
     on, asked here by the ledger rather than taken on the tool's word.
     """
-    verified = kb_util.run_kb_verify(ctx.repo_root, skip_frontmatter_presence=False)
+    verified = kb_util.run_build_verify(ctx.repo_root)
     # One unit and not three: a partial verify is not partial progress.
     return CoverageReport.declared(
         (

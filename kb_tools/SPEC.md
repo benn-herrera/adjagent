@@ -658,9 +658,9 @@ Index).
 
 ### The Claim-Graph Sheet
 
-**A KB carries a picture of its claim graph at `<kb-root>/claim-graph.svg`, and a stale one is a
-tool failure rather than a user error.** The sheet is derived from `.index/` alone and authored by
-nobody: it draws every node, and it draws the **premise relations** — `depends`, `supports`,
+**A KB carries a picture of its claim graph at `<kb-root>/claim-graph.svg`: a derived view
+`refresh` renders, which no verifier reads.** The sheet is derived from `.index/` alone and authored
+by nobody: it draws every node, and it draws the **premise relations** — `depends`, `supports`,
 `strengthens`, `rests-on`. **`references` are not among them.** The sheet is a picture of what one
 claim rests on, and that class asserts no such thing (Edge classes, above): it enters no solidity
 computation, gates nothing, and is under no acyclicity constraint, which is why the index already
@@ -714,8 +714,8 @@ that as redundancy would strand every claim on it.
 That boundary is on the drawing and nowhere else: the claim graph itself is never reduced to fit a
 rendering, `.index/` carries every record — `references` and premise alike — regardless of what the
 sheet does with it, and no consumer of the index sees fewer edges than it always has. So the sheet
-is kept fresh by the pair that already owns that index: **`refresh` mints it and `verify` checks
-it**, an absent sheet and a hand-edited one being the one refresh-fixable failure. The picture is
+is kept fresh by the tool that already owns that index: **`refresh` renders it on every run**, a
+render that fails fails the refresh, and a hand edit lasts until the next refresh. The picture is
 how a reader understands the graph at all, and an artifact someone must remember to regenerate is
 wrong exactly when it is trusted.
 
@@ -725,10 +725,9 @@ picture of the KB that produced it and each is drawn. The earliest point a sheet
 first `refresh` over an index, and that is where it starts existing — a spine with ten claims and
 nothing attributed yet is precisely when the picture of ten unconnected claims is worth having.
 
-The comparison the check makes is what promotes determinism (Corpus Invariants, below) from a
-property to a gate. **Perceptual locality is not part of it**: a one-edge change may rearrange the
-sheet completely, and where the rearrangement reads better that is a feature. Cross-run comparison
-is the machine's job, over the records, not the picture's.
+The render is deterministic (Corpus Invariants, below). **Perceptual locality is not promised**: a
+one-edge change may rearrange the sheet completely, and where the rearrangement reads better that is
+a feature. Cross-run comparison is the machine's job, over the records, not the picture's.
 
 ## Agent-Mediated Editing
 
@@ -976,6 +975,11 @@ seeding a KB, checking the environment, opening a build, driving the build ledge
 consumer-facing `kb-verify` / `kb-refresh` / `kb-stats` targets — is sanctioned only through the
 runner include and the `kb_util` CLI; mechanism in ARCHITECTURE.md, Runner Targets and the Build
 Ledger.
+`kb-verify`'s dead-link gate crawls `kb-root/` only; link targets resolve against the repository.
+
+**`kb-verify` is the standard check a running KB owes**: link integrity and claim-graph metadata.
+The build adds the citation grammar (Citation Grammar, below) to it as the **build-time check**,
+which runs in-process inside the build and no runner target exposes.
 
 ## Citation Grammar
 
@@ -984,8 +988,8 @@ leaves; all four are in `EXCLUDE_NAMES`. Only `invariants.md` is the framework-n
 (Claim-Graph Nodes and Edges, above) — the orientation docs are **not** an invariant channel
 (Project Scoping, below, for who writes them).
 
-**Citation grammar** (`verify_citations.py`, part of `kb-verify`). A claim id may appear only in a
-sanctioned channel — leaf frontmatter, a register's structured `- <field>:` bullets, a
+**Citation grammar** (`verify_citations.py`, part of the build-time check). A claim id may appear
+only in a sanctioned channel — leaf frontmatter, a register's structured `- <field>:` bullets, a
 `<!-- id: -->` or `<!-- claim-quality: -->` marker, or a markdown link to a KB path. An authority is
 cited as `["<excerpt>"](<kb-path>#<anchor>)`, the excerpt quoted verbatim (whitespace-normalized),
 one line, at most 240 characters.

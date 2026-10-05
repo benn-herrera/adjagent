@@ -723,20 +723,13 @@ def framework_source(kb_root: Path) -> Path | None:
 
     ``invariants.md`` is the authored home of corpus invariants. ``AGENTS.md``
     is the legacy home, kept as a fallback so a KB built before the split keeps
-    minting its framework nodes; :func:`framework_source_is_legacy` is what
-    lets a report say so out loud rather than migrating silently.
+    minting its framework nodes.
     """
     for name in (INVARIANTS_FILENAME, LEGACY_INVARIANTS_FILENAME):
         candidate = kb_root / name
         if candidate.is_file():
             return candidate
     return None
-
-
-def framework_source_is_legacy(kb_root: Path) -> bool:
-    """True when framework nodes still come from the deprecated agents file."""
-    source = framework_source(kb_root)
-    return source is not None and source.name == LEGACY_INVARIANTS_FILENAME
 
 
 def parse_framework_nodes(kb_root: Path | None = None) -> list[FrameworkNode]:
@@ -820,21 +813,15 @@ def _strip_code_fences(text: str) -> str:
 
 
 def _slugify_heading(text: str) -> str:
-    """GitHub-style heading anchor.
+    """Heading anchor: lowercase, punctuation dropped, each whitespace run one hyphen.
 
-    Lowercase, drop characters outside [a-z0-9-_], then replace whitespace
-    with '-' ONE CHARACTER AT A TIME. The per-character substitution is the
-    whole subtlety: GitHub deletes the punctuation and hyphenates each
-    surviving space independently, so ``Solidity — the dep gate`` anchors at
-    ``solidity--the-dep-gate`` — the em-dash leaves a space on either side and
-    both become hyphens. Collapsing the run with ``\\s+`` produces
-    ``solidity-the-dep-gate``: a single hyphen, an anchor GitHub never emits,
-    and a heading link that resolves in no renderer. Any punctuation
-    between two spaces has this shape — an em-dash, a colon, a slash.
+    The collapse is a stored-format invariant: `canonical_anchor` in every existing
+    KB's `.index/claims.jsonl` was written in this form, so an em dash in a heading
+    ("A — B") anchors at ``a-b``, not GitHub's ``a--b``.
     """
     s = text.strip().lower()
     s = re.sub(r"[^\w\s-]", "", s, flags=re.UNICODE)
-    s = re.sub(r"\s", "-", s)
+    s = re.sub(r"\s+", "-", s)
     return s.strip("-")
 
 
@@ -3984,7 +3971,6 @@ __all__ = [
     "SolidityResult",
     "parse_frontmatter",
     "framework_source",
-    "framework_source_is_legacy",
     "parse_framework_nodes",
     "parse_leaf",
     "parse_experiment_leaf",

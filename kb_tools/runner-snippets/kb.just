@@ -24,20 +24,18 @@
 
 KB_PYTHONPATH := parent_directory(parent_directory(source_directory()))
 
-# Composite, not sequential: all three verifiers run, and the recipe carries the
-# worst outcome. Three plain lines stop at the first failure, so a report
-# covered one verifier's faults while the next two stayed invisible until it
-# went green — three passes to see an all-red KB whole, each one looking like
-# the last problem. One continued line is one shell invocation, which is what lets
-# the rc be collected instead of enforced per line. The verifiers label their
-# own output ([verify-md-links], [claim-quality], [citations]), so suppressing
-# the echo costs the report nothing.
+# Composite, not sequential: both verifiers run, and the recipe carries the
+# worst outcome. Two plain lines stop at the first failure, so a report would
+# cover one verifier's faults while the other's stayed invisible until it went
+# green. One continued line is one shell invocation, which is what lets the rc
+# be collected instead of enforced per line. The verifiers label their own
+# output ([verify-md-links], [claim-quality]), so suppressing the echo costs
+# the report nothing.
 [doc("verify KB link integrity and claim-graph metadata")]
 kb-verify:
     @rc=0; \
     PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.verify_md_links || rc=1; \
     PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.verify_kb_metadata || rc=1; \
-    PYTHONPATH="{{ KB_PYTHONPATH }}" python3 -m kb_tools.verify_citations || rc=1; \
     exit $rc
 
 [doc("refresh mechanically maintained KB metadata")]

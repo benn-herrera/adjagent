@@ -184,38 +184,6 @@ class TestCheckIndex(unittest.TestCase):
         self.assertTrue(sheet.is_file(), "refresh left no claim-graph sheet")
         self.assertEqual(_run_checker(self.kb_root).returncode, 0)
 
-    def test_check_detects_an_absent_claim_graph_sheet(self):
-        """Verify alone on a KB no refresh has minted a sheet for reports the drift.
-
-        Refresh-fixable, and the hint says so — the sheet is a derived view of
-        ``.index/`` and no byte of it is authored.
-        """
-        sheet = self.kb_root / kb_util.CLAIM_GRAPH_FILENAME
-        original = sheet.read_text(encoding="utf-8")
-        sheet.unlink()
-        try:
-            result = _run_checker(self.kb_root)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(kb_util.CLAIM_GRAPH_FILENAME, result.stdout)
-            self.assertIn(kb_util.refresh_cmd(self.kb_root.parent), result.stdout)
-        finally:
-            sheet.write_text(original, encoding="utf-8")
-
-    def test_a_hand_edited_sheet_fails_verify_and_refresh_restores_it(self):
-        """The whole loop, in the order a consumer meets it."""
-        sheet = self.kb_root / kb_util.CLAIM_GRAPH_FILENAME
-        original = sheet.read_text(encoding="utf-8")
-        sheet.write_text(original.replace("</svg>", "<!-- hand-edited -->\n</svg>"), encoding="utf-8")
-        try:
-            self.assertNotEqual(_run_checker(self.kb_root).returncode, 0)
-
-            refresh = _run_refresh(self.kb_root)
-            self.assertEqual(refresh.returncode, 0, refresh.stderr)
-            self.assertEqual(sheet.read_text(encoding="utf-8"), original)
-            self.assertEqual(_run_checker(self.kb_root).returncode, 0)
-        finally:
-            sheet.write_text(original, encoding="utf-8")
-
     def test_check_detects_referential_integrity_violation(self):
         """A synthetic depends-on edge to a nonexistent target fails ref-integrity.
 

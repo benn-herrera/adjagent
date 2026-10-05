@@ -497,6 +497,84 @@ def _seeded_paths(repo: Path) -> tuple[Path, Path]:
     return index, index / "claims.jsonl"
 
 
+# ---------------------------------------------------------------------------
+# The standard check and the build-time check
+# ---------------------------------------------------------------------------
+
+#: Citation-shaped prose in an index body: a citation-grammar violation and
+#: nothing else.
+_CITATION_SHAPED_PROSE = "\nThis follows per design-doc Invariant 3.\n"
+
+
+def _refreshed_repo(root: Path, **extra: str) -> Path:
+    """``_DOCUMENT_TREE`` (plus ``extra``, kb-root-relative appends) under a repo root, refreshed."""
+    repo = _make_repo(root, kb=False)
+    for relpath, content in _DOCUMENT_TREE.items():
+        target = repo / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content + extra.get(relpath, ""), encoding="utf-8")
+    assert run_main(refresh_kb_metadata.main, ["--kb-root", str(repo / "kb-root")]).returncode == 0
+    return repo
+
+
+@pytest.mark.parametrize("sheet", ["absent", "stale"])
+def test_neither_check_reads_the_claim_graph_sheet(tmp_path: Path, sheet: str) -> None:
+    repo = _refreshed_repo(tmp_path / "repo")
+    path = repo / "kb-root" / kb_util.CLAIM_GRAPH_FILENAME
+    if sheet == "absent":
+        path.unlink()
+    else:
+        edited = path.read_text(encoding="utf-8").replace("</svg>", "<!-- hand-edited -->\n</svg>")
+        path.write_text(edited, encoding="utf-8")
+
+    assert not kb_util.run_kb_verify(repo).failed
+    assert not kb_util.run_build_verify(repo).failed
+
+
+def test_the_standard_check_runs_no_citation_check(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = _refreshed_repo(tmp_path / "repo", **{"kb-root/vol/index.md": _CITATION_SHAPED_PROSE})
+    capsys.readouterr()
+
+    codes = kb_util.run_kb_verify(repo)
+
+    assert codes.citations is None
+    assert not codes.failed
+    assert "[citations]" not in capsys.readouterr().out
+
+
+def test_the_build_time_check_runs_the_standard_check_first_and_is_red_on_a_citation_violation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _refreshed_repo(tmp_path / "repo", **{"kb-root/vol/index.md": _CITATION_SHAPED_PROSE})
+    capsys.readouterr()
+
+    codes = kb_util.run_build_verify(repo)
+
+    out = capsys.readouterr().out
+    assert (codes.links, codes.metadata, codes.citations) == (0, 0, 1)
+    assert codes.failed
+    assert "citations rc=1" in codes.detail()
+    assert out.index("[claim-quality]") < out.index("[citations]")
+
+
+def test_stage_g_runs_no_subprocess(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kb_tools.kb_claimgraph import gate
+    from kb_tools.kb_claimgraph.report import gating
+
+    repo = _refreshed_repo(tmp_path / "repo")
+
+    def no_spawn(*args: object, **kwargs: object) -> None:
+        raise AssertionError(f"stage G spawned a process: {args}")
+
+    monkeypatch.setattr(subprocess, "run", no_spawn)
+    monkeypatch.setattr(subprocess, "Popen", no_spawn)
+
+    findings = gate.run(repo)
+
+    assert not gating(findings), [finding.line() for finding in findings]
+    assert [finding.check for finding in findings] == ["refresh", "verify"]
+
+
 def test_graph_init_initialises_over_a_document_tree(tmp_path: Path) -> None:
     """A tree and a runner file: one command produces a green claim-graph spine.
 
@@ -933,7 +1011,7 @@ def _declared_documents(manifest: survey_manifest.Manifest) -> dict[str, str]:
 
     Keyed off the production derivation rather than off typed-out paths, so a
     fixture cannot satisfy a gate the running tool would refuse. Built only to
-    give ``phase-3a``'s real ``kb-verify`` gate a tree it can pass — no stage
+    give ``phase-3a``'s real build-time check a tree it can pass — no stage
     checks this list against the derivation any more.
     """
     return {

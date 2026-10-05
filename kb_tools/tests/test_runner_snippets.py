@@ -7,12 +7,10 @@ with the include lines written by the installed ``install-targets`` itself. That
 is the shape the fragments document; anything less exercises a copy of the
 recipe rather than the recipe.
 
-The property under test is ``kb-verify``'s composite contract: all three
-verifiers run, and the target carries the worst outcome. It is a gate contract
-rather than a formatting one — the driver's validation gate stops the build on
-this target's exit code and puts its captured stdout in the run log, so a report
-covering one verifier's faults sends whoever reads it after a third of the
-problem.
+The property under test is ``kb-verify``'s composite contract: both verifiers
+of the standard check run, and the target carries the worst outcome — a report
+covering one verifier's faults sends whoever reads it after half of the
+problem. The citation-grammar check is build-time only and is not among them.
 """
 
 import os
@@ -27,11 +25,10 @@ from kb_tools import install_location
 
 _AGENTS_SURFACE = Path(__file__).resolve().parent.parent.parent
 
-# Each verifier's mark ON STDOUT. verify_md_links and verify_citations put
-# their per-file findings on stdout and only their summary banners on stderr,
-# and stdout is what the driver writes to the round's findings file — so these
-# are what "one report covers all three" actually means downstream.
-_RED_MARKS = ("[broken intra]", "[claim-quality] FAIL", "[referent] x.md:1")
+# Each verifier's mark ON STDOUT. verify_md_links puts its per-file findings on
+# stdout and only its summary banner on stderr, so these are what "one report
+# covers both" means to whoever reads it.
+_RED_MARKS = ("[broken intra]", "[claim-quality] FAIL")
 
 _RUNNERS = [
     pytest.param(
@@ -69,8 +66,9 @@ def _verify(runner: str, root: Path) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def all_red(tmp_path: Path) -> Path:
-    """A KB that fails every one of the three: a broken link, a file with no
-    frontmatter, no ``.index/`` at all, and a citation that resolves to nothing."""
+    """A KB that fails both: a broken link, a file with no frontmatter, and no
+    ``.index/`` at all. The same link is a citation resolving to nothing, which
+    only the build-time check reports."""
     root = _consumer(tmp_path / "consumer")
     (root / "kb-root" / "x.md").write_text("[a](missing.md)\n", encoding="utf-8")
     return root
@@ -94,16 +92,13 @@ def green(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.mark.parametrize("runner", _RUNNERS)
-def test_kb_verify_reports_all_three_verifiers_in_one_round(runner: str, all_red: Path) -> None:
-    """Three plain recipe lines stop at the first failure, and both runners do.
-
-    An all-red KB then needs three passes to surface three verifiers' faults,
-    each one looking to its reader like the last problem.
-    """
+def test_kb_verify_reports_both_verifiers_in_one_round_and_no_citation_check(runner: str, all_red: Path) -> None:
+    """Two plain recipe lines stop at the first failure, and both runners do."""
     done = _verify(runner, all_red)
 
     assert done.returncode != 0
     assert [mark for mark in _RED_MARKS if mark not in done.stdout] == []
+    assert "[citations]" not in done.stdout + done.stderr
 
 
 @pytest.mark.parametrize("runner", _RUNNERS)
@@ -112,7 +107,7 @@ def test_kb_verify_is_green_when_every_verifier_is(runner: str, green: Path) -> 
 
     Under either harness directory: the include line the installer wrote, the
     fragment's own location, and each tool's located install have to agree for
-    any of the three verifiers to run at all.
+    either verifier to run at all.
     """
     done = _verify(runner, green)
 

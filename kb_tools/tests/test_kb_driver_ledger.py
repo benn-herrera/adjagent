@@ -9,7 +9,6 @@ re-rendered.
 """
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,20 +22,6 @@ _THIS_DIR = Path(__file__).resolve().parent
 _PKG_PARENT = install_location.current().agents_dir
 
 _CHARTER = "docs/charter.md"
-
-# A Makefile carrying the canonical include line — which is what
-# ``targets_installed`` looks for — plus locally-defined targets, so the runner
-# path is exercised without needing the toolchain installed under
-# ``.claude/agents/`` in the fixture. The include is non-fatal by design.
-_MAKEFILE_GREEN = f"{kb_util.install_line('make')}\n\nkb-verify:\n\t@echo verifying\n"
-_MAKEFILE_RED = f"{kb_util.install_line('make')}\n\nkb-verify:\n\t@echo 'dead link'; exit 1\n"
-# The same red gate, printing one byte that is not valid UTF-8 (0xE9, latin-1
-# 'é'). A consuming repo's recipe prints whatever its verifiers print, and the
-# driver does not get to assume that is decodable.
-_MAKEFILE_UNDECODABLE = (
-    f"{kb_util.install_line('make')}\n\nkb-verify:\n\t@printf 'dead link in caf\\351.md\\n'; exit 1\n"
-)
-
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
@@ -189,11 +174,11 @@ def test_graph_init_blocked_by_preflight_is_exit_14(tmp_path: Path) -> None:
 
 def test_graph_init_with_a_red_verify_is_exit_11(tmp_path: Path) -> None:
     """rc 1: seeding ran and the gates came back red — a gate failure, not an environment one."""
-    # A repo-wide dead link fails verify_md_links, which graph-init runs before
-    # it reports success.
+    # A dead link under kb-root fails verify_md_links, which graph-init runs
+    # before it reports success.
     repo = _tree_repo(
         tmp_path / "consumer",
-        files={"justfile": "default:\n    @true\n", "broken.md": "[missing](nowhere.md)\n"},
+        files={"justfile": "default:\n    @true\n", "kb-root/broken.md": "[missing](nowhere.md)\n"},
     )
 
     outcome = ledger.graph_init(repo)
@@ -339,74 +324,65 @@ def test_relay_can_be_suppressed_for_a_read_that_is_not_a_transition(
     assert "[kb-build] status:" in outcome.stdout
 
 
-@pytest.mark.skipif(shutil.which("make") is None, reason="the runner target needs make on PATH")
+# ---------------------------------------------------------------------------
+# The gate steps: refresh and the build-time check, in-process
+# ---------------------------------------------------------------------------
+
+#: The fixture tree's leaf with one dead link in its body: red for links alone.
+_BROKEN_LINK = {"kb-root/vol/leaf.md": _DOCUMENT_TREE["kb-root/vol/leaf.md"] + "\n[gone](nowhere.md)\n"}
+
+
 @pytest.mark.parametrize(
-    ("makefile", "expected"),
-    [(_MAKEFILE_GREEN, baton.EXIT_OK), (_MAKEFILE_RED, baton.EXIT_GATE_RED)],
+    ("files", "expected"),
+    [({}, baton.EXIT_OK), (_BROKEN_LINK, baton.EXIT_GATE_RED)],
     ids=["green", "red"],
 )
 def test_a_gate_report_is_kept_out_of_the_relay_without_changing_the_rc_mapping(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], makefile: str, expected: int
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], files: dict[str, str], expected: int
 ) -> None:
-    """The paste instruction is 'everything above this block'; a gate dump must not be in it.
+    """The paste instruction is 'everything above this block'; a gate dump must not be in it."""
+    repo = _seeded_repo(tmp_path / "consumer", **files)
 
-    ``run.py`` writes a red gate's report to the round's findings file and the
-    baton names that path, so suppressing the relay bounds the message body
-    without losing the report.
-    """
-    repo = _seeded_repo(tmp_path / "consumer", **{"Makefile": makefile})
-
-    outcome = ledger.run_target(repo, target=kb_util.TARGET_VERIFY)
+    assert ledger.refresh(repo).ok
+    outcome = ledger.build_verify(repo)
 
     assert outcome.exit_code == expected
     assert outcome.stdout.strip() != ""
     assert capsys.readouterr().out == ""
 
 
-def test_a_repo_with_no_runner_file_has_no_target_to_run(tmp_path: Path) -> None:
-    """The raw fallback hint names one module, not the whole gate — it is not a substitute."""
-    repo = _seeded_repo(tmp_path / "consumer")
+def test_a_red_build_verify_names_every_verifiers_code_and_the_failing_line(tmp_path: Path) -> None:
+    repo = _seeded_repo(tmp_path / "consumer", **_BROKEN_LINK)
+    assert ledger.refresh(repo).ok
 
-    outcome = ledger.run_target(repo, target=kb_util.TARGET_VERIFY)
-
-    assert outcome.exit_code == baton.EXIT_ENVIRONMENT
-    assert any("no justfile or Makefile" in line for line in outcome.detail)
-
-
-def test_a_runner_file_without_the_kb_include_line_has_no_target_to_run_either(tmp_path: Path) -> None:
-    """An uninstalled target is an environment fault, not a red gate.
-
-    The runner answers an unknown recipe the same way a verifier answers a
-    broken KB — nonzero — and exit 11 says the KB failed a check it was really
-    put through. Spawning first would stop the build as though the knowledge
-    base were broken when nothing had been checked at all (the stage half of
-    that is covered in the buildout suite by
-    ``test_an_environment_fault_stops_the_run_the_same_way_a_red_gate_does``).
-
-    No ``make`` on PATH is needed here, and that is the point: the guard
-    answers before anything is spawned.
-    """
-    repo = _seeded_repo(tmp_path / "consumer", **{"Makefile": "build:\n\t@echo building\n"})
-    assert not kb_util.targets_installed(repo)
-
-    outcome = ledger.run_target(repo, target=kb_util.TARGET_VERIFY)
-
-    assert outcome.exit_code == baton.EXIT_ENVIRONMENT
-    assert any(kb_util.OP_INSTALL_TARGETS in line for line in outcome.detail)
-
-
-@pytest.mark.skipif(shutil.which("make") is None, reason="the runner target needs make on PATH")
-def test_an_undecodable_byte_in_a_targets_output_maps_its_rc_instead_of_raising(tmp_path: Path) -> None:
-    """A UnicodeDecodeError here escapes the rc mapping entirely: no exit, no baton.
-
-    The byte survives as U+FFFD and the row keeps the verdict its rc earned.
-    """
-    repo = _seeded_repo(tmp_path / "consumer", **{"Makefile": _MAKEFILE_UNDECODABLE})
-
-    outcome = ledger.run_target(repo, target=kb_util.TARGET_VERIFY)
+    outcome = ledger.build_verify(repo)
 
     assert outcome.exit_code == baton.EXIT_GATE_RED
-    assert "dead link in caf�.md" in outcome.stdout
+    assert outcome.detail[0].startswith("verify (links rc=1, metadata rc=0, citations rc=0) exited 1"), outcome.detail
+    assert any("nowhere.md" in line for line in outcome.detail), outcome.detail
+
+
+def test_a_refresh_that_cannot_run_is_a_red_gate_naming_the_refresh(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "consumer")
+
+    outcome = ledger.refresh(repo)
+
+    assert outcome.exit_code == baton.EXIT_GATE_RED
+    assert outcome.detail[0] == "refresh exited 2"
+
+
+def test_the_gate_steps_spawn_no_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refresh and the build-time check are imported and called, never reached through a runner."""
+    repo = _seeded_repo(tmp_path / "consumer")
+
+    def no_spawn(*args: object, **kwargs: object) -> None:
+        raise AssertionError(f"a gate step spawned a process: {args}")
+
+    monkeypatch.setattr(subprocess, "run", no_spawn)
+    monkeypatch.setattr(subprocess, "Popen", no_spawn)
+
+    assert ledger.refresh(repo).ok
+    assert ledger.build_verify(repo).ok
 
 
 # ---------------------------------------------------------------------------
@@ -424,18 +400,6 @@ _STDOUT_FAULT = f"[verify] {kb_util.FAIL} point-2 index.md sits at an index path
 _STDERR_FAULT = "ValueError: the document tree does not conform"
 
 
-def _failing_makefile(*, out: str = "", err: str = "") -> str:
-    """A red ``kb-verify`` that says what is wrong on the streams named."""
-    recipe = []
-    if out:
-        recipe.append(f"@echo '{out}'")
-    if err:
-        recipe.append(f"@echo '{err}' >&2")
-    recipe.append("@exit 1")
-    return f"{kb_util.install_line('make')}\n\nkb-verify:\n" + "".join(f"\t{line}\n" for line in recipe)
-
-
-@pytest.mark.skipif(shutil.which("make") is None, reason="the runner target needs make on PATH")
 @pytest.mark.parametrize(
     ("out", "err", "expected"),
     [
@@ -446,14 +410,12 @@ def _failing_makefile(*, out: str = "", err: str = "") -> str:
     ids=["stdout", "stderr", "both"],
 )
 def test_a_failing_ops_report_reaches_the_detail_whichever_stream_carried_it(
-    tmp_path: Path, out: str, err: str, expected: tuple[str, ...]
+    out: str, err: str, expected: tuple[str, ...]
 ) -> None:
-    repo = _seeded_repo(tmp_path / "consumer", **{"Makefile": _failing_makefile(out=out, err=err)})
-
-    outcome = ledger.run_target(repo, target=kb_util.TARGET_VERIFY)
+    outcome = ledger._gate_step("verify", returncode=1, stdout=out, stderr=err)
 
     assert outcome.exit_code == baton.EXIT_GATE_RED
-    assert outcome.detail[0].startswith(f"make {kb_util.TARGET_VERIFY} exited")
+    assert outcome.detail[0] == "verify exited 1"
     for line in expected:
         assert line in outcome.detail, outcome.detail
 
@@ -493,10 +455,3 @@ def test_a_short_report_is_carried_whole_and_says_nothing_about_truncation() -> 
     detail = ledger._failure_detail("kb_claimgraph --pass 1", _completed(stdout=f"first\n{_STDOUT_FAULT}"))
 
     assert detail == ("kb_claimgraph --pass 1 exited 1", "first", _STDOUT_FAULT)
-
-
-def test_run_target_refuses_a_name_that_is_not_a_maintenance_target(tmp_path: Path) -> None:
-    repo = _seeded_repo(tmp_path / "consumer")
-
-    with pytest.raises(runlog.BoundaryError):
-        ledger.run_target(repo, target="kb-publish")

@@ -49,14 +49,6 @@ from kb_tools.kb_write import ops, render
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
-pytestmark = [
-    pytest.mark.skipif(
-        shutil.which("just") is None,
-        reason="every stage here ends on the consuming project's runner targets",
-    ),
-    pytest.mark.usefixtures("claimgraph_gate_in_process"),
-]
-
 _ENTRY_POINT = "# Knowledge Base\n\n- [Vol](vol/index.md)\n"
 _VOLUME_INDEX = (
     "[↑ Knowledge Base](../entry-point.md)\n\n# Vol\n\n"
@@ -617,7 +609,7 @@ def test_an_equation_named_only_from_prose_judged_not_a_claim_is_not_minted(disc
     assert _minted(discovered) == {"eq:beta"}
 
 
-def test_with_no_verdict_every_reference_counts(declared: Path, runner_gate: None):
+def test_with_no_verdict_every_reference_counts(declared: Path):
     """A build spending no inference: the record judges nothing, and the equation set is the declared pass's old one."""
     _mint_equations(declared)
     assert _minted(declared) == {"eq:beta", "eq:gamma"}

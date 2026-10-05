@@ -189,7 +189,7 @@ def test_the_seed_stage_installs_the_spine_the_claim_graph_needs(walked: run.Res
     """Both halves of the seed: the derived-index directory and the runner include line.
 
     The include line is what makes ``kb-refresh`` and ``kb-verify`` real targets
-    in this repository — which is what the pass after it exits on.
+    in this repository, and the claim-graph pass after it requires it.
     """
     assert walked.exit_code == baton.EXIT_OK, walked.detail
 

@@ -130,7 +130,7 @@
         <text x="456" y="-268" fill="#111111">Saturation Kernel</text>
       </g>
     </a>
-    <a href="../mini-kb/claim-quality.md#foundation-claim-a--no-dependencies">
+    <a href="../mini-kb/claim-quality.md#foundation-claim-a-no-dependencies">
       <g class="node">
         <title>clm-aa1111 — Foundation Claim A — No Dependencies</title>
         <rect x="272" y="-454" width="160" height="92" fill="#bfe3f5" stroke="#333333" stroke-width="1" />
@@ -139,7 +139,7 @@
         <text x="280" y="-404" fill="#111111">— No Dependencies</text>
       </g>
     </a>
-    <a href="../mini-kb/claim-quality.md#foundation-claim-b--input-only-band">
+    <a href="../mini-kb/claim-quality.md#foundation-claim-b-input-only-band">
       <g class="node">
         <title>clm-bb2222 — Foundation Claim B — Input-Only Band</title>
         <rect x="-80" y="-454" width="160" height="92" fill="#e69f00" stroke="#333333" stroke-width="1" />
@@ -290,7 +290,7 @@
         <text x="-424" y="-132" fill="#111111">Prediction Claim I</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-n--lifted-by-a-co-hosted-support">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-n-lifted-by-a-co-hosted-support">
       <g class="node">
         <title>clm-sb5555 — Support Beneficiary N — Lifted By A Co-Hosted Support</title>
         <rect x="-432" y="-46" width="160" height="92" fill="#bfe3f5" stroke="#333333" stroke-width="1" />
@@ -301,7 +301,7 @@
         <text x="-424" y="36" fill="#111111">Co-Hosted Support</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-j--lifted-to-090">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-j-lifted-to-090">
       <g class="node">
         <title>clm-sb1111 — Support Beneficiary J — Lifted To 0.90</title>
         <rect x="-432" y="90" width="160" height="92" fill="#bfe3f5" stroke="#333333" stroke-width="1" />
@@ -311,7 +311,7 @@
         <text x="-424" y="156" fill="#111111">Lifted To 0.90</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-k--fractional-lift-to-045">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-k-fractional-lift-to-045">
       <g class="node">
         <title>clm-sb2222 — Support Beneficiary K — Fractional Lift To 0.45</title>
         <rect x="-256" y="226" width="160" height="92" fill="#e69f00" stroke="#333333" stroke-width="1" />
@@ -322,7 +322,7 @@
         <text x="-248" y="308" fill="#111111">0.45</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-o--lifted-by-one-of-two-co-hosted-supports">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-o-lifted-by-one-of-two-co-hosted-supports">
       <g class="node">
         <title>clm-sb6666 — Support Beneficiary O — Lifted By One Of Two Co-Hosted Supports</title>
         <rect x="-80" y="226" width="160" height="92" fill="#7fc4eb" stroke="#333333" stroke-width="1" />
@@ -333,7 +333,7 @@
         <text x="-72" y="308" fill="#111111">Two Co-Hosted Sup…</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-p--fractional-lift-from-a-second-co-hosted-support">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-p-fractional-lift-from-a-second-co-hosted-support">
       <g class="node">
         <title>clm-sb7777 — Support Beneficiary P — Fractional Lift From A Second Co-Hosted Support</title>
         <rect x="96" y="226" width="160" height="92" fill="#d55e00" stroke="#333333" stroke-width="1" />
@@ -344,7 +344,7 @@
         <text x="104" y="308" fill="#111111">From A Second Co-…</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-m--not-poisoned-by-a-pending-support">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-m-not-poisoned-by-a-pending-support">
       <g class="node">
         <title>clm-sb4444 — Support Beneficiary M — Not Poisoned By A Pending Support</title>
         <rect x="272" y="226" width="160" height="92" fill="#e69f00" stroke="#333333" stroke-width="1" />
@@ -355,7 +355,7 @@
         <text x="280" y="308" fill="#111111">Pending Support</text>
       </g>
     </a>
-    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-l--lifted-by-a-dep-gated-support">
+    <a href="../mini-kb/common/claim-quality.md#support-beneficiary-l-lifted-by-a-dep-gated-support">
       <g class="node">
         <title>clm-sb3333 — Support Beneficiary L — Lifted By A Dep-Gated Support</title>
         <rect x="-80" y="-46" width="160" height="92" fill="#bfe3f5" stroke="#333333" stroke-width="1" />

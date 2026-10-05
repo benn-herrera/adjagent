@@ -9,7 +9,6 @@ leave alone.
 """
 
 import random
-import shutil
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,14 +36,6 @@ from kb_tools.kb_driver import prompt_templates, steps
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
-
-pytestmark = [
-    pytest.mark.skipif(
-        shutil.which("just") is None,
-        reason="the declared pass this stage runs over ends on the consuming project's runner targets",
-    ),
-    pytest.mark.usefixtures("claimgraph_gate_in_process"),
-]
 
 _ENTRY_POINT = "# Knowledge Base\n\n- [Alpha](alpha/index.md)\n- [Beta](beta/index.md)\n"
 

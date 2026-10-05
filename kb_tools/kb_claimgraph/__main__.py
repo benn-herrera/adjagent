@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{kb_root} holds no document tree, so there is nothing to build a claim graph over", file=sys.stderr)
         return EXIT_USAGE
 
-    absent = conform.spine_seeded(kb_root, targets_installed=kb_util.targets_installed(repo_root))
+    absent = conform.spine_seeded(kb_root)
     if absent is not None:
         print(
             f"the claim-graph spine is not installed: {absent}. Seed it first:\n"

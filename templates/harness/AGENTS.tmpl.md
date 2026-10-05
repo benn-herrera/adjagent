@@ -74,8 +74,12 @@ to right answers for tricky problems.
 ## Use existing task automation
 Every project defines runner targets (justfile, Makefile, package scripts) for its major actions —
 (re)generation, (re)build, test, integration test. Where a target covers a task, never run the task
-as ad-hoc shell or code, and never invoke the toolchain (compiler, test runner, packager) directly.
-If a needed target is missing, surface the gap — don't improvise the naked command line.
+as ad-hoc shell or ad-hoc code, and never invoke the toolchain (compiler, test runner, packager)
+directly. If a needed target is missing, surface the gap — don't improvise the naked command line.
+
+This governs the commands you run and dispatch. It says nothing about what code calls: a module
+that needs what another module does imports it and calls the function. Invoking external tooling
+to invoke one piece of implementation from another is injecting complexity where none is needed.
 
 ## Memory and behavior correction
 A behavior change — yours or a dispatched agent's — is a first-class work item: surfaced, proposed

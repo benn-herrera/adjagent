@@ -10,12 +10,9 @@ without one is a check that does not run.
 
 The consuming repository is stood up the way a consumer's is: the real runner
 snippet, imported by the line the installer writes, over the installed package.
-That is what makes the last stage's targets the real ones rather than a
-justfile this file invented.
 """
 
 import re
-import shutil
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
@@ -46,16 +43,6 @@ from kb_tools.kb_write import render
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
-
-# The last stage reaches the KB through the consuming project's runner targets,
-# which is the mechanism and not a detail this file may route around.
-pytestmark = [
-    pytest.mark.skipif(
-        shutil.which("just") is None,
-        reason="the discovered pass's last stage runs the consuming project's runner targets",
-    ),
-    pytest.mark.usefixtures("claimgraph_gate_in_process"),
-]
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +249,7 @@ def _scratch(repo: Path) -> Path:
     return repo / kb_util.scratch_dirname() / "claimgraph"
 
 
-def test_a_build_completes_over_a_document_carrying_an_unknown_environment(consumer: Path, runner_gate: None) -> None:
+def test_a_build_completes_over_a_document_carrying_an_unknown_environment(consumer: Path) -> None:
     """The property a sweep over an unfamiliar corpus depends on: a build, not a stop.
 
     Driven through the whole declared pass rather than through stage B alone,
@@ -887,7 +874,7 @@ def test_an_equation_candidate_answering_b_is_malformed_and_takes_its_draft(tmp_
     assert classified.edges == () and classified.references == ((source.id, sink.id),)
 
 
-def test_b_writes_the_edge_target_to_source_and_no_reference(declared: Path, runner_gate: None):
+def test_b_writes_the_edge_target_to_source_and_no_reference(declared: Path):
     """*In support of*: Beta needs Alpha, so the edge lands in Beta's entry and Alpha's names nothing."""
     ids, _ = _narrowed(declared)
     reader = FakeReader(declared, {("Alpha result", "Beta lemma"): ask.ClassifyLetter.IN_SUPPORT_OF})
@@ -952,7 +939,7 @@ def test_an_unmarked_yes_is_a_candidate_offered_its_class_s_letters_drafted_ment
 
 
 def test_an_unmarked_yes_answered_b_writes_target_to_source_and_is_counted_by_harvest(
-    declared: Path, runner_gate: None
+    declared: Path
 ):
     """The yes is classified like any candidate: *in support of* lands Beta → Delta in Beta's entry."""
     ids = _record_unmarked(declared, {("Delta result", "Beta lemma"): ask.UnmarkedLetter.POINTS})
@@ -997,7 +984,7 @@ def _plant_a_mutual_prose_reference(declared: Path) -> None:
     )
 
 
-def test_a_classified_two_cycle_demotes_both_edges_to_references_and_names_them(declared: Path, runner_gate: None):
+def test_a_classified_two_cycle_demotes_both_edges_to_references_and_names_them(declared: Path):
     """Two answers that cannot both be dependencies: both directions go, both relationships stay."""
     _plant_a_mutual_prose_reference(declared)
     ids, _ = _narrowed(declared)
@@ -1151,8 +1138,8 @@ def test_a_containment_ring_drafts_mention_and_is_still_asked(declared: Path, tm
 # ---------------------------------------------------------------------------
 
 
-def test_the_discovered_pass_runs_end_to_end_against_a_fake_reader(declared: Path, runner_gate: None):
-    """Pass 1's output in, edges authored through the write API, the runner's gates green.
+def test_the_discovered_pass_runs_end_to_end_against_a_fake_reader(declared: Path):
+    """Pass 1's output in, edges authored through the write API, stage G green.
 
     Every candidate is asked once, containment's drafts included; a candidate
     answered *supported by* writes a dependency and no reference beside it.

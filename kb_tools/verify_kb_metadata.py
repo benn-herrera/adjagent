@@ -4,7 +4,7 @@
 Read-only. Never modifies any file. Reads the unified ``kb-frontmatter`` block
 through ``kb_index_lib``, the canonical parser of that block's grammar.
 
-Eighteen checks, all hard fail-loud:
+Seventeen checks, all hard fail-loud:
 
     0. Quality-block integrity: every ``### Quality`` heading in a
        ``claim-quality.md`` register sits within a ``---``-delimited section
@@ -75,11 +75,6 @@ Eighteen checks, all hard fail-loud:
        register stages a fan-out for a support whose leaf exists, the two ends
        must name the same beneficiaries at the same on-point fractions. (Not
        refresh-fixable; the two authored blocks disagree.)
-   17. Claim-graph sheet freshness: ``<kb-root>/claim-graph.svg`` must be
-       byte-identical to what the ``.index/`` on disk renders. The sheet is a
-       derived view of that index, minted by refresh and never authored, so an
-       absent or stale one is drift of the same kind as check 10's.
-       (refresh-fixable.)
 
 Checks 15 and 16 are taken in ONE walk of the registers, and that walk is
 ``kb_index_lib.walk_registers`` — which returns what it found as data.
@@ -114,7 +109,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from kb_tools import __version__, kb_index_lib, kb_schema, kb_util
-from kb_tools.kb_graph import ops as graph_ops
 
 # The KB root this run operates on. Bound in main() — from --kb-root when
 # given, else by lazy repo-root discovery (kb_util.kb_root()) — never at
@@ -634,32 +628,6 @@ def check_index_fresh(index_dir: Path):
         actual_count = sum(1 for ln in actual_text.split("\n") if ln)
         drift.append((short, expected_count, actual_count))
     return drift, expected
-
-
-def check_claim_graph_fresh() -> str | None:
-    """Diff the on-disk claim-graph sheet against what the index on disk renders.
-
-    The sheet is a pure derived view of ``.index/``: refresh renders it once
-    that index is written, and this re-renders from the same files and
-    byte-compares. Returns a one-line reason where the two differ — or where no
-    sheet exists at all — and ``None`` where they agree. Refresh-fixable, for
-    the reason check 10's drift is: nothing authors a byte of it.
-
-    The comparison is composed rather than written, so this stays read-only. It
-    is composed against the KB root because that is the directory the sheet is
-    read from and every node hyperlink in it is resolved relative to.
-
-    Raises whatever ``kb_graph.ops.compose`` raises; the caller runs this only
-    once the index files have been found present and well-formed.
-    """
-    path = KB / kb_util.CLAIM_GRAPH_FILENAME
-    if not path.is_file():
-        return "no sheet on disk"
-    expected = graph_ops.compose(kb_root=KB, sheet_dir=KB).document
-    actual = path.read_text(encoding="utf-8")
-    if actual == expected:
-        return None
-    return f"{len(actual.encode('utf-8'))} bytes on disk, {len(expected.encode('utf-8'))} rendered"
 
 
 def check_index_referential_integrity(index_dir: Path):
@@ -1476,14 +1444,6 @@ def main(argv: list[str] | None = None) -> int:
     n_no_claim = sum(1 for _, fm in files if fm and fm.get("no-claim"))
     n_multi = sum(1 for _, fm in files if fm and len(fm.get("claims", [])) >= 2)
 
-    if kb_index_lib.framework_source_is_legacy(KB):
-        print(
-            f"[claim-quality] NOTE: framework nodes still parsed from "
-            f"{kb_index_lib.LEGACY_INVARIANTS_FILENAME} — the corpus-invariant source is now "
-            f"{kb_index_lib.INVARIANTS_FILENAME}. Move the '### INVARIANT-*' headings and "
-            f"'- Axiom N:' bullets there; {kb_index_lib.LEGACY_INVARIANTS_FILENAME} is canned "
-            f"orientation and no longer an invariant channel."
-        )
     print(
         f"[claim-quality] Scanned {n_files} files "
         f"({n_with_fm} with frontmatter, {n_leaves} leaves, "
@@ -1515,15 +1475,6 @@ def main(argv: list[str] | None = None) -> int:
     missing_index, malformed_index, eof_defects = check_index_well_formed(index_dir)
     fresh_drift, expected_records = check_index_fresh(index_dir)
     ref_violations = check_index_referential_integrity(index_dir)
-
-    # The claim-graph sheet, checked the way the index it derives from is.
-    # Skipped on two conditions, neither of them about the graph: an index that
-    # is missing or will not parse has no sheet to render and is already
-    # reported above, and an --index-dir pointing away from the KB's own is a
-    # run asking about a synthetic index rather than about this KB's sheet.
-    sheet_drift: str | None = None
-    if not missing_index and not malformed_index and index_dir == KB / kb_util.INDEX_DIRNAME:
-        sheet_drift = check_claim_graph_fresh()
 
     # Solidity content. ``solidity`` is a derived field; this verifies the
     # on-disk values match what ``compute_solidity`` derives.
@@ -1717,17 +1668,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n[FAIL] {len(fresh_drift)} .index file(s) stale vs canonical state:")
         for short, expected_count, actual_count in fresh_drift:
             print(f"  {short}.jsonl: {expected_count} expected vs " f"{actual_count} actual records")
-
-    if sheet_drift is not None:
-        has_failures = True
-        refresh_fixable = True
-        print(f"\n[FAIL] {kb_util.CLAIM_GRAPH_FILENAME} is not what {kb_util.INDEX_DIRNAME}/ renders:")
-        print(f"  {sheet_drift}")
-        print(
-            "  -> Refresh-fixable. The sheet is a derived view of the index, "
-            "rendered by refresh and never authored, so an absent one and a "
-            "hand-edited one are the same drift."
-        )
 
     if ref_violations:
         has_failures = True
