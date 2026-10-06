@@ -1,7 +1,7 @@
-<!-- kb-frontmatter
+---
 kind: leaf
 claims: [clm-aaa001, clm-aaa002, clm-aaa003, clm-aaa004]
--->
+---
 
 # Results
 

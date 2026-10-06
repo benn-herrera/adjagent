@@ -1,12 +1,13 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 no-claim: "hosts a pending-quality support node only"
-sup-id: sup-pend01
-supports:
-  - clm-sb4444: 1.0
--->
+support-nodes:
+  - sup-id: sup-pend01
+    supports:
+      - clm-sb4444: 1.0
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## Pending-Quality Analytical Support
 

@@ -156,8 +156,8 @@ _BATONS: dict[int, BatonSpec] = {
         then_run=("nothing; the run directory is the bug report: {run_dir}",),
     ),
     EXIT_LOCKED: BatonSpec(
-        ask="none — report the live pid",
-        then_run=("nothing while that run holds the lock — wait for it to end, or stop it first",),
+        ask="none — report the lock and holder the message names",
+        then_run=("nothing while that build holds the lock — wait for it to end, or stop it first",),
     ),
     EXIT_CONTRACT: BatonSpec(
         ask="none — report the step and the validator's complaint",

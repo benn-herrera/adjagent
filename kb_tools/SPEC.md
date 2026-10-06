@@ -103,10 +103,46 @@ placement should be re-cut. That judgement stage exists and is exercised on ever
 heuristic names no section and the skeleton passes through unaltered (ARCHITECTURE.md, The Derived
 Skeleton).
 
-**Derived-layer direction.** Within the KB, the **`.index/*.jsonl` artifacts** and every derived
+**Derived-layer direction.** Within the KB, the **`.index/*.yaml` streams** and every derived
 metadata field (`solidity`, `build_status`, `build_band`, `subtree-claims`, leaf-reference footers)
 are always derived from the authored Markdown, never the reverse — on any disagreement the derived
 layer is rebuilt, unconditionally (Derived Metadata, Defined, below).
+
+### The Metadata Format
+
+**A KB's metadata is in format `1.0.0`, and its entry point says so.** The format is a given
+interface, stated in kbase `SPEC.md` §10 as observed at kbase commit `0c7141e`; this toolchain reads
+and writes it and owns none of it. The stamp is `kb-format: "1.0.0"`, the last key of
+`entry-point.md`'s frontmatter, and a KB carrying none is `0.9.0` — the comment-block frontmatter,
+JSON build records and JSONL index this toolchain wrote before. Every command that reads a KB —
+`kb-refresh`, `kb-verify`, the queries, the write ops, `render-citation`, the claim-graph stages and
+the citation gate — reads the stamp before anything else: no `entry-point.md` is a refusal naming
+`kb-root`, and a newer major or minor is a refusal naming `kb-format`, both versions and "update
+kb_tools"; either exits 2 and writes nothing. An entry point that already carries YAML frontmatter
+is read through this toolchain's dialect reader, which refuses constructs outside the dialect that
+kbase's YAML library would accept.
+
+**One version is read and written; an older KB migrates on its next refresh.** Only the conversion
+reads `0.9.0`; every other reader reads `1.0.0` alone. `kb-verify`, the queries and
+`render-citation` write nothing: the queries and `render-citation` read an older KB converted in
+memory, and `kb-verify` reports it stale with remedy `kb-refresh` and checks nothing else. In a
+current KB a comment block is not frontmatter: `kb-verify` lists its document among those missing
+frontmatter, naming the block, and no write converts it or writes into it. No write op migrates: on
+an older KB it refuses, exits 2 naming `kb-refresh`, and writes nothing; the claim-graph stages and
+the citation gate, which run only inside a build, refuse it the same way. `kb-refresh` writes every
+covered file — each `.md` under `kb-root/`, `.index/`, the build records beside it — in `1.0.0`,
+removes the superseded paths it did not write, and stamps the entry point last; interrupted before
+the stamp, the KB still reads as `0.9.0`, each file in the form found, and the next refresh
+completes it. A refresh failing after the stamp leaves the KB migrated and stale. A KB at `1.0.x`
+with another patch is restamped to `1.0.0`.
+
+**What `1.0.0` is.** Frontmatter is the `---`-fenced block opening a document, recognised only where
+its first non-empty line is a kebab-case key; a leaf's node declarations are one mapping each under
+`experiment-nodes:` and `support-nodes:`; the up-link is the first line after the closing fence;
+`.index/<name>.yaml` holds one `--- <JSON object>` line per record; the build records are
+`kb-build-*.yaml`. All of it is written in kbase's YAML dialect, byte-equal to kbase's writer for
+the kinds of value kbase's golden pairs (`tests/fixtures/format-1.0.0/`) hold, and those pairs are
+the conformance test.
 
 ### The Document-Tree Contract
 
@@ -129,8 +165,10 @@ numbering is fixed and is what other documents and code cite by point number.
    actually uses — `{1,4}` becomes tree levels `{1,2}`, `{1,2,4}` becomes `{1,2,3}`, `{1,3}` becomes
    `{1,2}`. Ranking is per volume; levels need not agree between volumes. Judging a decomposition
    undesirable (The Derived Skeleton, above) is never done by truncating it.
-3. Every non-root document opens with an up-link to its parent index, on line 1:
-   `[↑ Parent Title](relpath)`, carrying `kb_index_lib.UPLINK_MARKER`.
+3. Every non-root document opens with an up-link to its parent index, `[↑ Parent Title](relpath)`,
+   carrying `kb_index_lib.UPLINK_MARKER`: on line 1 of the tree this stage writes, and on the first
+   line after the frontmatter's closing fence once the document carries frontmatter (The Metadata
+   Format, above).
 4. Every index links each of its children, in the source's own document order — never sorted.
 5. The down-link spine is acyclic and total: every document is reachable from `entry-point.md` by
    down-links alone, and every non-root document has exactly one parent.
@@ -414,7 +452,9 @@ numbering is fixed and is what other documents and code cite by point number.
     title is named by its filename stem.
 14. **No claim-graph artifacts.** No `.index/` directory, no frontmatter block, no `claims:` key, no
     `<!-- id: -->` or `<!-- claim-quality: -->` marker anywhere in the tree. A document carries body
-    text, a heading, an up-link, and — for an index — a child list, and nothing else.
+    text, a heading, an up-link, and — for an index — a child list, and nothing else. The one
+    exception is the format stamp: `entry-point.md` may carry a frontmatter block holding
+    `kb-format` alone (The Metadata Format, above) — a property of the KB, not claim-graph metadata.
 
 Mechanism for checking each of these lives in ARCHITECTURE.md, The Document Graph (`kb_docgraph/`)
 and The Partition Checks; this section states what must hold, not how it is verified.
@@ -481,16 +521,17 @@ the count and not only from the demand, or minting one equation node would chang
 of the claims that were already there — a leaf hosting one block claim and four equations stays a
 leaf with one claim as far as that threshold is concerned.
 
-**Edge classes.** Five, discriminated by the `relation` field on `kb_index_lib.DependsOnEdge`. Every
-edge of every class is materialized in `.index/depends-on.jsonl`.
+**Edge classes.** Six, discriminated by the `relation` field on `kb_index_lib.DependsOnEdge`. Every
+edge of every class is materialized in `.index/depends-on.yaml`.
 
 | `relation` | Authored at | Source → target | Also carries | Contribution to solidity |
 |---|---|---|---|---|
 | `depends` | the source's `- depends-on:` bullets in its register entry | claim or support → claim, invariant, or axiom | — | the **target** gates the **source**: its final solidity enters the source's `min`, a framework target contributing 1.0 |
-| `strengthens` | the experiment leaf's `strengthens:` frontmatter block | experiment → claim | `strength`, in [0, 1] | the **source** lifts the **target**: `max` of the strengths over *run* experiments is the claim's experimental solidity |
-| `supports` | the support leaf's `supports:` frontmatter block, and staged in the `sup-` register entry | support → claim | on-point `fraction`, in [0, 1] or the literal `*pending*` | the **source** lifts the **target**: `sup_solidity × fraction` enters the claim's local quality, and is still dep-gated |
+| `strengthens` | the `strengthens` list of the experiment's `experiment-nodes` entry in its leaf's frontmatter | experiment → claim | `strength`, in [0, 1] | the **source** lifts the **target**: `max` of the strengths over *run* experiments is the claim's experimental solidity |
+| `supports` | the `supports` list of the support's `support-nodes` entry in its leaf's frontmatter, and staged in the `sup-` register entry | support → claim | on-point `fraction`, in [0, 1] or the literal `*pending*` | the **source** lifts the **target**: `sup_solidity × fraction` enters the claim's local quality, and is still dep-gated |
 | `rests-on` | the source's `- depends-on:` bullets in its register entry, where the target is a `work-` id | claim → external work | applicability `fraction`, in [0, 1] or the literal `*pending*`; `strength` is null, a work's standing being a property of the node and not of each pairing | the **target** gates the **source**, on a positive applicability: the work's own `strength` enters the source's `min`. A zero applicability takes the pairing out of the `min`; either value `*pending*` leaves the source pending (below) |
 | `references` | the source's `- references:` bullets in its register entry | claim → claim | — | **none.** It enters no solidity computation, gates nothing, and is under no acyclicity constraint |
+| `demoted` | the source's `- demoted:` bullets in its register entry, written only by the build's cycle breaking | claim → claim | `origin`: `cited` or `inferred` | none, as `references` |
 
 **`references` records what the corpus states and computes nothing from it.** An author who writes
 one result's identifier inside another's statement — *a second certificate, distinct from the `V` of
@@ -521,22 +562,31 @@ than an observation:
   contain cycles. Acyclicity is checked over `depends` alone, and a corpus whose claims name each
   other mutually builds.
 
-  **This is also where a ring of derived dependency edges lands.** Where a build directs edges —
-  by the containment rule point 6 admits, or by classifying them (below) — and the directed set
-  closes a cycle, every edge on that cycle is recorded in this class instead, and the build carries
-  on; nothing is asked again about the cycle. The cycle proves those edges cannot
-  all be dependencies; it proves nothing about any other edge the corpus yielded, so producing no
-  graph for that document spends a whole paper on one ring and records every claim in it as resting
-  on nothing. The relationship each demoted edge states is kept — the author did write one claim's
+  **A ring of derived dependency edges lands beside this class, as `demoted`.** Where a build
+  directs edges — by the containment rule point 6 admits, or by classifying them (below) — and the
+  directed set closes a cycle, every edge on that cycle is recorded as a `demoted` edge instead,
+  carrying its origin — `inferred` where the unmarked-reference record answered yes for the pair in
+  the direction written, `cited` otherwise — and the build carries on; nothing is asked again about
+  the cycle. A containment-directed pair the ring took the direction off is drafted *mention*, and
+  lands as `demoted` where it keeps that draft — no reader, or no offered letter after the re-ask —
+  and as whatever a reader answered otherwise. The cycle proves those edges cannot all be
+  dependencies; it proves nothing about any other edge the corpus yielded, so producing no graph
+  for that document spends a whole paper on one ring and records every claim in it as resting on
+  nothing. The relationship each demoted edge states is kept — the author did write one claim's
   identifier inside another's proof — and only the direction claim is given up, which is the half
   the cycle disproves. The whole ring goes rather than a minimum feedback set: a ring is exactly
   where no evidence separates its members, so keeping some would assert a discrimination nothing in
   the corpus supports. **A build reports every demotion, naming the edges**, a corpus whose derived
-  edges are acyclic and one that lost a ring being otherwise the same passing build.
+  edges are acyclic and one that lost a ring being otherwise the same passing build. Only the build
+  writes a `demoted` edge, through an op no runner target and no `kb_util` subcommand exposes.
+  `kb-verify` lists every `demoted` edge as a finding, not a failure, and fails one whose origin is
+  missing or not `cited`/`inferred`; `resolve-demoted` removes one or restores it to `depends`,
+  refusing a restore that would close a cycle (The Write API's Contract, below).
 - **Nothing downstream may treat it as a weak dependency.** It contributes to no solidity, lifts
-  nothing, gates nothing, and `compute_solidity_full` does not see one: the class is carried on a
-  field of its own (`kb_index_lib.ClaimEntry.references`) rather than among the edges that compute,
-  so the guarantee is structural and not a branch each consumer remembers to write.
+  nothing, gates nothing, and `compute_solidity_full` does not see one: the class is carried on
+  fields of its own (`kb_index_lib.ClaimEntry.references`, `ClaimEntry.demoted`) rather than among
+  the edges that compute, so the guarantee is structural and not a branch each consumer remembers
+  to write.
 
 **Every edge candidate is classified *mention*, *supported by* or *in support of*.** A candidate is
 an ordered pair of claims whose source names its target, however the build found it; a claim and an
@@ -560,7 +610,7 @@ temporal difference rather than defining it.
 
 **`strengthens` is a push edge; `strengthened by` is a pull edge, and the two are not halves of one
 relationship.** A claim's `- strengthen-by:` bullets are its own open-work list — what *would* raise
-it — authored at the claim end, kept as free text, and materialized in `.index/strengthen-by.jsonl`
+it — authored at the claim end, kept as free text, and materialized in `.index/strengthen-by.yaml`
 as untraversed bookkeeping: no `DependsOnEdge`, no contribution to any solidity. A `strengthens`
 edge is authored at the experiment end and names the claim it lifts. Neither implies the other. An
 item on a claim's list that no experiment has answered is the normal state, and an experiment
@@ -664,9 +714,9 @@ of each volume that holds a node.** The KB-root bucket is not a volume, so a KB 
 one volume carries the root sheet alone, and a volume holding no node has no sheet and no digest
 box. All are derived views that `refresh` draws on every run and no verifier reads. They come from
 `.index/`, the titles the entry point and each volume index carry, the leaves that host the claims,
-and the two claim-graph build records beside `kb-root/` (`kb-build-unmarked.json`,
-`kb-build-classification.json`). Nobody authors any of them, and a hand edit lasts until the next
-refresh. The two root sheets link to each other.
+and the unmarked-reference build record beside `kb-root/` (`kb-build-unmarked.yaml`). Nobody
+authors any of them, and a hand edit lasts until the next refresh. The two root sheets link to each
+other.
 
 **The full sheet draws every node, and every edge a reader can rest on.** Each volume is a cluster
 titled with the volume's own title and its counts. The nodes at the KB root, framework nodes and
@@ -680,13 +730,13 @@ marker by rule (Claim-Graph Nodes and Edges, above) and are always read by their
 links to its canonical path and anchor, and its tooltip carries its full title. Each premise
 relation is drawn with the premise below what rests on it.
 
-**A `depends` edge is drawn as cited or inferred, and a `references` edge only where it was cut.**
-An edge is *inferred* where the unmarked build record answered that the claim's text points at the
-other with no mark, and *cited* otherwise, absent records included. A `references` row is *cut*
-where the classification build record chose `depends` for its pair: a dependency removed to break a
-cycle, drawn marked as no premise and outside the layering. No other `references` edge is drawn,
-because it asserts nothing about what rests on what (Edge classes, above). Those three words are the
-only provenance a sheet names. Each sheet draws its `depends` edges transitively reduced: an edge
+**A `depends` edge is drawn as cited or inferred, and a cut as cut.** An edge is *inferred* where
+the unmarked build record answered that the claim's text points at the other with no mark, and
+*cited* otherwise, absent records included. A `demoted` row is *cut*: drawn red dotted, heavier
+where its origin is `cited`, marked as no premise and outside the layering, under the legend row
+"cut from depends: part of a circle (cited / inferred)". A `references` edge is not drawn, because
+it asserts nothing about what rests on what (Edge classes, above). Those three words are the only
+provenance a sheet names. Each sheet draws its `depends` edges transitively reduced: an edge
 whose premise its claim still reaches through the other drawn `depends` edges is not drawn, so
 everything a claim rests on stays reachable along the strokes while a missing stroke is not a
 missing edge. No other relation takes part in that reduction. An edge naming an id that no record
@@ -721,12 +771,37 @@ defect in what the toolchain composed and not a property of the KB.
 **Perceptual locality is not promised.** A one-edge change may rearrange the sheet completely.
 Comparing runs is the machine's job, over the records, not the picture's.
 
+### Queries Over the Index
+
+**The queries answer from `.index/` and write nothing**; an older KB is read converted (The
+Metadata Format, above). Each answers as text, or with `--json` as one JSON document; the command
+list and mechanism are in ARCHITECTURE.md, Query Surface. Three answers have a fixed shape:
+
+- `show` on a claim carries, right after `strengthen_by_count`, `strengthen_by`: one record per
+  strengthen-by item, `item_idx`, `text` and `mentioned_ids` in that order, in `item_idx` order,
+  `mentioned_ids` `[]` where the item names no id. No other node kind and no other query carries
+  the items.
+- `deps` on an id carries one record per edge sourced there: `relation`, `target`, `applicability`
+  (a `rests-on` pairing's fraction, null on every other class) and `context` (the edge row's string,
+  null where it has none). A `demoted` edge reports under its relation, without its origin. `deps
+  -i` answers with the ids of the nodes resting on the id, and nothing else: the sources of the
+  `depends` and `rests-on` edges to it and the targets of the `strengthens` and `supports` edges
+  from it. A `references` or `demoted` edge makes neither end a dependent, and `weak-points` counts
+  a claim's dependents the same way.
+- `stats` counts `demoted_edges` right after `depends_on_edges`, which counts every edge row.
+
 ## Agent-Mediated Editing
 
 KB navigation and editing go **through** the agent set (the project contract mandates it), because
 the agents carry the verbatim and derived-field discipline that raw file edits would silently
 violate. The roster, and which agent owns which lifecycle stage, is in ARCHITECTURE.md, The Agent
 Set.
+
+At most one write-enabled maintainer works a KB at a time, and every metadata write — each
+`kb_util` write op, `kb-refresh`, anything touching frontmatter, a register or the index — comes
+from it. Other maintainer instances may examine the KB and queue change sets, which a coordinator
+applies through that one writer. Leaf prose may be edited in parallel by any number of agents,
+provided none changes metadata: no frontmatter, no register, no claim marker, no up-link.
 
 ## The Write API's Contract
 
@@ -753,17 +828,32 @@ PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util <write-op> --values 
 PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util insert-claim-entry --values <path.toml> [--create]
 ```
 
-**Three outcomes, three exit codes, and they are not interchangeable:**
+**Four outcomes, four exit codes, and they are not interchangeable:**
 
 | Code | Meaning | Caller obligation |
 |---|---|---|
 | 0 | Written and proven. | — |
-| 7 | Refused — the values are wrong and nothing was written; the report names the offending field and its line. | Fix the values, then call again. |
-| 8 | Retry unchanged — the values were right and a concurrent writer moved the file. | Re-issue the identical call. Re-asking for values that were already correct is how a duplicate id gets written. |
+| 2 | The environment is unfit — a KB file that will not decode, or a KB not in the format this toolchain writes; nothing was written. | Older format: run `kb-refresh`, which migrates the KB. Newer: update kb_tools. Then call again. |
+| 7 | Refused — the values are wrong and nothing was written; the report names the offending field and its line. Or a build is running (the report's `lock` line names its state dir), and nothing was read or written. | Fix the values, then call again; for a running build, call again once it has ended. |
+| 8 | Retry unchanged — the values were right and a concurrent writer moved the file, or held the KB write lock past the wait (the `lock` line names the repository root) and nothing was read. | Re-issue the identical call. Re-asking for values that were already correct is how a duplicate id gets written. |
 
 The proof runs on a temp, so a live file never holds bytes nobody read back, and after a 7 or an 8
 there is nothing on disk to restore. Report lines are the uniform `[kb-write] STATUS name detail`
 shape, every failure detail carrying a `restore:` clause naming the corrective call.
+
+**One write lock.** Every write op and `kb-refresh` hold the KB write lock — an advisory lock on the
+directory holding `kb-root/`, the same lock kbase's writers take — from their first read of the KB
+to their last write, the refresh's index and claim-graph sheets included. A writer that cannot take
+it within 30 seconds does not proceed: a write op exits 8 with one `lock` line naming the repository
+root, `kb-refresh` exits 8 with one `FAIL` line naming it, and nothing is read or written either
+way. Run as a command, a writer is also refused, exit 7, while a build holds the repository's run
+lock (The Driver's Contract), at once rather than after the wait. `render-citation`, `kb-verify`
+and the queries take no lock: a read during a write sees what is on disk at that moment. Every file
+a writer replaces is replaced atomically, so a reader sees the old file or the new one and never a
+torn one, but across files it may see a mix of old and new until the writer ends. The lock is the
+kernel's, released when its holder exits however it exits. Windows has no advisory lock: there
+neither the 8 nor the build-running refusal is given, the read-then-compare check each write makes
+on the file it replaces is the only guard, and one writer at a time is the operator's to keep.
 
 **An insert mints its own id and prints it; there is no separate mint step.** `insert-claim-entry`,
 `insert-support-entry` and `insert-experiment-entry` draw the id and write its canonical entry in
@@ -782,17 +872,26 @@ annotation and the leaf-references footer at their canonical placeholder identit
 derived line byte-untouched. These ops author, `refresh` derives, and `kb-verify`'s freshness gate
 is what says the two agree.
 
+**`resolve-demoted` is the one op over a cut.** It takes `id`, `target` and `action` (`remove` or
+`restore`) per entry: `remove` deletes the pair's `demoted` edge, `restore` rewrites it as a
+`depends` edge. A restore that would close a cycle — the batch's earlier restores counted — is
+refused naming the path, a restore of a pair holding neither a `demoted` nor a `depends` edge is
+refused, and so is a batch naming one pair twice; a pair already as asked is left as it stands, so a
+re-issue writes nothing. The report names each edge resolved. The op that writes a `demoted` edge
+is the build's own and no `kb_util` subcommand reaches it.
+
 **One op reads instead of writing: `render-citation`.** Over the same `--values` transport it prints
 the sanctioned authority-citation string — `["<excerpt>"](<path>#<anchor>)` — after reading the
 cited document and confirming the excerpt appears verbatim in the section the anchor names. Writing
-nothing, it has two outcomes rather than three: **0** with the citation on stdout, one line per
-entry, and **7** with nothing on stdout and the reason on stderr. Its values are the `excerpt`, the
-`cited-document` it is quoted from, the `anchor` naming that document's section, and the
-`citing-document` the citation will be written into — the last because a link target resolves
-relative to the file the link sits in, so where the citation will land decides how its target is
-spelled. Where in that document it goes stays the author's, and the citation gate still checks the
-placed result: this op moves the excerpt check to the moment of writing, it does not replace the
-gate.
+nothing, it has no **8**: **0** with the citation on stdout, one line per entry, **7** with nothing
+on stdout and the reason on stderr, and **2** where the environment is unfit, a KB newer than this
+toolchain among them. An older KB it reads converted (The Metadata Format, above). Its values are
+the `excerpt`, the `cited-document` it is quoted from, the `anchor` naming that document's section,
+and the `citing-document` the citation will be written into — the last because a link target
+resolves relative to the file the link sits in, so where the citation will land decides how its
+target is spelled. Where in that document it goes stays the author's, and the citation gate still
+checks the placed result: this op moves the excerpt check to the moment of writing, it does not
+replace the gate.
 
 ```sh
 PYTHONPATH=<harness-dir>/agents python3 -m kb_tools.kb_util render-citation --values <path.toml>
@@ -832,6 +931,21 @@ launch must be guarded against is destroying what a prior build already wrote: a
 `kb-root/` already `populated` (`kb_util.kb_root_state`) refuses, naming what it found; finding it
 `absent`, or `spine-only` — holding only the derived index, with no authored byte to lose — it
 proceeds.
+
+**Every boundary records what the build is built from, and a resume is given the same.** Each
+`kb-build:` boundary commit's body ends with the build's inputs, one line per path,
+repository-relative with forward slashes: a `volume-root: <path>` line per volume root, then a
+`bibliography: <path>` line per bibliography the run named, each in the order given. A
+bibliography the build found beside a volume root by default is not an input, and neither is a run
+parameter. The input lines follow any other note after a blank line, and a boundary with no other
+note carries them alone — the same lines kbase writes, so the two toolchains' trails line up
+boundary by boundary. A build over a non-empty trail compares its inputs with the newest boundary's
+before anything is written: on any difference — a volume root or bibliography added, removed, or
+the same ones in another order — it refuses with exit 14, one item per differing input, naming
+`inputs`, the input (`<volume-root>` or `--bibliography`), the repository root, what the trail
+records and what the run was given, and the remedy: resume with the inputs the trail records, or
+start over from a commit before the trail. A newest boundary that records no inputs, written before
+bodies carried them, is not compared.
 
 **A build may spend no inference and still be a finished build.** `--no-inference` drops every step
 that would cost a model call and the walk carries on past it, so the run produces a real KB built
@@ -947,6 +1061,20 @@ and a charter is optional, a build given none running on the sources it was give
 remains available for a run that sets more than the arguments carry, and where both are given the
 argument wins for the field it names.
 
+**One build at a time per repository, and no writer beside it.** A build holds the repository's run
+lock for its whole run: an advisory lock on `<git dir>/kbase-build.lock` — the `.git` file of a
+linked worktree followed to that worktree's own git directory — which kbase's builds take too, so
+neither toolchain's build runs beside the other's. The file records the build's state directory,
+the run directory, and is removed when the build ends; the lock itself is the kernel's, released
+when the build's process exits however it exits, so there is no stale lock to clear. A second build
+exits 16 naming the first one's state directory. Once its record is written the build waits out,
+once, a writer already holding the KB write lock (The Write API's Contract), exiting 16 where one
+holds it past the wait; a write op or `kb-refresh` started while the lock is held is refused (exit
+7), while a lock held with no record yet — a build starting — lets it proceed, because that build
+has not yet waited out the writers. The build's own writes take no run-lock check. Windows has no
+advisory lock: a running build is not observable there, and one build at a time is the operator's
+to keep.
+
 Exit codes are one ladder, enumerated in `baton.RUN_MODE_EXIT_CODES`. Every terminating invocation
 prints a relay card naming what to ask and what to run next, and an unrecognized code prints the
 fallback card rather than being interpreted.
@@ -969,9 +1097,10 @@ runner include and the `kb_util` CLI; mechanism in ARCHITECTURE.md, Runner Targe
 Ledger.
 `kb-verify`'s dead-link gate crawls `kb-root/` only; link targets resolve against the repository.
 
-**`kb-verify` is the standard check a running KB owes**: link integrity and claim-graph metadata.
-The build adds the citation grammar (Citation Grammar, below) to it as the **build-time check**,
-which runs in-process inside the build and no runner target exposes.
+**`kb-verify` is the standard check a running KB owes**: link integrity and claim-graph metadata. On
+a KB in an older format `kb-verify` reports the index stale and names `kb-refresh`, which migrates
+it (The Metadata Format, above). The build adds the citation grammar (Citation Grammar, below) to it
+as the **build-time check**, which runs in-process inside the build and no runner target exposes.
 
 ## Citation Grammar
 
@@ -1000,7 +1129,8 @@ outside those sections may not.
   all.**
   No third-party Python package and no required virtualenv in committed tooling. `pytest` (+
   `black`/`isort` for formatting) live only in the dev `.venv` the test/format targets provision;
-  nothing under `kb_tools/` imports them at runtime.
+  nothing under `kb_tools/` imports them at runtime. The KB YAML dialect is read and written by
+  `kb_yaml`, in the standard library alone; no YAML package is a dependency.
 
   The first exception is **the `pandoc` binary** — the reader `kb_docgraph` converts LaTeX sources
   through, reached exclusively via `kb_tools/pandoc.py` (ARCHITECTURE.md, Module Inventory). It is a

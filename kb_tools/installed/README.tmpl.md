@@ -25,7 +25,8 @@ corpus cites.
 Each edge between the nodes is of one class. A `depends` edge runs from a result to what it was
 derived from. `supports` and `strengthens` run the other way, from evidence to the result it lifts.
 `rests-on` leaves the corpus: it points at a work this KB cites and does not contain. A
-`references` edge records that one result's own text names another, and nothing rests on it.
+`references` edge records that one result's own text names another, and nothing rests on it. A
+`demoted` edge is a dependency the build cut to break a circle; nothing rests on it either.
 
 A claim carrying no confidence value reads {pending-literal} wherever it appears, and so does its
 solidity: that says *unscored*, not *low* and not *doubted*.
@@ -37,11 +38,12 @@ the KB's runner targets, run from the project root that holds this KB: `just <ta
 `make <target>` where that root has a Makefile rather than a justfile.
 
 `kb-stats` counts the claim graph. Its first lines count the nodes, one line per node kind.
-`depends_on_edges` counts every edge, of every class. Under `solidity build-band distribution` it
-counts the claims in each band: the {pending-literal} band holds the unscored claims, and every
-other band holds scored ones.
+`depends_on_edges` counts every edge, of every class, and `demoted_edges` on the next line counts
+the `demoted` edges among them. Under `solidity build-band distribution` it counts the claims in
+each band: the {pending-literal} band holds the unscored claims, and every other band holds scored
+ones.
 
-It does not split the edges by class. Each edge is one line of `.index/depends-on.jsonl`, and the
+It splits the edges by class no further. Each edge is one line of `.index/depends-on.yaml`, and the
 line's `relation` field names its class.
 
 `kb-verify` counts the documents. The files its `[claim-quality] Scanned` line counts are the

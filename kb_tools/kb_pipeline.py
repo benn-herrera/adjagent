@@ -16,9 +16,10 @@ Subject format — stable, greppable, and machine-readable::
 
 ``<stage-id>`` is the first whitespace-free token after the ``kb-build: ``
 prefix. It is one of :data:`STAGE_IDS` or a retired id, which
-:func:`recorded_stages` reads as no stage at all. An optional body paragraph
-follows the subject: the charter path on ``start``, the ``--note`` text
-``advance-step`` carries on any stage.
+:func:`recorded_stages` reads as no stage at all. The body follows the
+subject: a note paragraph — the charter path on ``start``, the ``--note`` text
+``advance-step`` carries on any stage — then the build's inputs, one line per
+path (:class:`BuildInputs`), each part omitted where it is empty.
 
 **Stage-addressed and declarative.** Recording is idempotent per stage — a
 re-record reports and exits 0 — and out-of-order recording is refused with
@@ -28,7 +29,6 @@ obeyed.
 Stdlib only.
 """
 
-import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 
-from kb_tools import install_location, kb_index_lib, kb_links, kb_schema, kb_util
+from kb_tools import install_location, kb_index_lib, kb_links, kb_load, kb_schema, kb_util, kb_yaml
 from kb_tools.kb_survey.manifest import write_text_atomic
 
 # Exit codes. 0/2 keep kb_util's meanings (success; environment unfit, which
@@ -91,12 +91,81 @@ CHARTER_RELPATH = "kb-build-charter.md"
 CHARTER_BODY_FIELD = "charter:"
 NO_CHARTER_BODY = "charter: none — this build was given none and runs on its sources"
 
+#: Every boundary body ends with the build's inputs, one line per path. kbase
+#: writes and compares the same lines, byte for byte, so these spellings and
+#: the line order are a shared format rather than this module's to vary.
+VOLUME_ROOT_BODY_FIELD = "volume-root:"
+BIBLIOGRAPHY_BODY_FIELD = "bibliography:"
+
+INPUTS_CHECK = "inputs"
+INPUTS_REMEDY = "resume with the inputs the trail records, or start over from a commit before the trail"
+
+
+def _repo_relative(repo_root: Path, path: str) -> str:
+    """``path`` (repo-root-relative or absolute) relative to the root, both symlink-resolved, with ``/``."""
+    resolved, root = (repo_root / path).resolve(), repo_root.resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+@dataclass(frozen=True)
+class BuildInputs:
+    """What a build is built from: its volume roots and the bibliographies it was told to use, in order.
+
+    Run parameters are not inputs, and neither is a bibliography found beside a
+    volume root by default: a resume given the same roots finds the same files.
+    """
+
+    volume_roots: tuple[str, ...] = ()
+    bibliographies: tuple[str, ...] = ()
+
+    @classmethod
+    def given(cls, repo_root: Path, *, volume_roots: Sequence[str], bibliographies: Sequence[str]) -> "BuildInputs":
+        """The inputs as a boundary records them: each path repository-relative, order kept."""
+        return cls(
+            volume_roots=tuple(_repo_relative(repo_root, path) for path in volume_roots),
+            bibliographies=tuple(_repo_relative(repo_root, path) for path in bibliographies),
+        )
+
+    def body(self) -> str:
+        lines = [f"{VOLUME_ROOT_BODY_FIELD} {path}" for path in self.volume_roots]
+        lines += [f"{BIBLIOGRAPHY_BODY_FIELD} {path}" for path in self.bibliographies]
+        return "\n".join(lines)
+
+
+def _inputs_in(body: str) -> BuildInputs | None:
+    """The inputs a boundary body records, or ``None`` where it names no volume root."""
+    roots: list[str] = []
+    bibliographies: list[str] = []
+    for line in body.splitlines():
+        if line.startswith(f"{VOLUME_ROOT_BODY_FIELD} "):
+            roots.append(line.removeprefix(f"{VOLUME_ROOT_BODY_FIELD} "))
+        elif line.startswith(f"{BIBLIOGRAPHY_BODY_FIELD} "):
+            bibliographies.append(line.removeprefix(f"{BIBLIOGRAPHY_BODY_FIELD} "))
+    return BuildInputs(tuple(roots), tuple(bibliographies)) if roots else None
+
 # Where the claim graph's node pass keeps its build state, repo-root-relative
 # and tracked, on the charter's placement and for its reasons: never under
 # kb-root/, which holds only what the finished KB is, and never under scratch,
 # which is wiped while a build still needs to resume from this. Swept into each
-# boundary commit by `_record`'s `git add -A`.
-NODE_PASS_RELPATH = "kb-build-node-pass.json"
+# boundary commit by `_record`'s `git add -A`. Each record's path is
+# `kb_load.record_path`'s; the relpaths here name them in messages and tests.
+NODE_PASS_RELPATH = kb_load.record_path(Path(), kb_load.NODE_PASS_STEM).as_posix()
+
+
+def _write_record(repo_root: Path, stem: str, payload: Mapping[str, object]) -> None:
+    """Land a build record whole, in YAML, through the toolchain's one atomic writer."""
+    write_text_atomic(kb_yaml.dump(payload), kb_load.record_path(repo_root, stem))
+
+
+def _read_record(repo_root: Path, stem: str) -> object | None:
+    """A build record's values as the current format reads them, or ``None`` where none stands."""
+    try:
+        return kb_load.read_record(repo_root, stem)
+    except FileNotFoundError:
+        return None
 
 
 # --- the node-pass record ---------------------------------------------------
@@ -191,7 +260,7 @@ class NodePassRecordError(ValueError):
     """The record on disk does not read as one."""
 
 
-def _entry_json(entry: LeafEntry) -> dict[str, object]:
+def _entry_fields(entry: LeafEntry) -> dict[str, object]:
     return {
         "state": entry.state.value,
         "outcome": None if entry.outcome is None else entry.outcome.value,
@@ -232,20 +301,21 @@ def write_node_pass(repo_root: Path, record: NodePassRecord) -> None:
     """Land ``record`` whole, deterministically ordered, through the toolchain's one atomic writer."""
     payload = {
         "about": NODE_PASS_ABOUT,
-        "leaves": {path: _entry_json(record.leaves[path]) for path in sorted(record.leaves)},
+        "leaves": {path: _entry_fields(record.leaves[path]) for path in sorted(record.leaves)},
     }
-    write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / NODE_PASS_RELPATH)
+    _write_record(repo_root, kb_load.NODE_PASS_STEM, payload)
 
 
 def read_node_pass(repo_root: Path) -> NodePassRecord | None:
     """The record, or ``None`` where no node pass has written one."""
-    path = repo_root / NODE_PASS_RELPATH
-    if not path.is_file():
-        return None
     try:
-        leaves = json.loads(path.read_text(encoding="utf-8"))["leaves"]
+        raw = _read_record(repo_root, kb_load.NODE_PASS_STEM)
+        if raw is None:
+            return None
+        leaves = raw["leaves"]  # type: ignore[index]
         return NodePassRecord(leaves=MappingProxyType({key: _entry_of(value) for key, value in leaves.items()}))
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+    except (KeyError, TypeError, ValueError) as error:
+        path = kb_load.record_path(repo_root, kb_load.NODE_PASS_STEM)
         raise NodePassRecordError(f"{path} does not read as a node-pass record: {error!r}") from error
 
 
@@ -258,11 +328,15 @@ def read_node_pass(repo_root: Path) -> NodePassRecord | None:
 # keeps every classify ask already answered. This module stores letters; it
 # never interprets one.
 
-CLASSIFICATION_RELPATH = "kb-build-classification.json"
+CLASSIFICATION_RELPATH = kb_load.record_path(Path(), kb_load.CLASSIFICATION_STEM).as_posix()
 
 
 class ClassifyOutcome(StrEnum):
-    """How a candidate's letter was reached. ``defaulted`` and ``drafted`` carry none."""
+    """How a candidate's letter was reached. ``defaulted`` and ``drafted`` carry none.
+
+    A containment-ring pair whose outcome is either of those kept its drafted
+    *mention*, and lands as a ``demoted`` edge rather than a ``references`` one.
+    """
 
     ANSWERED = "answered"
     REASKED = "re-asked"
@@ -336,19 +410,18 @@ def _pair_entries(rows: Sequence[Mapping[str, object]]) -> Mapping[tuple[str, st
 def write_classification(repo_root: Path, record: ClassificationRecord) -> None:
     """Land ``record`` whole, ordered by pair, through the toolchain's one atomic writer."""
     payload = {"about": CLASSIFICATION_ABOUT, "candidates": _pair_rows(record.candidates)}
-    write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / CLASSIFICATION_RELPATH)
+    _write_record(repo_root, kb_load.CLASSIFICATION_STEM, payload)
 
 
 def read_classification(repo_root: Path) -> ClassificationRecord | None:
     """The record, or ``None`` where no classification has written one."""
-    path = repo_root / CLASSIFICATION_RELPATH
-    if not path.is_file():
-        return None
     try:
-        return ClassificationRecord(
-            candidates=_pair_entries(json.loads(path.read_text(encoding="utf-8"))["candidates"])
-        )
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raw = _read_record(repo_root, kb_load.CLASSIFICATION_STEM)
+        if raw is None:
+            return None
+        return ClassificationRecord(candidates=_pair_entries(raw["candidates"]))  # type: ignore[index]
+    except (KeyError, TypeError, ValueError) as error:
+        path = kb_load.record_path(repo_root, kb_load.CLASSIFICATION_STEM)
         raise ClassificationRecordError(f"{path} does not read as a classification record: {error!r}") from error
 
 
@@ -360,7 +433,7 @@ def read_classification(repo_root: Path) -> ClassificationRecord | None:
 # as the group completes. A stop mid-stage keeps every ask already answered.
 # This module stores letters; it never interprets one.
 
-UNMARKED_RELPATH = "kb-build-unmarked.json"
+UNMARKED_RELPATH = kb_load.record_path(Path(), kb_load.UNMARKED_STEM).as_posix()
 
 UNMARKED_ABOUT = (
     "The claim-graph unmarked-reference build record: the shortlist of ordered claim pairs planned for asking "
@@ -368,6 +441,10 @@ UNMARKED_ABOUT = (
     "letters its ask offered, the letter chosen (null where none was), and how it was reached. It joins to the "
     "tree at this build's own boundary commits, not to a KB a maintainer later edits."
 )
+
+
+#: The letter the unmarked record stores for "the source claim's text points at the candidate".
+UNMARKED_POINTS_LETTER = "A"
 
 
 @dataclass(frozen=True)
@@ -399,22 +476,22 @@ def write_unmarked(repo_root: Path, record: UnmarkedRecord) -> None:
         "planned": None if record.planned is None else [list(pair) for pair in record.planned],
         "pairs": _pair_rows(record.pairs),
     }
-    write_text_atomic(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", repo_root / UNMARKED_RELPATH)
+    _write_record(repo_root, kb_load.UNMARKED_STEM, payload)
 
 
 def read_unmarked(repo_root: Path) -> UnmarkedRecord | None:
     """The record, or ``None`` where no declared pass has written one."""
-    path = repo_root / UNMARKED_RELPATH
-    if not path.is_file():
-        return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        planned = raw["planned"]
+        raw = _read_record(repo_root, kb_load.UNMARKED_STEM)
+        if raw is None:
+            return None
+        planned = raw["planned"]  # type: ignore[index]
         return UnmarkedRecord(
             planned=None if planned is None else tuple((source, target) for source, target in planned),
             pairs=_pair_entries(raw["pairs"]),
         )
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+    except (KeyError, TypeError, ValueError) as error:
+        path = kb_load.record_path(repo_root, kb_load.UNMARKED_STEM)
         raise UnmarkedRecordError(f"{path} does not read as an unmarked record: {error!r}") from error
 
 
@@ -659,13 +736,14 @@ def _check_claims_declared(ctx: CheckContext) -> CoverageReport:
 
     Which claims a document declares is the corpus's answer and may be none;
     that it carries the block saying so is this stage's, for every document
-    without exception. An empty tree fails rather than passing vacuously — a
-    walk that found nothing to stamp has not stamped everything.
+    without exception — frontmatter carrying ``kind``, which the entry point's
+    stamp-only block does not. An empty tree fails rather than passing
+    vacuously — a walk that found nothing to stamp has not stamped everything.
     """
-    from kb_tools.kb_write.render import FRONTMATTER_OPENER
-
     documents = _tree_documents(ctx.repo_root)
-    missing = sorted(path for path, text in documents.items() if FRONTMATTER_OPENER not in text)
+    missing = sorted(
+        path for path, text in documents.items() if "kind" not in (kb_index_lib.parse_frontmatter(text) or {})
+    )
     detail = (
         f"{kb_util.KB_DIRNAME}/ holds no document to stamp"
         if not documents
@@ -1257,6 +1335,57 @@ def recorded_charter(repo_root: Path) -> str | None:
     return None
 
 
+def recorded_inputs(repo_root: Path) -> BuildInputs | None:
+    """The inputs the newest boundary records, or ``None`` where it records none or no trail stands.
+
+    The newest boundary is the newest commit whose *subject* is a ledger entry:
+    ``--grep`` also matches a body line, which is why each candidate's subject
+    is checked here. A retired stage id is still a boundary of this build.
+    """
+    result = kb_util.run_git(repo_root, "log", f"--grep=^{LEDGER_PREFIX}", "--format=%s%x1f%b%x1e")
+    if result is None or result.returncode != 0:
+        return None
+    for record in result.stdout.split("\x1e"):
+        subject, _, body = record.strip("\n").partition("\x1f")
+        if _SUBJECT_RE.match(subject):
+            return _inputs_in(body)
+    return None
+
+
+def _missing_from(present: Sequence[str], paths: Sequence[str]) -> list[str]:
+    return [path for path in paths if path not in present]
+
+
+def inputs_refusal(repo_root: Path, given: BuildInputs) -> tuple[str, ...]:
+    """One line per input this run was given otherwise than the newest boundary records it, order included.
+
+    Empty where every input matches, and where the newest boundary records no
+    inputs — a trail written before bodies carried them is not compared.
+    """
+    recorded = recorded_inputs(repo_root)
+    if recorded is None:
+        return ()
+    lines = []
+    for key, noun, was, now in (
+        ("<volume-root>", "volume roots", recorded.volume_roots, given.volume_roots),
+        ("--bibliography", "bibliographies", recorded.bibliographies, given.bibliographies),
+    ):
+        if was == now:
+            continue
+        changes = [
+            f"{verb} {', '.join(paths)}"
+            for verb, paths in (("added", _missing_from(was, now)), ("removed", _missing_from(now, was)))
+            if paths
+        ]
+        change = "; ".join(changes) or "the same paths in another order"
+        detail = (
+            f"the {LEDGER_PREFIX} trail records {noun} [{', '.join(was)}] and this run was given "
+            f"[{', '.join(now)}]: {change}"
+        )
+        lines.append(f"{INPUTS_CHECK}: {key}: {repo_root}: {detail} — restore: {INPUTS_REMEDY}")
+    return tuple(lines)
+
+
 def current_stage(recorded: set[str]) -> Stage | None:
     """The stage to act on — the first unrecorded one — or None when complete.
 
@@ -1322,7 +1451,7 @@ def _print_report(
         print(line)
 
 
-def _record(repo_root: Path, stage: Stage, body: str | None = None) -> None:
+def _record(repo_root: Path, stage: Stage, *, note: str | None = None, inputs: BuildInputs = BuildInputs()) -> None:
     """Sweep the worktree into a boundary commit for ``stage``.
 
     ``git add -A`` is the sweep: gitignore rules keep scratch out, and on the
@@ -1330,7 +1459,11 @@ def _record(repo_root: Path, stage: Stage, body: str | None = None) -> None:
     belongs to the build's first commit. A stage that changed no tracked file
     still records, via ``--allow-empty`` — the boundary is the point, not the
     diff.
+
+    The body is the note, then a blank line, then the input lines; either
+    stands alone where the other is empty.
     """
+    body = "\n\n".join(part for part in (note, inputs.body()) if part)
     added = kb_util.run_git(repo_root, "add", "-A")
     if added is None or added.returncode != 0:
         raise PipelineError(f"git add -A failed at {repo_root}: {'' if added is None else added.stderr.strip()}")
@@ -1565,7 +1698,7 @@ def _refuse(recorded: set[str], stage: Stage, report: CoverageReport, refusal: s
     return EXIT_POSTCONDITION_FAILED
 
 
-def start_build(repo_root: Path, charter: str) -> int:
+def start_build(repo_root: Path, charter: str, inputs: BuildInputs = BuildInputs()) -> int:
     """Record the ``start`` boundary, sweeping the seed into it.
 
     Refuses without committing when ``start`` is already recorded: this
@@ -1593,12 +1726,20 @@ def start_build(repo_root: Path, charter: str) -> int:
     if refusal is not None:
         return _refuse(recorded, stage, report, refusal)
     _report_vacuous_units(report)
-    _record(repo_root, stage, body=f"{CHARTER_BODY_FIELD} {charter}" if charter else NO_CHARTER_BODY)
+    _record(
+        repo_root, stage, note=f"{CHARTER_BODY_FIELD} {charter}" if charter else NO_CHARTER_BODY, inputs=inputs
+    )
     _print_report(recorded_stages(repo_root))
     return EXIT_OK
 
 
-def advance_step(repo_root: Path, stage_id: str, note: str | None = None, no_inference: bool = False) -> int:
+def advance_step(
+    repo_root: Path,
+    stage_id: str,
+    note: str | None = None,
+    no_inference: bool = False,
+    inputs: BuildInputs = BuildInputs(),
+) -> int:
     """Record the ``stage_id`` boundary commit.
 
     Stage-addressed and declarative: an already-recorded stage reports and
@@ -1642,7 +1783,7 @@ def advance_step(repo_root: Path, stage_id: str, note: str | None = None, no_inf
         for line in stage.pre_commit(ctx):
             print(f"{_TAG} {line}")
 
-    _record(repo_root, stage, body=note)
+    _record(repo_root, stage, note=note, inputs=inputs)
     _print_report(recorded_stages(repo_root))
     return EXIT_OK
 
@@ -1655,6 +1796,7 @@ def run_op(
     charter: str | None,
     note: str | None,
     no_inference: bool = False,
+    inputs: BuildInputs = BuildInputs(),
 ) -> int:
     """Dispatch one ledger op.
 
@@ -1669,8 +1811,8 @@ def run_op(
             # resolves the stage in flight.
             return show_stage_status(repo_root, stage)
         if op == kb_util.OP_START_BUILD:
-            return start_build(repo_root, charter=charter or "")
-        return advance_step(repo_root, stage_id=stage or "", note=note, no_inference=no_inference)
+            return start_build(repo_root, charter=charter or "", inputs=inputs)
+        return advance_step(repo_root, stage_id=stage or "", note=note, no_inference=no_inference, inputs=inputs)
     except PipelineError as exc:
         kb_util.to_stderr(f"error: {exc}")
         return EXIT_GIT_FAILURE

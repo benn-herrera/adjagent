@@ -285,10 +285,10 @@ or proofs citing each other for symmetry, *the argument is as in Lemma 4*, which
 containment reads as direction-bearing and which is not a dependency — and it
 proves nothing whatever about the paper's other edges, so stopping the stage
 discards a whole graph over one ring and leaves every claim in the paper
-recorded as resting on nothing. Each edge on a ring is therefore recorded as a
-``references`` edge (:func:`cycle_edges`), which is the class for a relationship
-the corpus states and nothing can direct, and the rest of the settled edges
-stand. Measured over a 50-paper arXiv sweep with no model reachable, three
+recorded as resting on nothing. Each edge on a ring is therefore cut
+(:func:`cycle_edges`) and the rest of the settled edges stand; a cut is recorded
+as a ``demoted`` edge, which keeps the relationship, marks it as a dependency
+the build cut, and gates nothing. Measured over a 50-paper arXiv sweep with no model reachable, three
 papers carried such a ring — two 4-cycles and a 2-cycle — and each took its
 entire graph down with it.
 
@@ -307,7 +307,9 @@ weaker, true statement.
 **A demoted pair is drafted *mention*, and classified like any other.** What the
 ring refuses is the *set* of directions containment read, not any one reading,
 so the draft gives up only the direction; the question of what each pair is
-stays open and is asked.
+stays open and is asked. A pair that keeps its draft — no reader, or no offered
+letter after the re-ask — lands as ``demoted`` (:func:`classify.cuts`); one a
+model answered writes what the answer says.
 
 **The class is a fact about the pair, never about its harvest.** A provenance
 whose source end proof containment settled offers *supported by* and *mention*:
@@ -810,7 +812,8 @@ class Attribution:
     out of it, those pairs being drafted *mention*.
 
     ``demoted`` is the pairs containment settled that a ring took the direction
-    off — carried separately only so the report can name them.
+    off — carried separately so the report can name them and
+    :func:`classify.cuts` can land those that keep their draft as ``demoted``.
 
     ``word_dropped`` is the pairs an anchor would have opened had the word
     before it not named a kind no premise relation can hold

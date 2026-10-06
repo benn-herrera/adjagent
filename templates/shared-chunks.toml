@@ -38,6 +38,13 @@ variants.change = '''@!prove-replacement-rule!@ When your assignment deletes a m
 [chunks.machine-guarantees]
 text = '''**Put machine guarantees on machines.** A consumer of inference-produced output that assumes a guarantee only a machine gives is a defect — machine behavior expected of inference. Tells, by guarantee assumed — *byte fidelity*: a parser, schema, or format spec whose input an agent hand-authors. *Exhaustiveness*: an always/every/never obligation with no mechanical check. *Tirelessness*: an instruction expected to hold on the last repetition as on the first, or at the end of a long context as at its top. *Determinism*: same input relied on for same output. *Recall*: a far-back instruction relied on at the point of use. Split it: the guaranteed half to a tool, the judgment half to inference. A guarantee is carried by a tool by definition, so where that tool does not exist, name the tool that must — its absence is a gap to surface, never grounds to leave the guarantee in prose.'''
 
+# Observed failure: a runtime "representability" gate in kb_tools/kb_write/values.py
+# refused any number the register reader's regex could not read back, because the
+# reader's grammar was narrower than Python's float grammar; replaced by one tested
+# reader function (5b2aeaf).
+[chunks.tests-not-runtime-checks]
+text = '''**A deterministic job is a tested function, not a runtime check.** Write it once, unit-test it, call it. Runtime checks are for boundaries (*Runtime boundary checks*) and for results no finite test set settles; a check that fires only when your own code is wrong is a missing test.'''
+
 [chunks.machine-guarantees-coder]
 text = '''@!machine-guarantees!@ When the assigned work makes agent-produced output a parser's input, or writes an always/every/never that nothing checks, report it as a Blocker naming the tool that must carry the guarantee. Do not build that tool yourself — that is a scope expansion.'''
 
@@ -134,6 +141,14 @@ text = '''Target logic and algorithms where the correct answer is independently 
 # rust-coder state no coverage rule, and folding it in would add one to them.
 [chunks.coverage-metric]
 text = '''Coverage percentage is the wrong metric.'''
+
+# Review-side counterpart of unit-test-scope and unit-test-scope-coder: what to
+# cut from a suite, not what to write into one. The checksum class (log
+# messages, call sequences) stays with those chunks and architect.tmpl.md's
+# unit-test item; this one adds only what they do not name. Observed: the owner
+# typing this instruction into review briefs by hand across several sprints.
+[chunks.test-review]
+text = '''**Reviewing tests, name what to cut.** *Duplicate coverage*: a test pinning a behaviour another already pins through the same path, a unit re-proving a golden-file or parametrised case included — merge or delete, naming the survivor. *Performative units*: a test no logic error could fail — a constant compared to itself, a mock confirmed called with nothing checked of what it was given, a file confirmed to load with no further claim — delete. Propose a new test only for a stated invariant or acceptance criterion that no test exercises.'''
 
 [chunks.integration-logging-signal]
 defaults.level = '''logging'''
@@ -482,7 +497,7 @@ text = '''
 A KB built by this toolchain is **two graphs over one tree of Markdown files**, and every agent in the set works on one or both.
 
 - **Topography graph** — the navigation hierarchy `entry-point → domain index → subtopic index → leaf`, with `kb-root/invariants.md` holding what is invariant across all domains where the corpus declares any; a corpus declaring none has no such file, and there is then nothing to read and nothing to go looking for. A **leaf** is a translated (LaTeX→Markdown) unit of the corpus; a **summary** (subtopic, domain, entry-point) leads with Key Results drawn verbatim from below and exists to route a reader to the right leaf, not to stand in for it. The KB's audience is the source material's audience — nothing in it is re-pitched, analogized, or simplified for a different reader; that is the docent's job, delivered live.
-- **Claim graph** — a graph over the corpus's results, materialized under `kb-root/.index/`. Leaves *host* its node bodies, whose entries live in `claim-quality.md` registers; the two exceptions are the framework nodes `kb-root/invariants.md` declares and the cited works below. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of node bodies. Its `depends` and `supports` edges close no cycle — solidity is undefined on one, and `kb-verify` fails it — while `references` edges carry no solidity and may cycle.
+- **Claim graph** — a graph over the corpus's results, materialized under `kb-root/.index/`. Leaves *host* its node bodies, whose entries live in `claim-quality.md` registers; the two exceptions are the framework nodes `kb-root/invariants.md` declares and the cited works below. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of node bodies. Its `depends` and `supports` edges close no cycle — solidity is undefined on one, and `kb-verify` fails it — while `references` and `demoted` edges carry no solidity and may cycle. A `demoted` edge is a dependency the build cut because it closed a cycle, its origin `inferred` where the build's own reading found the reference and `cited` otherwise; whether it is a real dependency stays open until a maintainer resolves it.
 
 **The off-graph endcap.** A `work-` node stands for a work the corpus **cites and does not contain**. No leaf hosts one and nothing mints one: its id is `work-` plus the corpus's own citation key, and the KB root's register holds every one of them, so a work three volumes cite is a single node. It is terminal — it emits no edge — and carries one authored value, `strength`, the work's own standing from foundational at 1 to spurious at 0. That is not a solidity — it sits on no build band — but it **gates**. A claim reaches such a node by a **`rests-on`** edge carrying the pairing's applicability, and the two values divide the job: an applicability above zero puts the work's `strength` into the citing claim's dependency `min`, exactly where an in-corpus dependency's solidity sits, while `0.0` takes the pairing out of the `min` and `strength` is never read. While either value is `*pending*`, the citing claim's `solidity` is pending and everything downstream of that claim with it — a claim resting on unjudged outside work genuinely has unknown solidity, so those two judgements are owed rather than routed around. The edge is what tells a claim that rests on nothing from one whose warrant is outside reach: the same zero in an edge count, and not the same epistemic state.
 
@@ -530,7 +545,7 @@ text = '''**Assigned targets only.** You create files at the targets your assign
 # kb_survey/validate.py): a leaf up-linking past its own subtopic index still
 # resolves to a document that exists, and passes every gate.
 [chunks.kb-uplink]
-text = '''`[↑ Parent Name](<parent>)` at the top of the document — `↑` is U+2191, the machine-checkable marker; `<parent>` is the parent document, spelled relative to the document carrying the link: the `index.md` of its own directory, or for an `index.md` itself the one a directory above. Directly under `kb-root/` that parent is `entry-point.md`, so a domain index up-links to `../entry-point.md`; there is no `kb-root/index.md` to point at.'''
+text = '''`[↑ Parent Name](<parent>)` on the first line after the frontmatter's closing `---`, or the first line where the document has none — `↑` is U+2191, the machine-checkable marker; `<parent>` is the parent document, spelled relative to the document carrying the link: the `index.md` of its own directory, or for an `index.md` itself the one a directory above. Directly under `kb-root/` that parent is `entry-point.md`, so a domain index up-links to `../entry-point.md`; there is no `kb-root/index.md` to point at.'''
 
 # Heading-less on purpose: the consumer expands it inside a section of its own,
 # and a chunk-owned `##` would break that section in half.
@@ -539,7 +554,7 @@ text = '''**You supply values; the op writes the bytes.** A document's frontmatt
 
 - **Values travel in a file**, never on the command line: each op takes a TOML values file you write with the Write tool, prose fields and all. One file may carry a batch, and a batch is all-or-nothing.
 - **An insert mints the id and prints it.** There is no separate mint step and no id for you to choose — an id you did not read off an insert's output does not exist.
-- **Three outcomes.** **0** wrote it. **7** refused it and wrote nothing: the report names the offending field and its line, so correct that value and call again. **8** means a concurrent writer moved the file — re-run the identical call, unchanged, up to three times, then report the contended file rather than looping. Re-authoring values that were already right is how a duplicate entry gets written.'''
+- **Four outcomes.** **0** wrote it. **2** wrote nothing because the KB or its environment is unfit, not your values; the report's `restore:` clause names the fix. On a KB whose metadata is in an older format, every write op refuses this way until a `kb-refresh` migrates the KB; once it has run, re-run the identical call. **7** refused it and wrote nothing: the report names the offending field and its line, so correct that value and call again. **8** means a concurrent writer moved the file — re-run the identical call, unchanged, up to three times, then report the contended file rather than looping. Re-authoring values that were already right is how a duplicate entry gets written.'''
 
 
 # Scar: a session model relayed the guest's answer correctly and then added two

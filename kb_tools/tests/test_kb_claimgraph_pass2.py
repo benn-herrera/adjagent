@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_pipeline, kb_util, refresh_kb_metadata, verify_kb_metadata
+from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, refresh_kb_metadata, verify_kb_metadata
 from kb_tools.inference import liaison_tools
 from kb_tools.kb_claimgraph import __main__ as cli
 from kb_tools.kb_claimgraph import (
@@ -984,11 +984,16 @@ def _plant_a_mutual_prose_reference(declared: Path) -> None:
     )
 
 
-def test_a_classified_two_cycle_demotes_both_edges_to_references_and_names_them(declared: Path):
-    """Two answers that cannot both be dependencies: both directions go, both relationships stay."""
+def test_a_classified_two_cycle_demotes_both_edges_with_their_origins_and_names_them(declared: Path, capsys):
+    """Two answers that cannot both be dependencies: both directions go, both relationships stay as cuts.
+
+    The unmarked record answered yes for one direction alone, so that cut is
+    ``inferred`` and the other ``cited``; ``kb-verify`` lists each as a finding
+    and passes.
+    """
     _plant_a_mutual_prose_reference(declared)
-    ids, _ = _narrowed(declared)
-    ring = {(ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])}
+    ids = _record_unmarked(declared, {("Alpha result", "Beta lemma"): ask.UnmarkedLetter.POINTS})
+    alpha_to_beta, beta_to_alpha = (ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])
     supported = ask.ClassifyLetter.SUPPORTED_BY
     reader = FakeReader(
         declared, {("Alpha result", "Beta lemma"): supported, ("Beta lemma", "Alpha result"): supported}
@@ -997,14 +1002,21 @@ def test_a_classified_two_cycle_demotes_both_edges_to_references_and_names_them(
     outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
 
     assert not outcome.failed, outcome.lines()
-    assert ring.isdisjoint(_register_edges(declared))
-    assert ring <= _register_references(declared)
+    ring = {alpha_to_beta, beta_to_alpha}
+    assert ring.isdisjoint(_register_edges(declared)) and ring.isdisjoint(_register_references(declared))
+    assert _register_demoted(declared) == {alpha_to_beta: "inferred", beta_to_alpha: "cited"}
     verdict = next(line for line in outcome.lines() if "stage-D-classify" in line)
-    assert "2 classified edges lay on a cycle" in verdict
+    assert "2 classified edges lay on a cycle and are recorded as demoted" in verdict
     assert all(f"{source} -> {target}" in verdict for source, target in ring)
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
+    capsys.readouterr()
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
+    findings = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[finding]")]
+    assert sorted(findings) == [
+        f"[finding] demoted vol/claim-quality.md: {source} -> {target} (origin {origin})"
+        for (source, target), origin in sorted(_register_demoted(declared).items())
+    ]
 
 
 def test_a_classification_record_an_earlier_build_left_is_not_this_builds_resume_point(consumer: Path):
@@ -1082,6 +1094,54 @@ def test_the_demoted_set_is_a_property_of_the_edges_and_not_of_their_order():
 
     assert forward == attribute.cycle_edges(list(reversed(edges)))
     assert forward == attribute.cycle_edges(sorted(edges, key=lambda edge: edge[1]))
+
+
+_OUTCOME = kb_pipeline.ClassifyOutcome
+
+
+@pytest.mark.parametrize(
+    "pair, relation, outcome, on_ring, cycle_cut, yes, origin",
+    [
+        # A depends edge a cycle of the classified set cut, its pair a yes as written.
+        (("a", "b"), attribute.Relation.SUPPORTED_BY, _OUTCOME.ANSWERED, False, True, {("a", "b")}, "inferred"),
+        # The same, with the yes only in the other direction: the direction is the pair's.
+        (("a", "b"), attribute.Relation.SUPPORTED_BY, _OUTCOME.ANSWERED, False, True, {("b", "a")}, "cited"),
+        # A ring pair that kept its drafted mention for want of a reader.
+        (("c", "d"), attribute.Relation.MENTION, _OUTCOME.DRAFTED, True, False, set(), "cited"),
+        # A ring pair that kept it after the re-ask, its pair a yes.
+        (("c", "d"), attribute.Relation.MENTION, _OUTCOME.DEFAULTED, True, False, {("c", "d")}, "inferred"),
+        # A ring pair a model answered mention: the answer's record, no cut.
+        (("c", "d"), attribute.Relation.MENTION, _OUTCOME.ANSWERED, True, False, set(), None),
+        # A ring pair a model answered supported-by and no cycle took: a depends edge, no cut.
+        (("c", "d"), attribute.Relation.SUPPORTED_BY, _OUTCOME.REASKED, True, False, set(), None),
+        # A drafted mention off the ring: a reference, no cut.
+        (("e", "f"), attribute.Relation.MENTION, _OUTCOME.DRAFTED, False, False, set(), None),
+    ],
+    ids=[
+        "cycle-inferred",
+        "cycle-yes-reversed",
+        "ring-drafted",
+        "ring-defaulted-inferred",
+        "ring-answered-mention",
+        "ring-answered-supported",
+        "off-ring-mention",
+    ],
+)
+def test_cuts_are_the_cycle_s_edges_and_the_ring_pairs_that_kept_their_draft(
+    pair, relation, outcome, on_ring, cycle_cut, yes, origin
+):
+    classified = classify.Classification(
+        relations={pair: relation},
+        outcomes={pair: outcome},
+        edges=(),
+        references=(pair,),
+        demoted=(pair,) if cycle_cut else (),
+        asks=(),
+    )
+
+    cut = classify.cuts((pair,) if on_ring else (), classified, yes)
+
+    assert dict(cut) == ({} if origin is None else {pair: origin})
 
 
 def _plant_a_mutual_proof_cycle(declared: Path) -> None:
@@ -1214,6 +1274,11 @@ def _register_references(repo: Path) -> set[tuple[str, str]]:
     return {(entry.id, edge.target) for entry in _entries(repo / "kb-root") for edge in entry.references}
 
 
+def _register_demoted(repo: Path) -> dict[tuple[str, str], str | None]:
+    """The cuts on disk with their origins, read back through the production parser."""
+    return {(entry.id, edge.target): edge.origin for entry in _entries(repo / "kb-root") for edge in entry.demoted}
+
+
 def test_a_run_with_no_model_writes_every_candidate_s_draft(declared: Path, monkeypatch, capsys):
     """Through the shipped command line, which is what a seat is told to run.
 
@@ -1302,7 +1367,8 @@ def test_a_ring_among_the_settled_pairs_costs_its_own_edges_and_not_the_paper(de
 
     assert not outcome.failed, outcome.lines()
     assert _register_edges(declared) == _settled(ids)
-    assert ring <= _register_references(declared)
+    assert _register_demoted(declared) == dict.fromkeys(ring, "cited"), "no unmarked yes: each cut is cited"
+    assert ring.isdisjoint(_register_references(declared)), "a cut lands as demoted and never as a reference"
     line = next(line for line in outcome.lines() if "stage-D-containment-ring" in line)
     assert "2 pairs containment directed lay on a cycle" in line
     assert all(f"{source} -> {target}" in line for source, target in narrowed.demoted)
@@ -1310,6 +1376,36 @@ def test_a_ring_among_the_settled_pairs_costs_its_own_edges_and_not_the_paper(de
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
+
+
+@pytest.mark.parametrize(
+    "edited, shown",
+    [("(origin guessed)", "'guessed'"), ("", "None")],
+    ids=["outside-the-vocabulary", "missing"],
+)
+def test_a_cut_whose_origin_is_not_cited_or_inferred_fails_verify_and_no_refresh_fixes_it(
+    declared: Path, capsys, edited: str, shown: str
+):
+    """A hand edit to a ``demoted`` bullet's origin reaches the index, and verify fails it there."""
+    _plant_a_mutual_proof_cycle(declared)
+    assert not depends.build(
+        kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=None
+    ).failed
+    register = declared / "kb-root" / "vol" / "claim-quality.md"
+    text = register.read_text(encoding="utf-8")
+    assert text.count("(origin cited)") == 2
+    register.write_text(text.replace("(origin cited)", edited, 1), encoding="utf-8")
+
+    kb = declared / "kb-root"
+    assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
+    capsys.readouterr()
+    assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 1
+    out = capsys.readouterr().out
+
+    assert "referential-integrity violation" in out
+    assert f"demoted edge origin {shown} is not one of cited, inferred" in out
+    assert "Try `" not in out, "not refresh-fixable"
+    assert out.count("[finding] demoted vol/claim-quality.md: ") == 2
 
 
 def test_claim_discovery_has_no_run_that_asks_nobody(declared: Path, monkeypatch, capsys):

@@ -14,7 +14,6 @@ question this one asks of the loop. What is real is the reading — the guard
 calls ``kb_util.kb_root_state`` against a directory this file lays down.
 """
 
-import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -45,8 +44,8 @@ class Calls:
         self.started = 0
         self.document_graphs = 0
 
-    def _start(self, *, charter: str) -> ledger.Outcome:
-        del charter
+    def _start(self, *, charter: str, inputs: kb_pipeline.BuildInputs) -> ledger.Outcome:
+        del charter, inputs
         self.started += 1
         self.recorded.append(kb_pipeline.FIRST_STAGE_ID)
         return ledger.Outcome(baton.EXIT_OK)
@@ -56,8 +55,10 @@ class Calls:
         self.document_graphs += 1
         return ledger.Outcome(baton.EXIT_OK)
 
-    def _advance(self, *, stage: str, note: str = "", no_inference: bool = False) -> ledger.Outcome:
-        del note, no_inference
+    def _advance(
+        self, *, stage: str, inputs: kb_pipeline.BuildInputs, note: str = "", no_inference: bool = False
+    ) -> ledger.Outcome:
+        del inputs, note, no_inference
         self.recorded.append(stage)
         return ledger.Outcome(baton.EXIT_OK)
 
@@ -76,13 +77,13 @@ class Calls:
 
 
 def _repo(tmp_path: Path, *, state: str) -> Path:
-    """A repo root whose ``kb-root/`` is in one of the three states, and the lock held.
+    """A repo root whose ``kb-root/`` is in one of the three states, with a git directory for the run lock.
 
     Keyed on the tri-state rather than on a shape, so the three cases below are
     the three values and cannot drift into two spellings of one of them.
     """
     root = tmp_path / "repo"
-    root.mkdir()
+    (root / ".git").mkdir(parents=True)
     if state == kb_util.KB_ROOT_SPINE_ONLY:
         kb_util.index_dir(root).mkdir(parents=True)
     elif state == kb_util.KB_ROOT_POPULATED:
@@ -90,9 +91,6 @@ def _repo(tmp_path: Path, *, state: str) -> Path:
         (kb_util.kb_root(root) / "entry-point.md").write_text("# KB\n", encoding="utf-8")
     assert kb_util.kb_root_state(root) == state
 
-    lock = runlog.repo_lock_path(root)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": 1, "run_id": "start-suite"}), encoding="utf-8")
     return root
 
 
@@ -104,14 +102,16 @@ def _drive(
     decisions: Sequence[str] = (),
     stages: Sequence[str] = ("start",),
 ) -> run.Result:
-    return run.execute(
-        config=config.load(None, run_overrides={"sources": ("AcmeWidgets.tex",)}, admissible=barriers.ADMISSIBLE),
-        paths=runlog.prepare(tmp_path / "runs", "20260901T120000-1"),
-        decisions=[config.parse_decision(spec, admissible=barriers.ADMISSIBLE) for spec in decisions],
-        repo_root=root,
-        ops=calls.ops(),
-        stages=stages,
-    )
+    paths = runlog.prepare(tmp_path / "runs", "20260901T120000-1")
+    with runlog.run_lock(root, state_dir=paths.run_dir):
+        return run.execute(
+            config=config.load(None, run_overrides={"sources": ("AcmeWidgets.tex",)}, admissible=barriers.ADMISSIBLE),
+            paths=paths,
+            decisions=[config.parse_decision(spec, admissible=barriers.ADMISSIBLE) for spec in decisions],
+            repo_root=root,
+            ops=calls.ops(),
+            stages=stages,
+        )
 
 
 # ---------------------------------------------------------------------------

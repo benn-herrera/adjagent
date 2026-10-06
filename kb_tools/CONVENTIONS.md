@@ -84,12 +84,28 @@ root.
   drops the fourth, which is how a work entry becomes a lost entry the census reports and nobody
   expected. The one asymmetry to know: a `work-` entry carries no `- solidity:` line and no
   depends-on list, because the node is terminal and nothing derives a value for it.
+- **YAML is `kb_yaml`'s.** Every YAML byte a KB holds is read and written through it. No module
+  splits `---`, strips a `--- ` marker or parses an index line itself; test `bool` before `int` when
+  typing a value.
+- **A test KB is stamped.** A test that builds a KB inline builds it through
+  `tests/_stamped_kb.py` (`write_stamped_kb`, `write_index`); an unstamped KB in a test is a
+  migration's input — a copy of the `0.9.0` goldens or of `fixtures/superseded-shapes/`, or the
+  document tree `graph-init` seeds — and nothing else. A KB copied for refresh sits in a directory
+  named `kb-root`: the build records are read beside `kb-root/`, so a copy named otherwise finds no
+  KB for them.
+- **Only `kb_migrate` knows a superseded format.** Every other module reads the current one, from
+  disk or converted through `kb_load`, and spells no superseded form — not the comment-block opener,
+  not a `.jsonl` index or `.json` record name, not in a comment either.
+  `tests/test_superseded_format_monopoly.py` enforces it. A test that needs a 0.9.0 document takes
+  one from the `0.9.0` goldens or `fixtures/superseded-shapes/` rather than typing it.
 - **A frontmatter writer after the declared pass carries forward every attribute it does not own.**
   `set-frontmatter` replaces the whole block, so a key left out of the values file is a key removed:
   a leaf's block-hosted `claims:` left out is caught only by verify, after the write, and a
   `path-stable:` left out is caught by nothing. Such a writer reads the block as it stands and
   restates what is not its own: `write.land_leaf` is the one that does, and a new writer goes
-  through it rather than beside it.
+  through it rather than beside it. The `kb-format` stamp is the exception: `set-frontmatter`
+  carries it over itself, as the block's last key, and `store`'s frontmatter splices keep it last —
+  a new frontmatter writer goes through them rather than appending past it.
 - **Keep no prose copy of an op's key vocabulary.** The vocabulary is closed, total, and per-op,
   stated once in `values.OP_FIELDS` (SPEC.md, The Write API's Contract). A second statement of it —
   in a doc, a docstring, or a comment — drifts; point at `values.OP_FIELDS` or the refusal message

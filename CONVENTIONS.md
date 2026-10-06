@@ -80,7 +80,7 @@ Mechanism — markers, variants, overlay anchors, the write-safety table — liv
 module docstrings: `markers.py`, `chunks.py`, `model_tuning.py`, `generation.py`. This section is
 procedure only.
 
-- **New template, de novo.** Create `templates/agents/<path>/<name>.tmpl.md` (or the same under
+- **Adding a new template** Create `templates/agents/<path>/<name>.tmpl.md` (or the same under
   `templates/commands/`). Placement is the whole declaration: a template's path within its surface
   tree is its output's path within `agents/` or `commands/`, nesting included, and a template's
   existence is its enrollment — there is no list to join. The body is the definition as it should
@@ -90,4 +90,6 @@ procedure only.
   stamps its banner. An agents template's body must hold SPEC.md's Guest-Extraction Contract when it
   renders a dispatchable definition — a template directly under `templates/agents/`. Nested deeper,
   the obligation reaches only `mad/participant-contract.tmpl.md`, which exists to be extracted; a
-  `mad/design-topics/` methodology topic is outside it.
+  `mad/design-topics/` methodology topic is outside it. An agents template authors `tools:` as a
+  comma-separated list of the names `[harness.tools]` defines (`read`, `grep`, `webfetch`, ...), not
+  in any harness's spelling; the render refuses any other name.

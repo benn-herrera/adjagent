@@ -567,118 +567,67 @@ class TestNoAuthoredBound(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestReaderNumberGrammar(unittest.TestCase):
-    """A number the reader's grammar cannot hold is refused here, naming the field.
+class TestExponentNumbers(unittest.TestCase):
+    """A number whose repr is exponent notation is writable, and reads back as itself.
 
-    The domains above are magnitudes; this is not one. Python's shortest
-    round-tripping repr — ``render._format_score``'s output, and deliberately
-    so — leaves the reader's ``-?\\d+(?:\\.\\d+)?`` below ``1e-4``, above
-    ``1e16``, and at ``nan`` / ``inf``. Every such value sits *inside* its
-    magnitude domain, so no domain check can see it, and each fails silently in
-    a different direction downstream: a confidence line is read back as a
-    different number, a pair line is not matched at all and the edge is dropped.
-
-    A check failing for the wrong reason is a failed check.
+    ``render._format_score`` writes Python's shortest round-tripping repr, which
+    switches to exponent notation below ``1e-4``; ``kb_schema.number_token`` reads
+    that notation. Non-finite floats are not a representability case: the
+    per-field domain check refuses them.
     """
 
-    #: Rendered spellings the reader's grammar does not hold, with what a caller
-    #: would plausibly type to reach each.
-    _UNREADABLE = ("1e-05", "0.00001", "2.5e-07")
+    _EXPONENT = (1e-05, 2.5e-07)
 
-    def test_a_rigor_below_the_reprs_exponent_threshold_is_refused_at_step_one(self):
-        for literal in self._UNREADABLE:
-            with self.subTest(literal=literal):
-                refusal = _only(values.parse_values(_insert_file(rigor=literal), op="insert-claim-entry"))
-                self.assertEqual(refusal.field, "rigor")
-                self.assertEqual(refusal.line, 4)
-
-    def test_the_representable_neighbour_is_accepted(self):
-        # The teeth: 1e-4 is the threshold, so `0.0001` reprs as itself and is
-        # a perfectly writable rigor. A check that refused it would be an
-        # authored magnitude bound, which this program does not add.
-        parsed = values.parse_values(_insert_file(rigor="0.0001"), op="insert-claim-entry")
-        self.assertEqual(parsed.refusals, ())
-        self.assertEqual(parsed.entries[0].values["rigor"], 0.0001)
-
-    def test_a_fraction_the_reader_cannot_hold_is_refused(self):
-        text = '[[entry]]\nid = "sup-hh8888"\nclaim = "clm-aa1111"\nfraction = 1e-05\n'
-        refusal = _only(values.parse_values(text, op="set-on-point-fraction"))
-        self.assertEqual(refusal.field, "fraction")
-        self.assertEqual(refusal.line, 4)
-
-    def test_a_strength_inside_its_domain_can_still_be_unwritable(self):
-        # The two gates are independent: `1e-05` and `2.5e-07` are both inside
-        # [0, 1] and neither can be written, because the token the renderer
-        # emits for them is one the pair pattern does not match.
-        for literal in ("1e-05", "2.5e-07"):
-            with self.subTest(literal=literal):
-                refusal = _only(values.parse_values(_frontmatter_file(literal), op="set-frontmatter"))
-                self.assertEqual(refusal.field, "experiment-node[1].strengthens[1].strength")
-
-    def test_the_representable_neighbour_is_a_writable_strength(self):
-        # The teeth on the other side: `1e-4` is the repr threshold, so
-        # `0.0001` reprs as itself and is a perfectly writable strength.
-        parsed = values.parse_values(_frontmatter_file("0.0001"), op="set-frontmatter")
-        self.assertEqual(parsed.refusals, ())
-
-    def test_the_checked_token_is_the_one_the_renderer_writes(self):
-        # This module may not import `render`, so it re-spells the repr.
-        # The pin against that duplication: the two spellings agree.
-        for number in (0.0, 1.0, 0.875, 0.0001, 1e-05, 4.0, 1e15, 1e300, float("nan"), float("inf")):
+    def test_exponent_strengths_are_accepted(self):
+        for number in self._EXPONENT:
             with self.subTest(number=number):
-                self.assertEqual(f"{number}", render._format_score(number))
+                parsed = values.parse_values(_frontmatter_file(repr(number)), op="set-frontmatter")
+                self.assertEqual(parsed.refusals, ())
 
-    def test_this_module_refuses_exactly_what_the_readers_own_matchers_drop(self):
-        # The pin that matters, and the reason `_READER_NUMBER_RE` is a copy
-        # rather than a retyped bound: every value below is put through the
-        # production renderer and then through the reader's OWN pair patterns,
-        # and this module's verdict is compared against theirs. The verdict
-        # asked for is `_require_number`'s — the representability funnel every
-        # numeric field passes through — and not a field checker's, so that a
-        # value's magnitude domain cannot decide the answer.
-        corpus = (0.0001, 0.5, 1.0, 4.0, 1e15, 1e-05, 2.5e-07, 1e300, float("nan"), float("inf"))
-        for number in corpus:
+    def test_an_exponent_confidence_reads_back_as_itself(self):
+        for number in self._EXPONENT:
             with self.subTest(number=number):
-                strengthens = render.render_strengthens_pair_line("clm-aa1111", number)
-                supports = render.render_supports_pair_line("clm-aa1111", number)
-                readable = bool(kb_index_lib._STRENGTHENS_PAIR_RE.match(strengthens))
-                self.assertEqual(readable, bool(kb_index_lib._SUPPORTS_PAIR_RE.match(supports)))
-                refused = False
-                try:
-                    values._require_number(number, "strength", domain="[0, 1]")
-                except Exception:  # the module-internal refusal signal
-                    refused = True
-                self.assertEqual(refused, not readable)
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    register = root / "claim-quality.md"
+                    register.write_text(
+                        render.render_claim_entry(
+                            node_id="clm-aa1111", title="An Entry", confidence=number, rationale="why"
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    entries = kb_index_lib.parse_claim_quality_file(register, root)
+                self.assertEqual([entry.confidence for entry in entries], [number])
 
-    def test_an_unreadable_confidence_would_be_read_back_as_a_different_number(self):
-        # The first silent direction, demonstrated through the real parser
-        # rather than asserted: `_NUMBER_RE.search` takes the LEADING token of
-        # `1e-05`, so a rigor inside [0, 1] comes back as 1.0.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            register = root / "claim-quality.md"
-            register.write_text(
-                render.render_claim_entry(
-                    node_id="clm-aa1111",
-                    title="An Entry",
-                    confidence=1e-05,
-                    rationale="why",
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            entries = kb_index_lib.parse_claim_quality_file(register, root)
-        self.assertEqual([entry.confidence for entry in entries], [1.0])
+    def test_an_exponent_fraction_reads_back_as_itself(self):
+        for number in self._EXPONENT:
+            with self.subTest(number=number):
+                with tempfile.TemporaryDirectory() as tmp:
+                    register = Path(tmp) / "claim-quality.md"
+                    register.write_text(
+                        render.render_support_entry(
+                            node_id="sup-hh8888",
+                            title="A Support",
+                            quality=0.5,
+                            rationale="why",
+                            supports=(("clm-aa1111", number),),
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    staged = kb_index_lib.parse_register_staged_supports(register)
+                self.assertEqual(staged, {"sup-hh8888": [("clm-aa1111", number)]})
 
-    def test_an_unreadable_fraction_would_drop_its_edge_entirely(self):
-        # The second silent direction: the pair line does not match, so the
-        # beneficiary edge is not read at all — no error, no edge.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            leaf = root / "leaf.md"
-            leaf.write_text(_support_leaf_text(1e-05), encoding="utf-8")
-            nodes = kb_index_lib.parse_support_leaf(leaf, root)
-        self.assertEqual([node.supports for node in nodes], [()])
+    def test_non_finite_numbers_are_refused_by_the_domain_check(self):
+        for literal in ("nan", "inf", "-inf"):
+            with self.subTest(literal=literal):
+                strength = _only(values.parse_values(_frontmatter_file(literal), op="set-frontmatter"))
+                self.assertEqual(strength.field, "experiment-node[1].strengthens[1].strength")
+                self.assertIn("[0, 1]", strength.detail)
+                confidence = _only(values.parse_values(_insert_file(rigor=literal), op="insert-claim-entry"))
+                self.assertEqual(confidence.field, "rigor")
+                self.assertIn("[0, 1]", confidence.detail)
 
 
 # ---------------------------------------------------------------------------
@@ -890,7 +839,7 @@ class TestHostileShapes(unittest.TestCase):
         # the format. The rule is about who composes the bytes, not what
         # prose says.
         rationale = "the 2026-09-02 loss put <!-- id: clm-3hh05h --> above its ## heading"
-        title = "Why <!-- kb-frontmatter --> Placement Matters"
+        title = "Why <!-- claim-quality: clm-3hh05h --> Placement Matters"
         parsed = values.parse_values(
             _insert_file(rationale=f'"{rationale}"', title=f'"{title}"'), op="insert-claim-entry"
         )
@@ -928,34 +877,26 @@ class TestHostileShapes(unittest.TestCase):
         self.assertEqual(parsed.refusals, ())
 
 
-class TestCommentDelimitersInProse(unittest.TestCase):
-    """``-->`` inside a prose value is carried, because the reader carries it.
+class TestFrontmatterDelimitersInProse(unittest.TestCase):
+    """A fence or a comment closer inside a prose value is carried, because the reader carries it.
 
-    The question raised is whether a value containing the frontmatter
-    block's own closer must be refused. The rule is the same one the blank-line
-    refusal follows and the answer is the opposite one: a value the reader
-    cannot hold is refused *here*; a value it can hold is written, and never
-    escaped or reshaped to make it look safer than it is — an escape would be
-    the silent edit of an author's prose this module forbids, and it would put
-    a transform in a module whose contract is that it performs none.
+    The rule is the one the blank-line refusal follows, with the opposite
+    answer: a value the reader cannot hold is refused *here*; a value it can
+    hold is written, never escaped or reshaped to look safer than it is.
 
-    ``FRONTMATTER_RE``'s closer is anchored to a line start, and every prose
-    value is collapsed to a single physical line before it is written, so a
-    ``-->`` inside a value can never reach column zero. The class below shows
-    that end to end — through the production renderer and the production
-    parser — and then shows the anchor is load-bearing, so the demonstration is
-    not vacuous.
-
-    What remains true and is *not* this module's to fix: a Markdown renderer
-    that is not this toolchain ends an HTML comment at the first ``-->``
-    wherever it sits. That is a rendering-surface defect.
+    The frontmatter ends at a ``---`` line, and every prose value is collapsed
+    to one physical line and written as one YAML scalar, so a ``---`` or a
+    ``-->`` inside a value never stands on a line of its own. The class below
+    shows that end to end — through the production renderer and the production
+    parser — and then shows the line-start fence is load-bearing, so the
+    demonstration is not vacuous.
     """
 
-    _VALUE = "the fold reads `a --> b` as one hop, not two"
+    _VALUE = "the fold reads `a --> b` as one hop --- not two"
 
     def _document(self, no_claim: str) -> str:
         block = render.render_frontmatter_block(render.FrontmatterValues(kind="leaf", no_claim=no_claim))
-        return f"[↑ Parent](index.md)\n\n{block}\n\n# A Leaf\n\nBody prose survives.\n"
+        return f"{block}\n[↑ Parent](index.md)\n\n# A Leaf\n\nBody prose survives.\n"
 
     def test_the_value_is_accepted_and_returned_byte_identical(self):
         text = f'[[entry]]\ndocument = "l.md"\nkind = "leaf"\nno-claim = "{self._VALUE}"\n'
@@ -968,20 +909,20 @@ class TestCommentDelimitersInProse(unittest.TestCase):
         self.assertEqual(kb_index_lib.parse_frontmatter(document)["no-claim"], self._VALUE)
 
     def test_the_block_still_ends_where_the_writer_closed_it(self):
-        # The other direction: the closer inside the value must not shorten the
-        # block, and must not swallow the body when the block is scrubbed.
-        document = self._document(self._VALUE)
-        scrubbed = kb_index_lib.FRONTMATTER_RE.sub("", document)
-        self.assertIn("# A Leaf", scrubbed)
-        self.assertIn("Body prose survives.", scrubbed)
-        self.assertNotIn("no-claim", scrubbed)
+        # The other direction: the delimiters inside the value must not shorten
+        # the block, and must not swallow the body when the block is stripped.
+        stripped = kb_index_lib.strip_frontmatter(self._document(self._VALUE))
+        self.assertTrue(stripped.startswith("[↑ Parent](index.md)"), stripped)
+        self.assertIn("Body prose survives.", stripped)
+        self.assertNotIn("no-claim", stripped)
 
-    def test_a_closer_at_a_line_start_is_the_terminator(self):
-        # The teeth. Without the line-start anchor the three tests above would
-        # pass over a parser that ends the block anywhere, so this shows the
-        # anchor is what carries them — and that the renderer's collapse to one
-        # physical line is what keeps a value from ever reaching column zero.
-        hostile = self._document(self._VALUE).replace(f'no-claim: "{self._VALUE}"', "-->\nno-claim: swallowed")
+    def test_a_fence_at_a_line_start_is_the_terminator(self):
+        # The teeth: a `---` line ends the block, so the collapse to one
+        # physical line is what keeps a value from ever ending it early.
+        rendered_value = f'no-claim: "{self._VALUE}"'
+        document = self._document(self._VALUE)
+        self.assertIn(rendered_value, document)
+        hostile = document.replace(rendered_value, "---\nno-claim: swallowed")
         self.assertNotIn("no-claim", kb_index_lib.parse_frontmatter(hostile))
         self.assertEqual(render.collapse_prose(f"a\n{self._VALUE}").count("\n"), 0)
 

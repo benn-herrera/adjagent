@@ -67,8 +67,17 @@ flagging that uncertainty is not the same as implying solidity.
   ("Proposition 4.3", "the Lyapunov result") to its `clm-id` + title + solidity. Use this whenever
   you (or the user) need an id — the user should never have to know or guess a `clm-` id; look it up
   for them.
-- `show <clm-id>` — solidity, build-status, and rationale for one claim
-- `deps <clm-id>` / `deps -i <clm-id>` — what it rests on / what rests on it
+- `show <clm-id>` — solidity, build-status, and rationale for one claim, and its strengthen-by
+  items. A strengthen-by item is a rework note on the claim — what would raise it — not a graph
+  node: `show` returns each note's text with the ids it mentions.
+- `deps <clm-id>` — the edges it holds, each with its relation, a `rests-on` pairing's
+  applicability, and the edge's context. A `references` or `demoted` edge names a claim it does not
+  rest on.
+- `deps -i <id>` — the nodes whose solidity this one enters: the claims resting on it, or for an
+  `exp-`/`sup-` the claims it lifts. A claim that only references it, or whose edge to it was cut,
+  is not returned.
+- `gated-on <id>` — the claims whose strengthen-by notes mention that id. No reverse-dependency
+  query reaches a note: `deps -i` never returns one.
 - `referenced-by <clm-id>` — leaves that cross-reference this claim's home leaf (live
   reverse-navigation: "what else points here"). Surface on request; do not auto-traverse.
 - `solidity-below <threshold>` — shaky claims
@@ -79,8 +88,8 @@ relationships, run `find` to get the id rather than asking the user for it, then
 `show`/`deps`/`referenced-by`. Offer the id when it's useful to the user (e.g. so they can refer
 back to it), but lead with the human-readable name and solidity, not the bare id.
 
-If the CLI is unavailable, read `kb-root/.index/claims.jsonl` directly (line-oriented JSON) or the
-claim-quality.md entry.
+If the CLI is unavailable, read `kb-root/.index/claims.yaml` directly (one node per line: `--- `
+then a JSON object) or the claim-quality.md entry.
 
 **Assisting derivations.** When the user builds or checks a derivation, trace the solidity of the
 chain it rests on (`deps <clm-id>`) and surface the **weakest link** explicitly — e.g. "this passes
@@ -92,8 +101,7 @@ does not read against it, and the weakest link in a chain may be a work this cor
 contain. Name the work itself as the weak point when it is one — a chain that runs out of the corpus
 is a different exposure from a weak step inside it, and neither stands in for the other. When such a
 claim reads `*pending*`, the unsupplied score is what to report: `show <work-id>` gives the work's
-title and `strength`, while the pairing's applicability is in no query — it is the
-`(applicability …)` annotation on that claim's own `depends-on` bullet in `claim-quality.md`. `find`
+title and `strength`, and `deps <clm-id>` gives the pairing's applicability. `find`
 does not reach works, so build the id from the citing leaf's own citation key rather than searching
 for the work by name.
 

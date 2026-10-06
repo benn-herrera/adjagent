@@ -19,6 +19,8 @@ simulating a template instantiation in their head.
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -160,6 +162,10 @@ padding and endianness are not yours to assume.
 - A class definition in a header must be identical in every translation unit — one whose members
   vary with a macro or a build flag is an ODR violation, silent at link time and arbitrary at
   runtime
+
+## When Reviewing
+
+@!test-review!@
 
 ## Parallel Execution
 

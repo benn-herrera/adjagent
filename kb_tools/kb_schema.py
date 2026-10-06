@@ -8,7 +8,7 @@ and is anchored beside :mod:`kb_util` in the ``kb_tools`` package (the single so
 path truth), so any consumer imports it directly as ``from kb_tools import
 kb_schema``.
 
-Four vocabularies live here:
+Seven vocabularies live here:
 
 * the **build-band ladder** — the ordered solidity → (slug, status-phrase,
   display-label) mapping written into each claim's ``build_band`` field by the
@@ -18,9 +18,14 @@ Four vocabularies live here:
 * the **node-kind vocabulary** — :data:`NODE_KINDS`, every value a
   ``node_type`` takes, which a census, a breakdown, a union or an ordering
   iterates rather than spelling, with :data:`EDGE_RELATIONS` beside it for
-  every value an edge's ``relation`` takes, and
+  every value an edge's ``relation`` takes,
 * the **derived-field placeholders** — the identity value of each field
-  ``refresh`` computes and nothing else may.
+  ``refresh`` computes and nothing else may,
+* the **register's number grammar** — :data:`NUMBER_TOKEN_RE` and :func:`number_token`,
+* the **layout names** — the KB directory, the index directory and the entry point's filename, and
+* the **metadata-format vocabulary** — the stamp's key, the one version this
+  toolchain reads and writes, the version of a KB carrying no stamp, and the
+  frontmatter keys a leaf's node declarations sit under.
 
 Stdlib only.
 """
@@ -47,6 +52,17 @@ from typing import TypeVar
 #: The authored/derived "not yet assessed" literal — the one spelling, so a
 #: value written by one tool is recognized by every other.
 PENDING_LITERAL = "*pending*"
+
+#: A full float literal: every token Python's float repr emits, bar ``nan`` and ``inf``.
+NUMBER_TOKEN_RE = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+_NUMBER_TOKEN = re.compile(NUMBER_TOKEN_RE)
+
+
+def number_token(text: str) -> float | None:
+    """The first number token in ``text`` as a float, or ``None`` when there is none."""
+    match = _NUMBER_TOKEN.search(text)
+    return float(match.group(0)) if match else None
+
 
 #: The canonical ``- solidity:`` slot on an entry with no computable solidity,
 #: and on every freshly inserted one. Refresh *replaces* this line and never
@@ -290,7 +306,12 @@ FRAMEWORK_KINDS: tuple[str, ...] = ("invariant", "axiom")
 #: Every value an edge's ``relation`` takes, in SPEC.md's Edge classes order. A
 #: site that styles or counts per relation reads this rather than spelling the
 #: list, and checks a per-relation table against it.
-EDGE_RELATIONS: tuple[str, ...] = ("depends", "strengthens", "supports", "rests-on", "references")
+EDGE_RELATIONS: tuple[str, ...] = ("depends", "strengthens", "supports", "rests-on", "references", "demoted")
+
+#: Every origin a ``demoted`` edge may carry: whether the text marked the
+#: dependency the build's cycle breaking cut (``cited``) or a reading found it
+#: unmarked (``inferred``).
+DEMOTED_ORIGINS: tuple[str, ...] = ("cited", "inferred")
 
 _T = TypeVar("_T")
 
@@ -330,3 +351,34 @@ def node_kind_plural(kind: str) -> str:
     if kind not in NODE_KINDS:
         raise ValueError(f"unknown node kind {kind!r}; valid kinds are {NODE_KINDS!r}")
     return f"{kind}s"
+
+
+# ---------------------------------------------------------------------------
+# Layout
+# ---------------------------------------------------------------------------
+
+#: The directory a KB lives in, beside the repository's runner file.
+KB_DIRNAME = "kb-root"
+
+#: The directory of derived index streams, directly under the KB directory.
+INDEX_DIRNAME = ".index"
+
+#: The KB's root document, which carries the format stamp.
+ENTRY_POINT_FILENAME = "entry-point.md"
+
+# ---------------------------------------------------------------------------
+# The metadata-format vocabulary
+# ---------------------------------------------------------------------------
+
+#: The format stamp's key: the last key of ``entry-point.md``'s frontmatter.
+FORMAT_KEY = "kb-format"
+
+#: The one metadata format version this toolchain reads and writes.
+FORMAT_VERSION = "1.0.0"
+
+#: The version of a KB whose entry point carries no stamp.
+UNSTAMPED_FORMAT_VERSION = "0.9.0"
+
+#: The frontmatter keys a leaf's node declarations sit under, one mapping per node.
+EXPERIMENT_NODES_KEY = "experiment-nodes"
+SUPPORT_NODES_KEY = "support-nodes"

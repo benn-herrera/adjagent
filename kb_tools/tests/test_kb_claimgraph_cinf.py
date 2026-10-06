@@ -40,7 +40,6 @@ from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
 
-
 # ---------------------------------------------------------------------------
 # A four-leaf corpus: one author-marked block, one prose document stating
 # results across a hard wrap and carrying two maths fences, and one stating none.
@@ -299,7 +298,7 @@ def test_an_abbreviation_followed_by_a_numeral_is_not_a_sentence_end(declared: P
 
 def test_inline_maths_carrying_a_decimal_point_is_not_two_sentences():
     """``$x = 1.5$`` is one sentence's worth of maths, and the split must not enter it."""
-    body = "<!-- kb-frontmatter\nkind: leaf\n-->\n\nThe bound is $x = 1.5$ here. A second sentence follows.\n"
+    body = "---\nkind: leaf\n---\n\nThe bound is $x = 1.5$ here. A second sentence follows.\n"
     rendered = label.render(body)
 
     assert [sentence.text for sentence in rendered.sentences] == [
@@ -314,9 +313,9 @@ def test_navigation_and_the_frontmatter_block_carry_no_label(declared: Path):
     rendered = reading.render
 
     assert _UPLINK in rendered.text
-    assert "kb-frontmatter" in rendered.text
+    assert "no-claim:" in rendered.text
     assert all(_UPLINK not in sentence.text for sentence in rendered.sentences)
-    assert all("kb-frontmatter" not in sentence.text for sentence in rendered.sentences)
+    assert all("no-claim:" not in sentence.text for sentence in rendered.sentences)
     assert min(sentence.line for sentence in rendered.sentences) > 0
 
 
@@ -503,7 +502,7 @@ def test_a_yes_paragraph_carrying_an_equation_is_its_whole_paragraph(declared: P
 def test_a_paragraph_whose_words_repeat_is_unplaceable_and_defaulted(declared: Path):
     """No line of the document names it alone, so it cannot be marked: it costs that paragraph and nothing else."""
     body = (
-        "<!-- kb-frontmatter\nkind: leaf\n-->\n\n"
+        "---\nkind: leaf\n---\n\n"
         "The bound holds here.\n\nThe bound holds here.\n\nThe operator is monotone on the cone.\n"
     )
     reading = identify.Reading(document="vol/leaf.md", text=body, body=body)

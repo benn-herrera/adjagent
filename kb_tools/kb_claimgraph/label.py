@@ -37,8 +37,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .. import kb_index_lib
 from ..kb_write import render as compose
-from ..kb_write import store
 from .inventory import MathFence
 from .tree import BLOCKQUOTE_PREFIX
 
@@ -160,13 +160,16 @@ def _body_start(text: str) -> int:
     """The first line a label may name.
 
     The write API's locator match begins beneath the frontmatter block, so a
-    label above it could never be found again; and line 1 is the up-link, which
-    is navigation rather than anything the document states. Excluding both here
+    label above it could never be found again; and the up-link's line is
+    navigation rather than anything the document states. Excluding both here
     is what retires two downstream checks — what the render does not offer, a
     locator cannot name.
     """
-    block = store.FRONTMATTER_BLOCK.search(text)
-    return max(text.count("\n", 0, block.end()) + 1 if block else 0, 1)
+    block = kb_index_lib.find_frontmatter(text)
+    # `end` follows the closing fence's line break, so `end - 1` sits on the fence's line.
+    after_block = text.count("\n", 0, block.end - 1) + 1 if block else 0
+    uplink = kb_index_lib.uplink_index(text)
+    return max(after_block, uplink + 1 if uplink is not None else 0)
 
 
 def heading_lines(text: str) -> frozenset[int]:

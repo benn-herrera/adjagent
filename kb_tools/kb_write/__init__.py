@@ -3,7 +3,7 @@
 Module map:
 
 * :mod:`render` — the ONLY place metadata bytes are composed: register entries
-  (claim and support), the kb-frontmatter block, id and Tier-2 markers,
+  (claim and support), the frontmatter block, id and Tier-2 markers,
   structured bullets, prose normalization, derived-field placeholders, and the
   citation form. Values in, text out — total, pure, and path-free.
 * :mod:`values` — the values-file grammar (TOML) and the closed per-op field

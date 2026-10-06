@@ -15,7 +15,6 @@ on ``kb-root/`` proper; the live KB's "does it currently pass" status is
 covered by the verify target.
 """
 
-import json
 import re
 import shutil
 import subprocess
@@ -24,8 +23,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kb_tools import kb_schema, kb_util, refresh_kb_metadata, verify_kb_metadata
+from kb_tools import kb_load, kb_schema, kb_util, kb_yaml, refresh_kb_metadata, verify_kb_metadata
 from kb_tools.tests._in_process import run_main
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 _THIS_DIR = Path(__file__).resolve().parent
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
@@ -45,7 +45,7 @@ def _materialize_fixture(parent: Path) -> Path:
 
     Returns the path to the materialized fixture KB root.
     """
-    kb = parent / "mini-kb"
+    kb = parent / "kb-root"
     shutil.copytree(_FIXTURE_SRC, kb)
     result = _run_refresh(kb)
     if result.returncode != 0:
@@ -53,6 +53,19 @@ def _materialize_fixture(parent: Path) -> Path:
             f"refresh_kb_metadata failed against fixture copy: " f"stdout={result.stdout}\nstderr={result.stderr}"
         )
     return kb
+
+
+def _with_extra_edge(kb: Path, parent: Path, record: dict) -> Path:
+    """A copy of ``kb`` under ``parent`` whose depends-on stream carries ``record`` as a last line."""
+    copy = shutil.copytree(kb, parent / "kb-root")
+    path = kb_load.index_path(copy, "depends-on")
+    path.write_text(path.read_text(encoding="utf-8") + kb_yaml.index_line(record), encoding="utf-8")
+    return copy
+
+
+def _records(kb: Path, name: str) -> list[dict]:
+    """The index stream ``name``'s records, as the queries read them."""
+    return kb_load.read_index(kb, name)[0]
 
 
 class TestCheckIndex(unittest.TestCase):
@@ -71,10 +84,10 @@ class TestCheckIndex(unittest.TestCase):
         cls.index_dir = cls.kb_root / ".index"
 
     def _backup_index_file(self, name: str) -> str:
-        return (self.index_dir / name).read_text(encoding="utf-8")
+        return kb_load.index_path(self.kb_root, name).read_text(encoding="utf-8")
 
     def _restore_index_file(self, name: str, content: str) -> None:
-        (self.index_dir / name).write_text(content, encoding="utf-8")
+        kb_load.index_path(self.kb_root, name).write_text(content, encoding="utf-8")
 
     def test_index_line_reports_every_node_kind(self):
         """The [index] summary breaks the node total down over the whole
@@ -95,48 +108,36 @@ class TestCheckIndex(unittest.TestCase):
         """A depends-on edge whose target_kind contradicts the resolved node
         fails referential integrity (kind-match)."""
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_index = Path(tmp) / ".index"
-            tmp_index.mkdir()
-            for short in (
-                "claims.jsonl",
-                "depends-on.jsonl",
-                "strengthen-by.jsonl",
-                "cites.jsonl",
-                "subtree-aggregates.jsonl",
-            ):
-                shutil.copy2(self.index_dir / short, tmp_index / short)
-
             # Inject an edge to a real INVARIANT node but mislabel its kind.
-            dep_path = tmp_index / "depends-on.jsonl"
-            existing = dep_path.read_text(encoding="utf-8")
-            first_source = existing.split("\n")[0].split('"source": "')[1].split('"')[0]
-            extra = (
-                '{"source": "' + first_source + '", "target": "INVARIANT-S2"'
-                ', "relation": "depends", "target_kind": "claim"'
-                ', "target_solidity_recorded": null, "strength": null'
-                ', "context": null}\n'
-            )
-            dep_path.write_text(existing + extra, encoding="utf-8")
-
-            result = _run_checker(self.kb_root, ["--index-dir", str(tmp_index)])
+            first_source = _records(self.kb_root, "depends-on")[0]["source"]
+            extra = {
+                "source": first_source,
+                "target": "INVARIANT-S2",
+                "relation": "depends",
+                "target_kind": "claim",
+                "target_solidity_recorded": None,
+                "strength": None,
+                "context": None,
+            }
+            result = _run_checker(_with_extra_edge(self.kb_root, Path(tmp), extra))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("referential-integrity", result.stdout)
             self.assertIn("INVARIANT-S2", result.stdout)
 
-    def test_check_detects_stale_jsonl(self):
-        """A truncated cites.jsonl fails freshness with the refresh hint."""
-        name = "cites.jsonl"
+    def test_check_detects_stale_index(self):
+        """A truncated cites stream fails freshness with the refresh hint."""
+        name = "cites"
         original = self._backup_index_file(name)
         try:
             text = original
             lines = [ln for ln in text.split("\n") if ln]
             # Drop the first line (the fixture has too few rows for 5).
             truncated = "\n".join(lines[1:]) + "\n"
-            (self.index_dir / name).write_text(truncated, encoding="utf-8")
+            kb_load.index_path(self.kb_root, name).write_text(truncated, encoding="utf-8")
 
             result = _run_checker(self.kb_root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn(name, result.stdout)
+            self.assertIn(f"{name}.yaml", result.stdout)
             # Freshness failures must surface the refresh-fixable hint. Under
             # --kb-root the verifier probes for a runner file beside the KB
             # root; the bare fixture tempdir has none, so the hint is the raw
@@ -145,76 +146,54 @@ class TestCheckIndex(unittest.TestCase):
         finally:
             self._restore_index_file(name, original)
 
-    def test_check_detects_missing_jsonl(self):
-        """A renamed JSONL file fails with a clear 'missing' message."""
-        name = "strengthen-by.jsonl"
-        src = self.index_dir / name
-        dst = self.index_dir / (name + ".bak")
+    def test_check_detects_missing_index(self):
+        """A renamed index stream fails with a clear 'missing' message."""
+        name = "strengthen-by"
+        src = kb_load.index_path(self.kb_root, name)
+        dst = src.with_name(src.name + ".bak")
         src.rename(dst)
         try:
             result = _run_checker(self.kb_root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing", result.stdout.lower())
-            self.assertIn(name, result.stdout)
+            self.assertIn(src.name, result.stdout)
             self.assertIn(kb_util.refresh_cmd(self.kb_root.parent), result.stdout)
         finally:
             dst.rename(src)
 
-    def test_check_detects_malformed_jsonl(self):
-        """Appending a non-JSON line fails the well-formed check (not refresh-fixable)."""
-        name = "claims.jsonl"
+    def test_check_detects_malformed_index_line(self):
+        """Appending a line that is no record fails the well-formed check (not refresh-fixable)."""
+        name = "claims"
         original = self._backup_index_file(name)
         try:
-            (self.index_dir / name).write_text(original + "not-a-json\n", encoding="utf-8")
+            kb_load.index_path(self.kb_root, name).write_text(original + "not-a-json\n", encoding="utf-8")
             result = _run_checker(self.kb_root)
             self.assertNotEqual(result.returncode, 0)
-            output = result.stdout.lower()
-            # The malformed-line block uses "well-formed JSON" phrasing.
-            self.assertTrue(
-                "well-formed" in output or "json" in output,
-                f"expected JSON well-formedness mention in output: {result.stdout}",
-            )
-            self.assertIn(name, result.stdout)
+            self.assertIn("malformed line", result.stdout)
+            self.assertIn(f"{name}.yaml:", result.stdout)
         finally:
             self._restore_index_file(name, original)
 
     def test_check_detects_referential_integrity_violation(self):
         """A synthetic depends-on edge to a nonexistent target fails ref-integrity.
 
-        Uses ``--index-dir`` to point at a temp index tree so the fixture
-        ``.index/`` is never touched. Copies the fixture index files in, then
-        rewrites ``depends-on.jsonl`` with one extra orphan edge.
+        Works on a copy of the KB so the fixture ``.index/`` is never
+        touched, its depends-on stream carrying one extra orphan edge.
         """
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_index = Path(tmp) / ".index"
-            tmp_index.mkdir()
-            for short in (
-                "claims.jsonl",
-                "depends-on.jsonl",
-                "strengthen-by.jsonl",
-                "cites.jsonl",
-                "subtree-aggregates.jsonl",
-            ):
-                shutil.copy2(self.index_dir / short, tmp_index / short)
-
             # Inject an edge whose target is a syntactically-valid clm- id
-            # that does not appear in claims.jsonl.
-            dep_path = tmp_index / "depends-on.jsonl"
+            # that does not appear in claims.yaml. Pick a real source id (first
+            # edge's source); appending keeps the file parseable even if sort
+            # order is broken.
             orphan_target = "clm-zzz999"
-            existing = dep_path.read_text(encoding="utf-8")
-            # Pick a real source id (first edge's source); appending keeps
-            # the file parseable even if sort order is broken.
-            first_source = existing.split("\n")[0].split('"source": "')[1].split('"')[0]
-            extra = (
-                '{"source": "'
-                + first_source
-                + '", "target": "'
-                + orphan_target
-                + '", "target_solidity_recorded": null, "context": null}\n'
-            )
-            dep_path.write_text(existing + extra, encoding="utf-8")
-
-            result = _run_checker(self.kb_root, ["--index-dir", str(tmp_index)])
+            first_source = _records(self.kb_root, "depends-on")[0]["source"]
+            extra = {
+                "source": first_source,
+                "target": orphan_target,
+                "target_solidity_recorded": None,
+                "context": None,
+            }
+            result = _run_checker(_with_extra_edge(self.kb_root, Path(tmp), extra))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("referential-integrity", result.stdout)
             self.assertIn(orphan_target, result.stdout)
@@ -459,22 +438,16 @@ class TestQualityBlockIntegrity(unittest.TestCase):
             self.assertIn("claim-quality.md", result.stdout)
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    """Parse a JSONL file into a list of dicts (skipping blank lines)."""
-    return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-
-
 # A minimal valid experiment-hosting leaf, parameterized so negative variants
 # can perturb a single field. Frontmatter mirrors common/exp-bench.md:
 # experiment-ness is conferred by HOSTING an exp-id, not by a kind (the
 # container kind is `leaf`).
 _EXP_LEAF_TEMPLATE = """\
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 {fields}
--->
+---
+[↑ Mini-KB Common](index.md)
 
 # {title}
 
@@ -490,14 +463,10 @@ def _exp_leaf(
     extra: str = "",
     title: str = "Negative Experiment",
 ) -> str:
-    fields = [f"exp-id: {exp_id}", f"status: {status}"]
-    if extra:
-        fields.append(extra)
-    fields.append("strengthens:")
-    body = "\n".join(fields)
-    if strengthens:
-        body += "\n" + strengthens
-    return _EXP_LEAF_TEMPLATE.format(fields=body, title=title)
+    fields = [extra] if extra else []
+    fields += ["experiment-nodes:", f"  - exp-id: {exp_id}", f"    status: {status}", "    strengthens:"]
+    fields += [f"    {pair}" for pair in strengthens.splitlines()]
+    return _EXP_LEAF_TEMPLATE.format(fields="\n".join(fields), title=title)
 
 
 class TestExperimentEndToEnd(unittest.TestCase):
@@ -514,12 +483,12 @@ class TestExperimentEndToEnd(unittest.TestCase):
         cls.addClassCleanup(cls._tmp.cleanup)
         cls.kb_root = _materialize_fixture(Path(cls._tmp.name))
         cls.index_dir = cls.kb_root / ".index"
-        cls.claims = _read_jsonl(cls.index_dir / "claims.jsonl")
-        cls.edges = _read_jsonl(cls.index_dir / "depends-on.jsonl")
+        cls.claims = _records(cls.kb_root, "claims")
+        cls.edges = _records(cls.kb_root, "depends-on")
         cls.by_id = {r["id"]: r for r in cls.claims if "id" in r}
 
-    def test_experiment_node_emitted_into_claims_jsonl(self):
-        """The experiment is a 6-field, schema-ordered claims.jsonl node."""
+    def test_experiment_node_emitted_into_claims_index(self):
+        """The experiment is a 6-field, schema-ordered claims.yaml node."""
         exps = [r for r in self.claims if r["node_type"] == "experiment" and r["id"] == "exp-bench1"]
         self.assertEqual(len(exps), 1)
         rec = exps[0]
@@ -542,7 +511,7 @@ class TestExperimentEndToEnd(unittest.TestCase):
         self.assertEqual(rec["title"], "Synthetic Bench Experiment")
         self.assertEqual(rec["canonical_anchor"], "synthetic-bench-experiment")
 
-    def test_claims_jsonl_sorted_experiment_after_claims_before_invariants(self):
+    def test_claims_index_sorted_experiment_after_claims_before_invariants(self):
         """Sort key (node_type, id): experiments sit after claims, before
         invariants (ASCII: axiom < claim < experiment < invariant)."""
         keys = [(r["node_type"], r["id"]) for r in self.claims]
@@ -556,7 +525,7 @@ class TestExperimentEndToEnd(unittest.TestCase):
         self.assertLess(last_claim, exp_idx)
         self.assertLess(exp_idx, first_invariant)
 
-    def test_strengthens_edge_in_depends_on_jsonl(self):
+    def test_strengthens_edge_in_depends_on_index(self):
         """The strengthens edge has the schema's relation/kind/strength shape."""
         edges = [e for e in self.edges if e["source"] == "exp-bench1" and e["target"] == "clm-gg7777"]
         self.assertEqual(len(edges), 1)
@@ -589,10 +558,10 @@ class TestExperimentEndToEnd(unittest.TestCase):
 
     def test_refresh_is_deterministic(self):
         """A second refresh writes byte-identical index files (idempotent)."""
-        before = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.jsonl"))}
+        before = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.yaml"))}
         result = _run_refresh(self.kb_root)
         self.assertEqual(result.returncode, 0, result.stderr)
-        after = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.jsonl"))}
+        after = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.yaml"))}
         self.assertEqual(before, after)
 
 
@@ -612,8 +581,8 @@ class TestCoHostedClaimAndExperiment(unittest.TestCase):
         cls.addClassCleanup(cls._tmp.cleanup)
         cls.kb_root = _materialize_fixture(Path(cls._tmp.name))
         cls.index_dir = cls.kb_root / ".index"
-        cls.claims = _read_jsonl(cls.index_dir / "claims.jsonl")
-        cls.edges = _read_jsonl(cls.index_dir / "depends-on.jsonl")
+        cls.claims = _records(cls.kb_root, "claims")
+        cls.edges = _records(cls.kb_root, "depends-on")
         cls.by_id = {r["id"]: r for r in cls.claims if "id" in r}
 
     def test_leaf_parses_as_both_claim_and_experiment_host(self):
@@ -634,7 +603,7 @@ class TestCoHostedClaimAndExperiment(unittest.TestCase):
 
     def test_both_node_records_emitted(self):
         """The container emits a claim node AND an experiment node into
-        claims.jsonl — two distinct records from one leaf."""
+        claims.yaml — two distinct records from one leaf."""
         self.assertIn("clm-co1111", self.by_id)
         self.assertEqual(self.by_id["clm-co1111"]["node_type"], "claim")
         exp = self.by_id.get("exp-cohst1")
@@ -662,7 +631,7 @@ class TestCoHostedClaimAndExperiment(unittest.TestCase):
     def test_owning_index_subtree_experiments_lists_exp(self):
         """common/ index subtree-experiments aggregates the owned exp-cohst1
         even though its owning leaf also hosts a claim (owned-only, kind-blind)."""
-        agg = _read_jsonl(self.index_dir / "subtree-aggregates.jsonl")
+        agg = _records(self.kb_root, "subtree-aggregates")
         common = next(r for r in agg if r["node_path"] == "common/index.md")
         self.assertIn("exp-cohst1", common["subtree_experiments"])
 
@@ -771,7 +740,7 @@ class TestExperimentLeafRejection(unittest.TestCase):
             # clean no-op-or-rewrite; let refresh author the canonical value.
             result = _run_refresh(kb)
             self.assertEqual(result.returncode, 0, result.stderr)
-            claims = _read_jsonl(kb / ".index" / "claims.jsonl")
+            claims = _records(kb, "claims")
             gg = next(r for r in claims if r.get("id") == "clm-gg7777")
             self.assertIsNone(gg["experimental_solidity"])
             self.assertIsNone(gg["derivation_solidity"])
@@ -785,13 +754,12 @@ class TestExperimentLeafRejection(unittest.TestCase):
 # perturb the primary field or the experiments list. Mirrors the real
 # bench-protocols.md fixture leaf.
 _REF_LEAF_TEMPLATE = """\
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 {primary}
 experiments: [{experiments}]
--->
+---
+[↑ Mini-KB Common](index.md)
 
 ## {title}
 
@@ -837,7 +805,7 @@ class TestExperimentsReferenceEndToEnd(unittest.TestCase):
 
     def test_common_index_subtree_experiments_lists_exp(self):
         """After refresh, common/ index subtree-experiments includes exp-bench1."""
-        agg = _read_jsonl(self.index_dir / "subtree-aggregates.jsonl")
+        agg = _records(self.kb_root, "subtree-aggregates")
         common = next(r for r in agg if r["node_path"] == "common/index.md")
         self.assertIn("exp-bench1", common["subtree_experiments"])
 
@@ -848,7 +816,7 @@ class TestExperimentsReferenceEndToEnd(unittest.TestCase):
         single entry comes from ownership, so a reference adds nothing beyond
         what ownership already contributes (owned-only aggregation).
         """
-        agg = _read_jsonl(self.index_dir / "subtree-aggregates.jsonl")
+        agg = _records(self.kb_root, "subtree-aggregates")
         for rec in agg:
             # No duplication: exp-bench1 appears at most once per node.
             self.assertLessEqual(rec["subtree_experiments"].count("exp-bench1"), 1)
@@ -950,15 +918,15 @@ class TestExperimentsReferenceRejection(unittest.TestCase):
 # A support-hosting leaf (sup-id + supports block), parameterized so negative
 # variants perturb a single field. Mirrors common/sup-free.md.
 _SUP_LEAF_TEMPLATE = """\
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 no-claim: "hosts a support node only"
-sup-id: {sup_id}
-supports:
+support-nodes:
+  - sup-id: {sup_id}
+    supports:
 {supports}
--->
+---
+[↑ Mini-KB Common](index.md)
 
 ## {title}
 
@@ -972,6 +940,7 @@ def _sup_leaf(
     supports: str = "  - clm-bb2222: 1.0",
     title: str = "Negative Support",
 ) -> str:
+    supports = "\n".join(f"    {pair}" for pair in supports.splitlines())
     return _SUP_LEAF_TEMPLATE.format(sup_id=sup_id, supports=supports, title=title)
 
 
@@ -989,8 +958,8 @@ class TestSupportEndToEnd(unittest.TestCase):
         cls.addClassCleanup(cls._tmp.cleanup)
         cls.kb_root = _materialize_fixture(Path(cls._tmp.name))
         cls.index_dir = cls.kb_root / ".index"
-        cls.claims = _read_jsonl(cls.index_dir / "claims.jsonl")
-        cls.edges = _read_jsonl(cls.index_dir / "depends-on.jsonl")
+        cls.claims = _records(cls.kb_root, "claims")
+        cls.edges = _records(cls.kb_root, "depends-on")
         cls.by_id = {r["id"]: r for r in cls.claims if "id" in r}
 
     def test_support_node_emitted_with_documented_field_order(self):
@@ -1067,7 +1036,7 @@ class TestSupportEndToEnd(unittest.TestCase):
         self.assertEqual(m.group(1), "0.90")
 
     def test_supported_by_reverse_view_emitted(self):
-        sb = _read_jsonl(self.index_dir / "supported-by.jsonl")
+        sb = _records(self.kb_root, "supported-by")
         # 5 from single-sup leaves + 3 from the multi-sup container.
         self.assertEqual(len(sb), 8)
         by_claim = {r["claim_id"]: r for r in sb}
@@ -1100,10 +1069,10 @@ class TestSupportEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_refresh_is_deterministic(self):
-        before = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.jsonl"))}
+        before = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.yaml"))}
         result = _run_refresh(self.kb_root)
         self.assertEqual(result.returncode, 0, result.stderr)
-        after = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.jsonl"))}
+        after = {p.name: p.read_text(encoding="utf-8") for p in sorted(self.index_dir.glob("*.yaml"))}
         self.assertEqual(before, after)
 
 
@@ -1167,39 +1136,20 @@ class TestSupportRejection(unittest.TestCase):
         # node) fails referential integrity (target must be a claim).
         with tempfile.TemporaryDirectory() as tmp:
             kb = _materialize_fixture(Path(tmp))
-            (kb / "common" / "sup-badtgt.md").write_text(
-                _sup_leaf(
-                    sup_id="sup-bad001",
-                    supports="  - exp-bench1: 1.0",
-                    title="Non-Claim-Target Support",
-                ),
-                encoding="utf-8",
-            )
-            # exp-bench1 is matched by the clm-only supports pair regex? No — it
-            # is an exp- id, so the supports block parses zero pairs and the
-            # node supports nothing. Instead inject the bad edge directly into a
-            # temp index to exercise the verifier's target-kind check.
+            # The bad edge goes straight into a temp index: a leaf declaring it is
+            # refused at the read, before any index holds it.
             with tempfile.TemporaryDirectory() as itmp:
-                tmp_index = Path(itmp) / ".index"
-                tmp_index.mkdir()
-                for short in (
-                    "claims.jsonl",
-                    "depends-on.jsonl",
-                    "strengthen-by.jsonl",
-                    "supported-by.jsonl",
-                    "cites.jsonl",
-                    "subtree-aggregates.jsonl",
-                ):
-                    shutil.copy2(kb / ".index" / short, tmp_index / short)
-                dep = tmp_index / "depends-on.jsonl"
-                extra = (
-                    '{"source": "sup-free01", "target": "exp-bench1", '
-                    '"relation": "supports", "target_kind": "claim", '
-                    '"target_solidity_recorded": null, "strength": null, '
-                    '"context": null, "fraction": 1.0}\n'
-                )
-                dep.write_text(dep.read_text(encoding="utf-8") + extra, encoding="utf-8")
-                result = _run_checker(kb, ["--index-dir", str(tmp_index)])
+                extra = {
+                    "source": "sup-free01",
+                    "target": "exp-bench1",
+                    "relation": "supports",
+                    "target_kind": "claim",
+                    "target_solidity_recorded": None,
+                    "strength": None,
+                    "context": None,
+                    "fraction": 1.0,
+                }
+                result = _run_checker(_with_extra_edge(kb, Path(itmp), extra))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("referential-integrity", result.stdout)
                 self.assertIn("exp-bench1", result.stdout)
@@ -1209,26 +1159,17 @@ class TestSupportRejection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             kb = _materialize_fixture(Path(tmp))
             with tempfile.TemporaryDirectory() as itmp:
-                tmp_index = Path(itmp) / ".index"
-                tmp_index.mkdir()
-                for short in (
-                    "claims.jsonl",
-                    "depends-on.jsonl",
-                    "strengthen-by.jsonl",
-                    "supported-by.jsonl",
-                    "cites.jsonl",
-                    "subtree-aggregates.jsonl",
-                ):
-                    shutil.copy2(kb / ".index" / short, tmp_index / short)
-                dep = tmp_index / "depends-on.jsonl"
-                extra = (
-                    '{"source": "sup-free01", "target": "clm-bb2222", '
-                    '"relation": "supports", "target_kind": "claim", '
-                    '"target_solidity_recorded": null, "strength": null, '
-                    '"context": null, "fraction": 1.5}\n'
-                )
-                dep.write_text(dep.read_text(encoding="utf-8") + extra, encoding="utf-8")
-                result = _run_checker(kb, ["--index-dir", str(tmp_index)])
+                extra = {
+                    "source": "sup-free01",
+                    "target": "clm-bb2222",
+                    "relation": "supports",
+                    "target_kind": "claim",
+                    "target_solidity_recorded": None,
+                    "strength": None,
+                    "context": None,
+                    "fraction": 1.5,
+                }
+                result = _run_checker(_with_extra_edge(kb, Path(itmp), extra))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("referential-integrity", result.stdout)
 
@@ -1239,26 +1180,17 @@ class TestSupportRejection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             kb = _materialize_fixture(Path(tmp))
             with tempfile.TemporaryDirectory() as itmp:
-                tmp_index = Path(itmp) / ".index"
-                tmp_index.mkdir()
-                for short in (
-                    "claims.jsonl",
-                    "depends-on.jsonl",
-                    "strengthen-by.jsonl",
-                    "supported-by.jsonl",
-                    "cites.jsonl",
-                    "subtree-aggregates.jsonl",
-                ):
-                    shutil.copy2(kb / ".index" / short, tmp_index / short)
-                dep = tmp_index / "depends-on.jsonl"
-                extra = (
-                    '{"source": "exp-bench1", "target": "clm-bb2222", '
-                    '"relation": "strengthens", "target_kind": "claim", '
-                    '"target_solidity_recorded": null, "strength": 5.0, '
-                    '"context": null, "fraction": null}\n'
-                )
-                dep.write_text(dep.read_text(encoding="utf-8") + extra, encoding="utf-8")
-                result = _run_checker(kb, ["--index-dir", str(tmp_index)])
+                extra = {
+                    "source": "exp-bench1",
+                    "target": "clm-bb2222",
+                    "relation": "strengthens",
+                    "target_kind": "claim",
+                    "target_solidity_recorded": None,
+                    "strength": 5.0,
+                    "context": None,
+                    "fraction": None,
+                }
+                result = _run_checker(_with_extra_edge(kb, Path(itmp), extra))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("referential-integrity", result.stdout)
                 self.assertIn("5.0", result.stdout)
@@ -1269,7 +1201,7 @@ class TestZeroOnPointFraction(unittest.TestCase):
 
     The refusal boundary is covered above; what this covers is the value being
     carried rather than merely admitted — authored in the leaf, materialized
-    into ``depends-on.jsonl``, scored as a lift of nothing, and passed by the
+    into ``depends-on.yaml``, scored as a lift of nothing, and passed by the
     verifier.
     """
 
@@ -1284,7 +1216,7 @@ class TestZeroOnPointFraction(unittest.TestCase):
             refresh = _run_refresh(kb)
             self.assertEqual(refresh.returncode, 0, refresh.stdout + refresh.stderr)
 
-            edges = _read_jsonl(kb / ".index" / "depends-on.jsonl")
+            edges = _records(kb, "depends-on")
             edge = next(
                 e
                 for e in edges
@@ -1294,7 +1226,7 @@ class TestZeroOnPointFraction(unittest.TestCase):
 
             # The lift is 0.90 x 0.0 = 0.0, which loses the max against the
             # claim's own 0.40 confidence: an off-point support lowers nothing.
-            claims = {r["id"]: r for r in _read_jsonl(kb / ".index" / "claims.jsonl") if "id" in r}
+            claims = {r["id"]: r for r in _records(kb, "claims") if "id" in r}
             self.assertEqual(claims["clm-sb2222"]["derivation_solidity"], 0.40)
 
             result = _run_checker(kb)
@@ -1326,11 +1258,8 @@ def _frozen_kb(parent: Path) -> Path:
     the name ``claim-quality.md``, so each is copied back under a directory of
     its own. The fixture is read-only and is never written through.
     """
-    kb = parent / "kb-root"
-    kb.mkdir()
-    (kb / "entry-point.md").write_text(
-        "<!-- kb-frontmatter\nkind: entry-point\nsubtree-claims: []\n-->\n\n# Frozen corpus\n",
-        encoding="utf-8",
+    kb = write_stamped_kb(
+        parent / "kb-root", {"entry-point.md": "---\nkind: entry-point\nsubtree-claims: []\n---\n\n# Frozen corpus\n"}
     )
     for domain, _markers, _records, _lost in _FROZEN_CENSUS:
         (kb / domain).mkdir()
@@ -1635,6 +1564,22 @@ class TestMissingFrontmatterNamesAWrite(unittest.TestCase):
                 result, kb = self._report(rel)
                 self.assertNotIn(kb_util.refresh_cmd(kb.parent), result.stdout)
                 self.assertIn("fix the above and re-run", result.stdout)
+
+    def test_a_document_still_carrying_a_comment_block_is_named_as_such(self):
+        """A current KB does not read the 0.9.0 block as frontmatter, so the document has none."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        kb = _materialize_fixture(Path(tmp.name))
+        # A 0.9.0 golden leaf, as a copy carried over from an unmigrated KB would be.
+        carried = _THIS_DIR / "fixtures" / "format-1.0.0" / "0.9.0" / "kb-root" / "a.md"
+        shutil.copyfile(carried, kb / "common" / "carried-over.md")
+
+        result = _run_checker(kb)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("missing frontmatter", result.stdout)
+        self.assertIn("common/carried-over.md (carries a 0.9.0 comment block instead)", result.stdout)
+        self.assertNotIn(kb_util.refresh_cmd(kb.parent), result.stdout)
 
 
 def _load_checker_module():

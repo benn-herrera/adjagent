@@ -77,6 +77,17 @@ def no_graphviz() -> Iterator[None]:
     patch.undo()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def short_run_lock_wait() -> Iterator[None]:
+    """A refused run lock is refused after the wait, so the production wait would cost every such test seconds."""
+    from kb_tools import kb_lock
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(kb_lock, "RUN_LOCK_WAIT", 0.05)
+    yield
+    patch.undo()
+
+
 @pytest.fixture(autouse=True)
 def no_reader_server(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test starts with no server or key named, so an operator's env never reaches a test's call."""

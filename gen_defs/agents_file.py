@@ -34,7 +34,8 @@ can never be read as an output name; a surface template carrying it is refused
 by split_outputs.
 
 The render binds four invocation parameters of its own, beside the five tier
-tokens (pinned by DEFAULT_PIN_MAP; the agents file takes no tuning flags):
+tokens (each the default family's member for its tier; the agents file
+takes no tuning flags):
 
     @!dyn.agents-file-install-dir-arg!@   DIR, as given
     @!dyn.agents-file-scope-name!@        `Global` when DIR is the harness's
@@ -146,16 +147,15 @@ import os
 import re
 import shutil
 import subprocess
-import tomllib
 from pathlib import Path
 from typing import NamedTuple
 
 from .chunks import load_chunks
 from .discovery import read_fence
 from .errors import InputError
+from .harness import HARNESS_TABLE, load_harness
 from .markers import (
     DYNAMIC_NAMESPACE,
-    IDENTIFIER,
     DynamicMap,
     Expansion,
     Routes,
@@ -163,12 +163,10 @@ from .markers import (
     assert_no_residual_markers,
     expand,
 )
-from .model_tuning import DEFAULT_PIN_MAP, tier_binding
+from .model_tuning import DEFAULT_FAMILY, load_family, resolve_family, tier_binding
 from .paths import AGENTS_FILE_TEMPLATE, HARNESS_DIR, REPO_ROOT, rel
 from .rendering import routing_table
 
-HARNESS_TABLE = "harness"
-HARNESS_SUFFIX = ".toml"
 RESOLVE_METAKEY = "_resolve"
 INSTALL_DIR_PARAMETER = "agents-file-install-dir-arg"
 SCOPE_NAME_PARAMETER = "agents-file-scope-name"
@@ -191,35 +189,6 @@ STANDARD_AGENTS_FILE = "AGENTS.md"
 NATIVE_REDIRECT = f"{REDIRECT_PREFIX}{STANDARD_AGENTS_FILE}\n"
 
 
-def load_harness(name: str, harness_dir: Path = HARNESS_DIR) -> DynamicMap:
-    """Load templates/harness/<name>.toml as key -> value.
-
-    Schema: [harness.<key>] tables only, each key an identifier, each table
-    holding exactly one string `text`. An unknown name lists the harnesses
-    there are.
-    """
-    path = harness_dir / f"{name}{HARNESS_SUFFIX}"
-    if re.fullmatch(IDENTIFIER, name) is None or not path.is_file():
-        available = ", ".join(sorted(p.stem for p in harness_dir.glob(f"*{HARNESS_SUFFIX}"))) or "(none)"
-        raise InputError(f"unknown harness '{name}' — available: {available}")
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise InputError(f"{rel(path)}: invalid TOML — {exc}") from exc
-    stray = set(data) - {HARNESS_TABLE}
-    if stray:
-        raise InputError(f"{rel(path)}: unknown top-level table(s) {sorted(stray)} — only [{HARNESS_TABLE}.<key>]")
-    values: DynamicMap = {}
-    for key, entry in data.get(HARNESS_TABLE, {}).items():
-        where = f"{rel(path)}: [{HARNESS_TABLE}.{key}]"
-        if re.fullmatch(IDENTIFIER, key) is None:
-            raise InputError(f"{where}: '{key}' is not a harness key — it must match {IDENTIFIER}")
-        if not isinstance(entry, dict) or set(entry) != {"text"} or not isinstance(entry["text"], str):
-            raise InputError(f"{where}: must hold exactly one string 'text'")
-        values[key] = entry["text"]
-    return values
-
-
 def _required_harness_value(values: DynamicMap, key: str, *, harness: str) -> str:
     if key not in values:
         raise InputError(f"harness '{harness}' defines no [{HARNESS_TABLE}.{key}]")
@@ -228,7 +197,7 @@ def _required_harness_value(values: DynamicMap, key: str, *, harness: str) -> st
 
 def agents_file_name(harness: str, harness_dir: Path = HARNESS_DIR) -> str:
     """The file name a harness reads its agents file from (CLAUDE.md, AGENTS.md)."""
-    return _required_harness_value(load_harness(harness, harness_dir), AGENTS_FILE_KEY, harness=harness)
+    return _required_harness_value(load_harness(harness, harness_dir).values, AGENTS_FILE_KEY, harness=harness)
 
 
 def _is_user_harness_dir(user_harness_dir: str, directory: Path) -> bool:
@@ -371,11 +340,11 @@ def _agents_file_bindings(harness: str, directory: Path, harness_dir: Path) -> _
     bound to `directory`, which must exist."""
     if not directory.is_dir():
         raise InputError(f"'{directory}' is not an existing directory — the agents file renders into one")
-    values = load_harness(harness, harness_dir)
+    values = load_harness(harness, harness_dir).values
     user_harness_dir = _required_harness_value(values, USER_HARNESS_DIR_KEY, harness=harness)
     chunks = load_chunks()
     dynamic: DynamicMap = {
-        **tier_binding(chunks, pin_map=DEFAULT_PIN_MAP).real,
+        **tier_binding(chunks, models=load_family(resolve_family(DEFAULT_FAMILY)).tiers).real,
         INSTALL_DIR_PARAMETER: Verbatim(str(directory)),
         SCOPE_NAME_PARAMETER: Verbatim(agents_file_scope_name(user_harness_dir, directory)),
     }

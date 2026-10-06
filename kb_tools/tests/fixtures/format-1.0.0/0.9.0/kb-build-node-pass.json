@@ -1,0 +1,33 @@
+{
+  "about": "The claim-graph node pass's build record: each leaf's read state and outcome, and a verdict for every paragraph of readable prose the pass asked about — claim, not a claim, or defaulted with its cause — identified by the 0-based line it begins on.",
+  "leaves": {
+    "a.md": {
+      "state": "landed",
+      "outcome": "minted",
+      "claims": [
+        {
+          "title": "A Result: the bound holds",
+          "locator": "3"
+        }
+      ],
+      "verdicts": [
+        {
+          "line": 3,
+          "verdict": "claim",
+          "cause": null
+        },
+        {
+          "line": 9,
+          "verdict": "defaulted",
+          "cause": "no-letter"
+        }
+      ]
+    },
+    "b/c.md": {
+      "state": "unread",
+      "outcome": null,
+      "claims": [],
+      "verdicts": []
+    }
+  }
+}

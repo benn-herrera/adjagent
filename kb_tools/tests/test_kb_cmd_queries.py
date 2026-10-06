@@ -5,14 +5,18 @@
 bodies via the shared ``kb_links`` primitives — no persisted artifact.
 
 ``kb_cmd`` is a normal package (``from kb_tools.kb_cmd import index``); fixtures
-are built per-test in a tmp dir: a minimal ``.index/`` JSONL set plus a small
-leaf tree, so nothing depends on live KB state.
+are built per-test in a tmp dir: a stamped KB with a minimal ``.index/`` plus a
+small leaf tree, so nothing depends on live KB state.
 """
 
-import json
+import shutil
 from pathlib import Path
 
+from kb_tools import kb_index_lib
 from kb_tools.kb_cmd import index as kb_index
+from kb_tools.tests._stamped_kb import write_index, write_stamped_kb
+
+_GOLDENS_0_9_0 = Path(__file__).parent / "fixtures" / "format-1.0.0" / "0.9.0"
 
 
 def _claim_record(cid: str, title: str, *, solidity: float, build_band: str) -> dict:
@@ -37,26 +41,20 @@ def _cite_record(cid: str, leaf_path: str) -> dict:
     return {"claim_id": cid, "leaf_path": leaf_path, "leaf_kind": "leaf", "tier2_marked": False}
 
 
-def _write_jsonl(path: Path, records: list[dict]) -> None:
-    path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
-
-
 def _build_index_dir(index_dir: Path, claims: list[dict], cites: list[dict]) -> None:
-    index_dir.mkdir(parents=True, exist_ok=True)
-    _write_jsonl(index_dir / "claims.jsonl", claims)
-    _write_jsonl(index_dir / "cites.jsonl", cites)
-    # The remaining required files may be empty for these queries.
-    for name in ("depends-on.jsonl", "strengthen-by.jsonl", "subtree-aggregates.jsonl"):
-        (index_dir / name).write_text("", encoding="utf-8")
+    """A stamped KB at ``index_dir``'s parent; streams other than these two are empty for these queries."""
+    kb = write_stamped_kb(index_dir.parent)
+    streams = {"claims": claims, "cites": cites}
+    for name in kb_index_lib.INDEX_FILES:
+        write_index(kb, name, streams.get(name, []))
 
 
 _LEAF = """\
-[↑ Up](../index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 {front}
--->
+---
+[↑ Up](../index.md)
 
 # {title}
 
@@ -143,7 +141,7 @@ def test_referenced_by_returns_linking_leaf(tmp_path: Path) -> None:
     # An index container also links to origin — must NOT count (not a leaf body).
     (kb / "main" / "index.md").parent.mkdir(parents=True, exist_ok=True)
     (kb / "main" / "index.md").write_text(
-        "<!-- kb-frontmatter\nkind: index\n-->\n\n# Index\n\n[origin](origin.md)\n",
+        "---\nkind: index\n---\n\n# Index\n\n[origin](origin.md)\n",
         encoding="utf-8",
     )
 
@@ -175,3 +173,19 @@ def test_referenced_by_empty_when_no_leaf_links(tmp_path: Path) -> None:
 def test_referenced_by_unknown_claim_returns_empty(tmp_path: Path) -> None:
     idx = _index_with_named_claims(tmp_path)
     assert idx.referenced_by("clm-zzzzzz", kb_root=tmp_path) == []
+
+
+def test_referenced_by_reads_an_older_kb_converted_and_writes_nothing(tmp_path: Path) -> None:
+    """A 0.9.0 leaf's comment block reads as its frontmatter once converted; nothing on disk moves."""
+    repo = tmp_path / "repo"
+    shutil.copytree(_GOLDENS_0_9_0, repo)
+    kb = repo / "kb-root"
+    citing = kb / "b" / "c.md"
+    citing.write_text(citing.read_text(encoding="utf-8") + "\nSee [A](../a.md).\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in sorted(repo.rglob("*")) if path.is_file()}
+
+    idx = kb_index.load(kb / ".index")
+
+    assert idx.originating_leaf("clm-0dtsyu") == "a.md"
+    assert idx.referenced_by("clm-0dtsyu", kb_root=kb) == ["b/c.md"]
+    assert {path: path.read_bytes() for path in sorted(repo.rglob("*")) if path.is_file()} == before

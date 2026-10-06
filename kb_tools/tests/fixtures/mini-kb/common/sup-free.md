@@ -1,13 +1,14 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 no-claim: "hosts a support node only — no claim-quality entries of its own"
-sup-id: sup-free01
-supports:
-  - clm-sb1111: 1.0
-  - clm-sb2222: 0.50
--->
+support-nodes:
+  - sup-id: sup-free01
+    supports:
+      - clm-sb1111: 1.0
+      - clm-sb2222: 0.50
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## Free-Standing Analytical Support
 

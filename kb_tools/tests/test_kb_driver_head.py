@@ -29,7 +29,6 @@ same, because a run with a model call left to walk refuses one that names none
 before its first stage.
 """
 
-import json
 import os
 import shutil
 import subprocess
@@ -44,7 +43,6 @@ import pytest
 from kb_tools import install_location, kb_index_lib, kb_pipeline, kb_readme, kb_util
 from kb_tools.kb_claimgraph import tree
 from kb_tools.kb_driver import barriers, baton, call, config, prompt_templates, run, runlog, steps
-from kb_tools.kb_write.render import FRONTMATTER_OPENER
 from kb_tools.tests import _chat_stub
 from kb_tools.tests import _fake_model as fake_model
 
@@ -120,16 +118,14 @@ def _walk_head(
     the property that keeps the first run's evidence where it was left.
     """
     paths = runlog.prepare(runs, run_id)
-    lock = runlog.repo_lock_path(consumer)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": os.getpid(), "run_id": paths.run_id}), encoding="utf-8")
-    return run.execute(
-        config=config.load(None, run_overrides=dict(overrides), admissible=barriers.ADMISSIBLE),
-        paths=paths,
-        transport=transport,
-        repo_root=consumer,
-        stages=stages,
-    )
+    with runlog.run_lock(consumer, state_dir=paths.run_dir):
+        return run.execute(
+            config=config.load(None, run_overrides=dict(overrides), admissible=barriers.ADMISSIBLE),
+            paths=paths,
+            transport=transport,
+            repo_root=consumer,
+            stages=stages,
+        )
 
 
 def _documents(kb_root: Path) -> dict[str, str]:
@@ -269,7 +265,9 @@ def test_a_corpus_declaring_no_result_builds_an_empty_claim_graph(lamb: tuple[Pa
     documents = _documents(kb_root)
 
     assert documents
-    assert [path for path, text in documents.items() if FRONTMATTER_OPENER not in text] == []
+    assert [
+        path for path, text in documents.items() if "kind" not in (kb_index_lib.parse_frontmatter(text) or {})
+    ] == []
     assert kb_index_lib.scan_authored_ids(kb_root) == {}
     # No claim-bearing block means no volume register was ever created.
     assert list(kb_root.rglob("claim-quality.md")) == []

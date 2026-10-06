@@ -53,6 +53,10 @@ entitlement for JIT. Universal binaries (x86_64 + arm64) required for broad comp
 - Security: sandboxing for App Store
 - Diagnose: sandboxing access, code signing, notarization issues first
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent="Info.plist, entitlements, Package.swift, Xcode project settings"!@
@@ -81,6 +85,8 @@ macOS-version-specific behaviors. @!integration-logging-signal sink="Console.app
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

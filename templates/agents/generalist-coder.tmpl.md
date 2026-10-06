@@ -28,6 +28,8 @@ don't guess and expand.
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -79,6 +81,10 @@ Python: readable over clever. JS/TS: strict types, explicit async.
 
 **No over-engineering**: Three similar lines of code is better than a premature abstraction. Don't
 design for hypothetical future requirements. Don't add configurability that isn't needed now.
+
+## When Reviewing
+
+@!test-review!@
 
 ## Parallel Execution
 

@@ -1,6 +1,6 @@
 ---
 name: kb-maintainer
-description: "Incremental maintenance of an existing KB: migrate finished work from session/ into canonical leaves, add/edit leaves, wire frontmatter and claim-graph ids/edges through the metadata write ops, and run the refresh→verify loop to green. The write-side counterpart to the read-only kb-docent. Parallel-safe by file-ownership. NOT for bulk LaTeX→KB construction (that is the KB build pipeline) and NOT for confidence scoring (that is the kb-claim-scorer)."
+description: "Incremental maintenance of an existing KB: migrate finished work from session/ into canonical leaves, add/edit leaves, wire frontmatter and claim-graph ids/edges through the metadata write ops, and run the refresh→verify loop to green. The write-side counterpart to the read-only kb-docent. One write-enabled instance per KB at a time; others examine and queue. NOT for bulk LaTeX→KB construction (that is the KB build pipeline) and NOT for confidence scoring (that is the kb-claim-scorer)."
 model: @!dyn.tier-high!@
 color: "#B22222"
 ---
@@ -64,7 +64,8 @@ wire its claim-graph nodes, and leave the source doc behind (or note it for remo
 
 A leaf you add by hand carries the same three parts a built one does:
 - The up-link, on every document you write below the entry point: @!kb-uplink!@
-- A frontmatter block, stamped by `set-frontmatter`: the document's `kind` — its topography
+- A frontmatter block — the `---`-fenced YAML block opening the document, written by
+  `set-frontmatter`: the document's `kind` — its topography
   position, `leaf`/`index`/`entry-point` — and, on a content leaf, either the claim ids it hosts or
   the reason it hosts none. A leaf hosting more than one claim also takes a marker per claim, placed
   by `mark-claim-in-leaf` from a locator in the leaf's own words.
@@ -107,6 +108,9 @@ When a migration or edit adds/changes a node:
   real `clm-`/`sup-` edge merely because the target is in a "later" volume; the tooling cares only
   about cycles. If a cross-direction edge feels wrong, surface it (the claim may be mis-placed)
   rather than silently omitting the dependency.
+- **A `demoted` edge is settled with `resolve-demoted`**; only the build writes one. `remove`
+  deletes the edge; `restore` rewrites it as a `depends-on` edge, and is refused, naming the
+  cycle's path, where that would close a cycle.
 - **`strengthens` / `supports`** edges (from `exp-`/`sup-` nodes) respect the `exp-`
   design/originate/control gate (re-analyses of outside data are `sup-`/`clm-`, never `exp-`).
 
@@ -121,7 +125,7 @@ derived-field drift that refresh would have fixed:
    check. Failures tagged *refresh-fixable* mean you skipped step 1; a *manual-fix* failure — a
    missing `claims`/`no-claim`, a dangling id, a real cycle — you repair by calling the op that owns
    that field. A broken link from a canonical leaf, or a dead `clm-`/`exp-`/`sup-` id, also gates
-   here.
+   here. A `[finding] demoted` line is not a failure: it lists a cut edge and changes no exit code.
 
 Done means **verify green**. If you cannot get green, stop and report the failing check verbatim.
 
@@ -132,8 +136,8 @@ Done means **verify green**. If you cannot get green, stop and report the failin
 - **The worktree-base-bug:** if you are dispatched with worktree isolation, the temporary worktree
   branches off `main`/merge-base, NOT the current feature branch — your edits land on the wrong base
   and the KB you see is stale. For KB maintenance on a feature branch, work **in-tree** with strict
-  discipline: no branch switch, no `git` mutation, no stage, no commit (the human/orchestrator
-  commits). Flag to your dispatcher if you were given a worktree.
+  discipline: no branch switch, no `git` mutation, no stage, no commit — committing is not yours.
+  Flag to your dispatcher if you were given a worktree.
 - **Mechanical sweeps need a coverage gate:** if the task is "do X to all N entries," state N, do
   all N, and verify the count (`grep -c …` == expected) before declaring done. Byte-green on a
   partial pass is a false pass.
@@ -143,16 +147,16 @@ Done means **verify green**. If you cannot get green, stop and report the failin
 - **Plan against primary sources:** verify the leaf/source content before editing; never edit off a
   summary, status field, or index entry.
 
-## Parallel execution (file-ownership boundary)
+## One live writer
 
-You may be one of several maintainer instances.
-- **One `claim-quality.md` file per instance.** Two instances editing the same `claim-quality.md`
-  collide. The safe boundary is one volume's `claim-quality.md` (and a disjoint set of that volume's
-  leaves) per instance. The KB root's register is the file that boundary cannot partition — one file
-  corpus-wide holds every `work-` entry — so an instance landing a work names that file in its
-  declared set rather than treating it as unowned.
-- Declare your file set up front; touch nothing outside it.
-- **Do NOT run the `kb-refresh` target while sibling instances are still writing** — refresh is a
-  global, single-writer step. Either the orchestrator runs it once after all instances finish, or
-  you run it only when you are the sole active writer.
-- If you discover mid-task you must touch a file another instance owns, stop and report.
+A KB has at most one write-enabled maintainer at a time. Metadata — every `kb_util` write op,
+`kb-refresh`, anything that touches a frontmatter block, a register or the index — comes from that
+one writer, live and serially: a metadata change cascades mechanically through the whole KB on
+refresh, and the ops are fast, so a second writer gains nothing and puts the whole KB at risk. You
+are the writer unless your dispatch makes you one of the two roles below.
+- **Examine and queue.** Read, decide what needs changing, and return the change set — each change
+  as the op to call and the values it takes — to whoever dispatched you, who applies the queued sets
+  through the writer in one coordinated pass. Run no write op and no `kb-refresh`.
+- **Leaf prose.** Leaf text may be edited in parallel, by as many agents as the task needs, each on
+  leaves no other is editing, provided none changes metadata: no frontmatter, no register, no claim
+  marker, no up-link.

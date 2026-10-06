@@ -1,9 +1,9 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 claims: [clm-ee5555, clm-ff6666, clm-gg7777, clm-hh8888]
--->
+---
+[↑ Mini-KB Common](index.md)
+
 
 # Framework-Facing Synthetic Leaf
 

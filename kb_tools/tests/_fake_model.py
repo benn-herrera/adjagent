@@ -127,5 +127,4 @@ def stamped_leaf(document: str, *, claims: Sequence[str]) -> str:
     composer of the shape the write op a real member calls already owns.
     """
     values = render.FrontmatterValues(kind="leaf", claims=tuple(claims))
-    head, _, body = document.partition("\n")
-    return "\n".join([head, "", render.render_frontmatter_block(values), body])
+    return render.render_frontmatter_block(values) + "\n" + document

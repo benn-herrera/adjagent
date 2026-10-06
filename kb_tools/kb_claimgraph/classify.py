@@ -15,17 +15,18 @@ one asks it.
 
 **What each candidate writes is :func:`attribute.written`'s**, and only then is
 the set checked: every ``depends`` edge lying on a cycle of the classified set
-is demoted to a ``references`` record (:func:`attribute.cycle_edges`), keeping
-the relationship and giving up only the direction the cycle disproves. No
-question is asked again about a cycle.
+is cut (:func:`attribute.cycle_edges`), keeping the relationship and giving up
+only the direction the cycle disproves. No question is asked again about a
+cycle. Every cut lands as a ``demoted`` record carrying its origin
+(:func:`cuts`).
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from .. import kb_pipeline
+from .. import kb_pipeline, kb_schema
 from . import ask, equation_sites, letters
 from .attribute import Candidate, Relation, Written, cycle_edges, written
 from .graph import AuthoredGraph, ClaimNode
@@ -54,9 +55,10 @@ class Classification:
 
     ``relations`` and ``outcomes`` are per candidate. ``edges`` and
     ``references`` are what :func:`attribute.written` makes of them, less the
-    ``depends`` edges a cycle demoted, which are ``demoted`` and among
-    ``references``. ``asks`` is this run's group records; a group the record
-    already held is not among them.
+    ``depends`` edges a cycle cut, which are ``demoted`` and among
+    ``references``; :func:`cuts` says which of ``references`` land as
+    ``demoted`` records. ``asks`` is this run's group records; a group the
+    record already held is not among them.
     """
 
     relations: Mapping[Pair, Relation]
@@ -151,6 +153,31 @@ def records(
     edges = tuple(pair for pair in depends if pair not in on_ring)
     references = tuple(sorted({pair for kind, pair in written_as if kind is Written.REFERENCES} | on_ring))
     return edges, references, demoted
+
+
+def cuts(ring: Sequence[Pair], classification: Classification, unmarked_yes: Iterable[Pair]) -> Mapping[Pair, str]:
+    """Every ``references`` record the build's cycle breaking cut from ``depends``, with its origin.
+
+    A cut is a ``depends`` edge a cycle of the classified set demoted, or a
+    pair of the containment ring (``ring``, :attr:`attribute.Attribution.demoted`)
+    that kept its drafted *mention* — drafted with no reader, or defaulted after
+    the re-ask. A ring pair a model answered is that answer's record and no cut.
+    The origin is ``inferred`` where the pair, in the direction written, is a
+    yes in the unmarked record (``unmarked_yes``), and ``cited`` otherwise.
+    """
+    cited, inferred = kb_schema.DEMOTED_ORIGINS
+    yes = set(unmarked_yes)
+    took_its_draft = (kb_pipeline.ClassifyOutcome.DRAFTED, kb_pipeline.ClassifyOutcome.DEFAULTED)
+    cut = [
+        *classification.demoted,
+        *(
+            pair
+            for pair in ring
+            if classification.relations.get(pair) is Relation.MENTION
+            and classification.outcomes.get(pair) in took_its_draft
+        ),
+    ]
+    return MappingProxyType({pair: inferred if pair in yes else cited for pair in cut})
 
 
 def classify(

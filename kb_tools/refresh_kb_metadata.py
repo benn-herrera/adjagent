@@ -17,9 +17,20 @@ Currently regenerates:
       ``kb_index_lib.compute_solidity``
     * the ``(solidity X)`` annotation in every claim-target depends-on bullet,
       synced to the depended-on claim's computed solidity
-    * the claim-graph sheets, ``claim-graph.svg`` and ``claim-graph-digest.svg``
-      at the KB root, drawn from the index just written through
-      ``claim_sheet.render``
+    * the index streams, ``.index/*.yaml``
+    * the claim-graph sheets — ``claim-graph.svg`` at the KB root and, where two
+      or more volumes hold nodes, ``claim-graph-digest.svg`` beside it and each
+      such volume's ``claim-graph.svg`` — drawn from the index just written
+      through ``claim_sheet.render``
+
+On a KB in an older metadata format it first lands the migration
+(``kb_load.land_migration``) and then refreshes the migrated KB; on a newer one
+it refuses and writes nothing.
+
+It holds the KB write lock (``kb_lock``) from its first read to its last write,
+and exits 8 where another writer held it past the wait. Run as a command it is
+also refused, exit 7, while a build runs; every file it writes is replaced
+atomically.
 
 Future: bootstrap directive blockquote text (currently hand-maintained).
 
@@ -28,12 +39,14 @@ target afterward to confirm the result is internally consistent.
 """
 
 import argparse
-import os
 import re
 import sys
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 
-from kb_tools import __version__, claim_sheet, kb_index_lib, kb_schema, kb_util
+from kb_tools import __version__, claim_sheet, kb_index_lib, kb_load, kb_lock, kb_schema, kb_util
+from kb_tools.kb_survey.manifest import write_text_atomic
 
 # The shared writer. This module composes no metadata
 # format of its own: the frontmatter-field splice and the register
@@ -41,25 +54,12 @@ from kb_tools import __version__, claim_sheet, kb_index_lib, kb_schema, kb_util
 # block delimiters are `kb_write.render`'s. The dependency runs one way —
 # `kb_write` never imports this module — so what refresh writes and what the
 # write API writes cannot be two implementations of one format.
-from kb_tools.kb_write import render, store
+from kb_tools.kb_write import ops, render, store
 
-# The KB root and derived-index directory this run operates on. Bound in
-# main() — from --kb-root when given, else by lazy repo-root discovery
-# (kb_util.kb_root()) — never at import time.
+# The KB root this run operates on. Bound in main() — from --kb-root when
+# given, else by lazy repo-root discovery (kb_util.kb_root()) — never at
+# import time.
 KB: Path = None  # type: ignore[assignment]
-INDEX_DIR: Path = None  # type: ignore[assignment]
-
-# JSONL files emitted by the index-emission phase. This tuple IS the file
-# inventory and its order — nothing restates it in prose, and
-# `verify_kb_metadata` carries the matching tuple for the freshness diff.
-INDEX_FILES = (
-    "claims",
-    "depends-on",
-    "strengthen-by",
-    "supported-by",
-    "cites",
-    "subtree-aggregates",
-)
 
 # Walk-exclusion vocabulary — single-sourced in kb_index_lib. Only the dir set
 # is consumed here; the union comes from `compute_subtree_aggregates` like every
@@ -75,27 +75,24 @@ parse_frontmatter = kb_index_lib.parse_frontmatter
 
 
 def replace_subtree_claims(text: str, new_ids: list[str]) -> str:
-    """Replace the subtree-claims line in the frontmatter block (or insert it).
+    """Replace the subtree-claims field in the frontmatter (or insert it).
 
     The splice itself is ``kb_write.store``'s; what stays here is the
-    pair of facts refresh owns — which derived field this is, and which line it
+    pair of facts refresh owns — which derived field this is, and which key it
     anchors after when absent.
     """
-    return store.replace_or_insert_frontmatter_field(text, field="subtree-claims", ids=new_ids, anchor_prefix="kind:")
+    return store.replace_or_insert_frontmatter_field(text, field="subtree-claims", ids=new_ids, anchor_key="kind")
 
 
 def replace_subtree_experiments(text: str, new_ids: list[str]) -> str:
     """Replace subtree-experiments in the frontmatter (or insert it).
 
-    Inserted directly after the ``subtree-claims:`` line so the two derived
-    aggregates sit together; falls back after ``kind:`` if subtree-claims is
-    somehow absent (it is written first in the same refresh pass).
+    Inserted directly after the ``subtree-claims`` field so the two derived
+    aggregates sit together; :func:`replace_subtree_claims` has just written it
+    in the same refresh pass.
     """
-    anchor = "subtree-claims:"
-    if "subtree-claims:" not in text:
-        anchor = "kind:"
     return store.replace_or_insert_frontmatter_field(
-        text, field="subtree-experiments", ids=new_ids, anchor_prefix=anchor
+        text, field="subtree-experiments", ids=new_ids, anchor_key="subtree-claims"
     )
 
 
@@ -266,7 +263,7 @@ def _rewrite_claim_quality_solidity(
     if had_final_newline:
         new_text += "\n"
     if new_text != text:
-        path.write_text(new_text, encoding="utf-8")
+        write_text_atomic(new_text, path)
         return 1, solidity_changes, annotation_changes
     return 0, solidity_changes, annotation_changes
 
@@ -326,7 +323,7 @@ def _rewrite_claim_quality_leaf_references(
     if had_final_newline:
         new_text += "\n"
     if new_text != text:
-        path.write_text(new_text, encoding="utf-8")
+        write_text_atomic(new_text, path)
         return 1, footer_changes
     return 0, footer_changes
 
@@ -364,7 +361,7 @@ def _refresh_solidity() -> tuple[int, list, list]:
     ``solidity`` is computed ONCE via ``kb_index_lib.compute_solidity`` over
     the whole KB claim graph; the same map drives both the solidity-line
     write-back and the depends-on annotation sync (and, downstream, the
-    ``.index/claims.jsonl`` fields). Raises ``kb_index_lib.SolidityCycleError``
+    ``.index/claims.yaml`` fields). Raises ``kb_index_lib.SolidityCycleError``
     if the claim depends-on graph has a cycle — refresh refuses to write
     solidity in that case rather than emit undefined values.
 
@@ -374,7 +371,7 @@ def _refresh_solidity() -> tuple[int, list, list]:
     # ``solidity`` (claim finals), ``sup_solidity`` (support node solidities)
     # AND the per-claim branch record that renders each arithmetic trace all
     # come from ONE call — never re-derived — so the claim-quality write-back,
-    # the depends-on annotation sync, the trace, and the JSONL fields cannot
+    # the depends-on annotation sync, the trace, and the index fields cannot
     # drift (the dual-compute trap). A thin wrapper per half would run
     # `compute_solidity_full` again for each.
     full = kb_index_lib.compute_solidity_full(state.claim_entries, state.experiments, state.supports, state.works)
@@ -404,41 +401,113 @@ def _refresh_solidity() -> tuple[int, list, list]:
     return files_changed, all_solidity_changes, all_annotation_changes
 
 
-def _emit_jsonl_indexes() -> tuple[int, int]:
-    """Write the five JSONL files under ``KB/.index/``.
+def _emit_indexes() -> tuple[int, int]:
+    """Write every index stream in ``kb_index_lib.INDEX_FILES``, at ``kb_load.index_path``.
 
     Returns ``(written, unchanged)``. A file is "unchanged" when its on-disk
     bytes already match the freshly serialized payload; in that case the
     write is skipped to keep mtime stable and avoid spurious ``git status``
-    noise. Otherwise the file is written atomically (rename over existing).
+    noise. Otherwise the file is written atomically.
     """
-    INDEX_DIR.mkdir(exist_ok=True)
     state = kb_index_lib.discover_kb(KB)
     all_records = kb_index_lib.build_all_records(state)
 
     written = 0
     unchanged = 0
-    for short_name in INDEX_FILES:
-        records = all_records[short_name]
-        out_path = INDEX_DIR / f"{short_name}.jsonl"
+    for name in kb_index_lib.INDEX_FILES:
+        out_path = kb_load.index_path(KB, name)
         # Serialize through the library so the bytes compared here are the bytes
         # `check_index_fresh` byte-compares against. Re-implementing
         # `serialize_records` inline here is the emitter hand-rolling the format
         # the checker imports — a drift waiting for one of the two to change.
-        body = kb_index_lib.serialize_records(records)
+        body = kb_index_lib.serialize_records(all_records[name])
         if out_path.exists() and out_path.read_text(encoding="utf-8") == body:
             unchanged += 1
             continue
-        # Atomic rewrite: write to sibling temp file, then rename.
-        tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-        tmp_path.write_text(body, encoding="utf-8", newline="\n")
-        os.replace(tmp_path, out_path)
+        write_text_atomic(body, out_path)
         written += 1
     return written, unchanged
 
 
+def _land_format(kb: Path) -> int | None:
+    """Read the KB's format first; land an older KB's migration. An exit code where refresh must stop.
+
+    A KB newer than this toolchain, one whose entry point is missing or cannot be
+    read, and one whose files will not convert are refused before anything is
+    written (exit 2).
+    """
+    try:
+        try:
+            kb_format = kb_load.open_kb(kb)
+        except OSError as error:
+            entry = kb / kb_schema.ENTRY_POINT_FILENAME
+            detail = f"cannot be read: {error.strerror or error}"
+            raise kb_load.FormatRefusal(kb_load.CHECK_KB_ROOT, entry, detail) from None
+        landing = kb_load.land_migration(kb)
+    except kb_load.FormatRefusal as refusal:
+        print(f"FAIL: {refusal}", file=sys.stderr)
+        return 2
+    except kb_load.MigrationError as error:
+        print(f"FAIL: {kb_schema.FORMAT_KEY}: {error} — nothing was written", file=sys.stderr)
+        return 2
+    except OSError as error:
+        print(
+            f"FAIL: {kb_schema.FORMAT_KEY}: the migration from {kb_format.version} stopped before the stamp ({error}); "
+            f"the KB still reads as {kb_format.version}, and the next refresh completes it",
+            file=sys.stderr,
+        )
+        return 2
+    if landing.written:
+        print(
+            f"[refresh] Migrated the KB's metadata from format {kb_format.version} to {kb_schema.FORMAT_VERSION}: "
+            f"wrote {len(landing.written)} file(s), removed {len(landing.removed)} superseded file(s)."
+        )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
-    global KB, INDEX_DIR
+    """Refresh the KB, holding its write lock from the first read to the last write; 8 where another writer held it."""
+    kb = _resolved_kb(argv)
+    if kb is None:
+        return 2
+    return _refresh_holding(kb, kb_lock.write_lock)
+
+
+def _command() -> int:
+    """The ``python -m`` entry: :func:`main`, refused (7) while a build runs.
+
+    The build calls :func:`main` in-process and so never meets the refusal.
+    """
+    kb = _resolved_kb(None)
+    if kb is None:
+        return 2
+    return _refresh_holding(kb, kb_lock.command_write_lock)
+
+
+def _refresh_holding(kb: Path, hold: Callable[[Path], AbstractContextManager[None]]) -> int:
+    global KB
+    KB = kb
+    try:
+        with hold(kb.resolve().parent):
+            return _refresh()
+    except kb_lock.BuildRunning as exc:
+        print(
+            f"FAIL: lock: a build is running; its state-dir is {exc.state_dir} — nothing was read or written; "
+            f"re-run refresh once it has ended",
+            file=sys.stderr,
+        )
+        return int(ops.ExitCode.REFUSED)
+    except kb_lock.LockBusy as exc:
+        print(
+            f"FAIL: lock: another write op or refresh held the KB write lock on {exc.path} past the wait — nothing "
+            f"was read or written; re-run refresh unchanged",
+            file=sys.stderr,
+        )
+        return int(ops.ExitCode.RETRY)
+
+
+def _resolved_kb(argv: list[str] | None) -> Path | None:
+    """The KB root ``argv`` names, or the repository's; ``None`` after the FAIL line where there is none."""
     parser = argparse.ArgumentParser(description="Regenerate derived KB metadata fields from leaf claims.")
     parser.add_argument("--version", action="version", version=f"%(prog)s (kb_tools {__version__})")
     parser.add_argument(
@@ -453,22 +522,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.kb_root is not None:
-        KB = args.kb_root
+        kb = args.kb_root
     else:
         try:
-            KB = kb_util.kb_root()
+            kb = kb_util.kb_root()
         except kb_util.RepoRootError as exc:
             print(f"FAIL: {exc}", file=sys.stderr)
-            return 2
-    INDEX_DIR = KB / kb_util.INDEX_DIRNAME
+            return None
+    if not kb.is_dir():
+        print(f"FAIL: KB directory {kb} not found.", file=sys.stderr)
+        return None
+    return kb
 
-    if not KB.is_dir():
-        print(f"FAIL: KB directory {KB} not found.", file=sys.stderr)
-        return 2
+
+def _refresh() -> int:
     unmigrated = kb_index_lib.unmigrated_agents_file(KB)
     if unmigrated is not None:
         print(f"FAIL: {unmigrated}", file=sys.stderr)
         return 2
+    stopped = _land_format(KB)
+    if stopped is not None:
+        return stopped
 
     # BOTH aggregates come from the SAME shared library computation the
     # verifier uses (compute_subtree_aggregates over a single discover_kb
@@ -495,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
         new_text = replace_subtree_claims(text, sorted_ids)
         new_text = replace_subtree_experiments(new_text, exp_ids)
         if new_text != text:
-            p.write_text(new_text, encoding="utf-8")
+            write_text_atomic(new_text, p)
             updated += 1
 
     print(f"[refresh] Updated {updated} subtree-claims field(s).")
@@ -540,15 +614,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"    - {old.strip()}")
         print(f"    + {new.strip()}")
 
-    # Phase 2: emit derived JSONL index files. The frontmatter writes above
+    # Phase 2: emit the derived index streams. The frontmatter writes above
     # are already on disk, so discover_kb here picks up the just-written
-    # subtree-claims values when materializing subtree-aggregates.jsonl.
+    # subtree-claims values when materializing subtree-aggregates.
     try:
-        written, unchanged = _emit_jsonl_indexes()
+        written, unchanged = _emit_indexes()
     except kb_index_lib.FrameworkNodeParseError as exc:
         print(f"\nFAIL: {exc}", file=sys.stderr)
         return 1
-    print(f"[refresh-index] Wrote {written} file(s) under " f"{INDEX_DIR.as_posix()}/ ({unchanged} unchanged).")
+    index_dir = (KB / kb_util.INDEX_DIRNAME).as_posix()
+    print(f"[refresh-index] Wrote {written} file(s) under {index_dir}/ ({unchanged} unchanged).")
 
     # Phase 3: the claim-graph sheets, last, so nothing above depends on `dot`.
     sheets = claim_sheet.render(KB)
@@ -558,4 +633,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_command())

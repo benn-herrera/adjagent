@@ -38,11 +38,6 @@ MARKER_OPENERS: tuple[str, ...] = (
     _opener(render.render_tier2_marker(_MARKER_PROBE)),
 )
 
-#: Those two and the frontmatter block's opener: every metadata artifact the
-#: write API inserts into an authored document, which is the set point 14's
-#: cleanliness check reads.
-METADATA_OPENERS: tuple[str, ...] = (render.FRONTMATTER_OPENER, *MARKER_OPENERS)
-
 #: One marker where it sits, with the space that separates it from the content
 #: it follows. **A Tier-2 marker is appended to the end of the line it marks,
 #: never written on a line of its own**: a comment alone on a line is a
@@ -296,11 +291,13 @@ def read(kb_root: Path) -> Tree:
     parents: dict[str, str] = {}
     for path, document in documents.items():
         links = _links(document)
-        uplink = next((target for number, target in links if number == 1), None)
-        first = next(iter(document.lines), "")
-        if uplink is not None and kb_index_lib.UPLINK_MARKER in first:
+        at = kb_index_lib.uplink_index(document.text)
+        # `_links` numbers lines from 1.
+        uplink_number = None if at is None else at + 1
+        uplink = next((target for number, target in links if number == uplink_number), None)
+        if uplink is not None and kb_index_lib.UPLINK_MARKER in document.lines[at]:
             parents[path] = resolve(path, uplink)
-        down = [resolve(path, target) for number, target in links if number != 1]
+        down = [resolve(path, target) for number, target in links if number != uplink_number]
         children[path] = tuple(dict.fromkeys(down))
 
     return Tree(root=kb_root, documents=documents, children=children, parents=parents)

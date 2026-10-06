@@ -1,12 +1,13 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 no-claim: "hosts a support node only"
-sup-id: sup-dep001
-supports:
-  - clm-sb3333: 1.0
--->
+support-nodes:
+  - sup-id: sup-dep001
+    supports:
+      - clm-sb3333: 1.0
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## Dep-Gated Analytical Support
 

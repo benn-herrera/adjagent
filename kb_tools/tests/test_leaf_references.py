@@ -32,6 +32,7 @@ from pathlib import Path
 
 from kb_tools import install_location
 from kb_tools import kb_index_lib as lib
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 _PKG_PARENT = install_location.current().agents_dir
 _REFRESH_MOD = "kb_tools.refresh_kb_metadata"
@@ -60,23 +61,21 @@ _AGENTS_MD = """# Mini Invariants
 - Axiom 4: **Universal Saturation Kernel** — S(A).
 """
 
-_ENTRY_POINT = """[↑ root](entry-point.md)
-
-<!-- kb-frontmatter
+_ENTRY_POINT = """---
 kind: entry-point
 subtree-claims: []
 bootstrap: true
--->
+---
+[↑ root](entry-point.md)
 
 # Entry
 """
 
-_VOL_INDEX = """[↑ root](../entry-point.md)
-
-<!-- kb-frontmatter
+_VOL_INDEX = """---
 kind: index
 subtree-claims: []
--->
+---
+[↑ root](../entry-point.md)
 
 # Vol Index
 """
@@ -139,23 +138,21 @@ Body prose. This entry has a STALE hand-authored footer that refresh must fix.
   - clm-aa1111 (f=1.0)
 """
 
-_LEAF_SINGLE = """[↑ idx](index.md)
-
-<!-- kb-frontmatter
+_LEAF_SINGLE = """---
 kind: leaf
 claims: [clm-aa1111]
--->
+---
+[↑ idx](index.md)
 
 # Single
 Body.
 """
 
-_LEAF_MULTI = """[↑ idx](index.md)
-
-<!-- kb-frontmatter
+_LEAF_MULTI = """---
 kind: leaf
 claims: [clm-aa1111, clm-bb2222]
--->
+---
+[↑ idx](index.md)
 
 # Multi
 
@@ -166,30 +163,30 @@ A.
 B.
 """
 
-_LEAF_EXP = """[↑ idx](index.md)
-
-<!-- kb-frontmatter
+_LEAF_EXP = """---
 kind: leaf
 no-claim: "hosts an experiment"
-exp-id: exp-ee1111
-status: run
-strengthens:
-  - clm-aa1111: 1.0
--->
+experiment-nodes:
+  - exp-id: exp-ee1111
+    status: run
+    strengthens:
+      - clm-aa1111: 1.0
+---
+[↑ idx](index.md)
 
 # Experiment Leaf
 Body.
 """
 
-_LEAF_SUP = """[↑ idx](index.md)
-
-<!-- kb-frontmatter
+_LEAF_SUP = """---
 kind: leaf
 no-claim: "hosts a support"
-sup-id: sup-ss1111
-supports:
-  - clm-aa1111: 1.0
--->
+support-nodes:
+  - sup-id: sup-ss1111
+    supports:
+      - clm-aa1111: 1.0
+---
+[↑ idx](index.md)
 
 # Support Leaf
 Body.
@@ -198,16 +195,19 @@ Body.
 
 def _build_kb(root: Path) -> None:
     """Materialize the synthetic KB under ``root``."""
-    (root / "AGENTS.md").write_text(_AGENTS_MD, encoding="utf-8")
-    (root / "entry-point.md").write_text(_ENTRY_POINT, encoding="utf-8")
-    vol = root / "vol"
-    vol.mkdir()
-    (vol / "index.md").write_text(_VOL_INDEX, encoding="utf-8")
-    (vol / "claim-quality.md").write_text(_REGISTER, encoding="utf-8")
-    (vol / "leaf-single.md").write_text(_LEAF_SINGLE, encoding="utf-8")
-    (vol / "leaf-multi.md").write_text(_LEAF_MULTI, encoding="utf-8")
-    (vol / "leaf-exp.md").write_text(_LEAF_EXP, encoding="utf-8")
-    (vol / "leaf-sup.md").write_text(_LEAF_SUP, encoding="utf-8")
+    write_stamped_kb(
+        root,
+        {
+            "AGENTS.md": _AGENTS_MD,
+            "entry-point.md": _ENTRY_POINT,
+            "vol/index.md": _VOL_INDEX,
+            "vol/claim-quality.md": _REGISTER,
+            "vol/leaf-single.md": _LEAF_SINGLE,
+            "vol/leaf-multi.md": _LEAF_MULTI,
+            "vol/leaf-exp.md": _LEAF_EXP,
+            "vol/leaf-sup.md": _LEAF_SUP,
+        },
+    )
 
 
 class TestReverseMapUnit(unittest.TestCase):
@@ -216,7 +216,7 @@ class TestReverseMapUnit(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.state = lib.discover_kb(self.kb, diagnostic_stream=None)
@@ -276,7 +276,7 @@ class TestRefreshGeneration(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.register = self.kb / "vol" / "claim-quality.md"
@@ -342,7 +342,7 @@ class TestVerifyDriftGate(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.register = self.kb / "vol" / "claim-quality.md"
@@ -419,7 +419,7 @@ class TestFencedFooterInEntryBand(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.register = self.kb / "vol" / "claim-quality.md"
@@ -468,7 +468,7 @@ class TestFencedSolidityLineInQualitySection(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.register = self.kb / "vol" / "claim-quality.md"
@@ -528,15 +528,6 @@ class TestEmitterCheckerSingleSource(unittest.TestCase):
         checker = source.split("def check_subtree_consistency", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("compute_subtree_aggregates", checker)
 
-    def test_refresh_serializes_through_the_library(self):
-        """The emitter must not hand-roll the format the checker imports."""
-        from kb_tools import refresh_kb_metadata
-
-        source = Path(refresh_kb_metadata.__file__).read_text(encoding="utf-8")
-        emitter = source.split("def _emit_jsonl_indexes", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("kb_index_lib.serialize_records", emitter)
-        self.assertNotIn("json.dumps", emitter)
-
 
 class TestSolidityTraceIsGated(unittest.TestCase):
     """A green verify must mean refresh is a fixed point.
@@ -550,7 +541,7 @@ class TestSolidityTraceIsGated(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.register = self.kb / "vol" / "claim-quality.md"
@@ -600,7 +591,7 @@ class TestSolidityReportFormatting(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.kb = Path(self._tmp.name) / "kb"
+        self.kb = Path(self._tmp.name) / "kb-root"
         self.kb.mkdir()
         _build_kb(self.kb)
         self.register = self.kb / "vol" / "claim-quality.md"

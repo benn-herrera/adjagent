@@ -18,6 +18,8 @@ recognize when a clever approach is worse than a boring one.
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -108,6 +110,10 @@ be swapped. @!heavy-logging-framework baseline="slog"!@ This @!logging-abstracti
   objects; stored Go pointers become dangling.
 - `time.After` in a loop leaks timers until they fire on Go ≤ 1.22; from Go 1.23 an unreferenced
   timer is collectable before firing. On pre-1.23 toolchains use `time.NewTimer` and `Reset`.
+
+## When Reviewing
+
+@!test-review!@
 
 ## Parallel Execution
 

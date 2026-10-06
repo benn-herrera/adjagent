@@ -1,9 +1,8 @@
 """Runtime query interface over the KB derived index (Phase 3 consumer).
 
-The query side reads the on-disk JSONL artifacts under the KB's ``.index/``
-directory and exposes question-shaped lookups via :class:`Index`. Path
-resolution is shared with the build side (``kb_tools/``) through the
-``kb_util`` module — the single source of KB path truth.
+The query side reads the index streams under the KB's ``.index/`` directory
+through ``kb_load`` — the KB's format first, an older KB converted in memory —
+and exposes question-shaped lookups via :class:`Index`.
 
 ``kb_cmd`` is a normal importable package. The CLI entry point is ``python -m
 kb_tools.kb_cmd``; for programmatic access import the loader directly::

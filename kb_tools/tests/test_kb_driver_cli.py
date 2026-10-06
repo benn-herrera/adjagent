@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import install_location, kb_util
+from kb_tools import install_location, kb_lock, kb_util
 from kb_tools.kb_driver import baton, cli, config, ledger, runlog
-from kb_tools.tests import _chat_stub
+from kb_tools.tests import _chat_stub, _lock_holder
 
 _THIS_DIR = Path(__file__).resolve().parent
 _PKG_PARENT = install_location.current().agents_dir
@@ -105,7 +105,7 @@ def test_a_run_outside_a_repository_reports_the_environment_and_still_lays_out_i
     assert payload["barrier_record"] is None
     # No repository, so there was nothing to lock — and nothing was written
     # anywhere pretending otherwise.
-    assert not list(tmp_path.rglob("kb-driver.lock"))
+    assert not list(tmp_path.rglob(kb_lock.RUN_LOCK_FILENAME))
 
 
 def test_a_flags_only_run_launches(
@@ -162,7 +162,7 @@ def test_malformed_decide_exits_13_before_the_run_directory_exists(
     assert not (tmp_path / "runs").exists()
 
 
-def test_a_live_run_lock_exits_16_for_every_run_dir_under_the_repo(
+def test_a_held_run_lock_exits_16_for_every_run_dir_under_the_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The lock binds the repository, so `--run-dir` cannot get around it.
@@ -175,19 +175,16 @@ def test_a_live_run_lock_exits_16_for_every_run_dir_under_the_repo(
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     monkeypatch.chdir(repo)
-    lock = runlog.repo_lock_path(repo)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": os.getpid(), "run_id": "other"}), encoding="utf-8")
+    other = str(tmp_path / "elsewhere" / "run-0")
 
-    code = cli.main(_run_args(tmp_path))
+    with _lock_holder.held(kb_lock.run_lock_path(repo), content=other):
+        code = cli.main(_run_args(tmp_path))
+        out = capsys.readouterr().out
+        assert code == baton.EXIT_LOCKED
+        assert other in out
 
-    out = capsys.readouterr().out
-    assert code == baton.EXIT_LOCKED
-    assert "another driver run is live" in out
-    assert "report the live pid" in out
-
-    elsewhere = ["run", "--config", str(_config(tmp_path)), "--run-dir", str(tmp_path / "other-runs")]
-    assert cli.main(elsewhere) == baton.EXIT_LOCKED
+        elsewhere = ["run", "--config", str(_config(tmp_path)), "--run-dir", str(tmp_path / "other-runs")]
+        assert cli.main(elsewhere) == baton.EXIT_LOCKED
     assert not (tmp_path / "other-runs").exists()
 
 
@@ -273,7 +270,7 @@ def test_an_unhandled_exception_inside_the_run_leaves_its_traceback_in_the_run_l
     assert len(tracebacks) == 1
     assert "KeyError: '_HANDLERS'" in tracebacks[0]
     # The lock is released even on this path, so the next run is not wedged.
-    assert not runlog.repo_lock_path(repo).exists()
+    assert not kb_lock.run_lock_path(repo).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +368,7 @@ def test_a_killed_run_still_leaves_its_report(
     # thing a session must not do with it is narrate it.
     assert "do not interpret it" in out
     # The lock goes back even here, so the kill costs the next run nothing.
-    assert not runlog.repo_lock_path(consumer).exists()
+    assert not kb_lock.run_lock_path(consumer).exists()
 
 
 def test_a_boundary_error_mid_run_still_leaves_its_report(

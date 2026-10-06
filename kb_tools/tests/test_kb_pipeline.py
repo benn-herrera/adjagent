@@ -5,13 +5,20 @@ stage table directly, for obligations whose *absence* is the contract and which
 therefore have no rendered line to look for.
 """
 
-import json
 import re
 from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_pipeline, kb_util
+from kb_tools import kb_index_lib, kb_load, kb_pipeline, kb_util
+from kb_tools.tests._stamped_kb import write_stamped_kb
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A repository whose KB is stamped, for the build records beside it to be read in."""
+    write_stamped_kb(kb_util.kb_root(tmp_path))
+    return tmp_path
 
 
 def _stage(stage_id: str) -> kb_pipeline.Stage:
@@ -279,7 +286,7 @@ def test_no_reserved_resumption_literal_survives() -> None:
     assert {member.value for member in conform.Determination} == {"hosts-claims", "authored-no-claim", "undeclared"}
 
 
-def test_the_record_reads_back_what_was_written(tmp_path: Path) -> None:
+def test_the_record_reads_back_what_was_written(repo: Path) -> None:
     record = (
         kb_pipeline.NodePassRecord()
         .with_leaf(
@@ -303,23 +310,30 @@ def test_the_record_reads_back_what_was_written(tmp_path: Path) -> None:
         .with_leaf("vol/b.md", kb_pipeline.LeafEntry())
     )
 
-    kb_pipeline.write_node_pass(tmp_path, record)
-    back = kb_pipeline.read_node_pass(tmp_path)
+    kb_pipeline.write_node_pass(repo, record)
+    back = kb_pipeline.read_node_pass(repo)
 
     assert back is not None and dict(back.leaves)["vol/b.md"] == kb_pipeline.LeafEntry()
     assert back.leaves["vol/a.md"].claims == record.leaves["vol/a.md"].claims
     assert sorted(back.leaves["vol/a.md"].verdicts, key=lambda verdict: verdict.line) == sorted(
         record.leaves["vol/a.md"].verdicts, key=lambda verdict: verdict.line
     )
-    written = (tmp_path / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8")
-    kb_pipeline.write_node_pass(tmp_path, back)
-    assert (tmp_path / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
+    written = (repo / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8")
+    kb_pipeline.write_node_pass(repo, back)
+    assert (repo / kb_pipeline.NODE_PASS_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
     assert kb_pipeline.NODE_PASS_ABOUT in written
 
 
 def test_a_record_written_before_verdicts_carried_a_cause_still_reads(tmp_path: Path) -> None:
-    """Staged corpora hold records from before defaults existed, and the measurement scripts read them."""
-    (tmp_path / kb_pipeline.NODE_PASS_RELPATH).write_text(
+    """Staged corpora hold records from before defaults existed, and the measurement scripts read them.
+
+    Those corpora are also in the superseded format: the KB unstamped and the record its JSON form,
+    read converted where it stands.
+    """
+    kb = kb_util.kb_root(tmp_path)
+    kb.mkdir(parents=True)
+    (kb / "entry-point.md").write_text("# KB\n", encoding="utf-8")
+    (tmp_path / "kb-build-node-pass.json").write_text(
         '{"leaves": {"a.md": {"state": "landed", "outcome": "no-claim", "reason": "A sentence.", "claims": [], '
         '"verdicts": [{"line": 4, "verdict": "not-a-claim"}]}}}',
         "utf-8",
@@ -331,11 +345,11 @@ def test_a_record_written_before_verdicts_carried_a_cause_still_reads(tmp_path: 
     )
 
 
-def test_no_record_is_no_record_and_a_torn_one_is_refused(tmp_path: Path) -> None:
-    assert kb_pipeline.read_node_pass(tmp_path) is None
-    (tmp_path / kb_pipeline.NODE_PASS_RELPATH).write_text('{"leaves": {"a.md": {"state": "nowhere"}}}', "utf-8")
+def test_no_record_is_no_record_and_a_torn_one_is_refused(repo: Path) -> None:
+    assert kb_pipeline.read_node_pass(repo) is None
+    (repo / kb_pipeline.NODE_PASS_RELPATH).write_text("leaves:\n  a.md:\n    state: nowhere\n", "utf-8")
     with pytest.raises(kb_pipeline.NodePassRecordError):
-        kb_pipeline.read_node_pass(tmp_path)
+        kb_pipeline.read_node_pass(repo)
 
 
 def test_the_record_lives_outside_the_kb_and_outside_scratch() -> None:
@@ -354,15 +368,15 @@ def test_the_record_lives_outside_the_kb_and_outside_scratch() -> None:
     ],
 )
 def test_the_node_pass_is_covered_when_its_record_lists_no_leaf_unread_or_planned(
-    tmp_path: Path, leaves: dict | None, satisfied: bool
+    repo: Path, leaves: dict | None, satisfied: bool
 ) -> None:
     if leaves is not None:
         record = kb_pipeline.NodePassRecord()
         for path, state in leaves.items():
             record = record.with_leaf(path, kb_pipeline.LeafEntry(state=state))
-        kb_pipeline.write_node_pass(tmp_path, record)
+        kb_pipeline.write_node_pass(repo, record)
 
-    report = kb_pipeline._check_claims_discovered(kb_pipeline.CheckContext(tmp_path))
+    report = kb_pipeline._check_claims_discovered(kb_pipeline.CheckContext(repo))
 
     assert [unit.satisfied for unit in report.units] == [satisfied]
     assert all(unit.asserts_own_work for unit in report.units)
@@ -411,7 +425,7 @@ _ASKED = kb_pipeline.CandidateEntry(
 _DEFAULTED = kb_pipeline.CandidateEntry(offered=("A", "B"), letter=None, outcome=kb_pipeline.ClassifyOutcome.DEFAULTED)
 
 
-def test_the_unmarked_record_reads_back_what_was_written_with_its_plan_in_order(tmp_path: Path) -> None:
+def test_the_unmarked_record_reads_back_what_was_written_with_its_plan_in_order(repo: Path) -> None:
     planned = (("clm-bbbbbb", "clm-zzzzzz"), ("clm-bbbbbb", "clm-aaaaaa"), ("clm-cccccc", "clm-aaaaaa"))
     record = (
         kb_pipeline.UnmarkedRecord()
@@ -419,36 +433,36 @@ def test_the_unmarked_record_reads_back_what_was_written_with_its_plan_in_order(
         .with_entries({planned[1]: _DEFAULTED, planned[0]: _ASKED, ("clm-dddddd", "clm-aaaaaa"): _ASKED})
     )
 
-    kb_pipeline.write_unmarked(tmp_path, record)
-    back = kb_pipeline.read_unmarked(tmp_path)
+    kb_pipeline.write_unmarked(repo, record)
+    back = kb_pipeline.read_unmarked(repo)
 
     assert back == record
     assert back.unanswered() == (planned[2],)
-    written = (tmp_path / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8")
-    kb_pipeline.write_unmarked(tmp_path, back)
-    assert (tmp_path / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
+    written = (repo / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8")
+    kb_pipeline.write_unmarked(repo, back)
+    assert (repo / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8") == written, "deterministic"
     assert kb_pipeline.UNMARKED_ABOUT in written
 
 
-def test_one_pair_codec_writes_both_records_rows_alike(tmp_path: Path) -> None:
+def test_one_pair_codec_writes_both_records_rows_alike(repo: Path) -> None:
     """Two paths through one codec: a pair's row is the same bytes in either record."""
     entries = {("clm-aaaaaa", "clm-bbbbbb"): _ASKED}
-    kb_pipeline.write_classification(tmp_path, kb_pipeline.ClassificationRecord().with_entries(entries))
-    kb_pipeline.write_unmarked(tmp_path, kb_pipeline.UnmarkedRecord().with_entries(entries))
+    kb_pipeline.write_classification(repo, kb_pipeline.ClassificationRecord().with_entries(entries))
+    kb_pipeline.write_unmarked(repo, kb_pipeline.UnmarkedRecord().with_entries(entries))
 
-    classified = json.loads((tmp_path / kb_pipeline.CLASSIFICATION_RELPATH).read_text(encoding="utf-8"))
-    unmarked = json.loads((tmp_path / kb_pipeline.UNMARKED_RELPATH).read_text(encoding="utf-8"))
+    classified = kb_load.read_record(repo, kb_load.CLASSIFICATION_STEM)
+    unmarked = kb_load.read_record(repo, kb_load.UNMARKED_STEM)
 
     assert classified["candidates"] == unmarked["pairs"]
-    assert dict(kb_pipeline.read_classification(tmp_path).candidates) == entries
-    assert dict(kb_pipeline.read_unmarked(tmp_path).pairs) == entries
+    assert dict(kb_pipeline.read_classification(repo).candidates) == entries
+    assert dict(kb_pipeline.read_unmarked(repo).pairs) == entries
 
 
-def test_no_unmarked_record_is_no_record_and_a_torn_one_is_refused(tmp_path: Path) -> None:
-    assert kb_pipeline.read_unmarked(tmp_path) is None
-    (tmp_path / kb_pipeline.UNMARKED_RELPATH).write_text('{"planned": [["clm-a"]], "pairs": []}', "utf-8")
+def test_no_unmarked_record_is_no_record_and_a_torn_one_is_refused(repo: Path) -> None:
+    assert kb_pipeline.read_unmarked(repo) is None
+    (repo / kb_pipeline.UNMARKED_RELPATH).write_text("planned:\n  - - clm-a\npairs: []\n", "utf-8")
     with pytest.raises(kb_pipeline.UnmarkedRecordError):
-        kb_pipeline.read_unmarked(tmp_path)
+        kb_pipeline.read_unmarked(repo)
 
 
 def test_the_unmarked_record_lives_outside_the_kb_and_outside_scratch() -> None:
@@ -471,12 +485,12 @@ _PAIR = ("clm-aaaaaa", "clm-bbbbbb")
     ids=["empty-plan", "every-pair-answered", "a-pair-unanswered", "never-planned", "no-record"],
 )
 def test_the_unmarked_stage_is_covered_when_its_plan_stands_and_every_pair_carries_an_outcome(
-    tmp_path: Path, record: kb_pipeline.UnmarkedRecord | None, satisfied: bool
+    repo: Path, record: kb_pipeline.UnmarkedRecord | None, satisfied: bool
 ) -> None:
     if record is not None:
-        kb_pipeline.write_unmarked(tmp_path, record)
+        kb_pipeline.write_unmarked(repo, record)
 
-    report = kb_pipeline._check_references_found(kb_pipeline.CheckContext(tmp_path))
+    report = kb_pipeline._check_references_found(kb_pipeline.CheckContext(repo))
 
     assert [unit.satisfied for unit in report.units] == [satisfied]
     assert all(unit.asserts_own_work for unit in report.units)

@@ -1,16 +1,17 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 no-claim: "hosts TWO support nodes only — no claim-quality entries of its own"
-sup-id: sup-mlt001
-supports:
-  - clm-sb6666: 1.0
-sup-id: sup-mlt002
-supports:
-  - clm-sb6666: *pending*
-  - clm-sb7777: 0.50
--->
+support-nodes:
+  - sup-id: sup-mlt001
+    supports:
+      - clm-sb6666: 1.0
+  - sup-id: sup-mlt002
+    supports:
+      - clm-sb6666: "*pending*"
+      - clm-sb7777: 0.50
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## A Container Hosting Multiple Analytical Supports
 

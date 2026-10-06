@@ -11,16 +11,20 @@ Each file holds one shape's exact bytes plus the single trailing newline a text
 file ends with; the renderers themselves return text with no trailing newline,
 because where an entry sits among its siblings is `store.py`'s business.
 
+The `frontmatter-*.md` files are KB format 1.0.0 YAML frontmatter, byte-equal to what kbase's
+writer gives the same values. kbase's own render test reads this directory and compares its
+renderer against each file, so a byte moved here moves a test in that repository too.
+
 | File | Shape |
 |---|---|
 | `claim-entry-full.md` | a `clm-` register entry carrying every optional field, and every depends-on bullet form |
 | `claim-entry-minimal.md` | a `clm-` entry carrying none — pending score, no dependencies, no strengthen-by |
 | `support-entry.md` | a `sup-` entry: `quality:` in place of `confidence:`, no `strengthen-by` |
 | `support-entry-staged.md` | a `sup-` entry staging its beneficiary fan-out in the register — the fan-out's pre-leaf home |
-| `frontmatter-claims.md` | the kb-frontmatter block's primary `claims:` field, in the canonical inline-list shape |
+| `frontmatter-claims.md` | the YAML frontmatter's primary `claims:` field, in the canonical inline-list shape |
 | `frontmatter-no-claim.md` | the `no-claim:` branch of the primary field |
-| `frontmatter-path-stable.md` | the `path-stable:` document attribute, double-quoted like `no-claim:` |
-| `frontmatter-hosts.md` | a container hosting an experiment and two supports, with a pending on-point fraction |
+| `frontmatter-path-stable.md` | the `path-stable:` document attribute, double-quoted where it is not plain-safe, like `no-claim:` |
+| `frontmatter-hosts.md` | a container hosting an experiment and two supports under `experiment-nodes:` / `support-nodes:`, with a pending on-point fraction |
 | `markers.md` | the `<!-- id: … -->` register marker and the `<!-- claim-quality: … -->` Tier-2 marker |
 | `depends-on-bullets.md` | each depends-on bullet shape — claim and framework target, with and without title and context |
 | `no-edge.md` | the entry-level `- no-edge: <reason>` foreign-domain exemption |

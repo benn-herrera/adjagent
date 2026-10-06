@@ -1256,41 +1256,13 @@ class TestUntouchedLinesKeepTheirBytes(unittest.TestCase):
         self.assertTrue(after.startswith(document))
         self.assertNotIn("\n\n", after.replace("\r\n", "\r"))
 
-    def test_a_frontmatter_field_replacement_keeps_the_block_it_did_not_write(self):
-        document = (
-            "[up](index.md)\r\n\r\n<!-- kb-frontmatter\r\nkind: leaf\r\n"
-            "subtree-claims: [clm-aa1111]\r\npath-stable: y\r\n-->\r\n\r\n# Leaf\r\n\r\n" + _EXOTIC_PROSE + "\r\n"
-        )
-        after = store.replace_or_insert_frontmatter_field(
-            document, field="subtree-claims", ids=["clm-bb2222"], anchor_prefix="kind:"
-        )
-        changed = _changed_lines(document, after)
-        self.assertEqual(len(changed), 1, f"lines {changed} changed")
-        self.assertIn("subtree-claims: [clm-bb2222]\r\n", after)
-        self.assertEqual(after.count("\r"), document.count("\r"))
-
-    def test_a_field_inserted_after_the_blocks_last_line_is_a_line_of_its_own(self):
-        """The block's last line carries no terminator; a new neighbour needs one.
-
-        Gluing the new line onto the block's last line would read back as
-        ``subtree-claims`` holding the *experiments* value, so refresh would
-        report one field with an extra id and the other missing — a drift no
-        amount of re-running could clear. Caught by ``test_leaf_references``'
-        verify gate, not by this file.
-        """
-        document = "<!-- kb-frontmatter\nkind: index\nsubtree-claims: [clm-aa1111]\n-->\n\n# Index\n"
-        after = store.replace_or_insert_frontmatter_field(
-            document, field="subtree-experiments", ids=["exp-ee1111"], anchor_prefix="subtree-claims:"
-        )
-        self.assertIn("subtree-claims: [clm-aa1111]\nsubtree-experiments: [exp-ee1111]\n-->", after)
-
     def test_an_inserted_frontmatter_field_lands_without_re_terminating_the_block(self):
-        document = "<!-- kb-frontmatter\r\nkind: leaf\r\npath-stable: y\r\n-->\r\n\r\n# Leaf\r\n"
+        document = "---\r\nkind: leaf\r\npath-stable: y\r\n---\r\n\r\n# Leaf\r\n"
         after = store.replace_or_insert_frontmatter_field(
-            document, field="subtree-claims", ids=["clm-aa1111"], anchor_prefix="kind:"
+            document, field="subtree-claims", ids=["clm-aa1111"], anchor_key="kind"
         )
         self.assertEqual(after.count("\r"), document.count("\r") + 1)
-        self.assertIn("kind: leaf\r\nsubtree-claims: [clm-aa1111]\r\npath-stable: y\r\n-->", after)
+        self.assertIn("kind: leaf\r\nsubtree-claims: [clm-aa1111]\r\npath-stable: y\r\n---", after)
 
     def test_the_whole_write_path_publishes_the_bytes_the_splice_composed(self):
         # End to end, because `_write_temp` and `_read_text` are as able to
@@ -1327,6 +1299,61 @@ class TestUntouchedLinesKeepTheirBytes(unittest.TestCase):
             after = register.read_bytes()
             self.assertEqual(after.count(b"\r"), before.count(b"\r"))
             self.assertEqual(len(_changed_lines(before.decode(), after.decode())), 1)
+
+
+class TestTheYamlFrontmatterSplice(unittest.TestCase):
+    """kbase's span and insertion rules, over YAML frontmatter.
+
+    A key's span is its line and every indented or ``-`` line below it; an
+    absent id list goes after its anchor key's span, else at the top; any other
+    absent key goes at the end, before a ``kb-format`` stamp ending the block.
+    """
+
+    _BODY = "[↑ Up](index.md)\n\n# Leaf\n"
+
+    def _replace(self, document: str, *, field: str, ids: list[str], anchor_key: str) -> str:
+        return store.replace_or_insert_frontmatter_field(document, field=field, ids=ids, anchor_key=anchor_key)
+
+    def test_a_field_is_inserted_after_its_anchor_keys_whole_span(self):
+        document = "---\nkind: index\nclaims:\n  - clm-aa1111\nsubtree-claims: [clm-aa1111]\n---\n" + self._BODY
+        after = self._replace(document, field="subtree-experiments", ids=["exp-ee1111"], anchor_key="subtree-claims")
+        self.assertEqual(
+            after,
+            "---\nkind: index\nclaims:\n  - clm-aa1111\nsubtree-claims: [clm-aa1111]\n"
+            "subtree-experiments: [exp-ee1111]\n---\n" + self._BODY,
+        )
+
+    def test_a_multi_line_value_is_replaced_whole(self):
+        document = (
+            "---\nkind: index\nsubtree-claims:\n  - clm-aa1111\n  - clm-bb2222\npath-stable: y\n---\n" + self._BODY
+        )
+        after = self._replace(document, field="subtree-claims", ids=["clm-cc3333"], anchor_key="kind")
+        self.assertEqual(after, "---\nkind: index\nsubtree-claims: [clm-cc3333]\npath-stable: y\n---\n" + self._BODY)
+
+    def test_without_its_anchor_a_field_goes_on_top_and_the_stamp_stays_last(self):
+        document = '---\nkb-format: "1.0.0"\n---\n\n# KB\n'
+        after = self._replace(document, field="subtree-claims", ids=[], anchor_key="kind")
+        self.assertEqual(after, '---\nsubtree-claims: []\nkb-format: "1.0.0"\n---\n\n# KB\n')
+
+    def test_an_appended_key_goes_before_a_trailing_stamp(self):
+        document = '---\nkind: leaf\nkb-format: "1.0.0"\n---\n' + self._BODY
+        after = store.set_frontmatter_key(
+            document, key="experiment-nodes", lines=["experiment-nodes:", "  - exp-id: exp-ee1111"], after=None
+        )
+        self.assertEqual(
+            after, '---\nkind: leaf\nexperiment-nodes:\n  - exp-id: exp-ee1111\nkb-format: "1.0.0"\n---\n' + self._BODY
+        )
+
+    def test_a_crlf_block_stays_crlf_and_the_body_keeps_its_bytes(self):
+        document = (
+            "---\r\nkind: leaf\r\nsubtree-claims: [clm-aa1111]\r\n---\r\n[↑ Up](index.md)\r\n\r\n" + _EXOTIC_PROSE
+        )
+        after = self._replace(document, field="subtree-claims", ids=["clm-bb2222"], anchor_key="kind")
+        self.assertEqual(after, document.replace("[clm-aa1111]", "[clm-bb2222]"))
+
+    def test_an_empty_block_gains_the_field_on_a_line_of_its_own(self):
+        after = self._replace("---\n---\n" + self._BODY, field="subtree-claims", ids=["clm-aa1111"], anchor_key="kind")
+        self.assertEqual(after, "---\nsubtree-claims: [clm-aa1111]\n---\n" + self._BODY)
 
 
 class TestSpliceLines(unittest.TestCase):
@@ -1395,6 +1422,7 @@ class TestComparisonSurfaceIsTotal(unittest.TestCase):
             rationale="Written rationale.",
             depends_on=(),
             references=(),
+            demoted=(),
             strengthen_by=(),
             supports=(),
         )

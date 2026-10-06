@@ -30,7 +30,8 @@ default:
 # surfaces into <target>/.claude/ via gen_defs install, minus test suites
 # and caches, stamping each copied file with an !INSTALLED! banner carrying the
 # hash of the content below it. Every flag forwards verbatim to
-# gen_defs — --family, --model-tier-map, --model-pin-map, --verbose, and
+# gen_defs — --family, --model-tier-map, --model-pin-tier-alias-map,
+# --verbose, and
 # whatever it adds next: gen_defs's argparse is the single source of flag
 # truth, so an unknown spelling fails there — stripping `--` to
 # make the params positional would make the command line worse, not better. The
@@ -184,7 +185,7 @@ RENDERED_DIR := "rendered"
 # overwrites a differing file, so the slot's harness/ subtree is removed
 # before each render; the file's name is read from the harness file ahead of
 # the install, so an unknown harness fails before the slot is touched further.
-[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — every --* flag, --harness included, forwards verbatim to gen_defs via install (--family, --model-tier-map, --model-pin-map, --harness, --verbose, ...)")]
+[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — every --* flag, --harness included, forwards verbatim to gen_defs via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
 render *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -257,19 +258,60 @@ render-diff a="reference" b="latest":
 # unaffected: there the same packages arrive under .claude/agents/ and are
 # imported with PYTHONPATH=.claude/agents.
 # `surface` is always positional parameter $1 (positional-arguments, set
-# above), so the pytest arguments that follow it start at $2 — `"${@:2}"`
-# forwards them to pytest as the separate words `just` received them as,
-# not as a re-split string, so `-k "a and b"` survives as one argument.
-[doc("[dev] run tooling python tests: no argument runs all four (kb_tools + liaison_tools + gen_defs + dupe_sweep); a surface argument (kb_tools, liaison_tools, gen_defs, dupe_sweep) runs only that one; any further arguments forward to pytest verbatim (flags, -k, a file::test path, ...)")]
+# above); the pytest arguments follow it from $2, and are forwarded as the
+# separate words `just` received them as, so `-k "a and b"` stays one argument.
+# A path argument (not starting with `-`, and an existing path or containing
+# `::`) narrows the run: pytest gets the paths and flags but not the surface
+# directory. A flag alone does not narrow: pytest gets the directory plus the
+# flags. A path outside the surface's directory is refused. The word after a
+# flag that takes a separate value (`-k expr`) is that value, never a path.
+[doc("[dev] run tooling python tests: no argument runs all four (kb_tools + liaison_tools + gen_defs + dupe_sweep); a surface argument (kb_tools, liaison_tools, gen_defs, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
-    PYTHONPATH="{{PROJECT_ROOT}}" "{{VENV_PYTHON}}" -m pytest {{ \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -ra dirs <<< "{{ \
       if surface == "" { "kb_tools/tests liaison_tools/tests tests devtools/tests" } \
       else if surface == "kb_tools" { "kb_tools/tests" } \
       else if surface == "liaison_tools" { "liaison_tools/tests" } \
       else if surface == "gen_defs" { "tests" } \
       else if surface == "dupe_sweep" { "devtools/tests" } \
       else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen_defs, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
-    }} "${@:2}"
+    }}"
+    root="{{PROJECT_ROOT}}"
+    has_path=0
+    skip_next=0
+    for arg in "${@:2}"; do
+        if [[ "${skip_next}" -eq 1 ]]; then
+            skip_next=0
+            continue
+        fi
+        case "${arg}" in
+            -k|-m|-p|-o|-c|-n|--deselect|--ignore|--ignore-glob|--maxfail|--tb|--durations) skip_next=1; continue ;;
+            -*) continue ;;
+        esac
+        [[ -e "${arg}" || "${arg}" == *::* ]] || continue
+        has_path=1
+        rel="${arg#"${root}"/}"
+        rel="${rel#./}"
+        rel="${rel%%::*}"
+        under=0
+        for dir in "${dirs[@]}"; do
+            if [[ "${rel}" == "${dir}" || "${rel}" == "${dir}/"* ]]; then
+                under=1
+            fi
+        done
+        if [[ "${under}" -eq 0 ]]; then
+            printf "error: test path '%s' is outside surface '%s' (directory: %s)\n" \
+                "${arg}" "{{surface}}" "${dirs[*]}" >&2
+            exit 1
+        fi
+    done
+    if [[ "${has_path}" -eq 1 ]]; then
+        targets=()
+    else
+        targets=("${dirs[@]}")
+    fi
+    PYTHONPATH="${root}" "{{VENV_PYTHON}}" -m pytest ${targets[@]+"${targets[@]}"} "${@:2}"
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
 # `*paths` (positional-arguments, set above) arrives as "$@" with each path
@@ -412,3 +454,11 @@ test-changed base="":
         printf '%s\n' "FAILED surfaces: ${failed[*]}" >&2
         exit 1
     fi
+
+# update this projects agent installation from current state
+# the opencode line names models as provider/model, the provider as the operator's opencode config
+# names the oMLX endpoint
+[private]
+install-agents-here:
+  just install "{{justfile_directory()}}" --harness=claude
+  just install "{{justfile_directory()}}" --harness=opencode --model-tier-map=all=inherit

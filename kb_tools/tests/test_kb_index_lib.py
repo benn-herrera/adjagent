@@ -41,65 +41,35 @@ class TestParseFrontmatter(unittest.TestCase):
         self.assertIsNone(lib.parse_frontmatter("# Title\n\nNo frontmatter here."))
 
     def test_kind_leaf_field(self):
-        text = "<!-- kb-frontmatter\nkind: leaf\n-->\n"
+        text = "---\nkind: leaf\n---\n"
         fm = lib.parse_frontmatter(text)
         self.assertEqual(fm, {"kind": "leaf"})
 
     def test_claims_list(self):
-        text = "<!-- kb-frontmatter\nkind: leaf\nclaims: [clm-aaa111, clm-bbb222, clm-ccc333]\n-->\n"
+        text = "---\nkind: leaf\nclaims: [clm-aaa111, clm-bbb222, clm-ccc333]\n---\n"
         fm = lib.parse_frontmatter(text)
         self.assertEqual(fm["kind"], "leaf")
         self.assertEqual(fm["claims"], ["clm-aaa111", "clm-bbb222", "clm-ccc333"])
 
     def test_no_claim_string(self):
-        text = "<!-- kb-frontmatter\nkind: leaf\nno-claim: navigation only\n-->\n"
+        text = "---\nkind: leaf\nno-claim: navigation only\n---\n"
         fm = lib.parse_frontmatter(text)
         self.assertEqual(fm["no-claim"], "navigation only")
 
     def test_subtree_claims_list(self):
-        text = "<!-- kb-frontmatter\nkind: index\nsubtree-claims: [clm-abc123, clm-def456]\n-->\n"
+        text = "---\nkind: index\nsubtree-claims: [clm-abc123, clm-def456]\n---\n"
         fm = lib.parse_frontmatter(text)
         self.assertEqual(fm["subtree-claims"], ["clm-abc123", "clm-def456"])
 
     def test_path_stable_quoted_string(self):
-        text = '<!-- kb-frontmatter\nkind: leaf\npath-stable: "ref label"\n-->\n'
+        text = '---\nkind: leaf\npath-stable: "ref label"\n---\n'
         fm = lib.parse_frontmatter(text)
         self.assertEqual(fm["path-stable"], "ref label")
 
     def test_bootstrap_boolean_true(self):
-        text = "<!-- kb-frontmatter\nkind: index\nbootstrap: true\n-->\n"
+        text = "---\nkind: index\nbootstrap: true\n---\n"
         fm = lib.parse_frontmatter(text)
         self.assertIs(fm["bootstrap"], True)
-
-    def test_indented_closing_marker_ends_the_block(self):
-        """An indented `-->` closes the block instead of swallowing the body.
-
-        With the close anchored at column 0 the non-greedy body ran on to the
-        next `-->` anywhere in the file — here the `claim-quality:` marker — so
-        document prose parsed as frontmatter keys, and the `.sub("", text)`
-        site deleted the body from the text every later check reads.
-        """
-        text = (
-            "<!-- kb-frontmatter\nkind: leaf\nclaims: [clm-aaa111]\n  -->\n\n"
-            "# Body\n\nprose\n\n"
-            "<!-- claim-quality: clm-bbb222\nnote\n-->\n"
-        )
-        self.assertEqual(lib.parse_frontmatter(text), {"kind": "leaf", "claims": ["clm-aaa111"]})
-        # The body survives frontmatter removal.
-        self.assertIn("# Body", lib.FRONTMATTER_RE.sub("", text))
-
-    def test_delimiter_is_single_sourced_by_the_writer_and_verify(self):
-        """One compiled block delimiter, not three near-copies of it.
-
-        The writing side is ``kb_write.store``: the emitter reaches the
-        delimiter through its frontmatter-field splice rather than through a
-        compiled pattern of its own.
-        """
-        from kb_tools import verify_kb_metadata
-        from kb_tools.kb_write import store
-
-        self.assertIs(store.FRONTMATTER_BLOCK, lib.FRONTMATTER_RE)
-        self.assertIs(verify_kb_metadata.FRONTMATTER_BLOCK, lib.FRONTMATTER_RE)
 
 
 class TestRegisterFenceScrubbing(unittest.TestCase):
@@ -479,7 +449,7 @@ class TestBuildClaimsRecords(unittest.TestCase):
         cls.by_id = {r["id"]: r for r in cls.records}
 
     def test_length_is_union_of_all_node_types(self):
-        # claims.jsonl is a type-tagged union: claims + framework nodes +
+        # claims.yaml is a type-tagged union: claims + framework nodes +
         # experiment nodes + support nodes.
         self.assertEqual(
             len(self.records),
@@ -574,7 +544,7 @@ class TestBuildClaimsRecords(unittest.TestCase):
         self.assertEqual(self.by_id["clm-cc3333"]["build_band"], "ok-with-caveats")
 
     def test_solidity_field_is_computed_not_parsed(self):
-        # claims.jsonl solidity must match compute_solidity, NOT the value
+        # claims.yaml solidity must match compute_solidity, NOT the value
         # parsed off the claim-quality.md solidity line. clm-aa1111's on-disk
         # line is the stale 0.10; its record must carry the computed 0.90.
         sol = lib.compute_solidity(self.state.claim_entries, self.state.experiments)
@@ -702,43 +672,11 @@ class TestDeterminism(unittest.TestCase):
             self.assertEqual(rows_a, rows_b, f"non-deterministic output for {key}")
 
 
-class TestJsonlIo(unittest.TestCase):
-    def test_round_trip(self):
-        records = [
-            {"id": "abc123", "value": 1, "list": ["a", "b"]},
-            {"id": "def456", "value": None, "list": []},
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "out.jsonl"
-            lib.write_jsonl(p, records)
-            roundtripped = lib.read_jsonl(p)
-        self.assertEqual(roundtripped, records)
+class TestIndexStreamText(unittest.TestCase):
+    """``serialize_records`` is an index stream's text: one ``--- <JSON object>`` line per record."""
 
-    def test_write_is_byte_identical_across_calls(self):
-        records = [
-            {"a": 1, "b": "two", "c": [1, 2, 3]},
-            {"a": 4, "b": "five", "c": []},
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            p1 = Path(tmp) / "first.jsonl"
-            p2 = Path(tmp) / "second.jsonl"
-            lib.write_jsonl(p1, records)
-            lib.write_jsonl(p2, records)
-            self.assertEqual(p1.read_text(encoding="utf-8"), p2.read_text(encoding="utf-8"))
-
-    def test_empty_records_writes_empty_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "empty.jsonl"
-            lib.write_jsonl(p, [])
-            self.assertEqual(p.read_text(encoding="utf-8"), "")
-            self.assertEqual(lib.read_jsonl(p), [])
-
-    def test_malformed_jsonl_raises(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "bad.jsonl"
-            p.write_text('{"ok": 1}\nnot-json\n', encoding="utf-8")
-            with self.assertRaises(ValueError):
-                lib.read_jsonl(p)
+    def test_no_records_is_the_empty_stream(self):
+        self.assertEqual(lib.serialize_records([]), "")
 
 
 def _edge(source, target, kind="claim", recorded=None):
@@ -1285,7 +1223,7 @@ class TestSupportSolidity(unittest.TestCase):
         """A permanent hard block: the no-dep branch skipped ``round_half_up_2dp``.
 
         A lift is ``sup_solidity x fraction`` — a raw float product, not an
-        authored 2dp value. 0.20 x 0.98 wrote 0.196 into ``claims.jsonl`` while
+        authored 2dp value. 0.20 x 0.98 wrote 0.196 into ``claims.yaml`` while
         the markdown rendered ``0.20``, putting the record and the document on
         opposite sides of a band threshold. ``verify`` then FAILed
         "refresh-fixable" at 1e-9 and ``refresh`` reported nothing to change.
@@ -1464,15 +1402,16 @@ class TestSupportPendingFractionParse(unittest.TestCase):
     """
 
     _LEAF = (
-        "[↑ Parent](index.md)\n\n"
-        "<!-- kb-frontmatter\n"
+        "---\n"
         "kind: leaf\n"
         'no-claim: "hosts a support node only"\n'
-        "sup-id: sup-aaaaaa\n"
-        "supports:\n"
-        "  - clm-aaaaaa: *pending*\n"
-        "  - clm-bbbbbb: 0.50\n"
-        "-->\n\n"
+        "support-nodes:\n"
+        "  - sup-id: sup-aaaaaa\n"
+        "    supports:\n"
+        '      - clm-aaaaaa: "*pending*"\n'
+        "      - clm-bbbbbb: 0.50\n"
+        "---\n"
+        "[↑ Parent](index.md)\n\n"
         "## Pending-Fraction Support\n"
     )
 
@@ -1518,19 +1457,19 @@ class TestSupportPendingFractionParse(unittest.TestCase):
 
 
 class TestPairPatternLinearity(unittest.TestCase):
-    """The two pair patterns cost O(n) on a hostile line, and match what they did.
+    """The staged pair pattern costs O(n) on a hostile line, and matches what it did.
 
-    Both patterns used to lead with ``^\\s*-?\\s*`` — two whitespace runs around
-    an optional atom, which on a line of n spaces with no ``-`` in it fails
-    n²/2 times before failing once. They are run per line by every support and
-    experiment leaf parse and by ``parse_register_staged_supports``, which every
-    census and every write-API prove call reaches, so one long whitespace line
-    anywhere in the corpus was a multi-second stall on the *write* path with no
-    cycle in it and no error at the end of it.
+    It used to lead with ``^\\s*-?\\s*`` — two whitespace runs around an
+    optional atom, which on a line of n spaces with no ``-`` in it fails n²/2
+    times before failing once. It is run per line by
+    ``parse_register_staged_supports``, which every census and every write-API
+    prove call reaches, so one long whitespace line anywhere in the corpus was a
+    multi-second stall on the *write* path with no cycle in it and no error at
+    the end of it.
 
     Two claims, and the second is what makes the first safe to have made:
-    the shipped patterns hold a wall-clock bound over the adversarial input, and
-    they accept and capture exactly what the retired spelling did.
+    the shipped pattern holds a wall-clock bound over the adversarial input, and
+    it accepts and captures exactly what the retired spelling did.
     """
 
     #: The greedy spelling the shipped patterns used to use. Kept here, and
@@ -1557,12 +1496,7 @@ class TestPairPatternLinearity(unittest.TestCase):
 
     def test_a_long_whitespace_line_is_matched_within_the_budget(self):
         line = " " * self._ADVERSARIAL_WIDTH
-        for name, pattern in (
-            ("_STRENGTHENS_PAIR_RE", lib._STRENGTHENS_PAIR_RE),
-            ("_SUPPORTS_PAIR_RE", lib._SUPPORTS_PAIR_RE),
-        ):
-            with self.subTest(pattern=name):
-                self.assertLess(self._elapsed(pattern, line), self._BUDGET_SECONDS)
+        self.assertLess(self._elapsed(lib._SUPPORTS_PAIR_RE, line), self._BUDGET_SECONDS)
 
     def test_the_other_hostile_shapes_are_within_the_budget_too(self):
         # A `-` splits the two runs, which is the position the greedy spelling
@@ -1577,9 +1511,8 @@ class TestPairPatternLinearity(unittest.TestCase):
             ("id colon then spaces", "clm-aaaaaa:" + " " * self._ADVERSARIAL_WIDTH),
             ("tabs", "\t" * self._ADVERSARIAL_WIDTH),
         ):
-            for pattern in (lib._STRENGTHENS_PAIR_RE, lib._SUPPORTS_PAIR_RE):
-                with self.subTest(line=name, pattern=pattern.pattern):
-                    self.assertLess(self._elapsed(pattern, line), self._BUDGET_SECONDS)
+            with self.subTest(line=name):
+                self.assertLess(self._elapsed(lib._SUPPORTS_PAIR_RE, line), self._BUDGET_SECONDS)
 
     def test_the_budget_has_teeth_against_the_spelling_it_retired(self):
         # Without this the bound above would pass over any pattern at all, and
@@ -1620,16 +1553,15 @@ class TestPairPatternLinearity(unittest.TestCase):
             "   ",
             "",
         )
-        for shipped in (lib._STRENGTHENS_PAIR_RE, lib._SUPPORTS_PAIR_RE):
-            retired = self._retired(shipped)
-            for line in corpus:
-                with self.subTest(pattern=shipped.pattern, line=line):
-                    was = retired.match(line)
-                    now = shipped.match(line)
-                    self.assertEqual(
-                        None if was is None else was.groups(),
-                        None if now is None else now.groups(),
-                    )
+        retired = self._retired(lib._SUPPORTS_PAIR_RE)
+        for line in corpus:
+            with self.subTest(line=line):
+                was = retired.match(line)
+                now = lib._SUPPORTS_PAIR_RE.match(line)
+                self.assertEqual(
+                    None if was is None else was.groups(),
+                    None if now is None else now.groups(),
+                )
 
 
 class TestSupportFixture(unittest.TestCase):
@@ -1951,58 +1883,6 @@ class TestFrameworkNodeCoverageGuard(unittest.TestCase):
             self.assertIn("AGENTS.md", msg)
 
 
-class TestFrontmatterListShapes(unittest.TestCase):
-    """An id-list means the same thing in all three authored shapes.
-
-    A wrapped list fell through to the string branch, so every consumer that
-    iterated it got one "claim id" per CHARACTER; a YAML-block list was skipped
-    line by line and read as empty, dropping a leaf's whole claim set with no
-    diagnostic anywhere.
-    """
-
-    A = "clm-aaaaaa"
-    B = "clm-bbbbbb"
-
-    def _claims(self, body: str) -> list:
-        fm = lib.parse_frontmatter(f"<!-- kb-frontmatter\n{body}\n-->\n")
-        self.assertIsNotNone(fm)
-        return list(fm.get("claims", []) or ())
-
-    def test_single_line_list(self):
-        self.assertEqual(self._claims(f"kind: leaf\nclaims: [{self.A}, {self.B}]"), [self.A, self.B])
-
-    def test_wrapped_list_yields_ids_not_characters(self):
-        self.assertEqual(self._claims(f"kind: leaf\nclaims: [{self.A},\n         {self.B}]"), [self.A, self.B])
-
-    def test_yaml_block_list_yields_ids_not_nothing(self):
-        self.assertEqual(self._claims(f"kind: leaf\nclaims:\n  - {self.A}\n  - {self.B}"), [self.A, self.B])
-
-    def test_field_after_a_wrapped_list_still_parses(self):
-        """The continuation scan must not swallow the field that follows it."""
-        fm = lib.parse_frontmatter(f"<!-- kb-frontmatter\nclaims: [{self.A},\n  {self.B}]\nkind: leaf\n-->\n")
-        self.assertEqual(fm["kind"], "leaf")
-        self.assertEqual(fm["claims"], [self.A, self.B])
-
-    def test_field_after_a_yaml_block_still_parses(self):
-        fm = lib.parse_frontmatter(f"<!-- kb-frontmatter\nclaims:\n  - {self.A}\nkind: leaf\n-->\n")
-        self.assertEqual(fm["kind"], "leaf")
-        self.assertEqual(fm["claims"], [self.A])
-
-    def test_unterminated_list_stays_a_string(self):
-        """A malformed value degrades exactly as it did before — not an id-list."""
-        fm = lib.parse_frontmatter(f"<!-- kb-frontmatter\nclaims: [{self.A},\n-->\n")
-        self.assertIsInstance(fm["claims"], str)
-
-    def test_field_end_span_is_the_readers_join_rule(self):
-        """The writer's span rule and the reader's join rule are ONE rule."""
-        wrapped = [f"claims: [{self.A},", f"         {self.B}]", "kind: leaf"]
-        self.assertEqual(lib.frontmatter_field_end(wrapped, 0), 2)
-        self.assertEqual(lib.frontmatter_field_end(wrapped, 2), 3)
-
-        bullets = ["claims:", f"  - {self.A}", f"  - {self.B}", "kind: leaf"]
-        self.assertEqual(lib.frontmatter_field_end(bullets, 0), 3)
-
-
 class TestSlugifyHeading(unittest.TestCase):
     """Heading anchors collapse each whitespace run to one hyphen (stored-format invariant)."""
 
@@ -2014,95 +1894,6 @@ class TestSlugifyHeading(unittest.TestCase):
 
     def test_ordinary_heading_unchanged(self):
         self.assertEqual(lib._slugify_heading("The dep gate"), "the-dep-gate")
-
-
-class TestFrontmatterFinderIsLinear(unittest.TestCase):
-    """`find_frontmatter` answers `FRONTMATTER_RE.search`, in one pass.
-
-    ``FRONTMATTER_RE``'s body is a lazy ``(.*?)`` under ``DOTALL``: at every
-    candidate opener the engine scans to the end of the document looking for a
-    closer, so a document carrying many openers and no ``-->`` at line start
-    costs O(openers x length) — 100 openers 17 ms, 400 openers 281 ms, 1 600
-    openers 4 493 ms. Only a truncated or hostile document has that shape, but
-    ``parse_frontmatter`` runs over every file in the KB, so it only has to
-    arrive once.
-
-    Two claims, and the second is what makes the first safe to have made: the
-    finder holds a wall-clock bound over the adversarial input, and it returns
-    what the pattern's own ``search`` returns on every shape that matters.
-    """
-
-    #: Generous for CI and far above the finder's measured cost at
-    #: ``_ADVERSARIAL_OPENERS`` (~1 ms), while `search` needs seconds there.
-    _BUDGET_SECONDS = 0.5
-    #: Measured on the machine this was written on: the retired call costs
-    #: ~2 500 ms here and the finder ~1.3 ms, so the bound sits between two
-    #: numbers three orders of magnitude apart. The teeth check runs at the SAME
-    #: width, so the two halves are a claim about one input rather than two.
-    _ADVERSARIAL_OPENERS = 4_000
-
-    @staticmethod
-    def _unterminated(openers: int) -> str:
-        """A document of `openers` block openers and no closer at line start."""
-        return "".join("<!-- kb-frontmatter\nkind: leaf\nclaims: [clm-aa1111]\n" for _ in range(openers))
-
-    def _elapsed(self, call):
-        started = time.perf_counter()
-        call()
-        return time.perf_counter() - started
-
-    def test_the_unterminated_document_is_answered_within_the_budget(self):
-        text = self._unterminated(self._ADVERSARIAL_OPENERS)
-        self.assertIsNone(lib.find_frontmatter(text))
-        self.assertLess(self._elapsed(lambda: lib.find_frontmatter(text)), self._BUDGET_SECONDS)
-
-    def test_stripping_the_unterminated_document_is_within_the_budget_too(self):
-        text = self._unterminated(self._ADVERSARIAL_OPENERS)
-        self.assertEqual(lib.strip_frontmatter(text), text)
-        self.assertLess(self._elapsed(lambda: lib.strip_frontmatter(text)), self._BUDGET_SECONDS)
-
-    def test_the_budget_has_teeth_against_the_retired_call(self):
-        """The bound is only evidence if the shape it bounds is really hostile."""
-        text = self._unterminated(self._ADVERSARIAL_OPENERS)
-        self.assertGreater(
-            self._elapsed(lambda: lib.FRONTMATTER_RE.search(text)),
-            self._BUDGET_SECONDS,
-            "the adversarial document is no longer expensive for the retired call; "
-            "the timing bound above has stopped being evidence",
-        )
-
-    #: Shapes the finder and `FRONTMATTER_RE.search` must agree on, including
-    #: the ones the one-pass argument turns on: an opener that is not the
-    #: matching one, and openers before and after the real block.
-    _SHAPES = {
-        "none": "# Title\n\nprose\n",
-        "plain": "<!-- kb-frontmatter\nkind: leaf\n-->\n\n# Body\n",
-        "indented close": "<!-- kb-frontmatter\nkind: leaf\n  -->\n\n# Body\n",
-        "unterminated": "<!-- kb-frontmatter\nkind: leaf\n",
-        "unterminated then real": ("<!-- kb-frontmatter\nkind: index\n" "<!-- kb-frontmatter\nkind: leaf\n-->\n"),
-        "real then opener": ("<!-- kb-frontmatter\nkind: leaf\n-->\n\n" "<!-- kb-frontmatter\nkind: index\n"),
-        "two blocks": ("<!-- kb-frontmatter\nkind: leaf\n-->\n\nbody\n\n" "<!-- kb-frontmatter\nkind: index\n-->\n"),
-        "closer before opener": "-->\n<!-- kb-frontmatter\nkind: leaf\n-->\n",
-        "empty body": "<!-- kb-frontmatter\n\n-->\n",
-        "no trailing newline": "<!-- kb-frontmatter\nkind: leaf\n-->",
-        "empty document": "",
-    }
-
-    def test_the_finder_returns_what_search_returns(self):
-        for name, text in self._SHAPES.items():
-            with self.subTest(shape=name):
-                found = lib.find_frontmatter(text)
-                expected = lib.FRONTMATTER_RE.search(text)
-                if expected is None:
-                    self.assertIsNone(found)
-                    continue
-                self.assertIsNotNone(found)
-                self.assertEqual((found.span(), found.group(1)), (expected.span(), expected.group(1)))
-
-    def test_stripping_returns_what_sub_returns(self):
-        for name, text in self._SHAPES.items():
-            with self.subTest(shape=name):
-                self.assertEqual(lib.strip_frontmatter(text), lib.FRONTMATTER_RE.sub("", text))
 
 
 _REFERENCING_REGISTER = """# Register
@@ -2207,6 +1998,148 @@ class TestReferencesEdges(unittest.TestCase):
             [(r["source"], r["target"], r["target_kind"], r["strength"], r["fraction"]) for r in referencing],
             [("clm-aaaaaa", "clm-bbbbbb", "claim", None, None), ("clm-bbbbbb", "clm-aaaaaa", "claim", None, None)],
         )
+
+
+# Alpha references Beta and carries the cut of its dependency on Beta; Beta
+# carries the cut of its dependency on Alpha — the ring the cuts broke — and
+# a bullet whose origin annotation is missing.
+_DEMOTING_REGISTER = """# Claim Quality
+
+## Alpha
+<!-- id: clm-aaaaaa -->
+
+### Quality
+- confidence: 0.8
+- depends-on:
+  - clm-cccccc — Gamma (solidity 0.5)
+- references:
+  - clm-bbbbbb — Beta
+- demoted:
+  - clm-bbbbbb — Beta (origin cited)
+- solidity: *pending*
+- rationale: Alpha.
+
+---
+
+## Beta
+<!-- id: clm-bbbbbb -->
+
+### Quality
+- confidence: 0.9
+- demoted:
+  - clm-aaaaaa — Alpha (origin inferred) [the ring's other half]
+  - clm-cccccc — Gamma
+- solidity: *pending*
+- rationale: Beta.
+- strengthen-by:
+  - a replication.
+
+---
+
+## Gamma
+<!-- id: clm-cccccc -->
+
+### Quality
+- confidence: 0.5
+- solidity: *pending*
+- rationale: Gamma.
+"""
+
+
+class TestDemotedEdges(unittest.TestCase):
+    """The ``- demoted:`` field: parsed apart with its origin, materialized after ``references``, and inert."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        register = self.root / "claim-quality.md"
+        register.write_text(_DEMOTING_REGISTER, encoding="utf-8")
+        self.entries = {entry.id: entry for entry in lib.parse_claim_quality_file(register, self.root)}
+
+    def test_a_demoted_bullet_lands_on_its_own_field_with_its_origin(self):
+        alpha, beta = self.entries["clm-aaaaaa"], self.entries["clm-bbbbbb"]
+        self.assertEqual([e.target for e in alpha.depends_on], ["clm-cccccc"])
+        self.assertEqual([(e.target, e.relation) for e in alpha.references], [("clm-bbbbbb", "references")])
+        self.assertEqual(
+            [(e.target, e.relation, e.target_kind, e.origin, e.context) for e in beta.demoted],
+            [
+                ("clm-aaaaaa", "demoted", "claim", "inferred", "the ring's other half"),
+                ("clm-cccccc", "demoted", "claim", None, None),
+            ],
+        )
+        self.assertEqual(beta.depends_on, ())
+        self.assertIsNone(alpha.references[0].origin)
+        self.assertEqual([e.target for e in alpha.demoted], ["clm-bbbbbb"])
+        self.assertEqual((alpha.rationale, beta.rationale), ("Alpha.", "Beta."))
+        self.assertEqual([item.text for item in beta.strengthen_by], ["a replication."])
+
+    def test_a_demoted_row_closes_with_its_origin_after_the_references_row(self):
+        state = lib.KbState(
+            claim_entries=tuple(self.entries.values()), leaves=(), indexes=(), framework_nodes=(), experiments=()
+        )
+        records = lib.build_depends_on_records(state)
+        from_alpha_to_beta = [r for r in records if (r["source"], r["target"]) == ("clm-aaaaaa", "clm-bbbbbb")]
+        self.assertEqual([r["relation"] for r in from_alpha_to_beta], ["references", "demoted"])
+        references_row, demoted_row = from_alpha_to_beta
+        self.assertEqual(list(demoted_row), [*references_row, "origin"])
+        self.assertEqual(demoted_row["origin"], "cited")
+        self.assertEqual({key: demoted_row[key] for key in references_row}, {**references_row, "relation": "demoted"})
+        demoted = [(r["source"], r["target"], r["origin"], r["context"]) for r in records if r["relation"] == "demoted"]
+        self.assertEqual(
+            demoted,
+            [
+                ("clm-aaaaaa", "clm-bbbbbb", "cited", None),
+                ("clm-bbbbbb", "clm-aaaaaa", "inferred", "the ring's other half"),
+                ("clm-bbbbbb", "clm-cccccc", None, None),
+            ],
+        )
+        self.assertTrue(all("origin" not in r for r in records if r["relation"] != "demoted"))
+
+    def test_solidity_and_the_cycle_check_read_no_demoted_edge(self):
+        # Alpha ⇄ Beta would be a cycle as `depends`; as cuts it orders nothing
+        # and gates nothing, exactly as the references edge beside it does.
+        full = lib.compute_solidity_full(list(self.entries.values()))
+        self.assertEqual(
+            {cid: result.final for cid, result in full.items()},
+            {
+                "clm-aaaaaa": 0.5,
+                "clm-bbbbbb": 0.9,
+                "clm-cccccc": 0.5,
+            },
+        )
+        self.assertEqual(lib.premise_graph(self.entries.values(), ()), {"clm-aaaaaa": ["clm-cccccc"]})
+
+
+class TestDependsPath(unittest.TestCase):
+    """The path finder over the acyclicity check's own graph."""
+
+    def test_the_premise_graph_is_the_cycle_checks_edges(self):
+        # Claim → its depends targets, claim → the supports lifting it, support
+        # → its own depends targets; framework targets and dangling ids are no
+        # node of it.
+        a = _claim(
+            "clm-aaaaaa",
+            0.5,
+            [_edge("clm-aaaaaa", "clm-bbbbbb"), _edge("clm-aaaaaa", "INVARIANT-S2", kind="invariant")],
+        )
+        b = _claim("clm-bbbbbb", 0.5, [_edge("clm-bbbbbb", "clm-zzzzzz")])
+        c = _claim("clm-cccccc", 0.5)
+        s = _support("sup-ssssss", 0.5, [("clm-aaaaaa", 0.5)], depends_on=[_edge("sup-ssssss", "clm-cccccc")])
+        self.assertEqual(
+            lib.premise_graph([a, b, c], [s]),
+            {"clm-aaaaaa": ["clm-bbbbbb", "sup-ssssss"], "sup-ssssss": ["clm-cccccc"]},
+        )
+
+    def test_the_shortest_path_is_found_with_successors_in_sorted_order(self):
+        graph = {"a": ["d", "b", "c"], "b": ["e"], "c": ["e"], "d": ["x"], "x": ["e"]}
+        self.assertEqual(lib.depends_path(graph, "a", "e"), ("a", "b", "e"))
+        self.assertEqual(lib.depends_path(graph, "a", "x"), ("a", "d", "x"))
+
+    def test_an_unreachable_goal_is_none_and_one_node_is_its_own_path(self):
+        graph = {"a": ["b"], "b": ["a"]}
+        self.assertIsNone(lib.depends_path(graph, "a", "z"))
+        self.assertEqual(lib.depends_path(graph, "a", "a"), ("a",))
+        self.assertEqual(lib.depends_path(graph, "b", "a"), ("b", "a"))
 
 
 if __name__ == "__main__":

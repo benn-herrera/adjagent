@@ -38,13 +38,13 @@ from pathlib import Path
 from unittest import mock
 
 from gen_defs import (
-    agents_file,
     banners,
     chunks,
     cli,
     discovery,
     errors,
     generation,
+    harness,
     installation,
     markers,
     model_tuning,
@@ -63,35 +63,45 @@ def _quiet(func, *args, **kwargs):
         return func(*args, **kwargs)
 
 
+#: The shipped claude family's [tiers], stated here rather than read from it:
+#: its members are the claude aliases themselves, so under the default family
+#: they are also what every tier renders.
+_CLAUDE_TIERS = {"highest": "fable", "high": "opus", "medium": "sonnet", "low": "haiku", "lowest": "haiku"}
+
+
 def _tiers_toml(mapping=None):
     """The [tiers] table every family file must carry, as TOML text."""
-    mapping = model_tuning.DEFAULT_PIN_MAP if mapping is None else mapping
+    mapping = _CLAUDE_TIERS if mapping is None else mapping
     return "[tiers]\n" + "".join(f'{tier} = "{mapping[tier]}"\n' for tier in model_tuning.TIERS)
 
 
-def _tuning(family, *, tier_map=None, pin_map=None, entries=None, is_default=False):
-    """A triple for a scratch render. Tier and pin maps default to the same
-    claude-shaped map, which is the shipped default family's own state."""
-    tier_map = dict(model_tuning.DEFAULT_PIN_MAP if tier_map is None else tier_map)
+def _tuning(family, *, tier_map=None, alias_map=None, entries=None, is_default=False):
+    """A triple for a scratch render. The tier map defaults to the shipped
+    claude family's own, and there is no alias map unless one is given."""
+    tier_map = dict(_CLAUDE_TIERS if tier_map is None else tier_map)
     return model_tuning.Tuning(
         family=Path(family),
         tier_map=tier_map,
-        pin_map=dict(model_tuning.DEFAULT_PIN_MAP if pin_map is None else pin_map),
+        alias_map=alias_map,
         stock=model_tuning.stock_tiers(entries or {}, tier_map),
         is_default=is_default,
     )
 
 
 # The harness file the CLI loads by default: the shipped templates carry
-# @!hrn.<key>!@ markers, so every in-process render of them needs one.
-_DEFAULT_HARNESS = agents_file.load_harness(model_tuning.DEFAULT_HARNESS)
+# @!hrn.<key>!@ markers, and their frontmatter renders through its entries, so
+# every in-process render of them needs both.
+_DEFAULT_LOADED = harness.load_harness(model_tuning.DEFAULT_HARNESS)
+_DEFAULT_HARNESS = _DEFAULT_LOADED.values
+_DEFAULT_FRONTMATTER = _DEFAULT_LOADED.frontmatter
 
 
-def _binding(chunks, pin_map=None):
+def _binding(chunks, models=None):
     return model_tuning.tier_binding(
         chunks,
-        pin_map=dict(model_tuning.DEFAULT_PIN_MAP if pin_map is None else pin_map),
+        models=dict(_CLAUDE_TIERS if models is None else models),
         harness=_DEFAULT_HARNESS,
+        frontmatter=_DEFAULT_FRONTMATTER,
     )
 
 
@@ -102,7 +112,7 @@ def _expand(text, chunk_table, scope, overlays=None, dynamic=None):
     return markers.expand(text, routes, args=scope).text
 
 
-def _shipped_renders(family_name, *, tier_spec=None, pin_spec=None):
+def _shipped_renders(family_name, *, tier_spec=None, alias_spec=None):
     """Every real definition rendered under one tuning triple, in memory.
 
     The route generate and install both take, minus the write: nothing is
@@ -112,10 +122,10 @@ def _shipped_renders(family_name, *, tier_spec=None, pin_spec=None):
     """
     path = paths.FAMILY_DIR / f"{family_name}{paths.FAMILY_SUFFIX}"
     family = model_tuning.load_family(path)
-    tuning = model_tuning.effective_tuning(path, family, tier_spec=tier_spec, pin_spec=pin_spec)
+    tuning = model_tuning.effective_tuning(path, family, tier_spec=tier_spec, alias_spec=alias_spec)
     resolve = model_tuning.tier_resolver(family.entries, tuning.tier_map)
     renders = rendering.all_renders(
-        _binding(chunks.load_chunks(), tuning.pin_map),
+        _binding(chunks.load_chunks(), tuning.models),
         discovery.surface_map(paths.REPO_ROOT),
         overlays=resolve,
         tuning=tuning,
@@ -287,12 +297,10 @@ class TestFamilyLoading(unittest.TestCase):
     def test_tiers_table_is_returned_in_canonical_order(self):
         # Authored in reverse, so the canonical order has to come from the
         # loader rather than from the file.
-        reverse = "[tiers]\n" + "".join(
-            f'{tier} = "{model_tuning.DEFAULT_PIN_MAP[tier]}"\n' for tier in reversed(model_tuning.TIERS)
-        )
+        reverse = "[tiers]\n" + "".join(f'{tier} = "{_CLAUDE_TIERS[tier]}"\n' for tier in reversed(model_tuning.TIERS))
         tiers = self._load("", tiers=reverse).tiers
         self.assertEqual(list(tiers), list(model_tuning.TIERS))
-        self.assertEqual(tiers, model_tuning.DEFAULT_PIN_MAP)
+        self.assertEqual(tiers, _CLAUDE_TIERS)
 
     def test_missing_tiers_table_is_a_load_error_naming_the_five(self):
         with self.assertRaisesRegex(errors.InputError, r"no \[tiers\] table.*highest, high, medium, low, lowest"):
@@ -362,22 +370,22 @@ class TestMemberReachability(unittest.TestCase):
     def _family(self, member, tiers=None):
         return model_tuning.Family(
             entries={"fam.gap": {"models": {member: {"text": "t"}}}},
-            tiers=dict(model_tuning.DEFAULT_PIN_MAP if tiers is None else tiers),
+            tiers=dict(_CLAUDE_TIERS if tiers is None else tiers),
         )
 
     def test_member_the_family_maps_passes(self):
-        model_tuning.validate_family_members(self._family("sonnet"), model_tuning.DEFAULT_PIN_MAP, self.PATH)
+        model_tuning.validate_family_members(self._family("sonnet"), _CLAUDE_TIERS, self.PATH)
 
     def test_member_only_the_effective_tier_map_reaches_passes(self):
         # The union, not just [tiers]: a table authored for a member reachable
         # through --model-tier-map must not fail a default run.
-        tier_map = {**model_tuning.DEFAULT_PIN_MAP, "medium": "probe-member"}
+        tier_map = {**_CLAUDE_TIERS, "medium": "probe-member"}
         model_tuning.validate_family_members(self._family("sonnet"), tier_map, self.PATH)
         model_tuning.validate_family_members(self._family("probe-member"), tier_map, self.PATH)
 
     def test_unreachable_member_names_itself_and_what_is_reachable(self):
         with self.assertRaises(errors.InputError) as caught:
-            model_tuning.validate_family_members(self._family("sonnett"), model_tuning.DEFAULT_PIN_MAP, self.PATH)
+            model_tuning.validate_family_members(self._family("sonnett"), _CLAUDE_TIERS, self.PATH)
         message = str(caught.exception)
         self.assertIn("no tier reaches: sonnett", message)
         self.assertIn("sonnet", message)
@@ -426,80 +434,68 @@ class TestFamilyResolution(unittest.TestCase):
             self._resolve("ghost")
 
 
-class TestMapMerge(unittest.TestCase):
-    """effective_map: what a partial map flag does, and what it refuses."""
+class TestMapParse(unittest.TestCase):
+    """parse_tier_map: what a map flag's value means, and what it refuses."""
 
-    FLAG = "--model-pin-map"
+    FLAG = "--model-pin-tier-alias-map"
+    TOTAL = "highest=a,high=b,medium=c,low=d,lowest=e"
 
-    def _merge(self, spec, defaults=None):
-        return model_tuning.effective_map(
-            model_tuning.DEFAULT_PIN_MAP if defaults is None else defaults, spec, flag=self.FLAG
-        )
+    def _parse(self, spec, flag=FLAG):
+        return model_tuning.parse_tier_map(spec, flag=flag)
 
-    def test_no_spec_is_the_defaults(self):
-        self.assertEqual(self._merge(None), model_tuning.DEFAULT_PIN_MAP)
-
-    def test_named_tier_masks_only_itself(self):
-        # The whole-map-replacement bug looks identical in the happy path, so
-        # this is the case that separates them.
-        merged = self._merge("medium=fable")
-        self.assertEqual(merged["medium"], "fable")
-        self.assertEqual(
-            {tier: merged[tier] for tier in model_tuning.TIERS if tier != "medium"},
-            {tier: value for tier, value in model_tuning.DEFAULT_PIN_MAP.items() if tier != "medium"},
-        )
+    def test_every_tier_named_is_that_map(self):
+        self.assertEqual(self._parse(self.TOTAL), dict(zip(model_tuning.TIERS, "abcde")))
 
     def test_all_covers_every_tier(self):
-        self.assertEqual(self._merge("all=haiku"), {tier: "haiku" for tier in model_tuning.TIERS})
+        self.assertEqual(self._parse("all=haiku"), dict.fromkeys(model_tuning.TIERS, "haiku"))
 
     def test_all_is_positional_independent(self):
         # Whichever side of the named tier `all` sits, the named tier wins.
-        first = self._merge("all=haiku,high=opus")
-        second = self._merge("high=opus,all=haiku")
+        first = self._parse("all=haiku,high=opus")
+        second = self._parse("high=opus,all=haiku")
         self.assertEqual(first, second)
         self.assertEqual(first["high"], "opus")
         self.assertEqual(first["lowest"], "haiku")
 
-    def test_merged_map_is_always_total(self):
-        for spec in (None, "low=x", "all=y", "all=y,highest=z"):
-            with self.subTest(spec=spec):
-                self.assertEqual(set(self._merge(spec)), set(model_tuning.TIERS))
+    def test_a_partial_map_is_refused_naming_the_missing_tiers_and_both_forms(self):
+        for flag in ("--model-tier-map", self.FLAG):
+            with self.subTest(flag=flag), self.assertRaises(errors.InputError) as caught:
+                self._parse("high=opus,low=haiku", flag=flag)
+            message = str(caught.exception)
+            self.assertTrue(message.startswith(f"{flag}: names no value for highest, medium, lowest — "), message)
+            self.assertIn(f"{flag}=highest=<value>,high=<value>,medium=<value>,low=<value>,lowest=<value>", message)
+            self.assertIn(f"{flag}=all=<value>", message)
 
     def test_surrounding_whitespace_is_tolerated(self):
-        self.assertEqual(self._merge(" high = a , low = b ")["high"], "a")
+        self.assertEqual(self._parse(" all = a , high = b ")["high"], "b")
 
     def test_unknown_tier_names_the_five_and_all(self):
         with self.assertRaises(errors.InputError) as caught:
-            self._merge("mid=sonnet")
+            self._parse("mid=sonnet")
         message = str(caught.exception)
         for name in (self.FLAG, "mid=sonnet", *model_tuning.TIERS, "all"):
             self.assertIn(name, message)
 
     def test_duplicate_key_is_an_error(self):
         with self.assertRaisesRegex(errors.InputError, r"duplicate key 'low' — a map is 1:1\."):
-            self._merge("low=a,low=b")
+            self._parse("all=x,low=a,low=b")
 
     def test_duplicate_all_is_an_error_too(self):
         with self.assertRaisesRegex(errors.InputError, "duplicate key 'all'"):
-            self._merge("all=a,all=b")
+            self._parse("all=a,all=b")
 
     def test_malformed_pairs_are_errors(self):
         for spec in ("high", "high=", "=haiku", "", "high=a=b", "two words=a", "high=a b"):
             with self.subTest(spec=spec), self.assertRaises(errors.InputError):
-                self._merge(spec)
+                self._parse(spec)
 
     def test_the_flag_name_leads_every_error(self):
         with self.assertRaisesRegex(errors.InputError, "^--model-tier-map: "):
-            model_tuning.effective_map(model_tuning.DEFAULT_PIN_MAP, "nope=x", flag="--model-tier-map")
-
-    def test_pin_values_are_not_validated(self):
-        # Deliberate accepted risk: nothing in-repo owns the set of legal
-        # claude aliases, so the echo and the banner are the safety story.
-        self.assertEqual(self._merge("high=not-a-real-model")["high"], "not-a-real-model")
+            self._parse("nope=x", flag="--model-tier-map")
 
     def test_map_spec_serializes_in_tier_order_never_sorted(self):
         self.assertEqual(
-            model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP),
+            model_tuning.map_spec(_CLAUDE_TIERS),
             "highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku",
         )
 
@@ -514,21 +510,19 @@ class TestTierStates(unittest.TestCase):
     }
 
     def test_a_mapped_member_with_tables_is_not_stock(self):
-        self.assertNotIn("medium", model_tuning.stock_tiers(self.ENTRIES, model_tuning.DEFAULT_PIN_MAP))
+        self.assertNotIn("medium", model_tuning.stock_tiers(self.ENTRIES, _CLAUDE_TIERS))
 
     def test_every_other_tier_is_stock(self):
         self.assertEqual(
-            model_tuning.stock_tiers(self.ENTRIES, model_tuning.DEFAULT_PIN_MAP),
+            model_tuning.stock_tiers(self.ENTRIES, _CLAUDE_TIERS),
             ("highest", "high", "low", "lowest"),
         )
 
     def test_a_family_with_no_member_tables_is_stock_at_every_tier(self):
-        self.assertEqual(
-            model_tuning.stock_tiers({"fam.gap": {"text": "f"}}, model_tuning.DEFAULT_PIN_MAP), model_tuning.TIERS
-        )
+        self.assertEqual(model_tuning.stock_tiers({"fam.gap": {"text": "f"}}, _CLAUDE_TIERS), model_tuning.TIERS)
 
     def test_retargeting_a_tier_moves_it_between_the_states(self):
-        tuned_low = {**model_tuning.DEFAULT_PIN_MAP, "low": "sonnet"}
+        tuned_low = {**_CLAUDE_TIERS, "low": "sonnet"}
         self.assertNotIn("low", model_tuning.stock_tiers(self.ENTRIES, tuned_low))
 
 
@@ -594,11 +588,17 @@ class TestTierDiscovery(unittest.TestCase):
         self.assertIsNone(rendering.output_tier("---\nname: x\n---\nbody\n"))
         self.assertIsNone(rendering.output_tier("bare body\n"))
 
-    def test_the_tier_tokens_expand_from_the_pin_map_alone(self):
-        # The one thing a family-member name must never reach: a model: line.
-        binding = _binding({}, pin_map={**model_tuning.DEFAULT_PIN_MAP, "medium": "sonnet-probe"})
+    def test_the_tier_tokens_expand_from_the_bound_models(self):
+        binding = _binding({}, models={**_CLAUDE_TIERS, "medium": "sonnet-probe"})
         self.assertEqual(_expand("@!dyn.tier-medium!@", {}, {}, None, binding.real), "sonnet-probe")
         self.assertEqual(_expand("@!dyn.tier-medium!@", {}, {}, None, binding.probe), "tier:medium")
+
+    def test_inherit_binds_the_inherit_text_where_one_is_given(self):
+        models = {**_CLAUDE_TIERS, "low": "inherit"}
+        given = model_tuning.tier_binding({}, models=models, inherit_text="")
+        absent = model_tuning.tier_binding({}, models=models)
+        self.assertEqual(_expand("[@!dyn.tier-low!@]", {}, {}, None, given.real), "[]")
+        self.assertEqual(_expand("[@!dyn.tier-low!@]", {}, {}, None, absent.real), "[inherit]")
 
     def test_a_tier_token_expands_inside_a_chunk_body(self):
         # The dynamic table is routed to every span, so a token reaches a chunk
@@ -638,7 +638,7 @@ class TestTierResolver(unittest.TestCase):
         self.entries = model_tuning.load_family(self.family).entries
 
     def _resolver(self, tier_map=None):
-        return model_tuning.tier_resolver(self.entries, dict(tier_map or model_tuning.DEFAULT_PIN_MAP))
+        return model_tuning.tier_resolver(self.entries, dict(tier_map or _CLAUDE_TIERS))
 
     def test_member_scope_wins_over_family_scope_at_the_same_anchor(self):
         resolve = self._resolver()
@@ -658,12 +658,12 @@ class TestTierResolver(unittest.TestCase):
 
     def test_the_tier_map_decides_which_member_a_tier_resolves(self):
         # The same tier, retargeted: nothing about the output changed.
-        retargeted = self._resolver({**model_tuning.DEFAULT_PIN_MAP, "lowest": "opus"})
+        retargeted = self._resolver({**_CLAUDE_TIERS, "lowest": "opus"})
         self.assertEqual(retargeted("lowest")["fam.gap"], ("for opus", "model"))
         self.assertEqual(self._resolver()("lowest")["fam.gap"], ("family-wide", "family"))
 
     def test_a_family_with_no_entries_resolves_to_nothing(self):
-        resolve = model_tuning.tier_resolver({}, dict(model_tuning.DEFAULT_PIN_MAP))
+        resolve = model_tuning.tier_resolver({}, dict(_CLAUDE_TIERS))
         self.assertEqual(resolve(None), {})
         self.assertEqual(resolve("high"), {})
 
@@ -823,20 +823,20 @@ class TestHarnessSurfaceRender(unittest.TestCase):
 
     BODY = "---\nname: @!arg.name!@\n---\nread @!hrn.agents-file!@\n"
 
-    def _render(self, harness):
-        binding = model_tuning.tier_binding({}, pin_map=dict(model_tuning.DEFAULT_PIN_MAP), harness=harness)
+    def _render(self, values):
+        binding = model_tuning.tier_binding({}, models=dict(_CLAUDE_TIERS), harness=values)
         text, _ = rendering.render_output(self.BODY, binding, {"name": "x"}, lambda tier: {})
         return text
 
     def test_a_harness_marker_resolves_in_a_surface_render_given_a_harness(self):
-        self.assertIn("read AGENTS.md\n", self._render(agents_file.load_harness("opencode")))
+        self.assertIn("read AGENTS.md\n", self._render(harness.load_harness("opencode").values))
 
     def test_the_default_harness_supplies_the_claude_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             for verb in ("generate", "install"):
                 with self.subTest(verb=verb):
                     default = cli.build_parser().parse_args([verb, tmp]).harness
-                    self.assertIn("read CLAUDE.md\n", self._render(agents_file.load_harness(default)))
+                    self.assertIn("read CLAUDE.md\n", self._render(harness.load_harness(default).values))
 
 
 class TestSurfaceMap(unittest.TestCase):
@@ -1060,7 +1060,7 @@ class TestSelectedGeneration(unittest.TestCase):
 
     def test_selection_composes_with_tier_tuning(self):
         entries = model_tuning.load_family(self.family).entries
-        resolve = model_tuning.tier_resolver(entries, dict(model_tuning.DEFAULT_PIN_MAP))
+        resolve = model_tuning.tier_resolver(entries, dict(_CLAUDE_TIERS))
         tuning = _tuning(self.family, entries=entries)
         globs = {"agents": ["go-coder", "architect"]}
         self.assertTrue(self._generate(globs, overlays=resolve, tuning=tuning))
@@ -1092,9 +1092,9 @@ class TestSelectedGeneration(unittest.TestCase):
         entries = model_tuning.load_family(self.family).entries
         globs = {"agents": ["go-coder"]}
         target = self.out / "agents" / "go-coder.md"
-        self._generate(globs, overlays=model_tuning.tier_resolver(entries, dict(model_tuning.DEFAULT_PIN_MAP)))
+        self._generate(globs, overlays=model_tuning.tier_resolver(entries, dict(_CLAUDE_TIERS)))
         default = banners.tuning_claim(target.read_text(encoding="utf-8"))
-        retargeted = {**model_tuning.DEFAULT_PIN_MAP, "high": "haiku"}
+        retargeted = {**_CLAUDE_TIERS, "high": "haiku"}
         self._generate(
             globs,
             overlays=model_tuning.tier_resolver(entries, retargeted),
@@ -1251,10 +1251,12 @@ class TestTuningCLI(unittest.TestCase):
     reachable as real input by unrelated runs.
     """
 
+    # The probe member is spelled as a full claude model id, so the probe
+    # family renders under the claude harness's model shape with no aliasing.
     PROBE = (
-        _tiers_toml({**model_tuning.DEFAULT_PIN_MAP, "lowest": "probe-member"})
+        _tiers_toml({**_CLAUDE_TIERS, "lowest": "claude-probe"})
         + '[family.ask-vs-stipulate]\ntext = "probe family text"\n'
-        '[family.ask-vs-stipulate.models.probe-member]\ntext = "probe member text"\n'
+        '[family.ask-vs-stipulate.models.claude-probe]\ntext = "probe member text"\n'
         '[family.ask-vs-stipulate.models.opus]\ntext = "probe opus text"\n'
     )
     # applied-mathematician authors ask-vs-stipulate and carries a pin site;
@@ -1310,8 +1312,12 @@ class TestTuningCLI(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         claim = self._claim()
         self.assertEqual(claim.family, "templates/family/claude.toml")
-        self.assertEqual(claim.tier, model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP))
-        self.assertEqual(claim.pin, model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP))
+        self.assertEqual(claim.tier, model_tuning.map_spec(_CLAUDE_TIERS))
+        self.assertIsNone(claim.alias)
+        self.assertNotIn(" alias=", self._bodies()["agents/applied-mathematician.md"])
+        # The member is the rendered model: the claude family's members are the
+        # claude aliases themselves.
+        self.assertEqual(rendering.frontmatter_pin(self._bodies()["agents/applied-mathematician.md"]), "opus")
 
     def test_family_name_loads_that_family(self):
         done = self._generate("--family", "probe")
@@ -1337,22 +1343,34 @@ class TestTuningCLI(unittest.TestCase):
         self.assertIn("--family 'ghost' names no family file", done.stderr)
         self.assertEqual(self._bodies(), {})
 
-    def test_the_tier_map_retargets_a_tier_without_touching_its_pin(self):
-        # The whole point of two maps: what a definition is TUNED for and what
-        # it DISPATCHES on move independently.
-        done = self._generate("--family", "probe", "--model-tier-map", "highest=opus")
+    def test_the_tier_map_retargets_both_tuning_and_the_rendered_model(self):
+        done = self._generate("--family", "probe", "--model-tier-map", "all=haiku,high=sonnet")
         self.assertEqual(done.returncode, 0, done.stderr)
-        claim = self._claim()
-        self.assertIn("highest=opus", claim.tier)
-        self.assertIn("highest=fable", claim.pin)
+        self.assertEqual(self._claim().tier, "highest=haiku,high=sonnet,medium=haiku,low=haiku,lowest=haiku")
+        self.assertEqual(rendering.frontmatter_pin(self._bodies()["agents/applied-mathematician.md"]), "sonnet")
 
-    def test_the_pin_map_changes_rendered_pins_and_says_so(self):
-        done = self._generate("--model-pin-map", "all=haiku")
+    def test_the_alias_map_rewrites_the_rendered_model_and_not_tuning(self):
+        # The probe family tunes high against opus; aliasing high to sonnet
+        # changes what the definition dispatches on, never what it is tuned for.
+        done = self._generate("--family", "probe", "--model-pin-tier-alias-map", "all=haiku,high=sonnet")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self._claim().pin, ",".join(f"{tier}=haiku" for tier in model_tuning.TIERS))
+        body = self._bodies()["agents/applied-mathematician.md"]
+        self.assertEqual(rendering.frontmatter_pin(body), "sonnet")
+        self.assertIn("probe opus text", body)
+        claim = self._claim()
+        self.assertEqual(claim.member, "opus")
+        self.assertEqual(claim.alias, "highest=haiku,high=sonnet,medium=haiku,low=haiku,lowest=haiku")
+
+    def test_a_partial_map_is_refused_before_anything_is_written(self):
+        for flag in ("--model-tier-map", "--model-pin-tier-alias-map"):
+            with self.subTest(flag=flag):
+                done = self._generate(flag, "medium=haiku")
+                self.assertEqual(done.returncode, 2)
+                self.assertIn(f"{flag}: names no value for highest, high, low, lowest", done.stderr)
+                self.assertEqual(self._bodies(), {})
 
     def test_a_bad_map_key_is_a_hard_error_before_anything_is_written(self):
-        for flag in ("--model-tier-map", "--model-pin-map"):
+        for flag in ("--model-tier-map", "--model-pin-tier-alias-map"):
             with self.subTest(flag=flag):
                 done = self._generate(flag, "mid=sonnet")
                 self.assertEqual(done.returncode, 2)
@@ -1373,22 +1391,21 @@ class TestTuningCLI(unittest.TestCase):
         # Stock tier, silently.
         broken = self.family_dir / "typo.toml"
         broken.write_text(
-            _tiers_toml() + '[family.gap-aversion.models.oppus]\ntext = "x"\n',
+            _tiers_toml() + '[family.gap-aversion.models.claude-opuss]\ntext = "x"\n',
             encoding="utf-8",
         )
         self.addCleanup(broken.unlink)
         done = self._generate("--family", "typo")
         self.assertEqual(done.returncode, 2)
-        self.assertIn("no tier reaches: oppus", done.stderr)
+        self.assertIn("no tier reaches: claude-opuss", done.stderr)
         # …and the tier map is the union, so mapping a tier to it fixes the run.
-        fixed = self._generate("--family", "typo", "--model-tier-map", "lowest=oppus")
+        fixed = self._generate("--family", "typo", "--model-tier-map", "all=haiku,lowest=claude-opuss")
         self.assertEqual(fixed.returncode, 0, fixed.stderr)
 
     def test_a_family_naming_an_anchor_nothing_authors_refuses_to_render(self):
         stray = self.family_dir / "stray.toml"
         stray.write_text(
-            _tiers_toml({**model_tuning.DEFAULT_PIN_MAP, "lowest": "probe-member"})
-            + '[family.no-such-anchor]\ntext = "x"\n',
+            _tiers_toml({**_CLAUDE_TIERS, "lowest": "claude-probe"}) + '[family.no-such-anchor]\ntext = "x"\n',
             encoding="utf-8",
         )
         self.addCleanup(stray.unlink)
@@ -1435,48 +1452,57 @@ class TestTuningCLI(unittest.TestCase):
         stock = self._generate()
         [echo] = [line for line in stock.stdout.splitlines() if line.startswith("tuning:")]
         self.assertIn("templates/family/claude.toml", echo)
-        # Both maps, each serialized whole.
-        self.assertEqual(echo.count(model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP)), 2)
+        # The tier map serialized whole, and no alias map to show.
+        self.assertEqual(echo.count(model_tuning.map_spec(_CLAUDE_TIERS)), 1)
+        self.assertNotIn("alias[", echo)
         self.assertRegex(echo, r"\bharness\W+claude\b")
-        # Every tier of the shipped claude family is stock and the two maps
-        # agree, so the triple is the whole of what a default run says. The
+        # Every tier of the shipped claude family is stock and no alias map
+        # rewrites one, so the triple is the whole of what a default run says. The
         # stock state is what the banner's stock= field is for; the run's
         # report does not mention it at all.
         self.assertEqual([line for line in stock.stdout.splitlines() if line.startswith("notice:")], [])
         self.assertNotIn("stock", stock.stdout)
 
-    def test_the_divergence_notice_is_a_notice_and_gates_nothing(self):
-        done = self._generate("--model-tier-map", "medium=haiku")
+    def test_the_alias_notice_names_the_rewritten_tiers_and_gates_nothing(self):
+        done = self._generate(
+            "--model-pin-tier-alias-map", "highest=fable,high=opus,medium=haiku,low=haiku,lowest=haiku"
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
-        # The tier, the member it is tuned for, and the pin it dispatches on.
+        [echo] = [line for line in done.stdout.splitlines() if line.startswith("tuning:")]
+        self.assertIn("alias[highest=fable,high=opus,medium=haiku,low=haiku,lowest=haiku]", echo)
+        # Only the tier whose alias differs from its member: medium.
         [notice] = [line for line in done.stdout.splitlines() if line.startswith("notice:")]
-        for name in ("medium", "haiku", "sonnet"):
-            self.assertIn(name, notice)
+        self.assertEqual(
+            re.findall(r"\b([a-z]+) \(member=(\w+), alias=(\w+)\)", notice), [("medium", "sonnet", "haiku")]
+        )
         # It rendered: a notice never refuses.
         self.assertTrue(self._bodies())
 
     def test_the_floor_rung_prints_no_notice_at_all(self):
-        # The floor's flags. Two maps collapsed onto one value cannot
-        # diverge, and haiku is a member the claude family declares nothing
-        # for, so the rung renders stock at every tier and stays silent.
-        done = self._generate("--model-tier-map", "all=haiku", "--model-pin-map", "all=haiku")
+        # The floor's flag. haiku is a member the claude family declares
+        # nothing for, so the rung renders stock at every tier and stays silent.
+        done = self._generate("--model-tier-map", "all=haiku")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual([line for line in done.stdout.splitlines() if line.startswith("notice:")], [])
         self.assertEqual(rendering.frontmatter_pin(self._bodies()["agents/applied-mathematician.md"]), "haiku")
 
-    def test_the_divergence_notice_is_confined_to_the_claude_family(self):
-        # For any other family the two maps diverge at every tier by
-        # construction — members against claude aliases — so a notice there
-        # would fire five times a run carrying no information.
+    def test_a_member_outside_the_harness_shape_is_refused_naming_the_family(self):
         done = self._generate("--family", "gemma-4")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        # The triple pins that the reporting block ran at all, so the absent
-        # notice is a decision and not an unreached print.
-        self.assertIn("tuning: family=templates/family/gemma-4.toml", done.stdout)
-        self.assertEqual([line for line in done.stdout.splitlines() if line.startswith("notice:")], [])
+        self.assertEqual(done.returncode, 2)
+        self.assertIn(
+            "harness 'claude' does not accept model 'gemma-4-31B-it' at tier highest, supplied by the family "
+            "file templates/family/gemma-4.toml [tiers] (--family)",
+            done.stderr,
+        )
+        self.assertEqual(self._bodies(), {})
+        # The alias map is what lets a non-claude family render under claude.
+        aliased = self._generate("--family", "gemma-4", "--model-pin-tier-alias-map", "all=sonnet")
+        self.assertEqual(aliased.returncode, 0, aliased.stderr)
+        self.assertEqual(self._claim().member, "gemma-4-31B-it")
+        self.assertEqual(rendering.frontmatter_pin(self._bodies()["agents/applied-mathematician.md"]), "sonnet")
 
     def test_the_tuned_notice_names_the_override_bearing_tiers_and_no_others(self):
-        # probe.toml declares member tables for opus and probe-member alone,
+        # probe.toml declares member tables for opus and claude-probe alone,
         # and its [tiers] table staffs high and lowest with those two; the
         # other three tiers map to members it says nothing about. The tier
         # list parsed out of the line is the "and no others" half — a fourth
@@ -1484,7 +1510,7 @@ class TestTuningCLI(unittest.TestCase):
         done = self._generate("--family", "probe")
         self.assertEqual(done.returncode, 0, done.stderr)
         [notice] = [line for line in done.stdout.splitlines() if line.startswith("notice:")]
-        self.assertEqual(re.findall(r"\b([a-z]+) \(([^)]+)\)", notice), [("high", "opus"), ("lowest", "probe-member")])
+        self.assertEqual(re.findall(r"\b([a-z]+) \(([^)]+)\)", notice), [("high", "opus"), ("lowest", "claude-probe")])
         self.assertIn("templates/family/probe.toml", notice)
 
 
@@ -1526,13 +1552,23 @@ class TestTunedBanner(unittest.TestCase):
                 family="templates/family/fam.toml",
                 seat="high",
                 member="opus",
-                tier=model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP),
-                pin=model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP),
+                tier=model_tuning.map_spec(_CLAUDE_TIERS),
+                alias=None,
                 stock=",".join(model_tuning.TIERS),
                 harness="claude",
             ),
         )
         self.assertTrue(banners.body_untouched(text))
+
+    def test_the_alias_field_appears_only_where_an_alias_map_is_set(self):
+        self.assertNotIn(" alias=", self._stamped(seat="high"))
+        aliases = dict.fromkeys(model_tuning.TIERS, "claude-x")
+        text = self._stamped(seat="high", tuning=_tuning(self.FAMILY, alias_map=aliases))
+        self.assertIn(
+            f" tier={model_tuning.map_spec(_CLAUDE_TIERS)} alias={model_tuning.map_spec(aliases)} stock=", text
+        )
+        claim = banners.tuning_claim(text)
+        self.assertEqual((claim.member, claim.alias), ("opus", model_tuning.map_spec(aliases)))
 
     def test_the_claim_records_the_harness_rendered_under(self):
         tuning = dataclasses.replace(_tuning(self.FAMILY), harness="opencode")
@@ -1550,12 +1586,12 @@ class TestTunedBanner(unittest.TestCase):
         self.assertEqual((claim.seat, claim.member), ("none", "none"))
 
     def test_the_member_is_recorded_so_the_tier_never_has_to_be_inverted(self):
-        # An all= pin map collapses every tier onto one pin, so neither the
-        # seat nor the member can be recovered from it: both are recorded.
+        # An all= alias map collapses every tier onto one model, so neither
+        # the seat nor the member can be recovered from it: both are recorded.
         # The tier map names a different member at each seat, and neither is
-        # the pin, so a member read off the wrong map shows.
-        pin_map = {tier: "haiku" for tier in model_tuning.TIERS}
-        tier_map = {**model_tuning.DEFAULT_PIN_MAP, "low": "member-low", "lowest": "member-lowest"}
+        # the alias, so a member read off the wrong map shows.
+        alias_map = {tier: "haiku" for tier in model_tuning.TIERS}
+        tier_map = {**_CLAUDE_TIERS, "low": "member-low", "lowest": "member-lowest"}
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             agents = root / "templates" / "agents"
@@ -1568,10 +1604,10 @@ class TestTunedBanner(unittest.TestCase):
             out.mkdir()
             _quiet(
                 generation.generate,
-                _binding({}, pin_map),
+                _binding({}, alias_map),
                 discovery.surface_map(templates_root=root / "templates", output_root=out),
                 overlays=None,
-                tuning=_tuning(self.FAMILY, tier_map=tier_map, pin_map=pin_map),
+                tuning=_tuning(self.FAMILY, tier_map=tier_map, alias_map=alias_map),
             )
             claims = [
                 banners.tuning_claim((out / "agents" / f"at-{seat}.md").read_text(encoding="utf-8"))
@@ -1582,7 +1618,7 @@ class TestTunedBanner(unittest.TestCase):
             self.assertEqual(claim.member, tier_map[claim.seat])
 
     def test_stock_none_when_every_tier_is_tuned(self):
-        entries = {"fam.gap": {"models": {member: {"text": "t"} for member in model_tuning.DEFAULT_PIN_MAP.values()}}}
+        entries = {"fam.gap": {"models": {member: {"text": "t"} for member in _CLAUDE_TIERS.values()}}}
         claim = banners.tuning_claim(self._stamped(tuning=_tuning(self.FAMILY, entries=entries)))
         self.assertEqual(claim.stock, "none")
 
@@ -1627,7 +1663,7 @@ class TestGenerateRoundTrip(unittest.TestCase):
 
     def test_two_families_render_two_files_each_naming_its_own_family(self):
         # An output with no pin site takes family-wide text; retarget nothing.
-        overlays = model_tuning.tier_resolver(self.ENTRIES, dict(model_tuning.DEFAULT_PIN_MAP))
+        overlays = model_tuning.tier_resolver(self.ENTRIES, dict(_CLAUDE_TIERS))
         self.assertTrue(self._generate(overlays=overlays, tuning=_tuning(self.family, entries=self.ENTRIES)))
         tuned = self._target().read_text(encoding="utf-8")
         self.assertIn("body shared text\nfamily fill\ntail", tuned)
@@ -1756,11 +1792,13 @@ class TestMixedTierRender(unittest.TestCase):
         self.family.write_text(_tiers_toml() + self.FAMILY, encoding="utf-8")
         self.entries = model_tuning.load_family(self.family).entries
 
-    def _generate(self, *, tier_map=None):
-        tier_map = dict(tier_map or model_tuning.DEFAULT_PIN_MAP)
+    def _generate(self, *, tier_map=None, alias_map=None):
+        tier_map = dict(tier_map or _CLAUDE_TIERS)
         resolve = model_tuning.tier_resolver(self.entries, tier_map)
-        tuning = _tuning(self.family, tier_map=tier_map, entries=self.entries)
-        ok = _quiet(generation.generate, _binding(self.CHUNKS), self.smap, overlays=resolve, tuning=tuning)
+        tuning = _tuning(self.family, tier_map=tier_map, alias_map=alias_map, entries=self.entries)
+        ok = _quiet(
+            generation.generate, _binding(self.CHUNKS, tuning.models), self.smap, overlays=resolve, tuning=tuning
+        )
         return ok, resolve, tuning
 
     def _bodies(self):
@@ -1779,10 +1817,11 @@ class TestMixedTierRender(unittest.TestCase):
         # MEMBER-scoped entries require a tier.
         self.assertIn("\nfamily\n", plain)
 
-    def test_the_rendered_pin_is_the_pin_map_value_not_the_member(self):
-        self._generate(tier_map={**model_tuning.DEFAULT_PIN_MAP, "high": "haiku"})
+    def test_the_rendered_pin_is_the_member_unless_an_alias_replaces_it(self):
+        retargeted = {**_CLAUDE_TIERS, "high": "haiku"}
+        self._generate(tier_map=retargeted)
         text = (self.out / "agents" / "tiered.md").read_text(encoding="utf-8")
-        self.assertEqual(rendering.frontmatter_pin(text), "opus")
+        self.assertEqual(rendering.frontmatter_pin(text), "haiku")
         self.assertIn("\nhaiku text\n", text)
 
     def test_the_mixed_render_is_deterministic_across_runs(self):
@@ -1807,7 +1846,7 @@ class TestMixedTierRender(unittest.TestCase):
                 generation.generate,
                 _binding(self.CHUNKS),
                 self.smap,
-                overlays=model_tuning.tier_resolver({}, dict(model_tuning.DEFAULT_PIN_MAP)),
+                overlays=model_tuning.tier_resolver({}, dict(_CLAUDE_TIERS)),
                 tuning=_tuning(bare),
             )
         )
@@ -2520,7 +2559,7 @@ class TestInstallPassContract(unittest.TestCase):
         )
 
         entries = model_tuning.load_family(self.family).entries
-        self.overlays = model_tuning.tier_resolver(entries, dict(model_tuning.DEFAULT_PIN_MAP))
+        self.overlays = model_tuning.tier_resolver(entries, dict(_CLAUDE_TIERS))
         self.tuning = _tuning(self.family, entries=entries)
         self.binding = _binding(self.CHUNKS)
         self.src.mkdir(exist_ok=True)
@@ -2613,7 +2652,9 @@ class TestInstallEndToEnd(unittest.TestCase):
         # staticmethod: a plain function on a class would bind as a method and
         # arrive at render_output with `self` prepended.
         cls.overlays = staticmethod(model_tuning.tier_resolver(cls.family.entries, cls.tuning.tier_map))
-        cls.binding = model_tuning.tier_binding(cls.chunks, pin_map=cls.tuning.pin_map, harness=_DEFAULT_HARNESS)
+        cls.binding = model_tuning.tier_binding(
+            cls.chunks, models=cls.tuning.models, harness=_DEFAULT_HARNESS, frontmatter=_DEFAULT_FRONTMATTER
+        )
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -2708,7 +2749,8 @@ class TestInstallEndToEnd(unittest.TestCase):
         self.assertTrue(claims)
         for path, claim in claims.items():
             self.assertEqual(claim.family, paths.rel(self.tuning.family), paths.rel(path))
-            self.assertEqual(claim.pin, model_tuning.map_spec(self.tuning.pin_map), paths.rel(path))
+            self.assertEqual(claim.tier, model_tuning.map_spec(self.tuning.tier_map), paths.rel(path))
+            self.assertIsNone(claim.alias, paths.rel(path))
 
     def test_a_fresh_install_is_one_summary_line(self):
         # Report by exception: a fresh install is a non-event. A default triple
@@ -2924,11 +2966,17 @@ class TestInstallEndToEnd(unittest.TestCase):
                 self.assertEqual(text, "---\n" + front + "\n---\n" + done.stdout)
 
     def test_a_non_default_triple_renders_and_earns_its_summary_clause(self):
+        # Aliased back onto the claude family's members, so the rendered
+        # models match the default render's and only overlays differ.
         family_path = paths.FAMILY_DIR / "gemma-4.toml"
         family = model_tuning.load_family(family_path)
-        tuning = model_tuning.effective_tuning(family_path, family)
+        tuning = model_tuning.effective_tuning(
+            family_path, family, alias_spec=",".join(f"{tier}={model}" for tier, model in _CLAUDE_TIERS.items())
+        )
         self.assertFalse(tuning.is_default)
-        binding = model_tuning.tier_binding(self.chunks, pin_map=tuning.pin_map, harness=_DEFAULT_HARNESS)
+        binding = model_tuning.tier_binding(
+            self.chunks, models=tuning.models, harness=_DEFAULT_HARNESS, frontmatter=_DEFAULT_FRONTMATTER
+        )
         overlays = model_tuning.tier_resolver(family.entries, tuning.tier_map)
 
         # The default-triple render to compare against, produced the same way:
@@ -2963,9 +3011,9 @@ class TestInstallEndToEnd(unittest.TestCase):
         claim = banners.tuning_claim(tuned)
         self.assertEqual(claim.family, "templates/family/gemma-4.toml")
         self.assertIn("gemma-4-31B-it", claim.tier)
-        # A family member never reaches a pin: the tokens come from the pin map
-        # alone, so the rendered pins are claude-legal under any family.
-        self.assertEqual(claim.pin, model_tuning.map_spec(model_tuning.DEFAULT_PIN_MAP))
+        # The alias map, not the member, is what the definition renders.
+        self.assertEqual(claim.alias, model_tuning.map_spec(_CLAUDE_TIERS))
+        self.assertEqual(rendering.frontmatter_pin(tuned), "opus")
         # A definition the family does not touch keeps a byte-identical body;
         # only its banner records the triple it was rendered under.
         untouched = (self.root / "agents" / "go-coder.md").read_text(encoding="utf-8")
@@ -3145,9 +3193,10 @@ class TestShippedFamilyFiles(unittest.TestCase):
         tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path))
         self.assertTrue(tuning.is_default)
         self.assertEqual(tuning.harness, "claude")
-        # The two maps coincide inside claude, which is what makes a divergence
-        # there a deliberate act worth naming.
-        self.assertEqual(tuning.tier_map, tuning.pin_map)
+        # No alias map: every tier renders its member, which under the
+        # claude family is the claude alias itself.
+        self.assertIsNone(tuning.alias_map)
+        self.assertEqual(tuning.models, _CLAUDE_TIERS)
 
     def test_another_harness_is_not_the_default(self):
         path = paths.FAMILY_DIR / f"{model_tuning.DEFAULT_FAMILY}{paths.FAMILY_SUFFIX}"
@@ -3158,8 +3207,18 @@ class TestShippedFamilyFiles(unittest.TestCase):
         # `is_default` is a comparison by VALUE, not "was a flag passed": an
         # override that changes nothing must not turn an install into an event.
         path = paths.FAMILY_DIR / f"{model_tuning.DEFAULT_FAMILY}{paths.FAMILY_SUFFIX}"
-        tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path), pin_spec="high=opus")
+        tuning = model_tuning.effective_tuning(
+            path, model_tuning.load_family(path), tier_spec="all=haiku,highest=fable,high=opus,medium=sonnet"
+        )
         self.assertTrue(tuning.is_default)
+
+    def test_any_alias_map_is_not_the_default(self):
+        # Even one that renders the same text: the banner records it, so the
+        # install's summary line has to say so too.
+        path = paths.FAMILY_DIR / f"{model_tuning.DEFAULT_FAMILY}{paths.FAMILY_SUFFIX}"
+        aliases = ",".join(f"{tier}={model}" for tier, model in _CLAUDE_TIERS.items())
+        tuning = model_tuning.effective_tuning(path, model_tuning.load_family(path), alias_spec=aliases)
+        self.assertFalse(tuning.is_default)
 
 
 #: A pin site as a TEMPLATE spells it, in either of the two spellings a
@@ -3172,13 +3231,13 @@ class TestShippedFamilyFiles(unittest.TestCase):
 _DECLARED_PIN_SITE = re.compile(r'^\s*model\s*[:=]\s*"?@!dyn\.tier-([a-z]+)!@"?\s*$', re.MULTILINE)
 
 
-def declared_pins(templates_root: Path, pin_map: dict) -> dict[str, list[str]]:
+def declared_pins(templates_root: Path, models: dict) -> dict[str, list[str]]:
     """``{template path: the pins its declared tier tokens resolve to, sorted}``.
 
     The template side of the comparison, read straight out of the sources.
     """
     return {
-        paths.rel(path): sorted(pin_map[tier] for tier in _DECLARED_PIN_SITE.findall(path.read_text(encoding="utf-8")))
+        paths.rel(path): sorted(models[tier] for tier in _DECLARED_PIN_SITE.findall(path.read_text(encoding="utf-8")))
         for path in sorted(templates_root.rglob("*.tmpl.md"))
     }
 
@@ -3204,38 +3263,39 @@ def rendered_pins(renders: dict, known: dict) -> dict[str, list[str]]:
 
 class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
     """The tier a template DECLARES against the pin its render carries — two
-    independently produced values, joined only by the run's pin map.
+    independently produced values, joined only by the run's rendered models.
 
     A definition whose pin site stopped resolving, a fence parameter that
     stopped being a tier token, a tier token bound to the wrong map entry, or
     an output that lost its `model:` line altogether all land here as an
     inequality naming the template.
 
-    Run at three tunings, because a pin map that is a constant function hides a
+    Run at four tunings, because a map that is a constant function hides a
     misrouted tier: the shipped default (five tiers, four distinct pins), the
-    floor (`all=haiku`, what a map collapsed with `all=` has to survive), and a
-    non-claude family, whose tier map names members that must never reach a
-    pin.
+    floor (`all=haiku`, what a map collapsed with `all=` has to survive), a
+    non-claude family, whose members are what render, and that family aliased
+    onto the claude tiers, where the alias and not the member must render.
     """
 
     TUNINGS = (
         ("default", "claude", None, None),
-        ("floor", "claude", "all=haiku", "all=haiku"),
+        ("floor", "claude", "all=haiku", None),
         ("gemma-4", "gemma-4", None, None),
+        ("gemma-4 aliased", "gemma-4", None, ",".join(f"{tier}={model}" for tier, model in _CLAUDE_TIERS.items())),
     )
 
     def test_every_template_renders_the_pins_its_tier_tokens_declare(self):
-        for label, family, tier_spec, pin_spec in self.TUNINGS:
+        for label, family, tier_spec, alias_spec in self.TUNINGS:
             with self.subTest(tuning=label):
-                tuning, _, renders = _shipped_renders(family, tier_spec=tier_spec, pin_spec=pin_spec)
-                declared = declared_pins(paths.TEMPLATES_DIR, tuning.pin_map)
+                tuning, _, renders = _shipped_renders(family, tier_spec=tier_spec, alias_spec=alias_spec)
+                declared = declared_pins(paths.TEMPLATES_DIR, tuning.models)
                 self.assertEqual(rendered_pins(renders, declared), declared)
 
     def test_the_comparison_is_not_vacuous(self):
         # Floors rather than fixtures: a fortieth template and a sixth tier
         # must not require editing these, only a sweep that has quietly stopped
         # reaching the tree.
-        declared = declared_pins(paths.TEMPLATES_DIR, model_tuning.DEFAULT_PIN_MAP)
+        declared = declared_pins(paths.TEMPLATES_DIR, _CLAUDE_TIERS)
         pinned = {key: pins for key, pins in declared.items() if pins}
         self.assertGreaterEqual(len(pinned), 30)
         # More than one distinct pin under the default map, or the comparison
@@ -3254,12 +3314,12 @@ class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
             root = Path(tmp)
             template = root / "probe.tmpl.md"
             template.write_text("---\nname: probe\nmodel: @!dyn.tier-high!@\n---\nbody\n", encoding="utf-8")
-            declared = declared_pins(root, model_tuning.DEFAULT_PIN_MAP)
-            self.assertEqual(list(declared.values()), [[model_tuning.DEFAULT_PIN_MAP["high"]]])
+            declared = declared_pins(root, _CLAUDE_TIERS)
+            self.assertEqual(list(declared.values()), [[_CLAUDE_TIERS["high"]]])
 
             banner = f"# !GENERATED! from {paths.rel(template)} and x\n"
-            honest = {"probe.md": f"---\n{banner}model: {model_tuning.DEFAULT_PIN_MAP['high']}\n---\nbody\n"}
-            wrong = {"probe.md": f"---\n{banner}model: {model_tuning.DEFAULT_PIN_MAP['medium']}\n---\nbody\n"}
+            honest = {"probe.md": f"---\n{banner}model: {_CLAUDE_TIERS['high']}\n---\nbody\n"}
+            wrong = {"probe.md": f"---\n{banner}model: {_CLAUDE_TIERS['medium']}\n---\nbody\n"}
 
             self.assertEqual(rendered_pins(honest, declared), declared)
             self.assertNotEqual(rendered_pins(wrong, declared), declared)
@@ -3271,13 +3331,13 @@ class TestDeclaredPinsAgainstRenderedPins(unittest.TestCase):
             root = Path(tmp)
             template = root / "probe.tmpl.md"
             template.write_text("---\nname: probe\nmodel: @!dyn.tier-low!@\n---\nbody\n", encoding="utf-8")
-            declared = declared_pins(root, model_tuning.DEFAULT_PIN_MAP)
+            declared = declared_pins(root, _CLAUDE_TIERS)
             unpinned = {"probe.md": f"---\n# !GENERATED! from {paths.rel(template)} and x\n---\nbody\n"}
             self.assertNotEqual(rendered_pins(unpinned, declared), declared)
 
 
 class TestFloorRung(unittest.TestCase):
-    """The floor, over the real definition set: both maps collapsed onto one
+    """The floor, over the real definition set: the tier map collapsed onto one
     member with `all=`.
 
     What it proves is the `all=` merge reaching every tier a real definition
@@ -3292,7 +3352,6 @@ class TestFloorRung(unittest.TestCase):
         _, _, cls.renders = _shipped_renders(
             "claude",
             tier_spec=f"all={cls.FLOOR}",
-            pin_spec=f"all={cls.FLOOR}",
         )
         cls.pinned = {key: text for key, text in cls.renders.items() if rendering.frontmatter_pin(text)}
         cls.unpinned = {key: text for key, text in cls.renders.items() if key not in cls.pinned}
@@ -3378,15 +3437,32 @@ class TestStockRung(unittest.TestCase):
 
     def test_no_rendered_body_carries_a_member_scoped_word(self):
         # Stock is a claim about the MEMBER, so this is its proof: the family
-        # declares no [family.*.models.*] table for any of the five, and a member
-        # name never reaches rendered text in any case — the pin map is the
-        # sole source of pin text. Over the body, since the banner's own tier=
-        # field names all five by design.
+        # declares no [family.*.models.*] table for any of the five, and a
+        # member name reaches a definition only as its `model:` value. Over the
+        # prompt body, since the frontmatter names the member by design.
         for key, text in self.renders.items():
-            body = banners.banner_body(text)
+            body = text[len("---\n" + banners.frontmatter_of(text) + "\n---\n") :]
             for member in self.members:
                 with self.subTest(output=key, member=member):
                     self.assertNotIn(member, body)
+
+
+class TestRenderedDefinitionSize(unittest.TestCase):
+    RENDERED_DEFINITION_LINE_CAP = 500
+    """A runaway guard, not a target; the 100-column wrap makes line count a fair size measure."""
+
+    def test_no_rendered_agent_definition_exceeds_the_line_cap(self):
+        _, _, renders = _shipped_renders("claude")
+        for key, text in renders.items():
+            if not key.startswith("agents/"):
+                continue
+            count = len(banners.banner_body(text).splitlines())
+            with self.subTest(output=key):
+                self.assertLessEqual(
+                    count,
+                    self.RENDERED_DEFINITION_LINE_CAP,
+                    f"{key} renders at {count} lines after the banner; the cap is {self.RENDERED_DEFINITION_LINE_CAP}",
+                )
 
 
 class TestResidualMarkerGuard(unittest.TestCase):

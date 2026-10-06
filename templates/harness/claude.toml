@@ -9,3 +9,26 @@ text = "~/.claude"
 
 [harness.agents-file]
 text = "CLAUDE.md"
+
+[harness.agent-frontmatter]
+name        = "@!dyn.authored-value!@"
+description = "@!dyn.authored-value!@"
+model       = "@!dyn.authored-value!@"
+color       = "@!dyn.authored-value!@"
+tools       = "@!dyn.tools!@"
+mode        = false
+
+[harness.tools]
+read      = "Read"
+grep      = "Grep"
+glob      = "Glob"
+edit      = "Edit"
+write     = "Write"
+bash      = "Bash"
+webfetch  = "WebFetch"
+websearch = "WebSearch"
+agent     = "Agent"
+
+[harness.model]
+pattern = '^(fable|opus|sonnet|haiku|inherit|claude-\S+)$'
+shape = "a Claude alias (fable, opus, sonnet, haiku), a full model id such as claude-opus-4-1, or inherit"

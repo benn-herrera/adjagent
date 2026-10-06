@@ -1,7 +1,7 @@
 """No file hand-composes a metadata marker.
 
-`kb_write.render` is the only writer of a `<!-- id:`, `<!-- kb-frontmatter` or
-`<!-- claim-quality:` opener. The prose sweep that removed the freehand sites
+`kb_write.render` is the only writer of a `<!-- id:` or `<!-- claim-quality:`
+opener. The prose sweep that removed the freehand sites
 is evidence for that change; it is not a guard for the repository, and its
 finding list is not something a reviewer re-checks on every future edit. This
 file is the guard, in two halves:
@@ -18,7 +18,7 @@ file is the guard, in two halves:
   negative constraint, and a negative constraint with no instrument is a wish.
 
 **Token-bearing files are allowlisted by name, with a reason**
-(:data:`MARKER_ALLOWLIST`) — five readers of the format, plus the module that
+(:data:`MARKER_ALLOWLIST`) — four readers of the format, plus the module that
 spells the tokens for the lint that matches them.
 Composing a marker and reading one are indistinguishable to a line scanner —
 `CANONICAL_ID = re.compile(r"<!-- id: ...")` and a docstring describing the
@@ -73,7 +73,7 @@ _SKIP_DIRS = frozenset({"kb_write", "_vendor", "tests", "__pycache__", ".pytest_
 #: what keeps it from quietly shrinking the sweep toward nothing.
 _TEXT_SUFFIXES = frozenset({".py", ".md", ".toml", ".just", ".mk", ".sh", ".json", ".txt", ".cfg", ""})
 
-#: Modules that carry a marker token legitimately — five that read the format
+#: Modules that carry a marker token legitimately — four that read the format
 #: and the one that spells the tokens for the lint that matches them. Keyed by
 #: path relative to ``kb_tools/``.
 MARKER_ALLOWLIST: Mapping[str, str] = MappingProxyType(
@@ -90,7 +90,6 @@ MARKER_ALLOWLIST: Mapping[str, str] = MappingProxyType(
             "docstring of the leaf-references rewrite, describing the band between an entry's id marker and its "
             "`### Quality` heading (the opener this module used to compose is gone)"
         ),
-        "kb_cmd/index.py": "prose comment describing the frontmatter block the reader parses",
         "kb_driver/steps.py": (
             "`METADATA_MARKER_TOKENS` — the vocabulary this sweep matches with, which cannot be spelled in pieces "
             "without becoming unreadable to the next person and unmatched against what the scanner looks for"
@@ -148,9 +147,8 @@ def scan_modules(root: Path) -> list[str]:
 # --- the token vocabulary ----------------------------------------------------
 
 
-def test_the_marker_tokens_are_the_three_openers() -> None:
-    """Three openers. Spelled here so a fourth — or a lost third — is a decision, not a drift."""
-    assert set(steps.METADATA_MARKER_TOKENS) == {"<!-- id:", "<!-- kb-frontmatter", "<!-- claim-quality:"}
+def test_the_marker_tokens_are_the_two_openers() -> None:
+    """The sweep holds a pattern for each opener and for nothing else."""
     assert set(_PATTERNS) == set(steps.METADATA_MARKER_TOKENS)
 
 
@@ -242,6 +240,6 @@ def test_the_composer_and_the_test_tree_are_out_of_the_module_sweep(tmp_path: Pa
     for skipped in ("kb_write", "tests", "_vendor"):
         directory = tmp_path / skipped
         directory.mkdir()
-        (directory / "writer.py").write_text('OPEN = "<!-- kb-frontmatter"\n', encoding="utf-8")
+        (directory / "writer.py").write_text('OPEN = "<!-- id:"\n', encoding="utf-8")
 
     assert scan_modules(tmp_path) == []

@@ -160,7 +160,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from kb_tools import kb_index_lib, kb_schema
+from kb_tools import kb_index_lib, kb_schema, kb_yaml
 from kb_tools.kb_write import render
 
 # ---------------------------------------------------------------------------
@@ -352,6 +352,7 @@ COMPARED_FIELD_READS: Mapping[str, str] = {
     "rationale": "rationale",
     "depends_on": "depends_on",
     "references": "references",
+    "demoted": "demoted",
     "strengthen_by": "strengthen_by",
 }
 
@@ -413,6 +414,7 @@ class ExpectedEdge:
     target: str
     context: str | None = None
     applicability: float | None = None
+    origin: str | None = None
 
 
 def edge_of(edge) -> ExpectedEdge:
@@ -426,6 +428,7 @@ def edge_of(edge) -> ExpectedEdge:
         target=edge.target,
         context=edge.context,
         applicability=None if edge.fraction is kb_index_lib.PENDING_FRACTION else edge.fraction,
+        origin=edge.origin,
     )
 
 
@@ -460,6 +463,7 @@ class ExpectedEntry:
     rationale: str
     depends_on: tuple[ExpectedEdge, ...] = ()
     references: tuple[ExpectedEdge, ...] = ()
+    demoted: tuple[ExpectedEdge, ...] = ()
     strengthen_by: tuple[str, ...] = ()
     supports: tuple[tuple[str, float | None], ...] = ()
 
@@ -603,14 +607,9 @@ def take_census(path: Path, kb_root: Path) -> Census:
 # same walk, which is why `locate_entries` serves refresh's solidity write-back
 # as well as this module's splices.
 
-# The frontmatter block delimiter, single-sourced in `kb_index_lib` — the same
-# compiled pattern `verify_kb_metadata` reads with. The emitter and the checker
-# must agree on where a document's frontmatter ends or this splice rewrites a
-# span verify never read.
-FRONTMATTER_BLOCK = kb_index_lib.FRONTMATTER_RE
-
 # The reader's fold-break key lists, one per entry kind
-# (`kb_index_lib.py:997` for a claim, `:1158` for a support). A field's span is
+# (`kb_index_lib.QUALITY_FIELD_KEYS` for a claim,
+# `kb_index_lib.parse_support_quality_entries` for a support). A field's span is
 # the reader's to define: a replacement that deleted a shorter span than the
 # reader folds would strand a continuation line for the next parse to absorb
 # into the new value, which is the emitter/checker split in its most
@@ -641,7 +640,7 @@ def _fold_break_for(node_id: str) -> "re.Pattern[str]":
 # is refused by name — see `replace_field_line`.
 _SINGLE_LINE_FIELDS = frozenset({"confidence", "quality", "strength"})
 _FOLDED_FIELDS = frozenset({"rationale"})
-_LIST_FIELDS = frozenset({"depends-on", "references", "strengthen-by", "supports"})
+_LIST_FIELDS = frozenset({"depends-on", "references", "demoted", "strengthen-by", "supports"})
 
 
 @dataclass(frozen=True)
@@ -824,95 +823,118 @@ def insert_entry(document: str, entry: str) -> str:
     return f"{kept}{rule}{eol}{eol.join(entry.splitlines())}{eol}"
 
 
+def _frontmatter_key_of(line: str) -> str | None:
+    """The top-level key ``line`` opens, or None where it continues the key above, is blank or a comment."""
+    if not line or line[0] in " \t-#":
+        return None
+    key, colon, _ = line.partition(":")
+    return key.strip() if colon else None
+
+
+def _frontmatter_key_end(lines: Sequence[str], start: int) -> int:
+    """One past the last line of the key opening at ``start``: its line and every indented or ``-`` line below."""
+    end = start + 1
+    while end < len(lines) and lines[end] and lines[end][0] in " \t-":
+        end += 1
+    return end
+
+
+def edit_frontmatter_lines(document: str, edit: Callable[[list[str]], list[str]]) -> str:
+    """``document`` with its YAML frontmatter's body lines replaced by ``edit`` over them.
+
+    Each emitted line takes the body's own line break (the opening fence's where
+    the body has none), and every byte outside the body is kept — the fences
+    included, so no composer of them is needed here. A document with no YAML
+    frontmatter is returned unchanged.
+    """
+    span = kb_yaml.find_frontmatter(document)
+    if span is None:
+        return document
+    body = document[span.body_start : span.body_end]
+    parts = body.splitlines(keepends=True)
+    eol = "\n"
+    if parts and _terminator(parts[0]):
+        eol = _terminator(parts[0])
+    elif document[: span.body_start].endswith("\r\n"):
+        eol = "\r\n"
+    lines = edit(body.splitlines())
+    joined = eol.join(lines)
+    if span.body_start == span.body_end and lines:
+        joined += eol
+    return document[: span.body_start] + joined + document[span.body_end :]
+
+
+def frontmatter_key_span(document: str, key: str) -> tuple[list[str], int, int] | None:
+    """The YAML frontmatter's body lines and the span ``[start, end)`` of ``key``'s lines among them.
+
+    None where the document has no YAML frontmatter or the key is not a
+    top-level key of it.
+    """
+    span = kb_yaml.find_frontmatter(document)
+    if span is None:
+        return None
+    lines = document[span.body_start : span.body_end].splitlines()
+    for at, line in enumerate(lines):
+        if _frontmatter_key_of(line) == key:
+            return lines, at, _frontmatter_key_end(lines, at)
+    return None
+
+
+def set_frontmatter_key(document: str, *, key: str, lines: Sequence[str], after: str | None) -> str:
+    """Replace ``key``'s span in the YAML frontmatter with ``lines``, or insert them.
+
+    Absent, the key goes after the span of the key ``after`` names, else at the
+    end — before a ``kb-format`` stamp that ends the block, which stays last.
+    A document with no YAML frontmatter is returned unchanged.
+    """
+    return _set_frontmatter_key(document, key=key, new=lines, after=after, at_top=False)
+
+
+def _set_frontmatter_key(document: str, *, key: str, new: Sequence[str], after: str | None, at_top: bool) -> str:
+    def edit(body: list[str]) -> list[str]:
+        for at, line in enumerate(body):
+            if _frontmatter_key_of(line) == key:
+                return [*body[:at], *new, *body[_frontmatter_key_end(body, at) :]]
+        for at, line in enumerate(body):
+            if after is not None and _frontmatter_key_of(line) == after:
+                end = _frontmatter_key_end(body, at)
+                return [*body[:end], *new, *body[end:]]
+        if at_top:
+            return [*new, *body]
+        insert_at = len(body)
+        for at, line in enumerate(body):
+            if _frontmatter_key_of(line) == kb_schema.FORMAT_KEY and _frontmatter_key_end(body, at) == len(body):
+                insert_at = at
+        return [*body[:insert_at], *new, *body[insert_at:]]
+
+    return edit_frontmatter_lines(document, edit)
+
+
 def replace_or_insert_frontmatter_field(
     document: str,
     *,
     field: str,
     ids: Sequence[str],
-    anchor_prefix: str,
+    anchor_key: str,
 ) -> str:
-    """Replace ``field: [...]`` in the frontmatter block, or insert it.
+    """Replace the id list ``field`` in the document's frontmatter, or insert it.
 
-    The frontmatter splice has one implementation, and this is it. The block's own
-    delimiter lines are **not re-emitted at all** — the edit is made over the
-    span the block pattern captures, so the opener and closer keep whatever
-    spelling and terminators the document had, and no composer of them is needed
-    here. Re-emitting them canonicalizes an opener written
-    ``<!--kb-frontmatter`` and puts LF inside a CRLF document's block.
+    The frontmatter field splice has one implementation, and this is it. The
+    block's delimiter lines are **not re-emitted** — the edit is made over the
+    block's body, so the fences keep whatever terminators the document had.
 
-    When the field is absent it is inserted immediately after the line whose
-    stripped form starts with ``anchor_prefix`` (``subtree-claims:`` for
-    ``subtree-experiments``, ``kind:`` for ``subtree-claims``), preserving the
-    documented field order. It falls back to the top of the block when no anchor
-    line is present — the shape a block gains its first derived field in.
+    The field's span is its key line and every indented or ``-`` line below
+    it, replaced whole; absent, it is inserted after the span of ``anchor_key``
+    (``subtree-claims`` for ``subtree-experiments``, ``kind`` for
+    ``subtree-claims``), else at the top of the block — so a ``kb-format``
+    stamp ending the block stays last.
 
-    An existing value spanning several physical lines — the wrapped ``[a,``/``
-    b]`` and YAML-block ``- a``/``- b`` shapes the reader accepts — is replaced
-    WHOLE, over the span :func:`kb_index_lib.frontmatter_field_end` defines.
-    Rewriting only the first line would strand the continuations as orphaned
-    text that the next parse folds into whatever field followed: accepting a
-    shape on read and mangling it on write is the emitter/checker split in its
-    most destructive form.
-
-    A document with no frontmatter block is returned unchanged — the regex finds
-    nothing to substitute. That is the caller's condition to check, not a
-    refusal: this primitive is driven over a node set that was enumerated *by*
-    its parsed frontmatter.
+    A document with no frontmatter is returned unchanged. That is the caller's
+    condition to check, not a refusal: this primitive is driven over a node set
+    that was enumerated *by* its parsed frontmatter.
     """
-    match = FRONTMATTER_BLOCK.search(document)
-    if match is None:
-        return document
-
-    new_line = render.render_id_list_field(field, tuple(ids))
-    # Two views of the captured block: the text of each line, for the decisions,
-    # and the line with its own terminator, for everything kept.
-    lines = match.group(1).splitlines()
-    parts = match.group(1).splitlines(keepends=True)
-    eol = _prevailing_terminator(parts, 0)
-
-    out: list[str] = []
-    replaced = False
-    i = 0
-    while i < len(lines):
-        if lines[i].strip().startswith(f"{field}:"):
-            indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
-            out.append(f"{indent}{new_line}{eol}")
-            replaced = True
-            # Drop the field's continuation lines, if any — the span comes from
-            # the library rule the reader uses, so writer and reader cannot
-            # disagree about where this field ends.
-            i = kb_index_lib.frontmatter_field_end(lines, i)
-            continue
-        out.append(parts[i])
-        i += 1
-
-    if not replaced:
-        out = []
-        inserted = False
-        for text, part in zip(lines, parts):
-            out.append(part)
-            if not inserted and text.strip().startswith(anchor_prefix):
-                out.append(f"{new_line}{eol}")
-                inserted = True
-        if not inserted:
-            out.insert(0, f"{new_line}{eol}")
-
-    # The captured block's *last* line carries no terminator — the pattern
-    # anchors on the closer's line feed — so a line that was last and no longer
-    # is has to be given one, or it and its new neighbour become one line. (That
-    # is the whole of this fix: inserting `subtree-experiments:` after a
-    # `subtree-claims:` that ended the block produced a single glued line, which
-    # every reader then parsed as one field holding the other's value.)
-    for index in range(len(out) - 1):
-        if not _terminator(out[index]):
-            out[index] += eol
-    # ...and the line that ends it now must not carry one. Only the `\n` is
-    # dropped: in a CRLF document the pattern leaves the `\r` inside the
-    # capture, so stripping the terminator whole would convert that one line to
-    # LF — the rewrite this function was changed to stop.
-    if out and out[-1].endswith("\n"):
-        out[-1] = out[-1][:-1]
-    return document[: match.start(1)] + "".join(out) + document[match.end(1) :]
+    new_lines = render.render_frontmatter_field(field, kb_yaml.FlowList(ids))
+    return _set_frontmatter_key(document, key=field, new=new_lines, after=anchor_key, at_top=True)
 
 
 def replace_field_line(document: str, *, node_id: str, field_name: str, line: str) -> str:
@@ -1196,6 +1218,10 @@ def _normalize_target(token: str) -> str:
     return f"axiom-{match.group(1)}" if match else token.strip()
 
 
+#: One edge as the readback compares it: target, context, applicability, origin.
+_EdgeRead = tuple[str, str | None, float | None, str | None]
+
+
 @dataclass(frozen=True)
 class _Read:
     """One parsed record, reduced to the fields the readback compares.
@@ -1209,14 +1235,15 @@ class _Read:
     title: str
     rigor: float | None
     rationale: str
-    depends_on: tuple[tuple[str, str | None, float | None], ...]
-    references: tuple[tuple[str, str | None, float | None], ...]
+    depends_on: tuple[_EdgeRead, ...]
+    references: tuple[_EdgeRead, ...]
+    demoted: tuple[_EdgeRead, ...]
     strengthen_by: tuple[str, ...]
     supports: tuple[tuple[str, float | None], ...]
 
 
-def _edges(edges) -> tuple[tuple[str, str | None, float | None], ...]:
-    return tuple((edge.target, edge.context, edge_of(edge).applicability) for edge in edges)
+def _edges(edges) -> tuple[_EdgeRead, ...]:
+    return tuple((edge.target, edge.context, edge_of(edge).applicability, edge.origin) for edge in edges)
 
 
 def _staged(pairs) -> tuple[tuple[str, float | None], ...]:
@@ -1246,17 +1273,19 @@ def _work_read(work: kb_index_lib.ExternalWork) -> _Read:
         **{read: getattr(work, field) for field, read in COMPARED_WORK_FIELD_READS.items()},
         depends_on=(),
         references=(),
+        demoted=(),
         strengthen_by=(),
         supports=(),
     )
 
 
-def _expected_edges(edges: tuple[ExpectedEdge, ...]) -> tuple[tuple[str, str | None, float | None], ...]:
+def _expected_edges(edges: tuple[ExpectedEdge, ...]) -> tuple[_EdgeRead, ...]:
     return tuple(
         (
             _normalize_target(edge.target),
             render.collapse_prose(edge.context) if edge.context else None,
             edge.applicability,
+            edge.origin,
         )
         for edge in edges
     )
@@ -1269,6 +1298,7 @@ def _expected_read(expected: ExpectedEntry) -> _Read:
         rationale=render.collapse_prose(expected.rationale),
         depends_on=_expected_edges(expected.depends_on),
         references=_expected_edges(expected.references),
+        demoted=_expected_edges(expected.demoted),
         strengthen_by=tuple(render.collapse_prose(item) for item in expected.strengthen_by),
         supports=tuple(expected.supports),
     )
@@ -1336,6 +1366,7 @@ def _prove(temp: Path, kb_root: Path, edit: Edit, before: Census, *, subject: st
                     # is one claim of this corpus naming another. An expectation
                     # carrying one on a support is a mismatch, not a drop.
                     references=(),
+                    demoted=(),
                     strengthen_by=(),
                     supports=_staged(staged.get(expected.node_id, ())),
                 )
@@ -1351,6 +1382,7 @@ def _prove(temp: Path, kb_root: Path, edit: Edit, before: Census, *, subject: st
                     rationale=record.rationale,
                     depends_on=_edges(record.depends_on),
                     references=_edges(record.references),
+                    demoted=_edges(record.demoted),
                     strengthen_by=tuple(item.text for item in record.strengthen_by),
                     # A claim entry has no staging home; an expectation carrying
                     # pairs on one is a mismatch rather than an ignored value.

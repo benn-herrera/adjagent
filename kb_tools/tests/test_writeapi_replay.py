@@ -63,6 +63,7 @@ from pathlib import Path
 
 from kb_tools import kb_index_lib
 from kb_tools.kb_write import ops, render, store
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "writeapi-regression"
 
@@ -334,7 +335,7 @@ class TestByteLevelReplay(unittest.TestCase):
         cls.addClassCleanup(tmp.cleanup)
         # Resolved: a system temp directory is a symlink on macOS, and an
         # unresolved root makes `resolve_target`'s containment test vacuous.
-        cls.kb_root = Path(tmp.name).resolve() / "kb-root"
+        cls.kb_root = write_stamped_kb(Path(tmp.name).resolve() / "kb-root")
         cls.recorded = _load_recorded()
         cls.registers = _registers(cls.recorded)
         _seed_registers(cls.kb_root, cls.registers)
@@ -518,7 +519,7 @@ class TestEndToEndReplay(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(tmp.cleanup)
         work = Path(tmp.name).resolve()
-        cls.kb_root = work / "kb-root"
+        cls.kb_root = write_stamped_kb(work / "kb-root")
         cls.recorded = _load_recorded()
         cls.registers = _registers(cls.recorded)
         _seed_registers(cls.kb_root, cls.registers)

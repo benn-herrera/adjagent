@@ -1,0 +1,4 @@
+{"claim_id": "clm-alp011", "leaf_path": "alpha/a1-monotonicity.md", "leaf_kind": "leaf", "tier2_marked": false}
+{"claim_id": "clm-bet021", "leaf_path": "beta/b2-closure.md", "leaf_kind": "leaf", "tier2_marked": false}
+{"claim_id": "clm-drf024", "leaf_path": "core/sub2.4/s2-4-bounded-drift.md", "leaf_kind": "leaf", "tier2_marked": true}
+{"claim_id": "clm-drf025", "leaf_path": "core/sub2.4/s2-4-bounded-drift.md", "leaf_kind": "leaf", "tier2_marked": true}

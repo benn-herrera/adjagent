@@ -1,10 +1,10 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 no-claim: "references the bench experiment only"
 experiments: [exp-bench1]
--->
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## Bench Protocols
 

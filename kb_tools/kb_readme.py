@@ -179,14 +179,18 @@ def _links(text: str) -> list[tuple[str, str]]:
 
 
 def _without_uplink(text: str) -> str:
-    """``text`` less its first line, where that line is the link up to the parent."""
-    first, _, rest = text.lstrip("\n").partition("\n")
-    return rest if first.lstrip().startswith(f"[{kb_index_lib.UPLINK_MARKER}") else text
+    """``text`` less the up-link's line (``kb_index_lib.uplink_index``), where that line links up to the parent."""
+    at = kb_index_lib.uplink_index(text)
+    lines = text.split("\n")
+    if at is None or not lines[at].lstrip().startswith(f"[{kb_index_lib.UPLINK_MARKER}"):
+        return text
+    del lines[at]
+    return "\n".join(lines)
 
 
 def _body(text: str) -> str:
     """A document as an excerpt carries it: no metadata block, no up-link, every link reduced to its text."""
-    body = _without_uplink(kb_index_lib.strip_frontmatter(text))
+    body = kb_index_lib.strip_frontmatter(_without_uplink(text))
     return kb_links.LINK_RE.sub(_link_text, body).strip("\n")
 
 
@@ -207,7 +211,7 @@ def _excerpted_documents(kb_root: Path) -> list[_Document]:
         documents.append(_Document(title=volume_title, body=_body(index_text)))
         own_prose = [
             dest
-            for text, dest in _links(_without_uplink(kb_index_lib.strip_frontmatter(index_text)))
+            for text, dest in _links(kb_index_lib.strip_frontmatter(_without_uplink(index_text)))
             if text == OWN_PROSE_TITLE
         ]
         if own_prose:

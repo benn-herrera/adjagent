@@ -1,12 +1,13 @@
+---
+kind: leaf
+experiment-nodes:
+  - exp-id: exp-bench1
+    status: run
+    strengthens:
+      - clm-gg7777: 0.80
+---
 [↑ Mini-KB Common](index.md)
 
-<!-- kb-frontmatter
-kind: leaf
-exp-id: exp-bench1
-status: run
-strengthens:
-  - clm-gg7777: 0.80
--->
 
 ## Synthetic Bench Experiment
 

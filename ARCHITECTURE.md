@@ -25,13 +25,15 @@ gen_defs/               the generator package, run as `python3 -m gen_defs` — 
     chunks.py           chunk table, variants/defaults/`wrap=`, the chunk source
     discovery.py        surfaces, template discovery, a template's declared outputs, selection globs
     model_tuning.py     tiers, family files, overlay resolution, the tuning triple and its reports
+    harness.py          harness files: the `hrn.` values, the frontmatter tables, and `[harness.model]`
+    frontmatter.py      per-harness agent frontmatter: the entry grammar, the authored grammar, the five entry slots, assembly
     banners.py          both banners: writing, reading, the body hash
     rendering.py        one template to its rendered outputs
     generation.py       the `generate` verb, per-target write safety, backups
     product.py          what the install product holds: shipped-package table, exclusion vocabulary, destinations, copy set, root guard
     installation.py     the `install` verb
     pruning.py          install's stale-output sweep
-    agents_file.py      the harness agents file: harness files, the templates status probe, its render, the `install-agents-file` verb, and the `dev` subcommands behind the `render-agents-file` recipe
+    agents_file.py      the harness agents file: the templates status probe, its render, the `install-agents-file` verb, and the `dev` subcommands behind the `render-agents-file` recipe
     cli.py              argparse surface and dispatch
 devtools/               repository-maintenance tooling — project space, never installed; imported from the repository root as `devtools.*`
   dupe_sweep/           the duplication sweep, run as `python3 -m devtools.dupe_sweep` — enumerates one-idea-two-places candidates over templates/ and kb_tools/ (justfile `sweep-prose` / `sweep-python`, CONVENTIONS.md)
@@ -96,9 +98,9 @@ Mechanism, in three parts — two that write and one that sweeps:
   backup, or refusal has anything left to act on (SPEC.md, Write Safety). Re-installing an untouched
   tree is byte-stable.
 - **Render.** The definitions are not copied from anywhere; the ordinary generation pass (below)
-  runs against the installed tree, under whatever (family, tier-map, pin-map) triple the install was
-  given, and *is* how they arrive. Because every target the pass meets is either absent or provably
-  untouched output, it leaves no numbered backups behind.
+  runs against the installed tree, under whatever (family, tier-map, alias-map) triple the install
+  was given, and *is* how they arrive. Because every target the pass meets is either absent or
+  provably untouched output, it leaves no numbered backups behind.
 - **Prune** (`prune_stale`). Both halves finish writing, and then the surfaces under ROOT are walked
   for files neither of them wrote. Running last is what makes the write set a fact on disk rather
   than a prediction, and what keeps a render that raised from ever reaching the prune: a failed
@@ -147,28 +149,29 @@ maps them); this section does not restate it and is a map into them.
     family source's own rule. A marker naming an unregistered namespace is a hard error at parse,
     before any file is written
   - `@!dyn.tier-highest!@`, `@!dyn.tier-high!@`, `@!dyn.tier-medium!@`, `@!dyn.tier-low!@`,
-    `@!dyn.tier-lowest!@` — the invocation's own parameters, bound at load time from the resolved
-    **pin** map alone: `tier-<t>` carries `pin_map[t]`, the model pin, and never a family-member
-    name, which must never reach a `model:` frontmatter line; the tier map is not a source for these
-    tokens, it selects the member whose overlay overrides apply. The dynamic table is routed to
+    `@!dyn.tier-lowest!@` — the invocation's own parameters, bound at load time to each tier's
+    rendered model (`Tuning.models`): the tier map's member, or the alias map's alias where one
+    is set, with `inherit` bound to the harness's `inherit-text`. The dynamic table is routed to
     every span, so they reach template bodies, chunk bodies, and overlay text alike (see Model
     tuning and render-to-order, below)
   - `@!hrn.<key>!@` — a value from the loaded harness file (`templates/harness/<name>.toml`,
     `[harness.<key>] text`), bound in the agents-file render for its harness and in a surface render
     for the harness `generate`/`install --harness NAME` loads (default `claude`; an unknown name
     fails listing the harnesses there are). Strict like `dyn.`, never an overlay: a key the file
-    does not define is an error. Template and chunk bodies spell the project harness directory,
-    scratch directory and the user-global agents file through it (`hrn.project-harness-dir`,
-    `hrn.project-temp-dir`, `hrn.user-harness-dir`/`hrn.agents-file`), never as Claude Code's
-    literals; a project's agents file is the literal `AGENTS.md` under every harness (SPEC.md,
-    Harness Agents File). The agents-file render also binds `dyn.agents-file-install-dir-arg`,
-    `dyn.agents-file-scope-name`, and the two user-content parameters
-    `dyn.existing-user-content-before-rendered-minus-h1` and
-    `dyn.existing-user-content-after-rendered` beside the five tier tokens, which it pins from the
-    default pin map; operator-supplied values — the two user-content parameters, DIR, the scope
-    name, and every tier token's pin — are verbatim values, spliced in as themselves and never
-    rescanned or residual-checked, while `hrn.` values and the remaining `dyn.` values are authored
-    text and expand. A surface template spelling any of them is an unknown invocation parameter
+    does not define is an error. `[harness.agent-frontmatter]` and `[harness.tools]` are structural
+    tables rather than values, so `@!hrn.agent-frontmatter!@` and `@!hrn.tools!@` are unknown keys
+    like any other (Harness frontmatter, below). Template and chunk bodies spell the project harness
+    directory, scratch directory and the user-global agents file through it
+    (`hrn.project-harness-dir`, `hrn.project-temp-dir`, `hrn.user-harness-dir`/`hrn.agents-file`),
+    never as Claude Code's literals; a project's agents file is the literal `AGENTS.md` under every
+    harness (SPEC.md, Harness Agents File). The agents-file render also binds
+    `dyn.agents-file-install-dir-arg`, `dyn.agents-file-scope-name`, and the two user-content
+    parameters `dyn.existing-user-content-before-rendered-minus-h1` and
+    `dyn.existing-user-content-after-rendered` beside the five tier tokens, which it binds to the
+    default family's members under every harness; operator-supplied values — the two user-content
+    parameters, DIR, the scope name, and every tier token's pin — are verbatim values, spliced in
+    as themselves and never rescanned or residual-checked, while `hrn.` values and the remaining
+    `dyn.` values are authored text and expand. A surface template spelling any of them is an unknown invocation parameter
     (`gen_defs/agents_file.py`)
   - Bare where a value is bound, prefixed where it is consumed (CONVENTIONS.md): a chunk marker's
     `key="value"` argument, a `[chunks.<name>.defaults]` key, and an `[outputs.<name>]` fence key
@@ -188,18 +191,25 @@ maps them); this section does not restate it and is a map into them.
   outputs-table `model` parameter and a literal frontmatter line are the same thing. A pin site that
   resolves no tier — a literal pin, e.g. `model: opus`, standing where a tier token belongs — fails
   the render: `assert_tiered` refuses it, naming the output and its literal pin. Tuning is asked for
-  through three flags: `--family NAME` (default `claude`), and `--model-tier-map` /
-  `--model-pin-map`, each taking comma-separated `tier=value` pairs (or `all=value`) that mask only
-  the tiers they name. The banner's `!TUNING!` line is where SPEC's recorded provenance (Generation
-  System) lands, closing with the `harness=` the render's `hrn.` markers resolved from (a reader
-  accepts a banner written before that field, as claiming no harness), and it carries alongside it
-  the tiers rendering *stock* — a mapped member for which the family declares no overrides, a legal
-  state rather than a warning. The banner additionally records that definition's own `seat=` (the
-  tier its pin site declared) and `member=` (the family member its overlays resolved against) —
-  `none`/`none` for an output with no pin site — because the default pin map is not injective, so
-  the tier cannot be recovered by inverting the rendered pin. A run states its effective
-  family/tier-map/pin-map triple and harness, and reports two non-gating notices: tiers rendering
-  *stock*, and — within the claude family only — tiers where the tier and pin maps diverge.
+  through three flags: `--family NAME` (default `claude`), `--model-tier-map`, which replaces the
+  family's tier map, and the optional `--model-pin-tier-alias-map`. Both map flags take
+  comma-separated `tier=value` pairs that name every tier, or `all=value` followed by any named
+  exceptions; `parse_tier_map` refuses a map leaving a tier unnamed. `effective_tuning` builds the
+  `Tuning`, whose `models` property is each tier's rendered text — the alias where the alias map
+  is set, else the member — and checks every one against the harness's `[harness.model]` pattern
+  before anything is written, naming the flag or family file that supplied a refused value. The
+  banner's `!TUNING!` line is where SPEC's recorded provenance (Generation System) lands: `tier=`,
+  then `alias=` only where the alias map is set, then the tiers rendering *stock* — a mapped
+  member for which the family declares no overrides, a legal state rather than a warning — and
+  last the `harness=` the render's `hrn.` markers resolved from (a reader accepts a banner written
+  before that field, as claiming no harness). The banner additionally records that definition's
+  own `seat=` (the tier its pin site declared) and `member=` (the family member its overlays
+  resolved against) — `none`/`none` for an output with no pin site — because a tier map need not
+  be injective (the claude family staffs `low` and `lowest` with haiku), so the tier cannot be
+  recovered by inverting the rendered model. A run states its effective triple and harness
+  (`display_maps`, with `alias[...]` only where set), and reports two non-gating notices: tiers
+  whose member the family tunes, and — only where the alias map is set — the tiers whose alias
+  differs from their member.
   `--surfaces agents|commands|both` narrows which surfaces a run covers. A tuned set is not a
   special destination: every render names its root, so a default-triple render and a tuned one
   differ only in the triple — which is what makes two slots rendered under two triples comparable to
@@ -220,6 +230,33 @@ maps them); this section does not restate it and is a map into them.
   (`mad-participant-fable/opus/sonnet/haiku`). A declared output must be a table; the agents-file
   template's `[[outputs._resolve]]` list — entries whose `text` renders to an output path — is a
   fence metakey only the agents-file render reads, and a surface template carrying it is refused.
+- **Harness frontmatter** (`gen_defs/frontmatter.py`, whose docstring is the grammar): an agents
+  template's frontmatter is the one authored source, in Claude Code's field names, held to a closed
+  flat `key: value` grammar. Each harness file's `[harness.agent-frontmatter]` maps every output
+  field to an entry — slot text expanded as a chunk's is, `injected` to emit it whatever the
+  template authors, or `false` to elide it — and an authored field with no entry fails the render.
+  Five `dyn.` slots are bound only while an entry expands: `authored-value`, `output-stem`, `tools`,
+  `tools-as-permission` and `undispatchable-marker`. Authored fields emit first, in authored order,
+  then injected entries in table order, so Claude's output order follows from the template alone.
+  The render attaches inside `_expand_output`'s real pass (`gen_defs/rendering.py`); the
+  tier-discovery pass and `assert_tiered` read the authored spelling, so a harness that elides or
+  rewrites `model` can cost an output neither its tier nor the literal-pin refusal. Command
+  templates keep their frontmatter as written. An authored `name` must render its output's own name
+  on every harness, which is what lets opencode, whose filename is the name, elide it. `tools:` is
+  authored in our own vocabulary — the key set of `[harness.tools]`, the same in both shipped files
+  (`tests/test_harness_frontmatter.py`) — and a name a harness's table lacks fails the render.
+  Under opencode it becomes a `permission` block allowing or denying each key the table maps to; the
+  keys it does not govern (`external_directory`, `todowrite`, `lsp`, `skill`, `question`,
+  `doom_loop`) and MCP tools keep opencode's defaults for an allowlisted agent, where Claude's
+  allowlist denies them. That residual is accepted: every allowlisted agent is a
+  read-and-report seat, and MCP tool keys are operator-chosen server names this repository cannot
+  enumerate. A harness's `[harness.model]` (`gen_defs/harness.py`) declares `pattern`, the shape
+  every tier's rendered model must match — claude's a Claude alias or a `claude-` model id,
+  opencode's `provider/model` or `inherit` — with `shape`, the same rule in words with an example,
+  which is what a refusal prints (the pattern reaches no message); and `inherit-text`, what a tier
+  token renders for
+  `inherit`; opencode's is empty, so an inherited `model` is elided as any empty entry is. It says
+  nothing about which model a tier gets.
 - **Single-source discipline**: CONVENTIONS.md, Chunk single-sourcing.
 
 ## Banner and Backup Mechanism
@@ -289,9 +326,10 @@ separately:
 - **`tests/test_gen_defs.py`** — the render's own properties, asserted against values the render did
   not compute. `TestDeclaredPinsAgainstRenderedPins` is the pattern: the tier a template declares is
   read out of the template source by the test module's own regex, the pin is read out of the
-  rendered frontmatter, and the run's pin map is the only thing joining them, so a tier token bound
-  to the wrong map entry is an inequality naming the template. It runs at three tunings because a
-  pin map collapsed with `all=` is a constant function and would hide a misrouted tier. The banner's
+  rendered frontmatter, and the run's rendered models are the only thing joining them, so a tier
+  token bound to the wrong map entry is an inequality naming the template. It runs at four tunings
+  because a map collapsed with `all=` is a constant function and would hide a misrouted tier, and
+  because a member and an alias are two sources of rendered text. The banner's
   `!TUNING!` line is likewise held to account by rendering the same templates under two triples and
   comparing the two banners, never by re-reading one.
 

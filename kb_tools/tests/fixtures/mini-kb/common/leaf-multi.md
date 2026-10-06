@@ -1,9 +1,9 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 claims: [clm-aa1111, clm-bb2222, clm-cc3333, clm-dd4444]
--->
+---
+[↑ Mini-KB Common](index.md)
+
 
 # Multi-Claim Synthetic Leaf
 

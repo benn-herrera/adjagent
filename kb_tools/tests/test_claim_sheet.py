@@ -6,6 +6,7 @@ pointed away by ``conftest.py`` — is the absent-``dot`` case.
 """
 
 import dataclasses
+import html
 import re
 import shutil
 from pathlib import Path
@@ -13,18 +14,13 @@ from xml.etree import ElementTree
 
 import pytest
 
-from kb_tools import claim_sheet, dot, kb_pipeline, kb_schema, refresh_kb_metadata
-from kb_tools.kb_cmd import index as kb_index
+from kb_tools import claim_sheet, dot, kb_index_lib, kb_load, kb_pipeline, kb_schema, refresh_kb_metadata
 from kb_tools.tests._in_process import run_main
+from kb_tools.tests._stamped_kb import write_index, write_stamped_kb
 
-#: The repository the fixture stands for: ``kb-root/`` and the two build records beside it.
+#: The repository the fixture stands for: ``kb-root/`` and the unmarked build record beside it.
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "claim-graph-sheet"
 KB = FIXTURE / "kb-root"
-
-#: A drawn node's statement; the unattached tables, the legend and the sheet link are ``plaintext``.
-_NODE_STATEMENT = re.compile(r'^\s+"((?:[^"\\]|\\.)+)" \[shape=(?!plaintext)', re.MULTILINE)
-_EDGE_STATEMENT = re.compile(r'^\s+"((?:[^"\\]|\\.)+)" -> "((?:[^"\\]|\\.)+)" \[(.*)\]$', re.MULTILINE)
-
 
 @pytest.fixture(scope="module")
 def sheet() -> claim_sheet.SheetInput:
@@ -42,10 +38,6 @@ def _copy_repo(tmp_path: Path) -> Path:
     return tmp_path / "repo" / "kb-root"
 
 
-def _drawn_edges(composed: str) -> dict[tuple[str, str], str]:
-    return {(tail, head): attributes for tail, head, attributes in _EDGE_STATEMENT.findall(composed)}
-
-
 @pytest.mark.parametrize(
     ("compose", "golden"),
     [
@@ -56,16 +48,18 @@ def _drawn_edges(composed: str) -> dict[tuple[str, str], str]:
     ids=["sheet", "digest", "alpha-volume"],
 )
 def test_composition_matches_its_golden(sheet: claim_sheet.SheetInput, compose, golden: str) -> None:
-    composed = compose(sheet)
+    assert compose(sheet) == (FIXTURE / golden).read_text(encoding="utf-8")
 
-    assert composed == (FIXTURE / golden).read_text(encoding="utf-8")
-    assert compose(claim_sheet.load(KB)) == composed
+
+def test_the_fixture_index_streams_hold_only_records() -> None:
+    for name in kb_index_lib.INDEX_FILES:
+        assert kb_load.read_index(KB, name)[1] == [], name
 
 
 def test_record_order_does_not_reach_the_text(tmp_path: Path, sheet: claim_sheet.SheetInput) -> None:
     kb = _copy_repo(tmp_path)
-    for name in ("claims.jsonl", "depends-on.jsonl", "cites.jsonl"):
-        path = kb / ".index" / name
+    for name in ("claims", "depends-on", "cites"):
+        path = kb_load.index_path(kb, name)
         lines = path.read_text(encoding="utf-8").splitlines()
         path.write_text("\n".join(reversed(lines)) + "\n", encoding="utf-8")
 
@@ -81,11 +75,9 @@ def test_record_order_does_not_reach_the_text(tmp_path: Path, sheet: claim_sheet
     [
         ("a\\b", '"a\\\\b"', "a\\b"),
         ('say "x"', '"say \\"x\\""', "say &quot;x&quot;"),
-        ("a < b", '"a < b"', "a &lt; b"),
-        ("a & b", '"a & b"', "a &amp; b"),
         ("\\nabla", '"\\\\nabla"', "\\nabla"),
     ],
-    ids=["backslash", "quote", "less-than", "ampersand", "backslash-n"],
+    ids=["backslash", "quote", "backslash-n"],
 )
 def test_each_escaper_escapes_only_its_own_syntax(text: str, plain: str, markup: str) -> None:
     assert claim_sheet._q(text) == plain
@@ -96,47 +88,30 @@ def test_a_multi_line_plain_string_breaks_after_escaping() -> None:
     assert claim_sheet._q("a\\", "b") == '"a\\\\\\nb"'
 
 
-def test_maths_and_markup_titles_reach_the_text_escaped_once(sheet_dot: str) -> None:
-    nabla = next(line for line in sheet_dot.splitlines() if line.lstrip().startswith('"clm-aaa003" ['))
-    beta = next(line for line in sheet_dot.splitlines() if "Beta" in line)
+def _as_graphviz_reads_an_html_tooltip(value: str) -> str:
+    """An HTML-like label's ``tooltip`` value as Graphviz shows it: entities decoded, then its escString
+    pass, where a doubled backslash is one and any other escape expands — marked here so it cannot pass."""
+    return re.sub(
+        r"\\(.)",
+        lambda match: "\\" if match.group(1) == "\\" else f"<expanded \\{match.group(1)}>",
+        html.unescape(value),
+    )
 
-    assert "\\\\nabla" in nabla
-    assert "&amp;" in beta and "&quot;" in beta and "&lt;" in beta
-    assert "&amp;amp;" not in sheet_dot
 
-
-def test_every_connected_node_is_drawn_once_and_every_unattached_one_is_listed(
-    sheet: claim_sheet.SheetInput, sheet_dot: str
+def test_a_tooltip_reaches_graphviz_as_the_whole_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sheet_dot: str
 ) -> None:
-    ends = {end for edge in sheet.edges for end in (edge.source, edge.target)}
-    statements = _NODE_STATEMENT.findall(sheet_dot)
-    unattached = sorted(node.id for node in sheet.nodes if node.id not in ends)
+    """``clm-aaa005``'s title holds ``\\Gamma``, whose ``\\G`` Graphviz would otherwise read as the graph name."""
+    title = next(record["title"] for record in kb_load.read_index(KB, "claims")[0] if record["id"] == "clm-aaa005")
+    drawn: list[str] = []
+    monkeypatch.setattr(dot, "to_svg", lambda text: drawn.append(text) or _DRAWN)
+    claim_sheet.render(_copy_repo(tmp_path))
 
-    assert sorted(statements) == sorted(ends)
-    assert unattached == ["clm-aaa005", "clm-aaa006"]
-    for node_id in unattached:
-        assert f">{node_id} — " in sheet_dot
-        assert node_id not in statements
-
-
-def test_edges_place_the_premise_at_the_head(sheet: claim_sheet.SheetInput, sheet_dot: str) -> None:
-    drawn = _drawn_edges(sheet_dot)
-    expected = claim_sheet._reduced(sheet.edges)
-
-    assert len(drawn) == len(expected)
-    for edge in expected:
-        if edge.relation in ("supports", "strengthens"):
-            attributes = drawn[(edge.target, edge.source)]
-            assert "dir=back" in attributes
-        else:
-            attributes = drawn[(edge.source, edge.target)]
-            assert "dir=back" not in attributes
-        assert ("constraint=false" in attributes) is (edge.provenance == claim_sheet.CUT)
-
-
-def test_duplicate_records_are_one_stroke_and_a_missing_end_is_a_ghost(sheet: claim_sheet.SheetInput) -> None:
-    assert sum(1 for edge in sheet.edges if (edge.source, edge.target) == ("clm-aaa001", "clm-aaa002")) == 1
-    assert [node.id for node in sheet.nodes if node.kind == claim_sheet.GHOST_KIND] == ["clm-zzz999"]
+    assert "\\Gamma" in title
+    for composed in (sheet_dot, drawn[0]):
+        tooltip = re.search(r'tooltip="(clm-aaa005 [^"]*)"', composed)
+        assert tooltip is not None
+        assert _as_graphviz_reads_an_html_tooltip(tooltip.group(1)).endswith(f"] {title}")
 
 
 # ---------------------------------------------------------------------------
@@ -155,15 +130,6 @@ def _reach(edges: list[claim_sheet.SheetEdge]) -> set[tuple[str, str]]:
         if grown == closure:
             return closure
         closure = grown
-
-
-def test_a_premise_another_route_reaches_is_not_drawn(sheet: claim_sheet.SheetInput) -> None:
-    """The fixture triangle: aaa003 rests on aaa002 directly and through aaa001."""
-    assert ("clm-aaa003", "clm-aaa002") in {(edge.source, edge.target) for edge in sheet.edges}
-    for composed in (claim_sheet.compose_sheet(sheet), claim_sheet.compose_volume_sheet(sheet, "alpha")):
-        drawn = _drawn_edges(composed)
-        assert ("clm-aaa003", "clm-aaa002") not in drawn
-        assert ("clm-aaa003", "clm-aaa001") in drawn and ("clm-aaa001", "clm-aaa002") in drawn
 
 
 @pytest.mark.parametrize(
@@ -190,83 +156,65 @@ def test_reduction_reads_and_drops_depends_alone(other: claim_sheet.SheetEdge) -
 
 
 # ---------------------------------------------------------------------------
-# Provenance, from the build records
+# Provenance: the unmarked record for depends, the row's origin for a cut
 # ---------------------------------------------------------------------------
 
 
-def test_each_edge_carries_its_provenance(sheet: claim_sheet.SheetInput) -> None:
-    by_pair = {(edge.source, edge.target): edge for edge in sheet.edges}
-
-    assert by_pair[("clm-aaa003", "clm-aaa001")].provenance == claim_sheet.INFERRED
-    assert by_pair[("clm-bbb001", "clm-aaa001")].provenance == claim_sheet.CITED  # answered "does not point"
-    assert by_pair[("clm-aaa004", "clm-bbb003")].provenance == claim_sheet.CUT
-    assert ("clm-bbb003", "clm-aaa004") not in by_pair  # a references row classify did not choose depends for
-
-
-def test_the_sheets_name_provenance_in_reader_words_only(sheet: claim_sheet.SheetInput, sheet_dot: str) -> None:
-    composed = [sheet_dot, claim_sheet.compose_digest(sheet), claim_sheet.compose_volume_sheet(sheet, "alpha")]
-
-    assert "(depends, inferred)" in sheet_dot and "(depends, cited)" in sheet_dot and "(references, cut)" in sheet_dot
-    assert "1 cited · 1 inferred" in composed[1] or "2 cited · 1 inferred" in composed[1]
-    for text in composed:
-        assert not re.search(r"\b(ask|asked|unmarked|demoted)\b", text)
-
-
-def test_without_build_records_every_depends_is_cited_and_no_references_drawn(tmp_path: Path) -> None:
+def test_a_demoted_row_without_a_valid_origin_draws_as_cited(tmp_path: Path) -> None:
     kb = _copy_repo(tmp_path)
-    for name in (kb_pipeline.UNMARKED_RELPATH, kb_pipeline.CLASSIFICATION_RELPATH):
-        (kb.parent / name).unlink()
+    path = kb_load.index_path(kb, "depends-on")
+    path.write_text(
+        path.read_text(encoding="utf-8").replace('"origin": "inferred"', '"origin": null'), encoding="utf-8"
+    )
+
+    by_pair = {(edge.source, edge.target): edge for edge in claim_sheet.load(kb).edges}
+
+    assert by_pair[("clm-aaa001", "clm-aaa004")].provenance == claim_sheet.CITED
+
+
+def test_without_the_unmarked_record_every_depends_is_cited(tmp_path: Path) -> None:
+    kb = _copy_repo(tmp_path)
+    (kb.parent / kb_pipeline.UNMARKED_RELPATH).unlink()
 
     loaded = claim_sheet.load(kb)
 
     assert {edge.provenance for edge in loaded.edges if edge.relation == "depends"} == {claim_sheet.CITED}
-    assert not [edge for edge in loaded.edges if edge.relation == "references"]
 
 
-def test_an_unreadable_build_record_fails_the_render(tmp_path: Path) -> None:
+def test_an_unreadable_unmarked_record_fails_the_render(tmp_path: Path) -> None:
     kb = _copy_repo(tmp_path)
-    (kb.parent / kb_pipeline.CLASSIFICATION_RELPATH).write_text("{ not json", encoding="utf-8")
+    (kb.parent / kb_pipeline.UNMARKED_RELPATH).write_text("{ not yaml", encoding="utf-8")
 
     outcome = claim_sheet.render(kb)
 
     assert outcome.failed
     assert len(outcome.lines) == 1 and outcome.lines[0].startswith("FAIL: [refresh-sheet] ")
-    assert kb_pipeline.CLASSIFICATION_RELPATH in outcome.lines[0]
+    assert kb_pipeline.UNMARKED_RELPATH in outcome.lines[0]
 
 
-def test_the_copied_letters_are_the_claim_graphs_own() -> None:
-    from kb_tools.kb_claimgraph import ask, attribute, classify
+def test_a_record_beside_a_kb_not_named_kb_root_fails_refresh_with_a_line_not_a_traceback(tmp_path: Path) -> None:
+    """Records are read against ``<repository>/kb-root``; a copy named otherwise has none to read them for."""
+    kb = _copy_repo(tmp_path)
+    renamed = kb.rename(kb.parent / "copied-kb")
 
-    assert claim_sheet.UNMARKED_POINTS_LETTER == ask.UnmarkedLetter.POINTS
-    assert claim_sheet.CLASSIFY_DEPENDS_LETTER == ask.ClassifyLetter.SUPPORTED_BY
-    assert classify.LETTER_RELATION[ask.ClassifyLetter.SUPPORTED_BY] is attribute.Relation.SUPPORTED_BY
+    result = run_main(refresh_kb_metadata.main, ["--kb-root", str(renamed)])
 
-
-# ---------------------------------------------------------------------------
-# Node kind, from the claim's marker in its leaf
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("node_id", "kind"),
-    [
-        ("clm-aaa001", "block"),  # marker in a labelled blockquote
-        ("clm-bbb002", "block"),  # on a block's content line, its label in a <span id>; its title reads as prose
-        ("clm-aaa003", "equation"),  # marker inside a math fence; its title reads as prose
-        ("clm-aaa004", "prose"),  # marker in a paragraph
-        ("clm-aaa002", "equation"),  # no marker: the equation title
-        ("clm-bbb001", "block"),  # no leaf: the printed-name title
-        ("clm-bbb003", "prose"),  # its leaf cannot be read
-        ("sup-aaa007", "support"),
-        ("work-smith2020", "work"),
-    ],
-)
-def test_claims_are_read_as_their_sub_kind(sheet: claim_sheet.SheetInput, node_id: str, kind: str) -> None:
-    assert next(node.kind for node in sheet.nodes if node.id == node_id) == kind
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert [line for line in result.stderr.splitlines() if line.startswith("FAIL: ")] == [
+        f"FAIL: [refresh-sheet] the build records beside {renamed} are not read for it: "
+        f"kb-root: {renamed.parent / 'kb-root' / 'entry-point.md'}: {renamed.parent / 'kb-root'} has no entry-point.md"
+    ]
 
 
-def test_claims_read_from_the_title_are_counted(sheet: claim_sheet.SheetInput) -> None:
-    assert sheet.claims_without_marker == 4  # the markerless equation is read by rule, not counted
+def test_the_classification_record_is_not_read(tmp_path: Path, sheet: claim_sheet.SheetInput) -> None:
+    kb = _copy_repo(tmp_path)
+    (kb.parent / kb_pipeline.CLASSIFICATION_RELPATH).write_text("{ not yaml", encoding="utf-8")
+
+    loaded = claim_sheet.load(kb)
+
+    assert not claim_sheet.render(kb).failed
+    assert claim_sheet.compose_sheet(loaded) == claim_sheet.compose_sheet(sheet)
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +228,9 @@ def test_the_legend_names_only_what_the_sheet_draws(sheet: claim_sheet.SheetInpu
         nodes=tuple(node for node in sheet.nodes if node.kind != "work"),
         edges=tuple(edge for edge in sheet.edges if edge.relation != "rests-on"),
     )
-    legend = next(line for line in claim_sheet.compose_sheet(variant).splitlines() if line.lstrip().startswith("legend"))
+    legend = next(
+        line for line in claim_sheet.compose_sheet(variant).splitlines() if line.lstrip().startswith("legend")
+    )
     full = next(line for line in sheet_dot.splitlines() if line.lstrip().startswith("legend"))
 
     assert ">work</td>" in full and ">rests-on — " in full
@@ -289,40 +239,16 @@ def test_the_legend_names_only_what_the_sheet_draws(sheet: claim_sheet.SheetInpu
     assert "refuted, do not use" not in full
 
 
-def test_a_volume_sheet_links_relative_to_its_own_directory(sheet: claim_sheet.SheetInput) -> None:
-    alpha = claim_sheet.compose_volume_sheet(sheet, "alpha")
-
-    assert 'href="claim-quality.md#theorem-1"' in alpha
-    assert 'href="claim-quality.md#an-isolated-observation-nothing-cites"' in alpha
-    assert 'href="../beta/claim-quality.md#test-example-2"' in alpha
-    assert 'href="../invariants.md#invariant-s1"' in alpha
-    assert "clm-bbb002" not in alpha  # a beta node no alpha edge touches
-
-
-def test_the_root_sheets_link_to_each_other_and_the_digest_to_each_volume(sheet: claim_sheet.SheetInput) -> None:
-    digest = claim_sheet.compose_digest(sheet)
-
-    assert 'href="claim-graph-digest.svg"' in claim_sheet.compose_sheet(sheet)
-    assert 'href="claim-graph.svg"' in digest
-    assert 'href="alpha/index.md"' in digest and 'href="alpha/claim-graph.svg"' in digest
-
-
 def test_an_empty_index_composes_no_clusters_and_no_legend(tmp_path: Path) -> None:
-    kb = tmp_path / "kb-root"
-    (kb / ".index").mkdir(parents=True)
-    for name in kb_index._REQUIRED_FILES:
-        (kb / ".index" / name).write_text("", encoding="utf-8")
+    kb = write_stamped_kb(tmp_path / "kb-root", {"entry-point.md": ""})
+    for name in kb_index_lib.INDEX_FILES:
+        write_index(kb, name, [])
 
     empty = claim_sheet.load(kb)
 
     for composed in (claim_sheet.compose_sheet(empty), claim_sheet.compose_digest(empty)):
         assert "subgraph" not in composed and "legend" not in composed and "->" not in composed
     assert empty.kb_title == "kb-root"
-
-
-def test_style_tables_are_total_over_their_vocabularies() -> None:
-    assert set(claim_sheet._EDGE_STYLES) == set(kb_schema.EDGE_RELATIONS)
-    assert set(claim_sheet._BAND_FILLS) == {slug for slug, _ in kb_index.BUILD_BANDS}
 
 
 def test_a_relation_without_a_style_is_refused() -> None:
@@ -369,9 +295,9 @@ def test_render_writes_every_sheet_fitted_and_then_leaves_them_alone(
     assert drawn[:2] == [claim_sheet.compose_sheet(loaded), claim_sheet.compose_digest(loaded)]
     assert not first.failed and not second.failed
     assert first.lines == (
-        "[refresh-sheet] Wrote claim-graph.svg: 14 nodes, 10 edges drawn of 11, 2 unattached, 1 ghost id.",
+        "[refresh-sheet] Wrote claim-graph.svg: 14 nodes, 11 edges drawn of 12, 2 unattached, 1 ghost id.",
         "[refresh-sheet] Wrote claim-graph-digest.svg: 3 volumes, 4 bundles.",
-        "[refresh-sheet] Wrote alpha/claim-graph.svg: 8 nodes, 3 neighbours, 7 edges drawn.",
+        "[refresh-sheet] Wrote alpha/claim-graph.svg: 8 nodes, 2 neighbours, 8 edges drawn.",
         "[refresh-sheet] Wrote beta/claim-graph.svg: 3 nodes, 5 neighbours, 5 edges drawn.",
         _MARKER_NOTE,
     )
@@ -380,50 +306,51 @@ def test_render_writes_every_sheet_fitted_and_then_leaves_them_alone(
     assert stamps == {name: (kb / name).stat().st_mtime_ns for name in _SHEETS}
 
 
+def _drop_beta_nodes(kb: Path) -> None:
+    claims = kb_load.index_path(kb, "claims")
+    kept = [line for line in claims.read_text(encoding="utf-8").splitlines() if '"beta/' not in line]
+    claims.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
 def _one_volume_repo(tmp_path: Path) -> Path:
     """The fixture with beta gone: alpha alone holds nodes beside the KB-root bucket."""
     kb = _copy_repo(tmp_path)
-    claims = kb / ".index" / "claims.jsonl"
-    kept = [line for line in claims.read_text(encoding="utf-8").splitlines() if '"beta/' not in line]
-    claims.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    _drop_beta_nodes(kb)
     shutil.rmtree(kb / "beta")
     return kb
 
 
-@pytest.mark.parametrize(
-    ("rule", "expected"),
-    [
-        ("two-or-more volumes", (claim_sheet.SHEET_FILENAME,)),
-        ("always", (claim_sheet.SHEET_FILENAME, claim_sheet.DIGEST_FILENAME, f"alpha/{claim_sheet.SHEET_FILENAME}")),
-    ],
-)
-def test_one_volume_draws_what_the_volume_rule_calls_for(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rule: str, expected: tuple[str, ...]
+@pytest.mark.parametrize("drawing", [True, False], ids=["drawn", "without-dot"])
+def test_a_kb_shrinking_to_one_volume_loses_every_sheet_but_the_root_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drawing: bool
 ) -> None:
-    """The live rule is two-or-more; ``always`` is the one-line alternative, kept covered."""
+    kb = _copy_repo(tmp_path)
+    absent_dot = dot.to_svg
+    monkeypatch.setattr(dot, "to_svg", lambda _text: _DRAWN)
+    claim_sheet.render(kb)
+    _drop_beta_nodes(kb)
+    if not drawing:
+        monkeypatch.setattr(dot, "to_svg", absent_dot)
+
+    outcome = claim_sheet.render(kb)
+
+    assert not outcome.failed
+    assert [line for line in outcome.lines if " Removed " in line] == [
+        f"[refresh-sheet] Removed {name}: no longer called for." for name in _SHEETS[1:]
+    ]
+    assert sorted(path.relative_to(kb).as_posix() for path in kb.rglob("*.svg")) == [claim_sheet.SHEET_FILENAME]
+
+
+def test_one_volume_draws_what_the_volume_rule_calls_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     kb = _one_volume_repo(tmp_path)
     monkeypatch.setattr(dot, "to_svg", lambda _text: _DRAWN)
-    if rule == "always":
-        monkeypatch.setattr(claim_sheet, "multi_volume", lambda _sheet: True)
 
     outcome = claim_sheet.render(kb)
 
     assert not outcome.failed
     written = tuple(line.split(" ")[2].rstrip(":") for line in outcome.lines if " Wrote " in line)
-    assert written == expected
-    assert claim_sheet.multi_volume(claim_sheet.load(kb)) is (rule == "always")
-
-
-def test_two_volumes_draw_every_sheet(sheet: claim_sheet.SheetInput) -> None:
-    assert claim_sheet.multi_volume(sheet)
-    assert [name for name, _, _ in claim_sheet._sheets(sheet)] == list(_SHEETS)
-
-
-def test_a_volume_holding_no_node_has_no_sheet_and_no_box(sheet: claim_sheet.SheetInput) -> None:
-    """``gamma/`` has an ``index.md`` and no node."""
-    assert (KB / "gamma" / "index.md").is_file()
-    assert "gamma" not in {volume.key for volume in sheet.volumes}
-    assert "Gamma Volume" not in claim_sheet.compose_digest(sheet)
+    assert written == (claim_sheet.SHEET_FILENAME,)
+    assert not claim_sheet.multi_volume(claim_sheet.load(kb))
 
 
 def test_a_drawn_sheet_replaces_a_placeholder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -438,18 +365,24 @@ def test_a_drawn_sheet_replaces_a_placeholder(tmp_path: Path, monkeypatch: pytes
 
 
 def test_a_refused_graph_fails_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second sheet is refused, so a sheet written as soon as it was drawn would be left behind."""
     kb = _copy_repo(tmp_path)
+    calls: list[str] = []
 
-    def refuse(_text: str) -> str:
-        raise dot.DotError("`dot -Tsvg` exited 1: Error: <stdin>: syntax error in line 1")
+    def refuse_the_second(text: str) -> str:
+        calls.append(text)
+        if len(calls) == 2:
+            raise dot.DotError("`dot -Tsvg` exited 1: Error: <stdin>: syntax error in line 1")
+        return _DRAWN
 
-    monkeypatch.setattr(dot, "to_svg", refuse)
+    monkeypatch.setattr(dot, "to_svg", refuse_the_second)
 
     outcome = claim_sheet.render(kb)
 
     assert outcome.failed
     assert outcome.lines == (
-        "FAIL: [refresh-sheet] drawing claim-graph.svg: `dot -Tsvg` exited 1: Error: <stdin>: syntax error in line 1",
+        "FAIL: [refresh-sheet] drawing claim-graph-digest.svg: "
+        "`dot -Tsvg` exited 1: Error: <stdin>: syntax error in line 1",
     )
     assert not any((kb / name).exists() for name in _SHEETS)
 
@@ -500,12 +433,12 @@ def test_without_dot_an_existing_sheet_is_kept(tmp_path: Path) -> None:
 
 
 def test_without_dot_refresh_completes(tmp_path: Path) -> None:
-    kb = tmp_path / "mini-kb"
+    kb = tmp_path / "kb-root"
     shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "mini-kb", kb)
 
     result = run_main(refresh_kb_metadata.main, ["--kb-root", str(kb)])
 
     assert result.returncode == 0, result.stderr
     assert _NOTE_LINE in result.stdout.splitlines()
-    assert (kb / ".index" / "claims.jsonl").is_file()
+    assert kb_load.index_path(kb, "claims").is_file()
     assert (kb / claim_sheet.SHEET_FILENAME).read_text(encoding="utf-8") == claim_sheet.PLACEHOLDER_SVG

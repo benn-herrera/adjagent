@@ -1,0 +1,13 @@
+about: "The claim-graph unmarked-reference build record: the shortlist of ordered claim pairs planned for asking (null until the stage plans one)."
+planned:
+  - - clm-0dtsyu
+    - clm-2h6i01
+pairs:
+  - source: clm-0dtsyu
+    target: clm-2h6i01
+    offered:
+      - "Y"
+      - "N"
+    letter: "N"
+    outcome: re-asked
+    confidence: null

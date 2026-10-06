@@ -137,6 +137,11 @@ blocker needing user intervention during planning, never as a mid-run discovery.
   can earn its place while the block outweighs what it documents. The test is who reads it and when
   — a note the next editor of this file needs stays; one answering "why was this done" belongs in
   the commit, where whoever asks that already looks.
+- **Change an existing file only with the edit and write tools** — never `sed -i`, a script or a
+  heredoc: a scripted edit hits every match, not the one site meant, and shows no diff. A
+  file-writing tool — formatter, renderer, build — is exempt.
+  - These tools write JSON escapes for U+2028/U+2029 as raw characters; spell those code points
+    another way.
 
 ## Acting on the user's words
 **No quotable go, no action.**

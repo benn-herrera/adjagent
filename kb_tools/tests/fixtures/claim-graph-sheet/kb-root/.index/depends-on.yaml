@@ -1,0 +1,15 @@
+--- {"source": "clm-aaa001", "target": "INVARIANT-S1", "relation": "depends", "target_kind": "invariant", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-aaa001", "target": "clm-aaa002", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.7, "strength": null, "context": "first use", "fraction": null}
+--- {"source": "clm-aaa001", "target": "clm-aaa002", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.7, "strength": null, "context": "second use", "fraction": null}
+--- {"source": "clm-aaa001", "target": "clm-aaa004", "relation": "demoted", "target_kind": "claim", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": null, "origin": "inferred"}
+--- {"source": "clm-aaa003", "target": "clm-aaa001", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.9, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-aaa003", "target": "clm-aaa002", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.7, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-aaa004", "target": "clm-bbb003", "relation": "references", "target_kind": "claim", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-bbb001", "target": "clm-aaa001", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.9, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-bbb001", "target": "clm-aaa004", "relation": "demoted", "target_kind": "claim", "target_solidity_recorded": null, "strength": null, "context": "the circle's other half", "fraction": null, "origin": "cited"}
+--- {"source": "clm-bbb002", "target": "axiom-1", "relation": "depends", "target_kind": "axiom", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-bbb002", "target": "work-smith2020", "relation": "rests-on", "target_kind": "work", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": 0.7}
+--- {"source": "clm-bbb003", "target": "clm-aaa004", "relation": "references", "target_kind": "claim", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": null}
+--- {"source": "clm-bbb003", "target": "clm-zzz999", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": null}
+--- {"source": "exp-aaa008", "target": "clm-aaa003", "relation": "strengthens", "target_kind": "claim", "target_solidity_recorded": null, "strength": 0.8, "context": null, "fraction": null}
+--- {"source": "sup-aaa007", "target": "clm-aaa004", "relation": "supports", "target_kind": "claim", "target_solidity_recorded": null, "strength": null, "context": null, "fraction": 0.5}

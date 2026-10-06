@@ -17,7 +17,7 @@ heading.
 2. ``set-frontmatter``, one entry per document. Must follow pass 1: the op
    resolves every claim id against the authored register and refuses one that is
    not there.
-3. ``add-depends-on``, one batch carrying every edge — :func:`write_edges`.
+3. ``add-build-edges``, one batch carrying every edge — :func:`write_edges`.
    Every target exists by now, so no ordering among edges is needed and none is
    imposed. It lands twice over a build's three invocations: the declared pass's
    off-graph edges here, and the discovered pass's dependency attribution
@@ -48,6 +48,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from types import MappingProxyType
 
 from .. import kb_index_lib, kb_schema
 from ..kb_write import ops, render
@@ -418,8 +419,9 @@ def write_edges(
     scratch: Path,
     name: str = "pass-3-add-depends-on",
     references: Sequence[tuple[str, str]] = (),
+    demoted: Mapping[tuple[str, str], str] = MappingProxyType({}),
 ) -> list[Finding]:
-    """Pass 3 — every authored edge in one batch, through ``add-depends-on``.
+    """Pass 3 — every authored edge in one batch, through ``add-build-edges``.
 
     One values entry per *source*, because the op's transport is keyed that way:
     the entry being written is the source, and its lists name the referents it
@@ -427,10 +429,12 @@ def write_edges(
     ordering among the edges is needed and none is imposed.
 
     ``references`` are the cross-references the narrowing could not direct
-    (:mod:`attribute`). They ride the same op and the same batch because they
-    are the same entry's outgoing edges written into the same register entry;
-    splitting them into a second call would put one claim's edges in two
-    all-or-nothing batches, so a refusal in either would leave the other landed.
+    (:mod:`attribute`). A reference ``demoted`` names is a ``depends`` edge the
+    cycle breaking cut (:func:`classify.cuts`), and lands in the ``demoted``
+    list with its origin instead. All three ride the same op and the same batch
+    because they are the same entry's outgoing edges written into the same
+    register entry; splitting them would put one claim's edges in several
+    all-or-nothing batches, so a refusal in one would leave the others landed.
 
     **A work target's applicability is not supplied and that is the value.** The
     op renders the pending literal for a ``depends-on`` table carrying no
@@ -450,26 +454,34 @@ def write_edges(
     for source, target in edges:
         depends_by_source.setdefault(source, []).append(target)
     references_by_source: dict[str, list[str]] = {}
+    demoted_by_source: dict[str, list[tuple[str, str]]] = {}
     for source, target in references:
-        references_by_source.setdefault(source, []).append(target)
+        if (source, target) in demoted:
+            demoted_by_source.setdefault(source, []).append((target, demoted[(source, target)]))
+        else:
+            references_by_source.setdefault(source, []).append(target)
 
     batch: list[Mapping[str, object]] = []
-    for source in sorted({*depends_by_source, *references_by_source}):
+    for source in sorted({*depends_by_source, *references_by_source, *demoted_by_source}):
         entry: dict[str, object] = {"id": source}
         if source in depends_by_source:
             entry["depends-on"] = tuple({"id": target} for target in depends_by_source[source])
         if source in references_by_source:
             entry["references"] = tuple({"id": target} for target in references_by_source[source])
+        if source in demoted_by_source:
+            entry["demoted"] = tuple({"id": target, "origin": origin} for target, origin in demoted_by_source[source])
         batch.append(entry)
     path = _values_path(scratch, name.removeprefix("pass-"))
     path.write_text(_compose(batch), encoding="utf-8")
-    _landed(_call(ops.add_depends_on, kb_root=kb_root, values_file=path), "pass-3")
+    _landed(_call(ops.add_build_edges, kb_root=kb_root, values_file=path), "pass-3")
+    cut = sum(len(targets) for targets in demoted_by_source.values())
     return [
         Finding(
             PASS,
             name,
             f"{len(edges)} dependency edges across {len(depends_by_source)} claims, "
-            f"{len(references)} references across {len(references_by_source)} claims",
+            f"{len(references) - cut} references across {len(references_by_source)} claims, "
+            f"{cut} demoted across {len(demoted_by_source)} claims",
         )
     ]
 

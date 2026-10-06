@@ -2,8 +2,9 @@
 # One template, four model-pinned participants. They are separate definitions
 # because the referee dispatches by `subagent_type`, so each pin needs its own
 # file presenting the identical contract.
-# The four `model` values are tier tokens, resolved through the run's pin map
-# at render time — the rendered pin follows the map, not this table.
+# The four `model` values are tier tokens, resolved through the run's tier map
+# (or its alias map) at render time — the rendered pin follows the map, not
+# this table.
 [outputs.mad-participant-fable]
 model = "@!dyn.tier-highest!@"
 color = "#7C3AED"

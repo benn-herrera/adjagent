@@ -1,15 +1,15 @@
-"""Integration tests for the JSONL index emission in ``refresh_kb_metadata.py``.
+"""Integration tests for the index emission in ``refresh_kb_metadata.py``.
 
 Runs the refresh script as a subprocess against the synthetic fixture KB
 under ``tests/fixtures/mini-kb/`` (copied to a per-class tempdir so the
 committed fixture is never mutated) and verifies the emission contract:
 
-* All five JSONL files are emitted under ``.index/``.
+* Every index stream in ``kb_index_lib.INDEX_FILES`` is emitted under ``.index/``.
 * The script is idempotent — a second run produces byte-identical files.
 * Record counts match what ``kb_index_lib`` produces in-process.
-* Every emitted line is a well-formed JSON object; files end with one ``\\n``.
+* Every emitted line is ``--- `` and a JSON object; files end with one ``\\n``.
 * Referential integrity: every claim id referenced in non-claims files
-  appears as a record in ``claims.jsonl``.
+  appears as a record in ``claims.yaml``.
 * Records are sorted by the per-file sort key its ``kb_index_lib`` emitter documents.
 
 Run via the project's test target (pytest).
@@ -19,7 +19,6 @@ asserts on ``kb-root/`` proper.
 """
 
 import hashlib
-import json
 import re
 import shutil
 import subprocess
@@ -27,22 +26,18 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from kb_tools import install_location
 from kb_tools import kb_index_lib as lib
+from kb_tools import kb_load, kb_lock
+from kb_tools.tests import _lock_holder
+from kb_tools.tests._in_process import run_main
 
 _THIS_DIR = Path(__file__).resolve().parent
 _PKG_PARENT = install_location.current().agents_dir
 _FIXTURE_SRC = _THIS_DIR / "fixtures" / "mini-kb"
 _REFRESH_MOD = "kb_tools.refresh_kb_metadata"
-
-_INDEX_FILES = (
-    "claims.jsonl",
-    "depends-on.jsonl",
-    "strengthen-by.jsonl",
-    "cites.jsonl",
-    "subtree-aggregates.jsonl",
-)
 
 
 def _run_refresh(kb_root: Path) -> subprocess.CompletedProcess:
@@ -58,7 +53,7 @@ def _run_refresh(kb_root: Path) -> subprocess.CompletedProcess:
 
 def _materialize_fixture(parent: Path) -> Path:
     """Copy the committed fixture into ``parent``. Returns the KB root path."""
-    kb = parent / "mini-kb"
+    kb = parent / "kb-root"
     shutil.copytree(_FIXTURE_SRC, kb)
     return kb
 
@@ -67,13 +62,14 @@ def _hash_file(path: Path) -> str:
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
 
 
-def _read_jsonl_lines(path: Path) -> list[str]:
-    """Return raw (non-empty) lines preserving exact bytes for sort checks."""
-    text = path.read_text(encoding="utf-8")
-    return [ln for ln in text.split("\n") if ln]
+def _records(kb_root: Path, name: str) -> list[dict]:
+    """The index stream ``name``'s records, in file order; a line that is no record fails the test."""
+    records, problems = kb_load.read_index(kb_root, name)
+    assert not problems, (name, problems)
+    return records
 
 
-class TestRefreshIndexJsonlEmission(unittest.TestCase):
+class TestRefreshIndexEmission(unittest.TestCase):
     """End-to-end tests; share a single refresh run across test methods."""
 
     @classmethod
@@ -84,20 +80,20 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
         cls.index_dir = cls.kb_root / ".index"
         cls.first_result = _run_refresh(cls.kb_root)
         if cls.first_result.returncode == 0:
-            cls.first_hashes = {name: _hash_file(cls.index_dir / name) for name in _INDEX_FILES}
+            cls.first_hashes = {name: _hash_file(kb_load.index_path(cls.kb_root, name)) for name in lib.INDEX_FILES}
         else:
             cls.first_hashes = {}
 
-    def test_jsonl_files_emitted(self):
+    def test_index_files_emitted(self):
         self.assertEqual(
             self.first_result.returncode,
             0,
             f"refresh exited non-zero: stderr={self.first_result.stderr}",
         )
-        for name in _INDEX_FILES:
+        for name in lib.INDEX_FILES:
             with self.subTest(name=name):
                 self.assertTrue(
-                    (self.index_dir / name).exists(),
+                    kb_load.index_path(self.kb_root, name).exists(),
                     f"missing emitted file: {name}",
                 )
 
@@ -105,40 +101,34 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
         # Run again and compare hashes.
         second_result = _run_refresh(self.kb_root)
         self.assertEqual(second_result.returncode, 0)
-        for name in _INDEX_FILES:
+        for name in lib.INDEX_FILES:
             with self.subTest(name=name):
                 self.assertEqual(
                     self.first_hashes[name],
-                    _hash_file(self.index_dir / name),
+                    _hash_file(kb_load.index_path(self.kb_root, name)),
                     f"{name} changed between runs (not idempotent)",
                 )
 
     def test_record_counts_match_state(self):
         state = lib.discover_kb(self.kb_root)
         all_records = lib.build_all_records(state)
-        expected = {
-            "claims.jsonl": len(all_records["claims"]),
-            "depends-on.jsonl": len(all_records["depends-on"]),
-            "strengthen-by.jsonl": len(all_records["strengthen-by"]),
-            "cites.jsonl": len(all_records["cites"]),
-            "subtree-aggregates.jsonl": len(all_records["subtree-aggregates"]),
-        }
-        for name, want in expected.items():
+        for name in lib.INDEX_FILES:
+            want = len(all_records[name])
             with self.subTest(name=name):
-                got = len(_read_jsonl_lines(self.index_dir / name))
+                got = len(_records(self.kb_root, name))
                 self.assertEqual(
                     got,
                     want,
                     f"{name}: on-disk count {got} != build_all_records count {want}",
                 )
 
-    def test_jsonl_well_formed(self):
-        for name in _INDEX_FILES:
+    def test_index_well_formed(self):
+        for name in lib.INDEX_FILES:
             with self.subTest(name=name):
-                path = self.index_dir / name
+                path = kb_load.index_path(self.kb_root, name)
                 raw = path.read_text(encoding="utf-8")
-                # Empty file is acceptable per write_jsonl semantics, but we
-                # expect every file in this fixture to be non-empty.
+                # An empty stream holds no records; every stream in this
+                # fixture holds some.
                 self.assertTrue(raw, f"{name} is empty")
                 # File ends with exactly one trailing newline.
                 self.assertEqual(
@@ -151,24 +141,14 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
                     "\n\n",
                     f"{name} has multiple trailing newlines",
                 )
-                text = raw
-                for lineno, line in enumerate(text.split("\n"), start=1):
-                    if lineno == len(text.split("\n")):
-                        # Last element is empty string from terminal "\n".
-                        self.assertEqual(line, "", f"{name}: trailing content after final newline")
-                        continue
-                    obj = json.loads(line)
-                    self.assertIsInstance(
-                        obj,
-                        dict,
-                        f"{name}:{lineno}: not a JSON object",
-                    )
+                records = _records(self.kb_root, name)
+                self.assertEqual(len(records), raw.count("\n"), f"{name}: a line is not one record")
 
-    def test_claims_jsonl_node_type_distribution(self):
+    def test_claims_index_node_type_distribution(self):
         # Content-independent: every record's node_type is one of the three
         # valid node kinds.
-        recs = [json.loads(ln) for ln in _read_jsonl_lines(self.index_dir / "claims.jsonl")]
-        self.assertTrue(recs, "claims.jsonl is empty")
+        recs = _records(self.kb_root, "claims")
+        self.assertTrue(recs, "claims.yaml is empty")
         for rec in recs:
             self.assertIn(
                 rec.get("node_type", "claim"),
@@ -179,8 +159,8 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
     def test_depends_on_target_kind_distribution(self):
         # Content-independent: every edge's target_kind is one of the three
         # valid node kinds.
-        recs = [json.loads(ln) for ln in _read_jsonl_lines(self.index_dir / "depends-on.jsonl")]
-        self.assertTrue(recs, "depends-on.jsonl is empty")
+        recs = _records(self.kb_root, "depends-on")
+        self.assertTrue(recs, "depends-on.yaml is empty")
         for rec in recs:
             self.assertIn(
                 rec["target_kind"],
@@ -190,13 +170,9 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
 
     def test_depends_on_target_kind_matches_resolved_node_type(self):
         # Every edge's target_kind must equal the node_type of the record it
-        # resolves to in claims.jsonl.
-        node_type = {
-            json.loads(ln)["id"]: json.loads(ln).get("node_type", "claim")
-            for ln in _read_jsonl_lines(self.index_dir / "claims.jsonl")
-        }
-        for ln in _read_jsonl_lines(self.index_dir / "depends-on.jsonl"):
-            rec = json.loads(ln)
+        # resolves to in claims.yaml.
+        node_type = {rec["id"]: rec.get("node_type", "claim") for rec in _records(self.kb_root, "claims")}
+        for rec in _records(self.kb_root, "depends-on"):
             self.assertIn(rec["target"], node_type, f"orphan target: {rec}")
             self.assertEqual(
                 rec["target_kind"],
@@ -204,32 +180,39 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
                 f"target_kind mismatch: {rec}",
             )
 
-    def test_referential_integrity(self):
-        # Build the set of canonical claim ids from claims.jsonl.
-        claims_path = self.index_dir / "claims.jsonl"
-        canonical_ids = {json.loads(ln)["id"] for ln in _read_jsonl_lines(claims_path)}
+    def test_an_em_dash_heading_anchors_at_its_collapsed_slug(self):
+        # "A — B" anchors at `a-b`, never GitHub's `a--b`, and that anchor names the heading's section.
+        claims = {rec["id"]: rec for rec in _records(self.kb_root, "claims")}
+        for claim_id, anchor in (
+            ("clm-aa1111", "foundation-claim-a-no-dependencies"),
+            ("clm-sb1111", "support-beneficiary-j-lifted-to-090"),
+        ):
+            with self.subTest(claim_id=claim_id):
+                record = claims[claim_id]
+                self.assertIn("—", record["title"])
+                self.assertEqual(record["canonical_anchor"], anchor)
+                register = (self.kb_root / record["canonical_path"]).read_text(encoding="utf-8")
+                self.assertIsNotNone(lib.anchor_section(register, anchor))
 
-        # depends-on: source and target must each appear in claims.jsonl.
-        dep_path = self.index_dir / "depends-on.jsonl"
-        for ln in _read_jsonl_lines(dep_path):
-            rec = json.loads(ln)
+    def test_referential_integrity(self):
+        # Build the set of canonical claim ids from claims.yaml.
+        canonical_ids = {rec["id"] for rec in _records(self.kb_root, "claims")}
+
+        # depends-on: source and target must each appear in claims.yaml.
+        for rec in _records(self.kb_root, "depends-on"):
             self.assertIn(rec["source"], canonical_ids, f"depends-on source orphan: {rec}")
             self.assertIn(rec["target"], canonical_ids, f"depends-on target orphan: {rec}")
 
-        # strengthen-by: claim_id must appear in claims.jsonl.
-        sb_path = self.index_dir / "strengthen-by.jsonl"
-        for ln in _read_jsonl_lines(sb_path):
-            rec = json.loads(ln)
+        # strengthen-by: claim_id must appear in claims.yaml.
+        for rec in _records(self.kb_root, "strengthen-by"):
             self.assertIn(
                 rec["claim_id"],
                 canonical_ids,
                 f"strengthen-by claim_id orphan: {rec}",
             )
 
-        # cites: claim_id must appear in claims.jsonl.
-        cites_path = self.index_dir / "cites.jsonl"
-        for ln in _read_jsonl_lines(cites_path):
-            rec = json.loads(ln)
+        # cites: claim_id must appear in claims.yaml.
+        for rec in _records(self.kb_root, "cites"):
             self.assertIn(
                 rec["claim_id"],
                 canonical_ids,
@@ -237,10 +220,8 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
             )
 
         # subtree-aggregates: every id within each subtree_claims must
-        # appear in claims.jsonl.
-        agg_path = self.index_dir / "subtree-aggregates.jsonl"
-        for ln in _read_jsonl_lines(agg_path):
-            rec = json.loads(ln)
+        # appear in claims.yaml.
+        for rec in _records(self.kb_root, "subtree-aggregates"):
             for cid in rec["subtree_claims"]:
                 self.assertIn(
                     cid,
@@ -249,43 +230,71 @@ class TestRefreshIndexJsonlEmission(unittest.TestCase):
                 )
 
     def test_sort_order(self):
-        # claims.jsonl sorted by (node_type, id)
-        claims_keys = [
-            (json.loads(ln).get("node_type", "claim"), json.loads(ln)["id"])
-            for ln in _read_jsonl_lines(self.index_dir / "claims.jsonl")
-        ]
+        # claims.yaml sorted by (node_type, id)
+        claims_keys = [(rec.get("node_type", "claim"), rec["id"]) for rec in _records(self.kb_root, "claims")]
         self.assertEqual(claims_keys, sorted(claims_keys))
 
-        # depends-on.jsonl sorted by (source, target, context)
+        # depends-on.yaml sorted by (source, target, context)
         dep_keys = [
             (
-                json.loads(ln)["source"],
-                json.loads(ln)["target"],
-                json.loads(ln).get("context") or "",
+                rec["source"],
+                rec["target"],
+                rec.get("context") or "",
             )
-            for ln in _read_jsonl_lines(self.index_dir / "depends-on.jsonl")
+            for rec in _records(self.kb_root, "depends-on")
         ]
         self.assertEqual(dep_keys, sorted(dep_keys))
 
-        # strengthen-by.jsonl sorted by (claim_id, item_idx)
-        sb_keys = [
-            (json.loads(ln)["claim_id"], json.loads(ln)["item_idx"])
-            for ln in _read_jsonl_lines(self.index_dir / "strengthen-by.jsonl")
-        ]
+        # strengthen-by.yaml sorted by (claim_id, item_idx)
+        sb_keys = [(rec["claim_id"], rec["item_idx"]) for rec in _records(self.kb_root, "strengthen-by")]
         self.assertEqual(sb_keys, sorted(sb_keys))
 
-        # cites.jsonl sorted by (claim_id, leaf_path)
-        cite_keys = [
-            (json.loads(ln)["claim_id"], json.loads(ln)["leaf_path"])
-            for ln in _read_jsonl_lines(self.index_dir / "cites.jsonl")
-        ]
+        # cites.yaml sorted by (claim_id, leaf_path)
+        cite_keys = [(rec["claim_id"], rec["leaf_path"]) for rec in _records(self.kb_root, "cites")]
         self.assertEqual(cite_keys, sorted(cite_keys))
 
-        # subtree-aggregates.jsonl sorted by node_path
-        agg_keys = [
-            json.loads(ln)["node_path"] for ln in _read_jsonl_lines(self.index_dir / "subtree-aggregates.jsonl")
-        ]
+        # subtree-aggregates.yaml sorted by node_path
+        agg_keys = [rec["node_path"] for rec in _records(self.kb_root, "subtree-aggregates")]
         self.assertEqual(agg_keys, sorted(agg_keys))
+
+
+class TestRefreshUnderTheWriteLock(unittest.TestCase):
+    """A second writer and a running build, each held by another process: a flock belongs to an open file description."""
+
+    def setUp(self):
+        if kb_lock.fcntl is None:
+            self.skipTest("no advisory lock without fcntl (Windows)")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name).resolve()
+        (self.repo / ".git").mkdir()
+        self.kb = _materialize_fixture(self.repo)
+
+    def tree(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in sorted(self.kb.rglob("*")) if path.is_file()}
+
+    def test_refresh_under_a_held_write_lock_exits_8_and_writes_nothing(self):
+        from kb_tools import refresh_kb_metadata
+
+        before = self.tree()
+        with mock.patch.object(kb_lock, "WRITE_LOCK_WAIT", 0.2), _lock_holder.held(self.repo):
+            result = run_main(refresh_kb_metadata.main, ["--kb-root", str(self.kb)])
+        self.assertEqual(result.returncode, 8, result.stderr)
+        [line] = [line for line in result.stderr.splitlines() if line.startswith("FAIL")]
+        self.assertIn(str(self.repo), line)
+        self.assertEqual(self.tree(), before)
+
+    def test_the_refresh_command_is_refused_while_a_build_runs_and_main_is_not(self):
+        from kb_tools import refresh_kb_metadata
+
+        before = self.tree()
+        with _lock_holder.held(kb_lock.run_lock_path(self.repo), content="/state/of/the/build"):
+            refused = _run_refresh(self.kb)
+            self.assertEqual(self.tree(), before)
+            in_process = run_main(refresh_kb_metadata.main, ["--kb-root", str(self.kb)])
+        self.assertEqual(refused.returncode, 7, refused.stderr)
+        self.assertIn("/state/of/the/build", refused.stderr)
+        self.assertEqual(in_process.returncode, 0, in_process.stderr)
 
 
 class TestRefreshSolidityWriteBack(unittest.TestCase):
@@ -433,13 +442,12 @@ def _load_refresh_module():
 # empty. `compute_subtree_aggregates` — what the verifier checks drift against —
 # enumerates it by kind; a filename-driven emitter walk never sees it.
 _ALT_NAMED_INDEX = """\
-[↑ Mini-KB Entry Point](../index.md)
-
-<!-- kb-frontmatter
+---
 kind: index
 subtree-claims: []
 subtree-experiments: []
--->
+---
+[↑ Mini-KB Entry Point](../index.md)
 
 # Alternate Index
 
@@ -693,10 +701,10 @@ class TestRefreshSolidityPendingWriteBack(unittest.TestCase):
 class TestSubtreeFieldRewriteSpans(unittest.TestCase):
     """A multi-line field is replaced WHOLE, not by its first line.
 
-    The reader now accepts wrapped and YAML-block id-lists. Rewriting only the
-    opening line of one would strand its tail as orphaned text for the next
-    parse to fold into whatever field followed — accepting a shape on read and
-    mangling it on write is the emitter/checker split at its most destructive.
+    Rewriting only the opening line of a block list would strand its items as
+    orphaned text for the next parse to fold into whatever field followed —
+    accepting a shape on read and mangling it on write is the emitter/checker
+    split at its most destructive.
     """
 
     def setUp(self):
@@ -705,27 +713,20 @@ class TestSubtreeFieldRewriteSpans(unittest.TestCase):
         self.refresh = refresh_kb_metadata
 
     def _rewrite(self, body: str) -> dict:
-        text = f"<!-- kb-frontmatter\n{body}\n-->\n\n# Title\n"
+        text = f"---\n{body}\n---\n\n# Title\n"
         out = self.refresh.replace_subtree_claims(text, ["clm-cccccc"])
         fm = lib.parse_frontmatter(out)
         self.assertIsNotNone(fm, out)
         return {"text": out, "fm": fm}
 
-    def test_wrapped_field_replaced_whole(self):
-        got = self._rewrite("kind: index\nsubtree-claims: [clm-aaaaaa,\n                 clm-bbbbbb]")
-        self.assertEqual(got["fm"]["subtree-claims"], ["clm-cccccc"])
-        # No orphaned tail left behind anywhere in the document.
-        self.assertNotIn("clm-bbbbbb", got["text"])
-        self.assertEqual(got["fm"]["kind"], "index")
-
-    def test_yaml_block_field_replaced_whole(self):
+    def test_block_list_field_replaced_whole(self):
         got = self._rewrite("kind: index\nsubtree-claims:\n  - clm-aaaaaa\n  - clm-bbbbbb")
         self.assertEqual(got["fm"]["subtree-claims"], ["clm-cccccc"])
         self.assertNotIn("clm-bbbbbb", got["text"])
         self.assertEqual(got["fm"]["kind"], "index")
 
     def test_following_field_survives_the_replacement(self):
-        got = self._rewrite("subtree-claims: [clm-aaaaaa,\n                 clm-bbbbbb]\nkind: index")
+        got = self._rewrite("subtree-claims:\n  - clm-aaaaaa\n  - clm-bbbbbb\nkind: index")
         self.assertEqual(got["fm"]["kind"], "index")
         self.assertEqual(got["fm"]["subtree-claims"], ["clm-cccccc"])
 
@@ -735,7 +736,7 @@ class TestSubtreeFieldRewriteSpans(unittest.TestCase):
         self.assertIn("subtree-claims: [clm-cccccc]", got["text"])
 
     def test_rewrite_is_idempotent_across_shapes(self):
-        once = self._rewrite("kind: index\nsubtree-claims: [clm-aaaaaa,\n                 clm-bbbbbb]")["text"]
+        once = self._rewrite("kind: index\nsubtree-claims:\n  - clm-aaaaaa\n  - clm-bbbbbb")["text"]
         twice = self.refresh.replace_subtree_claims(once, ["clm-cccccc"])
         self.assertEqual(once, twice)
 

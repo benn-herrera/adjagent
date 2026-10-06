@@ -2,7 +2,8 @@
 
 :func:`load` reads the index through :func:`kb_cmd.index.load` — nothing else of
 it — plus the H1s of ``entry-point.md`` and each volume's ``index.md``, and the
-two claim-graph build records beside ``kb-root/`` for each edge's provenance.
+unmarked build record beside ``kb-root/`` for each ``depends`` edge's
+provenance.
 :func:`compose_sheet`, :func:`compose_digest` and :func:`compose_volume_sheet`
 turn that into DOT text and touch neither the disk nor a binary, so composition
 is testable without Graphviz. :func:`render` is the one write site, and refresh
@@ -31,7 +32,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from kb_tools import dot, kb_index_lib, kb_pipeline, kb_schema, kb_util
+from kb_tools import dot, kb_index_lib, kb_load, kb_pipeline, kb_schema, kb_util
 from kb_tools.kb_cmd import index as kb_index
 from kb_tools.kb_survey.manifest import write_text_atomic
 
@@ -43,18 +44,10 @@ DIGEST_FILENAME = "claim-graph-digest.svg"
 #: The ``kind`` of a node drawn for an edge end no record carries.
 GHOST_KIND = "ghost"
 
-#: The reader-facing provenance words, the only ones that reach a sheet.
-CITED = "cited"
-INFERRED = "inferred"
+#: The reader-facing provenance words, the only ones that reach a sheet: a ``depends`` edge's, and
+#: a ``demoted`` row's origin, spelled as :data:`kb_schema.DEMOTED_ORIGINS` spells it.
+CITED, INFERRED = kb_schema.DEMOTED_ORIGINS
 CUT = "cut"
-
-#: The letters the two build records store, as ``kb_claimgraph.ask`` defines them: the unmarked
-#: ask's "points at the candidate", and the classify ask's "supported by", which classify writes as
-#: a ``depends`` edge in the pair's own direction. Copied rather than imported, because importing
-#: ``kb_claimgraph`` from refresh's path closes a cycle through ``kb_claimgraph.gate``;
-#: ``tests/test_claim_sheet.py`` holds them equal.
-UNMARKED_POINTS_LETTER = "A"
-CLASSIFY_DEPENDS_LETTER = "A"
 
 
 @dataclass(frozen=True)
@@ -88,9 +81,9 @@ class SheetNode:
 class SheetEdge:
     """One stroke, in record direction; two records differing only in ``context`` are one.
 
-    ``provenance`` is :data:`CITED` or :data:`INFERRED` for ``depends``,
-    :data:`CUT` for ``references`` (no other ``references`` edge is drawn, so
-    none is loaded), and ``None`` for every other relation.
+    ``provenance`` is :data:`CITED` or :data:`INFERRED` for ``depends`` and
+    ``demoted``, and ``None`` for every other relation. No ``references`` edge
+    is drawn, so none is loaded.
     """
 
     source: str
@@ -168,55 +161,103 @@ _CLAIM_PLURALS = {"block": "blocks", "equation": "equations", "prose": "prose"}
 
 @dataclass(frozen=True)
 class _EdgeStyle:
-    word: str  # what the legend, the tooltips and the digest's counts call the stroke
+    word: str  # what the digest's counts call the stroke
+    tip: str  # what the stroke's tooltip calls it
     reverse: bool  # emitted target → source with dir=back, so the premise sits at the head
     premise: bool
     color: str
     extra: str
     glyph: str
-    meaning: str
+    legend: str  # the legend row's text; strokes sharing one share the row
 
 
-#: Per relation, the strokes it draws as, keyed by provenance. Iterating this is the legend's and the
-#: counts' order.
+_CUT_COLOR = "#c0392b"
+_CUT_GLYPH = "┈┈┈▷"
+_CUT_LEGEND = "cut from depends: part of a circle (cited / inferred)"
+
+#: Per relation, the strokes it draws as, keyed by provenance; ``references`` draws none, because it
+#: asserts nothing about what rests on what. Iterating this is the legend's and the counts' order.
 _EDGE_STYLES: dict[str, dict[str | None, _EdgeStyle]] = {
     "depends": {
         CITED: _EdgeStyle(
-            CITED, False, True, "#222222", "penwidth=1.2", "━━━▶", "depends, marked in the text; points to the premise"
+            CITED,
+            f"depends, {CITED}",
+            False,
+            True,
+            "#222222",
+            "penwidth=1.2",
+            "━━━▶",
+            f"{CITED} — depends, marked in the text; points to the premise",
         ),
         INFERRED: _EdgeStyle(
             INFERRED,
+            f"depends, {INFERRED}",
             False,
             True,
             "#2471a3",
             "style=dashed penwidth=1.3",
             "╍╍╍▶",
-            "depends, found with no mark in the text; points to the premise",
+            f"{INFERRED} — depends, found with no mark in the text; points to the premise",
         ),
     },
     "strengthens": {
         None: _EdgeStyle(
-            "strengthens", True, True, "#1f6fb2", "style=dashed arrowtail=empty", "╍╍╍▷", "points to the claim lifted"
+            "strengthens",
+            "strengthens",
+            True,
+            True,
+            "#1f6fb2",
+            "style=dashed arrowtail=empty",
+            "╍╍╍▷",
+            "strengthens — points to the claim lifted",
         )
     },
     "supports": {
-        None: _EdgeStyle("supports", True, True, "#2e7d32", "arrowtail=empty", "━━━▷", "points to the claim lifted")
+        None: _EdgeStyle(
+            "supports",
+            "supports",
+            True,
+            True,
+            "#2e7d32",
+            "arrowtail=empty",
+            "━━━▷",
+            "supports — points to the claim lifted",
+        )
     },
     "rests-on": {
         None: _EdgeStyle(
-            "rests-on", False, True, "#7d3c98", "style=dashed arrowhead=diamond", "╍╍╍◆", "points to the cited work"
+            "rests-on",
+            "rests-on",
+            False,
+            True,
+            "#7d3c98",
+            "style=dashed arrowhead=diamond",
+            "╍╍╍◆",
+            "rests-on — points to the cited work",
         )
     },
-    "references": {
-        CUT: _EdgeStyle(
-            CUT,
+    "references": {},
+    "demoted": {
+        CITED: _EdgeStyle(
+            f"{CITED} {CUT}",
+            f"{CUT}, {CITED}",
             False,
             False,
-            "#c0392b",
-            "style=dotted penwidth=1.2 arrowhead=open constraint=false",
-            "┈┈┈▷",
-            "a depends cut to break a circle; no premise",
-        )
+            _CUT_COLOR,
+            "style=dotted penwidth=1.4 arrowhead=open constraint=false",
+            _CUT_GLYPH,
+            _CUT_LEGEND,
+        ),
+        INFERRED: _EdgeStyle(
+            f"{INFERRED} {CUT}",
+            f"{CUT}, {INFERRED}",
+            False,
+            False,
+            _CUT_COLOR,
+            "style=dotted penwidth=1.0 arrowhead=open constraint=false",
+            _CUT_GLYPH,
+            _CUT_LEGEND,
+        ),
     },
 }
 
@@ -254,6 +295,8 @@ _STROKE_ORDER: tuple[_EdgeStyle, ...] = tuple(
 # ---------------------------------------------------------------------------
 
 _H1_RE = re.compile(r"^# +(.+?)\s*$", re.MULTILINE)
+# The sheet's fallback for reading a title as a block where no marker is readable — deliberately
+# not `kb_claimgraph.inventory`'s claim-bearing set, which answers which environments carry claims.
 _BLOCK_TITLE_RE = re.compile(
     r"^(Theorem|Proposition|Lemma|Corollary|Definition|Conjecture|Remark|Assumption|Axiom|Claim|Example)\b"
 )
@@ -351,26 +394,22 @@ def _claim_kinds(kb_root: Path, index: kb_index.Index) -> tuple[dict[str, str], 
     return kinds, fallbacks
 
 
-def _lettered(entries: Mapping[tuple[str, str], kb_pipeline.CandidateEntry], letter: str) -> set[tuple[str, str]]:
-    return {pair for pair, entry in entries.items() if entry.letter == letter}
-
-
 def load(kb_root: Path) -> SheetInput:
-    """Read the sheets' input: ``kb_root``'s ``.index/``, the H1s that title it, the build records beside it.
+    """Read the sheets' input: ``kb_root``'s ``.index/``, the H1s that title it, the unmarked record beside it.
 
     A ``depends`` edge whose pair the unmarked record answered "points" is
-    inferred, every other one cited. A ``references`` row is drawn only where
-    the classification record chose ``depends`` for its pair — a ``depends``
-    cut to break a cycle. Absent records leave every ``depends`` cited and
-    draw no ``references``. A record that does not read raises its own
-    ``kb_pipeline`` error.
+    inferred, every other one cited, and every one cited where the record is
+    absent. A ``demoted`` row is drawn as a cut under its own origin, cited
+    where the row carries no ``inferred`` one. No ``references`` row is drawn.
+    A record that does not read raises its own ``kb_pipeline`` error.
     """
     index = kb_index.load(kb_root / kb_util.INDEX_DIRNAME)
-    repo_root = kb_root.parent
-    unmarked = kb_pipeline.read_unmarked(repo_root)
-    classification = kb_pipeline.read_classification(repo_root)
-    inferred = _lettered(unmarked.pairs, UNMARKED_POINTS_LETTER) if unmarked else set()
-    cut = _lettered(classification.candidates, CLASSIFY_DEPENDS_LETTER) if classification else set()
+    unmarked = kb_pipeline.read_unmarked(kb_root.parent)
+    inferred = (
+        {pair for pair, entry in unmarked.pairs.items() if entry.letter == kb_pipeline.UNMARKED_POINTS_LETTER}
+        if unmarked
+        else set()
+    )
 
     claim_kinds, fallbacks = _claim_kinds(kb_root, index)
     nodes = {
@@ -385,14 +424,18 @@ def load(kb_root: Path) -> SheetInput:
         for record in index.all_nodes
     }
     edges = []
-    for source, target, relation in sorted({(e.source, e.target, e.relation) for e in index.all_depends_on_edges}):
+    for source, target, relation, origin in sorted(
+        {
+            (e.source, e.target, e.relation, e.origin or "")
+            for e in index.all_depends_on_edges
+            if _EDGE_STYLES[e.relation]
+        }
+    ):
         provenance = None
         if relation == "depends":
             provenance = INFERRED if (source, target) in inferred else CITED
-        elif relation == "references":
-            if (source, target) not in cut:
-                continue
-            provenance = CUT
+        elif relation == "demoted":
+            provenance = INFERRED if origin == INFERRED else CITED
         edges.append(SheetEdge(source, target, relation, provenance))
     ghosts = {end for edge in edges for end in (edge.source, edge.target)} - set(nodes)
     for ghost in ghosts:
@@ -428,6 +471,16 @@ def _q(*lines: str) -> str:
 def _h(text: str) -> str:
     """Text or an attribute value inside an HTML-like label, where backslashes are literal."""
     return html.escape(text, quote=True)
+
+
+def _tip(text: str) -> str:
+    """``text`` for a ``tooltip``, which Graphviz reads as an escString after the string's own unescaping.
+
+    The escString pass expands ``\\G``, ``\\N``, ``\\L``, ``\\E``, ``\\H`` and ``\\T`` and keeps a
+    backslash only where it is doubled, so every backslash is doubled once more here, before
+    :func:`_q` or :func:`_h` applies its own escaping. ``label`` and ``href`` take no such pass.
+    """
+    return text.replace("\\", "\\\\")
 
 
 def _count(number: int, noun: str) -> str:
@@ -568,12 +621,15 @@ def _legend(rows: list[str]) -> str | None:
 
 
 def _stroke_rows(edges: Iterable[SheetEdge]) -> list[str]:
-    drawn = {_style(edge).word for edge in edges}
+    drawn = {_style(edge).legend for edge in edges}
+    rows: dict[str, _EdgeStyle] = {}
+    for style in _STROKE_ORDER:
+        if style.legend in drawn:
+            rows.setdefault(style.legend, style)
     return [
         f'<td><font color="{_h(style.color)}"><b>{_h(style.glyph)}</b></font></td>'
-        f'<td align="left">{_h(style.word)} — {_h(style.meaning)}</td>'
-        for style in _STROKE_ORDER
-        if style.word in drawn
+        f'<td align="left">{_h(style.legend)}</td>'
+        for style in rows.values()
     ]
 
 
@@ -596,20 +652,20 @@ def _node_statement(node: SheetNode, base: str) -> str:
     return (
         f"{_q(node.id)} [shape={style.shape} style={_q(style.style)} penwidth={style.penwidth} "
         f"fillcolor={_q(fill)} label={_q(*_label_lines(node))} href={_q(_relative(node.href, base))} "
-        f"tooltip={_q(_tooltip(node))}]"
+        f"tooltip={_q(_tip(_tooltip(node)))}]"
     )
 
 
 def _ghost_statement(node: SheetNode) -> str:
     return (
         f'{_q(node.id)} [shape=box style="dashed" penwidth=1 color={_q(_GHOST_FRAME)} label={_q(node.id)} '
-        f"tooltip={_q(f'{node.id} — no record carries this id')}]"
+        f"tooltip={_q(_tip(f'{node.id} — no record carries this id'))}]"
     )
 
 
 def _unattached_table(nodes: list[SheetNode], base: str) -> str:
     rows = "".join(
-        f'<tr><td align="left" href="{_h(_relative(node.href, base))}" tooltip="{_h(_tooltip(node))}">'
+        f'<tr><td align="left" href="{_h(_relative(node.href, base))}" tooltip="{_h(_tip(_tooltip(node)))}">'
         f"{_h(node.id)} — {_h(_cut(_display_title(node.title), 48))}</td></tr>"
         for node in nodes
     )
@@ -623,9 +679,8 @@ def _edge_statement(edge: SheetEdge) -> str:
     style = _style(edge)
     tail, head = _emitted(edge)
     direction = "dir=back " if style.reverse else ""
-    word = style.word if style.word == edge.relation else f"{edge.relation}, {style.word}"
-    tooltip = f"{edge.source} → {edge.target} ({word})"
-    return f"{_q(tail)} -> {_q(head)} [{direction}color={_q(style.color)} {style.extra} tooltip={_q(tooltip)}]"
+    tooltip = f"{edge.source} → {edge.target} ({style.tip})"
+    return f"{_q(tail)} -> {_q(head)} [{direction}color={_q(style.color)} {style.extra} tooltip={_q(_tip(tooltip))}]"
 
 
 def _kind_swatch(kind: str) -> str:
@@ -785,7 +840,7 @@ def _bundle_statement(bundle: _Bundle) -> str:
     ends = f'"v_{bundle.tail}" -> "v_{bundle.head}"'
     label = _q(_stroke_counts(bundle.edges))
     if not bundle.premise:
-        style = _EDGE_STYLES["references"][CUT]
+        style = _EDGE_STYLES["demoted"][CITED]
         return f"{ends} [label={label} color={_q(style.color)} {style.extra}]"
     return f'{ends} [label={label} penwidth={min(1 + len(bundle.edges) / 4, 6):.1f} color="#222222"]'
 
@@ -870,7 +925,11 @@ def _sheets(sheet: SheetInput) -> list[tuple[str, str, str]]:
     if multi_volume(sheet):
         sheets.append((DIGEST_FILENAME, compose_digest(sheet), _digest_summary(sheet)))
         sheets += [
-            (f"{volume.key}/{SHEET_FILENAME}", compose_volume_sheet(sheet, volume.key), _volume_summary(sheet, volume.key))
+            (
+                f"{volume.key}/{SHEET_FILENAME}",
+                compose_volume_sheet(sheet, volume.key),
+                _volume_summary(sheet, volume.key),
+            )
             for volume in sheet.volumes
             if volume.key
         ]
@@ -895,6 +954,21 @@ def _placeholder_svg() -> str:
 PLACEHOLDER_SVG = _placeholder_svg()
 
 
+def _remove_stale(kb_root: Path, names: list[str]) -> list[str]:
+    """Remove each sheet a KB can carry that ``names`` no longer calls for: the digest, a top-level directory's."""
+    owned = [
+        DIGEST_FILENAME,
+        *(f"{entry.name}/{SHEET_FILENAME}" for entry in sorted(kb_root.iterdir()) if entry.is_dir()),
+    ]
+    lines = []
+    for name in owned:
+        path = kb_root / name
+        if name not in names and path.is_file():
+            path.unlink()
+            lines.append(f"[refresh-sheet] Removed {name}: no longer called for.")
+    return lines
+
+
 def _placeholders(kb_root: Path, names: list[str], missing: dot.DotMissingError) -> Outcome:
     """Stand a placeholder where no sheet exists yet; keep any sheet, real or placeholder, that does."""
     lines = []
@@ -905,6 +979,7 @@ def _placeholders(kb_root: Path, names: list[str], missing: dot.DotMissingError)
         else:
             write_text_atomic(PLACEHOLDER_SVG, path)
             lines.append(f"[refresh-sheet] Placeholder {name}.")
+    lines += _remove_stale(kb_root, names)
     lines.append(f"[refresh-sheet] NOTE {missing}")
     return Outcome(failed=False, lines=tuple(lines))
 
@@ -922,22 +997,32 @@ def render(kb_root: Path) -> Outcome:
     """Draw every sheet beside ``kb_root``'s ``.index/``, writing each only where its bytes changed.
 
     Every sheet is drawn before any is written, so a refused graph writes
-    nothing. Without ``dot`` none is drawn, and that is no failure: a
-    placeholder stands where no sheet exists, and an existing sheet is kept. A
-    build record that does not read fails the render, naming the record.
+    nothing. A sheet the KB no longer calls for — the digest, or the sheet of a
+    directory that holds no node — is removed. Without ``dot`` none is drawn,
+    and that is no failure: a placeholder stands where no sheet exists, and an
+    existing sheet is kept. A
+    build record that does not read fails the render, naming the record, and so
+    does one standing beside a KB directory not named ``kb-root``: records are
+    read against the KB at ``<repository>/kb-root``, and that one is not it.
     """
     try:
         sheet = load(kb_root)
-    except (kb_pipeline.UnmarkedRecordError, kb_pipeline.ClassificationRecordError) as unreadable:
+    except kb_pipeline.UnmarkedRecordError as unreadable:
         return Outcome(failed=True, lines=(f"FAIL: [refresh-sheet] {unreadable}",))
+    except kb_load.FormatRefusal as refused:
+        return Outcome(
+            failed=True,
+            lines=(f"FAIL: [refresh-sheet] the build records beside {kb_root} are not read for it: {refused}",),
+        )
     sheets = _sheets(sheet)
+    names = [name for name, _, _ in sheets]
     notes = _notes(sheet)
     drawn = []
     for name, composed, summary in sheets:
         try:
             drawn.append((name, fit(dot.to_svg(composed)), summary))
         except dot.DotMissingError as missing:
-            placeholders = _placeholders(kb_root, [name for name, _, _ in sheets], missing)
+            placeholders = _placeholders(kb_root, names, missing)
             return Outcome(failed=False, lines=(*placeholders.lines, *notes))
         except dot.DotError as refused:
             return Outcome(failed=True, lines=(f"FAIL: [refresh-sheet] drawing {name}: {refused}",))
@@ -950,4 +1035,5 @@ def render(kb_root: Path) -> Outcome:
             write_text_atomic(svg, path)
             verb = "Wrote"
         lines.append(f"[refresh-sheet] {verb} {name}: {summary}.")
+    lines += _remove_stale(kb_root, names)
     return Outcome(failed=False, lines=(*lines, *notes))

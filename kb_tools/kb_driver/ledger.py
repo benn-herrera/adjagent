@@ -324,22 +324,44 @@ def graph_init(repo_root: Path, *, runner: str | None = None) -> Outcome:
     )
 
 
-def record_start(repo_root: Path, *, charter: str) -> Outcome:
+def _input_flags(volume_roots: Sequence[str], bibliographies: Sequence[str]) -> tuple[str, ...]:
+    """The record ops' input flags, one per path, in the build's order."""
+    roots = [part for path in volume_roots for part in (kb_util.VOLUME_ROOT_FLAG, path)]
+    named = [part for path in bibliographies for part in (kb_util.BIBLIOGRAPHY_FLAG, path)]
+    return (*roots, *named)
+
+
+def record_start(
+    repo_root: Path, *, charter: str, volume_roots: Sequence[str] = (), bibliographies: Sequence[str] = ()
+) -> Outcome:
     """``start.record``: ``start-build``; rc 5 (already started) reads as done.
 
     ``charter`` is the repo-relative path recorded in the start commit, or
     empty where the build carries none — in which case the flag is not passed
-    at all, rather than passed with nothing behind it.
+    at all, rather than passed with nothing behind it. The inputs end the
+    commit's body.
     """
     return _outcome(
-        _kb_util(kb_util.OP_START_BUILD, *(("--charter", charter) if charter else ())),
+        _kb_util(
+            kb_util.OP_START_BUILD,
+            *(("--charter", charter) if charter else ()),
+            *_input_flags(volume_roots, bibliographies),
+        ),
         repo_root=repo_root,
         op=f"kb_util {kb_util.OP_START_BUILD}",
         exits=_START_BUILD_EXITS,
     )
 
 
-def record_stage(repo_root: Path, *, stage: str, note: str = "", no_inference: bool = False) -> Outcome:
+def record_stage(
+    repo_root: Path,
+    *,
+    stage: str,
+    note: str = "",
+    no_inference: bool = False,
+    volume_roots: Sequence[str] = (),
+    bibliographies: Sequence[str] = (),
+) -> Outcome:
     """A stage record row: ``advance-step --stage``.
 
     Re-recording a recorded stage is inert and exits 0; a stage whose
@@ -357,6 +379,7 @@ def record_stage(repo_root: Path, *, stage: str, note: str = "", no_inference: b
         stage,
         *(("--note", note) if note else ()),
         *((kb_util.NO_INFERENCE_FLAG,) if no_inference else ()),
+        *_input_flags(volume_roots, bibliographies),
     )
     return _outcome(argv, repo_root=repo_root, op=f"kb_util {kb_util.OP_ADVANCE_STEP}", exits=_ADVANCE_STEP_EXITS)
 

@@ -29,7 +29,7 @@ text = "override text for that member"
 
 **`[tiers]` is required and total.** It names the family member staffing each of the five tiers. A
 file that omits the table, drops a tier, or carries a key outside the five does not load — never a
-fallback to a partial map, to another family's members, or to the pin map. A family name is still
+fallback to a partial map or to another family's members. A family name is still
 reservable before any observed failure motivates tuning: zero `[family.*]` tables is legal, but the
 five-line `[tiers]` table is what makes the file load at all.
 
@@ -49,17 +49,20 @@ reaches them, in this file's `[tiers]` or in an effective `--model-tier-map`. An
 is a hard error rather than a table that quietly never fires, which makes `[tiers]` the single
 source of truth for member spelling.
 
-## Two maps, and only one of them is yours
+## The tier map is the model source
 
 | Map | Source | What it decides |
 |---|---|---|
-| tier → member | this file's `[tiers]`, masked per tier by `--model-tier-map` | which member's `[family.*.models.*]` overrides a definition is tuned against |
-| tier → pin | `model_tuning.DEFAULT_PIN_MAP` in `gen_defs`, masked per tier by `--model-pin-map` | the `model:` text a definition renders, always a claude-legal name |
+| tier → member | this file's `[tiers]`, or replaced whole by `--model-tier-map` | which member's `[family.*.models.*]` overrides a definition is tuned against, and the `model:` text it renders |
+| tier → alias | `--model-pin-tier-alias-map` only; no file and no default supplies it | where given, the `model:` text each tier renders in place of its member; tuning is untouched |
 
-The two are independent on purpose: what a definition is tuned for and what it dispatches on are
-separately chosen. No member name ever reaches rendered text — nothing in this file sources a
-`model:` value. On a non-claude family the two maps therefore differ at every tier by construction,
-which is that render's normal state rather than a problem to reconcile.
+Unless aliased, a member is the `model:` value itself, so the harness file's `[harness.model]`
+pattern is checked against every tier's rendered text before anything is written, and a value
+outside it is refused, naming this file or the flag that supplied it. The alias map exists for a
+harness that resolves aliases through its own remapping — Claude Code's `ANTHROPIC_*` model
+variables — so a family whose members are not Claude aliases can still render under the claude
+harness; any harness may use it. Both flags take `tier=value` for every tier, or `all=value` with any named exceptions; a
+flag leaving a tier unnamed is refused, with no fallback to this file.
 
 ## Tuned, Stock, and the load error
 
@@ -80,8 +83,8 @@ an override, and the notice says so. A member holding a table for one anchor and
 Resolution, not accumulation: at most one overlay renders per anchor. A table matching the member
 the definition's tier maps to wins outright; otherwise the family-wide `text` renders; otherwise the
 anchor renders as nothing. Family and member texts are never concatenated. The text renders verbatim
-in place, with no lead-in and no wrapper — any lead-in belongs in the text itself — and no family or
-member name appears in rendered output, so this file is the provenance record.
+in place, with no lead-in and no wrapper — any lead-in belongs in the text itself — and adds no
+family or member name of its own to rendered output, so this file is the provenance record.
 
 ## Never touches base
 

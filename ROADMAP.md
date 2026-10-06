@@ -59,7 +59,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
     **Closed by a live-inference walk, not a mechanical one.** The `--no-inference` recipes spend no model call by construction, so they exercise the build pipeline and dispatch nothing — a moved dispatch default passes straight through them. What settles this is `kb-driver-arxiv-corpus` over `ARXIV_LIVE_IDS`, and it was run: both papers reached `claims-discovered` and `depends-attributed`, so seats launch, receive briefs, and return parseable answers under the new build. Re-render and re-install were no-ops, the templates being unchanged.
 
-    **The pins were verified honored, at the output side.** `runs/<id>/<ts>/calls/*.stream.jsonl` carries the model id per session, and a floor-tuned run (`--model-tier-map=all=haiku --model-pin-map=all=haiku`) reported `claude-haiku-4-5-20251001` throughout. That is the direct check: the definition states the pin, and the stream says what served the call. Neither `/usage` nor the console log breaks usage down by model, so this is the only instrument for it.
+    **The pins were verified honored, at the output side.** `runs/<id>/<ts>/calls/*.stream.jsonl` carries the model id per session, and a floor-tuned run (every tier tuned for and pinned to haiku) reported `claude-haiku-4-5-20251001` throughout. That is the direct check: the definition states the pin, and the stream says what served the call. Neither `/usage` nor the console log breaks usage down by model, so this is the only instrument for it.
 
 3. **Atomic install** (dry-run-then-live, git-style): the install first runs a full dry pass and
    halts before writing anything if any target would be a collision — where collision = target
@@ -172,6 +172,16 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     resume-versus-new by inspecting `messages.json` where the liaison says to decide it with
     `validate` and never by inspecting the file.
 
+   **Sections meant to stay in sync are held in sync by nobody.** A template section that is the
+   same across a family — a heading and a sequence of chunk markers — is copied per template, so
+   the sequence drifts: among the seven language coders, Core Principles' marker block is
+   identical in four and Parallel Execution's in five; among the seven platform experts, Code
+   Standards' is identical in two and Testing's in one. Some deviations are deliberate (go and
+   rust carry no coverage rule by design), and nothing distinguishes those from drift. The fix
+   is one nested chunk per family per sync-intended section, heading included, with a template
+   argument where a value legitimately differs; `render-diff` then shows exactly the drift
+   repairs. First: enumerate every deviation and classify it from the chunk file's own comments
+   and the line's history. Next dev branch's first task.
 
 9. **Re-examine the MAD agent set against what the harness now does.** That design predates several
    harness capabilities and may be replicating orchestration the harness performs more reliably.
@@ -203,14 +213,30 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    written.
 
 10. **Architect probes its own design assumptions.** The architect has no shell
-    (`templates/agents/architect.tmpl.md`, `tools: Read, Grep, Glob, Write, Edit`), so a design call
+    (`templates/agents/architect.tmpl.md`, `tools: read, grep, glob, write, edit`), so a design call
     that only execution settles — an import graph, a rendered byte, a CLI's output — reaches
     approval unverified and surfaces mid-run. It needs a way to run probes without gaining a way to
     change code. Candidates: per-agent Bash command patterns, if the harness honours them in agent
     frontmatter (unverified), limited to running scripts under `.claude-temp/`; or a defined handoff
     where the architect writes probe scripts there and a coder runs them and returns the output.
 
-11. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+11. **Does Claude Code honour a hex `color`?** Every agent template authors `color` as a hex value,
+    and Claude Code's subagent documentation lists eight color names. The claude render passes the
+    hex value through unchanged. Settling it wants a behavioral probe.
+
+12. **Does opencode load `agents/` recursively?** The shipped packages' markdown under
+    `agents/kb_tools/` and `agents/liaison_tools/` — READMEs and `.tmpl.md` prompt templates —
+    carries no frontmatter and sits at destinations SPEC.md freezes (Deployed Surfaces). If opencode
+    loads `agents/**/*.md`, it reads those files as agents or fails its config validation, which no
+    frontmatter rendering can fix. Settled by starting opencode in a project installed with
+    `--harness=opencode` and listing its agents.
+
+13. **The harness agents file names a Claude pin under every harness.**
+    `templates/harness/AGENTS.tmpl.md` renders "dispatch at `model: sonnet`" for opencode too,
+    because the agents-file render binds its tier tokens to the default family's members whatever
+    the harness. Rewording it changes agent-visible text, so it goes through prompt-engineer review.
+
+14. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
     installs the agent and command definitions under a prefixed namespace so the set coexists with
     an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
     packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a

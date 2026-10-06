@@ -185,7 +185,10 @@ class FakeLedger:
         #: stage's.
         self._refuses = set(refuses)
 
-    def _advance(self, *, stage: str, note: str = "", no_inference: bool = False) -> ledger.Outcome:
+    def _advance(
+        self, *, stage: str, inputs: kb_pipeline.BuildInputs, note: str = "", no_inference: bool = False
+    ) -> ledger.Outcome:
+        del inputs
         if stage in self._refuses:
             self._refuses.discard(stage)
             return ledger.Outcome(baton.EXIT_ENVIRONMENT, detail=(f"the boundary commit for {stage} did not land",))
@@ -213,7 +216,7 @@ class FakeLedger:
             graph_init=lambda *, runner: ledger.Outcome(baton.EXIT_OK),
             document_graph=lambda *, sources, bibliographies, kb_root: ledger.Outcome(baton.EXIT_OK),
             claim_graph=lambda *, flags: ledger.Outcome(baton.EXIT_OK),
-            start_build=lambda *, charter: ledger.Outcome(baton.EXIT_OK),
+            start_build=lambda *, charter, inputs: ledger.Outcome(baton.EXIT_OK),
             advance_step=self._advance,
             show_status=lambda *, relay: ledger.Outcome(baton.EXIT_OK, stdout=render_for(self.recorded)),
             refresh=self._run_refresh,
@@ -328,9 +331,6 @@ def drive(
     path.write_text("\n".join(body) + "\n", encoding="utf-8")
 
     paths = runlog.prepare(tmp_path / "runs", f"20260901T120000-{next(_RUN_SERIAL)}")
-    lock = runlog.repo_lock_path(repo_root)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": 1, "run_id": paths.run_id}), encoding="utf-8")
     return run.execute(
         config=config.load(path, admissible=barriers.ADMISSIBLE),
         paths=paths,

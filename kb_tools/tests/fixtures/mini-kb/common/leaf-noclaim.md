@@ -1,9 +1,9 @@
+---
+kind: leaf
+no-claim: "navigation-only synthetic leaf — carries no claim-quality entries"
+---
 [↑ Mini-KB Common](index.md)
 
-<!-- kb-frontmatter
-kind: leaf
-no-claim: navigation-only synthetic leaf — carries no claim-quality entries
--->
 
 # No-Claim Synthetic Leaf
 

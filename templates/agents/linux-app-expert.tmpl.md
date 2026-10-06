@@ -60,6 +60,10 @@ library flags — not hardcoded paths.
   protocol support
 - Security: avoid setuid (use polkit/D-Bus), credentials via libsecret, validate input
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent=".desktop files, systemd units, CMakeLists.txt, meson.build, packaging manifests"!@
@@ -88,6 +92,8 @@ Wayland where relevant. Test with AppArmor/SELinux confined execution.
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

@@ -59,27 +59,12 @@ anywhere:
   beyond it — which renders a solidity the build-band ladder has no band
   for — is refused at both ends rather than only here.
 
-Beside those domains sits one constraint that is not a magnitude at all but a
-**representability** check, inherited from the reader's number grammar
-(:data:`_READER_NUMBER_RE`) rather than from any range: the token a number
-renders to must be a token that grammar matches. Python's shortest
-round-tripping repr — which is what ``render._format_score`` emits, deliberately
-(rounding an authored ``0.875`` would be a near-miss coercion) — switches to
-exponent notation below ``1e-4`` and above ``1e16``, and spells the two
-non-finite floats ``nan`` and ``inf``. None of those tokens is in the reader's
-grammar, and each fails in a different silent direction: ``rigor = 1e-05``
-renders ``- confidence: 1e-05``, whose *leading* token
-``kb_index_lib._NUMBER_RE.search`` (``:174``) reads as **1.0** — a different
-number, inside the domain; ``strength = nan`` renders a pair line
-``_STRENGTHENS_PAIR_RE`` (``:131``) does not match at all, so the edge is
-dropped entire. Every such value is inside its magnitude domain, so no domain
-check above can see it. Refusing it here is what puts the report at the value
-step naming the field, instead of at the readback step as a mismatch on an
-already-minted id — or, for an in-range strength the reader cannot hold, as a
-message telling the caller to report a renderer defect for a value they
-supplied: a check failing for the wrong reason is a failed check. The check is
-derived from the format contract, not from a magnitude this program authored,
-so the no-authored-bounds rule is untouched.
+Numbers are written by ``render._format_score`` as Python's shortest
+round-tripping repr — deliberately, since rounding an authored ``0.875`` would
+be a near-miss coercion — and read back by ``kb_schema.number_token``, whose
+grammar accepts every token that repr emits, exponent notation included. The
+two non-finite floats are not a separate case: ``nan`` and ``inf`` fall outside
+every per-field domain above and are refused there, naming the domain.
 
 **Dependency direction**: this module imports :mod:`kb_tools.kb_schema` and the
 standard library, and nothing else. In particular it does **not** import
@@ -121,18 +106,6 @@ PENDING_LITERAL = kb_schema.PENDING_LITERAL
 #: The inherited citation-excerpt bound (``verify_citations.EXCERPT_MAX_CHARS``).
 #: An excerpt is a minimal quotation, not a pasted section.
 EXCERPT_MAX_CHARS = 240
-
-#: The reader's number grammar — the only spelling of a number anything
-#: downstream of this API can read back. It is one sub-pattern with three
-#: owners, all in ``kb_index_lib``: ``_NUMBER_RE`` (``:174``), which reads a
-#: ``- confidence:`` / ``- quality:`` / ``- solidity:`` line; and the second
-#: group of ``_STRENGTHENS_PAIR_RE`` (``:131``) and ``_SUPPORTS_PAIR_RE``
-#: (``:137``), which read a pair line's score. A module-local copy for the
-#: dependency-direction reason, and pinned to all three owners *behaviourally*
-#: — by putting rendered
-#: tokens through the owners' own matchers — in ``test_kb_write_values.py``,
-#: which is stronger than comparing two pattern strings.
-_READER_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 #: The closed ``kind:`` vocabulary of a KB document. Structural position only —
 #: it does not encode claim-graph flavor. The reader's two guards are
@@ -240,6 +213,8 @@ class DependsOnValue:
     id: str
     context: str | None = None
     applicability: float | None = None
+    #: A ``demoted`` target's alone: one of :data:`kb_schema.DEMOTED_ORIGINS`.
+    origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -456,35 +431,17 @@ def _require_str(value: object, field: str, *, expected: str = "a string") -> st
 
 
 def _require_number(value: object, field: str, *, domain: str) -> float:
-    """Accept an int or a float the reader can read back; reject a bool.
+    """Accept an int or a float; reject a bool.
 
     A TOML integer is widened to a float. That is a lossless widening of the
     same number, not a coercion of one value into another: refusing ``rigor =
     1`` while accepting ``rigor = 1.0`` would be a byte-fidelity demand of
-    exactly the kind this program exists to remove.
-
-    The **representability** gate below is deliberately here rather than in each
-    of the three numeric checkers: this is the one funnel every authored number
-    in the vocabulary passes through, so a numeric field added later inherits it
-    without anyone remembering to. It runs *before* each caller's domain check,
-    because a value the reader cannot hold is not out of range — it is
-    unwritable, and saying "outside [0, 1]" of ``nan`` would be a second check
-    failing for the wrong reason. See the module docstring for what each
-    unreadable spelling does downstream.
+    exactly the kind this program exists to remove. Magnitude, ``nan`` and
+    ``inf`` are the caller's domain check.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise _Refused(field, f"expected a number in {domain}, got {_typename(value)}")
-    number = float(value)
-    token = f"{number}"
-    if _READER_NUMBER_RE.fullmatch(token) is None:
-        raise _Refused(
-            field,
-            f"is written to disk as {token!r}, which is not a number in the grammar every reader of these "
-            f"files uses ({_READER_NUMBER_RE.pattern}) — exponent notation, 'nan' and 'inf' are all outside "
-            f"it, and a value spelled that way is read back as a different number or dropped entirely. "
-            f"Supply it as a plain decimal",
-        )
-    return number
+    return float(value)
 
 
 def _require_array(value: object, field: str, *, of: str) -> list:
@@ -702,20 +659,28 @@ def check_path(value: object, field: str) -> str:
     return text
 
 
-def check_kind(value: object, field: str) -> str:
-    """A document's structural-position ``kind:``, from the closed set."""
-    text = _require_str(value, field)
-    if text not in DOCUMENT_KINDS:
-        raise _Refused(field, f"{text!r} is outside the closed kind vocabulary {DOCUMENT_KINDS}")
-    return text
+def _one_of(vocabulary: tuple[str, ...], *, what: str) -> Callable[[object, str], str]:
+    """A checker for a string drawn from a closed ``vocabulary``."""
+
+    def check(value: object, field: str) -> str:
+        text = _require_str(value, field)
+        if text not in vocabulary:
+            raise _Refused(field, f"{text!r} is outside the closed {what} vocabulary {vocabulary}")
+        return text
+
+    return check
 
 
-def check_status(value: object, field: str) -> str:
-    """An experiment block's ``status:``, from the closed set."""
-    text = _require_str(value, field)
-    if text not in EXPERIMENT_STATUSES:
-        raise _Refused(field, f"{text!r} is outside the closed status vocabulary {EXPERIMENT_STATUSES}")
-    return text
+#: A document's structural-position ``kind:``, from the closed set.
+check_kind = _one_of(DOCUMENT_KINDS, what="kind")
+#: An experiment block's ``status:``, from the closed set.
+check_status = _one_of(EXPERIMENT_STATUSES, what="status")
+#: A ``demoted`` edge's origin.
+check_origin = _one_of(kb_schema.DEMOTED_ORIGINS, what="origin")
+
+#: What ``resolve-demoted`` does with a cut edge: delete it, or restore it to ``depends-on``.
+RESOLVE_ACTIONS: tuple[str, ...] = ("remove", "restore")
+check_resolve_action = _one_of(RESOLVE_ACTIONS, what="action")
 
 
 def _id_checker(*kinds: str) -> Callable[[object, str], str]:
@@ -901,6 +866,18 @@ def check_references(value: object, field: str) -> tuple[DependsOnValue, ...]:
     )
 
 
+def check_demoted(value: object, field: str) -> tuple[DependsOnValue, ...]:
+    """The ``demoted`` list: ``{ id, origin }`` tables, claim ids only — the build's cut edges."""
+    items = _table_items(value, field, of="an { id, origin } table")
+    return tuple(
+        DependsOnValue(id=str(checked["id"]), origin=str(checked["origin"]))
+        for checked in (
+            _check_table(item, container=field, position=position, specs=_DEMOTED_FIELDS)
+            for position, item in enumerate(items, 1)
+        )
+    )
+
+
 def check_strengthens(value: object, field: str) -> tuple[StrengthensPair, ...]:
     """An experiment block's ``strengthens:`` pairs: ``{ id, strength }``."""
     items = _table_items(value, field, of="a { id, strength } table")
@@ -1028,6 +1005,11 @@ _REFERENCES_FIELDS: tuple[Field, ...] = (
     Field("context", check_prose),
 )
 
+_DEMOTED_FIELDS: tuple[Field, ...] = (
+    Field("id", check_claim_id, required=True),
+    Field("origin", check_origin, required=True),
+)
+
 _STRENGTHENS_FIELDS: tuple[Field, ...] = (
     Field("id", check_claim_id, required=True),
     Field("strength", check_strength, required=True),
@@ -1062,6 +1044,12 @@ _INSERT_COMMON: tuple[Field, ...] = (
     Field("rationale", check_prose, required=True),
     Field("depends-on", check_depends_on),
     Field("no-edge", check_prose),
+)
+
+_ADD_EDGES_COMMON: tuple[Field, ...] = (
+    Field("id", check_entry_id, required=True),
+    Field("depends-on", check_depends_on),
+    Field("references", check_references),
 )
 
 OP_FIELDS: Mapping[str, tuple[Field, ...]] = {
@@ -1126,19 +1114,24 @@ OP_FIELDS: Mapping[str, tuple[Field, ...]] = {
     ),
     # Two lists, both optional, because this op adds an entry's outgoing edges
     # and a caller may have only one class to add. Neither supplied is refused
-    # in `ops._plan_add_depends_on`, which is where the entry is resolved: a
+    # in `ops._plan_add_edges`, which is where the entry is resolved: a
     # cross-key condition is not something a per-key vocabulary can state.
-    "add-depends-on": (
-        Field("id", check_entry_id, required=True),
-        Field("depends-on", check_depends_on),
-        Field("references", check_references),
+    "add-depends-on": _ADD_EDGES_COMMON,
+    # The build's edge write: `add-depends-on`'s lists and the `demoted` list,
+    # one batch per source. No surface binds it, so only the build writes a cut.
+    "add-build-edges": _ADD_EDGES_COMMON + (Field("demoted", check_demoted),),
+    # Both ends of the cut edge — `id` the claim carrying it, `target` the claim
+    # it names — and what to do with it.
+    "resolve-demoted": (
+        Field("id", check_claim_id, required=True),
+        Field("target", check_claim_id, required=True),
+        Field("action", check_resolve_action, required=True),
     ),
     "set-frontmatter": (
         Field("document", check_path, required=True),
         Field("kind", check_kind, required=True),
         # A free-text stable-reference label the reader types generically, the
-        # same way it types `no-claim` (`kb_index_lib._frontmatter_value`): a
-        # quoted string, unquoted on the way in. No vocabulary, no length and
+        # same way it types `no-claim`: a string. No vocabulary, no length and
         # no shape is stated for it anywhere in the contract, so none is
         # enforced here — this program authors no bound of its own, and the only
         # constraint applied is the one the block's grammar already imposes on

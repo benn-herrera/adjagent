@@ -22,7 +22,6 @@ record that can be made to fail the way a killed process leaves one — the stag
 work done and no entry for it.
 """
 
-import json
 import logging
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -87,8 +86,10 @@ class Ledger:
         self.graph_inits = 0
         self._loses = list(loses)
 
-    def _advance(self, *, stage: str, note: str = "", no_inference: bool = False) -> ledger.Outcome:
-        del note, no_inference
+    def _advance(
+        self, *, stage: str, inputs: kb_pipeline.BuildInputs, note: str = "", no_inference: bool = False
+    ) -> ledger.Outcome:
+        del inputs, note, no_inference
         if stage in self._loses:
             self._loses.remove(stage)
             return ledger.Outcome(baton.EXIT_ENVIRONMENT, detail=(f"the boundary commit for {stage} did not land",))
@@ -119,7 +120,7 @@ class Ledger:
             graph_init=self._graph_init,
             document_graph=lambda *, sources, bibliographies, kb_root: ledger.Outcome(baton.EXIT_OK),
             claim_graph=self._claim_graph,
-            start_build=lambda *, charter: ledger.Outcome(baton.EXIT_OK),
+            start_build=lambda *, charter, inputs: ledger.Outcome(baton.EXIT_OK),
             advance_step=self._advance,
             show_status=lambda *, relay: ledger.Outcome(baton.EXIT_OK, stdout=_render(self.recorded)),
             refresh=lambda: ledger.Outcome(baton.EXIT_OK),
@@ -137,7 +138,7 @@ def _stage_of(flags: Sequence[str]) -> str | None:
 
 
 def _repo(tmp_path: Path) -> Path:
-    """A repo root carrying a runner file, with the run lock held.
+    """A repo root carrying a runner file.
 
     The runner file is there so ``spine-seed.runner-choice`` is never raised: the
     subject here is what a resume re-spends with no operator in the loop, and a
@@ -148,9 +149,6 @@ def _repo(tmp_path: Path) -> Path:
     (root / "justfile").write_text("default:\n", encoding="utf-8")
     assert kb_util.detected_runner(root) is not None
 
-    lock = runlog.repo_lock_path(root)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": 1, "run_id": "checkpoint-suite"}), encoding="utf-8")
     return root
 
 

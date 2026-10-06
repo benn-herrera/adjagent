@@ -6,18 +6,20 @@ line and the body hash:
     #
     # !GENERATED! from <tmpl> and <chunks> — edit those. DO NOT HAND EDIT ...
     # !TUNING! family=<file> seat=<tier|none> member=<member|none>
-              tier=<tier map> pin=<pin map> stock=<tiers|none> harness=<name>
+              tier=<tier map> [alias=<alias map>] stock=<tiers|none>
+              harness=<name>
     # !BODY-SHA256! <hex>
     #
 
 (one physical line for `!TUNING!`; wrapped here only to fit). `family=` and
-the two maps are the render's whole triple, both maps EFFECTIVE — post-merge —
-and serialized in TIERS order rather than sorted, so the claim is deterministic
-and reads highest-to-lowest. `seat=` and `member=` are this definition's OWN
-resolution: the tier its pin site declared and the family member its overlays
-resolved against, `none` for an output with no pin site. They are carried
-because the pin map is not injective (`low` and `lowest` both default to
-haiku), so a definition's tier cannot be recovered by inverting it — recording
+the maps are the render's whole tuning, both maps EFFECTIVE and serialized in
+TIERS order rather than sorted, so the claim is deterministic and reads
+highest-to-lowest. `alias=` is present only where the render was given an
+alias map. `seat=` and `member=` are this definition's OWN resolution: the
+tier its pin site declared and the family member its overlays resolved
+against, `none` for an output with no pin site. They are carried because a
+tier map need not be injective (the claude family staffs `low` and `lowest`
+with haiku), so a definition's tier cannot be recovered by inverting it — recording
 the answer is what keeps a definition's tuning readable from the definition
 alone. `member=` is redundant with tier[seat] in a well-formed banner, and that
 is the point: it is the cheap cross-check catching a banner written under one
@@ -56,6 +58,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
+from .frontmatter import is_fence_line
 from .model_tuning import Tuning, map_spec
 from .paths import SHARED_CHUNKS, TEMPLATE_SUFFIX, rel
 
@@ -71,14 +74,14 @@ BANNER_CLAIM = re.compile(rf"^# !GENERATED! from (\S+{re.escape(TEMPLATE_SUFFIX)
 # bytes it covers — for either banner kind, since an !INSTALLED! banner in an
 # HTML comment closes with "-->" where the others close with "#".
 BODY_HASH_CLAIM = re.compile(r"^# !BODY-SHA256! ([0-9a-f]{64})\n(?:#|-->)\n", re.MULTILINE)
-# The banner's tuning claim: the whole triple this definition was rendered
+# The banner's tuning claim: the whole tuning this definition was rendered
 # under, plus its own seat and member, and the harness — optional on read. A MACHINE claim — read back and compared
 # field for field, so it is bracket-free, one token per field, and must stay
 # stable across versions or a definition rendered by an older build stops
-# reading. The run-report echo (report_tuning) is the display form and is
+# reading. The run-report echo (display_maps) is the display form and is
 # deliberately a separate serialization.
 TUNING_CLAIM = re.compile(
-    r"^# !TUNING! family=(\S+) seat=(\S+) member=(\S+) tier=(\S+) pin=(\S+) stock=(\S+)(?: harness=(\S+))?$",
+    r"^# !TUNING! family=(\S+) seat=(\S+) member=(\S+) tier=(\S+)(?: alias=(\S+))? stock=(\S+)(?: harness=(\S+))?$",
     re.MULTILINE,
 )
 
@@ -89,9 +92,9 @@ def sha256_text(text: str) -> str:
 
 
 def tuning_line(tuning: Tuning, *, seat: str | None) -> str:
-    """The banner's !TUNING! line: the run's whole triple, plus this
+    """The banner's !TUNING! line: the run's whole tuning, plus this
     definition's own seat and the member it resolved against, then the
-    harness.
+    harness. `alias=` appears only where the alias map is set.
 
     `seat`/`member` are deliberately not spelled `tier` — that key is already
     spent on the tier MAP, and two different things named tier in one line is
@@ -99,10 +102,11 @@ def tuning_line(tuning: Tuning, *, seat: str | None) -> str:
     records `seat=none member=none`.
     """
     member = "none" if seat is None else tuning.tier_map[seat]
+    aliases = "" if tuning.alias_map is None else f" alias={map_spec(tuning.alias_map)}"
     return (
         f"# !TUNING! family={rel(tuning.family)}"
         f" seat={seat or 'none'} member={member}"
-        f" tier={map_spec(tuning.tier_map)} pin={map_spec(tuning.pin_map)}"
+        f" tier={map_spec(tuning.tier_map)}{aliases}"
         f" stock={','.join(tuning.stock) or 'none'}"
         f" harness={tuning.harness}"
     )
@@ -156,10 +160,10 @@ def body_untouched(text: str) -> bool:
 def frontmatter_of(text: str) -> str | None:
     """Return the YAML frontmatter block, or None if the file has none."""
     lines = text.split("\n")
-    if not lines or lines[0].strip() != "---":
+    if not is_fence_line(lines[0]):
         return None
     for i, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
+        if is_fence_line(line):
             return "\n".join(lines[1:i])
     return None
 
@@ -176,13 +180,14 @@ def banner_claim(text: str) -> str | None:
 class TuningClaim(NamedTuple):
     """A banner's !TUNING! line, parsed back. Strings throughout: it is a claim
     read off a file, compared against another claim, never re-resolved.
-    `harness` is None for a banner written before the field existed."""
+    `alias` is None for a render given no alias map, and `harness` None for
+    a banner written before the field existed."""
 
     family: str
     seat: str
     member: str
     tier: str
-    pin: str
+    alias: str | None
     stock: str
     harness: str | None = None
 

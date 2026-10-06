@@ -49,6 +49,10 @@ analysis. Application Verifier to catch handle leaks and heap corruption during 
 - Security: credentials via CredentialManager/DPAPI (never plaintext), UAC considerations
 - Diagnose: UAC, antivirus interference, bitness mismatches first
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent=".csproj, app manifests, WiX installer definitions, registry scripts"!@
@@ -77,6 +81,8 @@ or UI Automation. Test across privilege levels (standard user, UAC prompt, admin
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from kb_tools import install_location
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 _AGENTS_SURFACE = Path(__file__).resolve().parent.parent.parent
 
@@ -44,8 +45,8 @@ def _installed_env(root: Path, harness: str) -> dict[str, str]:
 
 
 def _consumer(root: Path, harness: str = ".claude") -> Path:
-    """A consuming repo carrying the include lines its installed toolchain wrote."""
-    (root / "kb-root").mkdir(parents=True)
+    """A consuming repo, its KB stamped and otherwise empty, carrying the include lines its installed toolchain wrote."""
+    write_stamped_kb(root / "kb-root")
     subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
     (root / harness).mkdir()
     (root / harness / "agents").symlink_to(_AGENTS_SURFACE, target_is_directory=True)

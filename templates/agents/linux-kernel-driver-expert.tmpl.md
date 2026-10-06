@@ -120,6 +120,10 @@ and scripts, never into a command line the reply asks someone to paste.
 - Security: validate everything crossing from userspace, zero what you copy back, and treat a
   capability check as part of the interface
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent="Kconfig, Kbuild and Makefile entries, device tree bindings and sources, UAPI headers, DKMS configuration"!@
@@ -149,6 +153,8 @@ to the kernel goes. @!integration-logging-signal sink="the kernel log"!@
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

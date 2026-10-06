@@ -255,16 +255,16 @@ with one of them is the defect.
     - Guards: refuse on a dirty worktree, and refuse a stage that is not recorded.
 
     **The stronger reason for that field is not rewind.** Control-flow state
-    lives in a directory whose entire contract is that it can be deleted: the
-    repository concurrency lock is anchored by `runlog.repo_lock_path` inside
-    the scratch directory — the one a routine restage wipes — so a restage
-    landing mid-run removes the lock and a second driver can start against the
-    same repository and ledger. That instance turned up in an unrelated
-    investigation rather than by looking for the class, and nothing in the
-    system can report how many more there are. The rule worth landing with the
-    field: **state that decides control flow either goes in the commit or is
-    declared.** Scratch that survives a reset is scratch that can lie about
-    what has already happened.
+    lives in a directory whose entire contract is that it can be deleted. The
+    run lock was once that case: anchored in the scratch directory a routine
+    restage wipes, so a restage landing mid-run removed it and a second driver
+    could start against the same repository and ledger. It now lives in the git
+    directory as a kernel lock (`kb_lock`), but the instance turned up in an
+    unrelated investigation rather than by looking for the class, and nothing
+    in the system can report how many more there are. The rule worth landing
+    with the field: **state that decides control flow either goes in the commit
+    or is declared.** Scratch that survives a reset is scratch that can lie
+    about what has already happened.
 
     Until it exists the manual path is two steps, and the second is the one
     that gets forgotten: `git reset --hard <stage-commit>^`, then remove that
@@ -326,8 +326,8 @@ with one of them is the defect.
     records already carry, not set ahead of them.
 
 14. **A cycle re-ask, if ring demotions of classified edges prove frequent.** Today every
-    `depends` edge on a cycle of the classified set is demoted to a reference with no question
-    asked (`classify.records`), and the report names each. Should those counts run high, one re-ask
+    `depends` edge on a cycle of the classified set is recorded as a `demoted` edge with no question
+    asked (`classify.cuts`), and the report names each. Should those counts run high, one re-ask
     putting the cycle in front of the seat would be the only ask showing it other answers, with a
     template of its own.
 
@@ -351,28 +351,13 @@ with one of them is the defect.
     no multi-label form. What would reopen it is a K the yes rate justifies whose per-pair cost the
     build cannot carry.
 
-18. **Edge provenance on the `depends-on` record itself.** The sheet's provenance words — cited,
-    inferred, cut — are recovered from the build records at the repository root
-    (`kb-build-unmarked.json`, `kb-build-classification.json`), so a KB without them draws every
-    `depends` as cited, and a `references` row cut from a reversed pair is not recognised. The
-    record carries `relation` and `context` only. Carrying provenance on the record is a metadata
-    format change; item 20 is the form it would take.
+18. **A `depends` edge's provenance on the `depends-on` record itself.** A `demoted` row carries
+    its `origin`; a `depends` row does not, so the sheet recovers cited-or-inferred from the
+    unmarked build record at the repository root (`kb-build-unmarked.yaml`), and a KB without it
+    draws every `depends` as cited. Carrying it on the record is a metadata format change, taking
+    the form `demoted`'s `origin` already has.
 
-19. **Metadata format versioning, semver, stamped in the entry point's frontmatter.** Today's
-    formats are `0.9.0`. `1.0.0` is one major bump: standard YAML frontmatter in place of the
-    comment block, YAML build records, and the index as a YAML stream in flow style, one record per
-    line so line tooling keeps working. The tool reads and writes the current version only; an
-    older stamp is migrated at load by an isolated module (stream in, stream out, no file I/O)
-    chaining N→N+1 transforms; a newer stamp refuses with "update the tool". In a shared repository
-    the oldest user updates. Reference implementation lands in kbase first; kb_tools adopts it.
-
-20. **The demoted relation.** A reference-class edge only the build's cycle breaking creates, from
-    a `depends`; outside the premise walk and the acyclicity check, as `references` is; no write op
-    creates one, one write op resolves it; `kb-verify` lists each as a finding; the sheet draws it
-    as the cut of a circle with its origin, cited or inferred. A minor bump riding with the stamp
-    of item 19. Reference implementation lands in kbase first; kb_tools adopts it.
-
-21. **Jointly established units.** A strongly connected component of the claim graph that a person
+19. **Jointly established units.** A strongly connected component of the claim graph that a person
     promotes into one node carrying the solidity its members share; the DAG constraint then holds
     over units. A later major bump. Reference implementation lands in kbase first; kb_tools
     adopts it.

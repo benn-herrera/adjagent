@@ -17,7 +17,7 @@ full install product — the two surfaces together with the shipped packages del
 by explicit mapping (below) — by **install**: one deployment shape, and no other:
 
 ```sh
-just install <path-to-consuming-project> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-map=SPEC] [--harness=NAME] [--verbose]
+just install <path-to-consuming-project> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME] [--verbose]
 ```
 
 The generator and install need Python 3.11 or later on the host; `kb_tools/SPEC.md` states the
@@ -37,11 +37,12 @@ source. A shipped package's contract states what it must do for someone changing
 consuming project receives the code and not the project it came from, so no installed prose may
 assume a reader who can open one. `README.md` is not in that class: it is the one such name a
 package writes for its consumer, and a package that grows one ships it. The optional tuning
-arguments — a model family, and overrides to either of the two maps that resolve a definition's tier
-(the tier map, which the family file declares; the pin map, which the generator supplies and no
-family owns) — render the generated definitions under that tuning (see Generation System, below).
+arguments — a model family, a replacement for the tier map it declares, and an alias map — render
+the generated definitions under that tuning (see Generation System, below).
 The optional harness argument names the supported harness whose values the generated definitions are
-rendered with (default `claude`); an unsupported name is refused before anything is written.
+rendered with, and whose frontmatter they carry: each field in the spelling that harness reads, and
+absent where that harness has no use for it (default `claude`); an unsupported name is refused
+before anything is written.
 
 An install's ROOT may be any directory prepared to receive the product. The sanctioned deployment
 shape has a consuming project gitignore a subdirectory for this repository's own clone and run
@@ -97,12 +98,14 @@ directory, named as the harness names it. A project's agents file is named `AGEN
 harness (Harness Agents File, below); only the operator's user-global agents file is named as the
 harness names it.
 
-Every file directly under `agents/` matching `*.md` and carrying frontmatter with dispatch keys
-(`name`, `description`, `model`) is a dispatchable agent definition — the rule holds without
-exception. What sits under `agents/` besides those definitions is generated too, and structurally
-outside the dispatch namespace: `mad/participant-contract.md` and the design referee's methodology
-topic set, `mad/design-topics/`. Each additionally carries a frontmatter block empty of dispatch
-keys, an independent second guard that keeps it undispatchable on its own terms.
+Every file directly under `agents/` matching `*.md` whose template authors frontmatter with dispatch
+keys (`name`, `description`, `model`) is a dispatchable agent definition — the rule holds without
+exception, and its rendered frontmatter spells those keys as the installing harness reads them. What
+sits under `agents/` besides those definitions is generated too, and structurally outside the
+dispatch namespace: `mad/participant-contract.md` and the design referee's methodology topic set,
+`mad/design-topics/`. Each additionally authors a frontmatter block empty of dispatch keys, an
+independent second guard that keeps it undispatchable on its own terms, rendered in the installing
+harness's spelling of that guard — under opencode, `disable: true`.
 
 The repository's fourth file class is a **shipped package**: plain code, never rendered and so never
 carrying a `!GENERATED!` banner in this repository, its tests beside it, installed by explicit
@@ -130,17 +133,25 @@ properties, independent of how they are implemented (see ARCHITECTURE.md):
   declared anchor points; it can never replace, suppress, or fork that text. A definition whose
   anchors the loaded family does not fill is byte-identical to its base render.
 - **Tier-keyed tuning, with recorded provenance.** A definition declares a tier at its pin site —
-  one of `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability — and two maps, each
-  covering all five tiers in every render, resolve it: the tier map names the family member whose
-  overrides the definition is tuned against, and the pin map supplies the model pin the definition
-  renders with. The two are independent, so what a definition is tuned for and what it dispatches on
-  may diverge; that is deliberate, because tuning and dispatch capacity are separately chosen.
-  Divergence is disclosed rather than prevented — every generated definition's banner records the
-  family file and both maps in force at its render, and the harness it was rendered for, so both
-  answers, and the harness, are readable from the definition alone. A model pin is not required and
-  a definition with no pin site declares no tier and stands outside this resolution; family-wide
-  tuning text still fills its anchors. A family file whose `[family.*.models.*]` tables name a
-  member no tier reaches — in neither its own `[tiers]` nor the effective tier map — fails to load.
+  one of `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability — and the family's tier
+  map, the one model source on every harness, resolves it: the tier's family member is both what
+  the definition is tuned against and the model it renders with. The tier map comes from the family
+  file, or whole from the tier-map argument. Either map argument covers all five tiers, naming each
+  or giving one value for all and naming any exceptions; one leaving a tier unnamed is refused, with
+  no fallback to the family file. An optional alias map, with no
+  default, renders an alias in place of each tier's member and changes nothing else, so what a
+  definition is tuned for and what it dispatches on may diverge; it exists for a harness that
+  resolves aliases through its own remapping, such as Claude Code's `ANTHROPIC_*` model variables,
+  and any harness may use it. A harness declares the shape a rendered model must have — a model
+  outside it fails the render before anything is written, naming the tier, the value, and the
+  argument or family file that supplied it — and the text `inherit` renders as; an empty rendering
+  leaves the definition without a model line. Every generated definition's banner records the family
+  file, the tier map, the alias map where one was given, and the harness it was rendered for, so
+  what it is tuned for and what it dispatches on are readable from the definition alone. A model pin
+  is not required and a definition with no pin site declares no tier and stands outside this
+  resolution; family-wide tuning text still fills its anchors. A family file whose
+  `[family.*.models.*]` tables name a member no tier reaches — in neither its own `[tiers]` nor the
+  effective tier map — fails to load.
 
 An install that requests a tuning other than the default (Deployed Surfaces, above) renders the
 generated definitions under it; Generated-Definition Integrity, below, holds for the tuning the
@@ -214,8 +225,8 @@ through the one that closes the frontmatter block yields the body entire, losing
 needing no knowledge of what the block holds. The property is guaranteed where a definition is
 built, not where it is read: a definition that would not extract fails at generation rather than
 reaching a guest model truncated. The extracted body does not carry the definition's `model:` pin,
-which stays in the frontmatter: a caller that uses the body without `--agent` carries the pin
-itself.
+which stays in the frontmatter where the harness render carries one: a caller that uses the body
+without `--agent` carries the pin itself.
 
 `agents/mad/participant-contract.md` is written specifically for this extraction: it sits outside
 the dispatch namespace, and its frontmatter is additionally empty of dispatch keys, so neither route

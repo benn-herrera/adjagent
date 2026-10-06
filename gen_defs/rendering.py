@@ -1,13 +1,27 @@
 """gen_defs — one template → its rendered outputs."""
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from functools import cache
 from pathlib import Path
 
 from .banners import banner, frontmatter_of, sha256_text
 from .chunks import ChunkSource
 from .discovery import COMMAND_SURFACE, GlobMap, output_key, selected, split_outputs, template_targets
 from .errors import InputError
+from .frontmatter import (
+    DISPATCH_FIELDS,
+    NAME_FIELD,
+    TOOLS_FIELD,
+    AuthoredField,
+    AuthoredLine,
+    EntrySlots,
+    FrontmatterRules,
+    assemble,
+    field_plan,
+    split_authored,
+    tool_slots,
+)
 from .markers import (
     CHUNK_ROUTE,
     DYNAMIC_NAMESPACE,
@@ -17,6 +31,7 @@ from .markers import (
     Expansion,
     Routes,
     TableSource,
+    Verbatim,
     assert_no_residual_markers,
     expand,
 )
@@ -68,7 +83,10 @@ def output_tier(probe_text: str) -> str | None:
 
 
 def routing_table(
-    chunks: dict[str, dict], dynamic: DynamicMap, overlays: OverlayMap | None, harness: DynamicMap | None = None
+    chunks: dict[str, dict],
+    dynamic: Mapping[str, str | Verbatim],
+    overlays: OverlayMap | None,
+    harness: DynamicMap | None = None,
 ) -> Routes:
     """A render's routes: bare markers to the chunk table, `dyn` to
     `dynamic`, `fam` to `overlays`, and `hrn` to `harness` when one is loaded."""
@@ -90,7 +108,10 @@ def render_output(
 ) -> tuple[str, str | None]:
     """Render one declared output; return (text, the tier it declared).
     The text of _expand_output's expansion."""
-    expansion, tier = _expand_output(body, binding, params, resolve)
+    name = params["name"]
+    expansion, tier, _ = _expand_output(
+        body, binding, params, resolve, frontmatter=binding.frontmatter, output=name, where=f"output '{name}'"
+    )
     return expansion.text, tier
 
 
@@ -99,9 +120,13 @@ def _expand_output(
     binding: TierBinding,
     params: dict[str, str],
     resolve: Callable[[str | None], OverlayMap | None],
-) -> tuple[Expansion, str | None]:
+    *,
+    frontmatter: FrontmatterRules | None,
+    output: str,
+    where: str,
+) -> tuple[Expansion, str | None, str | None]:
     """Expand one declared output; return (its expansion, the tier it
-    declared).
+    declared, the pin its authored frontmatter spells).
 
     Two passes, both over the raw body. Pass A renders under `binding.probe`,
     whose tier tokens carry a marker-free sentinel, so reading the pin out of
@@ -113,16 +138,77 @@ def _expand_output(
     Pass B is UNCONDITIONAL. Skipping it when the overlay set is unchanged — the
     optimization this replaced — would ship pass A's sentinel text into a
     system prompt wherever a tier token sits in a body or chunk. Pass A's
-    output is never written, never hashed, and never returned.
+    output is never written, never hashed, and never returned — only the pin
+    it reads, which is the authored spelling whatever the harness renders.
+
+    Pass A renders the authored frontmatter as written. Under `frontmatter`,
+    pass B renders it through the harness's entries (`frontmatter` module
+    docstring) instead, so a harness that elides or rewrites `model` can cost
+    an output neither its tier nor assert_tiered's view of a literal pin.
     """
     probe = expand(body, routing_table(binding.chunks, binding.probe, resolve(None), binding.harness), args=params)
     tier = output_tier(probe.text)
-    real = expand(body, routing_table(binding.chunks, binding.real, resolve(tier), binding.harness), args=params)
-    return real, tier
+    overlays = resolve(tier)
+    split = None if frontmatter is None else split_authored(body, where=where)
+    if split is None:
+        real = expand(body, routing_table(binding.chunks, binding.real, overlays, binding.harness), args=params)
+    else:
+        authored, rest = split
+        real = _expand_frontmatter_output(
+            authored, rest, binding, params, overlays, frontmatter=frontmatter, output=output, where=where
+        )
+    return real, tier, frontmatter_pin(probe.text)
 
 
-def assert_tiered(text: str, tier: str | None, *, path: Path, name: str) -> None:
-    """Refuse a rendered output whose pin site resolved no tier.
+def _expand_frontmatter_output(
+    authored: list[AuthoredLine],
+    rest: str,
+    binding: TierBinding,
+    params: dict[str, str],
+    overlays: OverlayMap | None,
+    *,
+    frontmatter: FrontmatterRules,
+    output: str,
+    where: str,
+) -> Expansion:
+    """Pass B of an output whose authored frontmatter renders through its
+    harness's entries: each emitted entry's text expanded under pass B's routes
+    with the five entry slots joined to the invocation parameters, then the
+    rest of the body as usual. An authored `name` must render the output's own
+    name, which is what lets a harness elide it."""
+    routes = routing_table(binding.chunks, binding.real, overlays, binding.harness)
+    fields = {line.key: line.value for line in authored if isinstance(line, AuthoredField)}
+
+    def expanded_field(field: str) -> str | None:
+        return expand(fields[field], routes, args=params).text if field in fields else None
+
+    name = expanded_field(NAME_FIELD)
+    if name is not None and name != output:
+        raise InputError(f"{where}: authors name '{name}', which is not its output name '{output}'")
+    tools = cache(lambda: tool_slots(expanded_field(TOOLS_FIELD), frontmatter, where=where))
+    undispatchable = not set(fields) & set(DISPATCH_FIELDS)
+    items: list[str | tuple[str, Expansion]] = []
+    for item in field_plan(authored, frontmatter, where=where):
+        if isinstance(item, str):
+            items.append(item)
+            continue
+        field, entry = item
+        slots = EntrySlots(
+            binding.real,
+            authored_value=fields.get(field, ""),
+            output=output,
+            undispatchable=undispatchable,
+            tools=tools,
+        )
+        items.append(
+            (field, expand(entry.text, routing_table(binding.chunks, slots, overlays, binding.harness), args=params))
+        )
+    return assemble(items, expand(rest, routes, args=params))
+
+
+def assert_tiered(pin: str | None, tier: str | None, *, path: Path, name: str) -> None:
+    """Refuse an output whose pin site resolved no tier; `pin` is the one its
+    authored frontmatter spells, read from the discovery render.
 
     A pin site declares its tier with one of the five tier tokens, and every
     pin site does: the alternative — a literal pin — renders exactly the bytes
@@ -133,14 +219,13 @@ def assert_tiered(text: str, tier: str | None, *, path: Path, name: str) -> None
     An output with NO pin site is untouched by this. It carries no `model:` key
     at all, which is a property of its type, not a failed resolution.
     """
-    pin = frontmatter_pin(text)
     if tier is not None or pin is None:
         return
     tokens = ", ".join(f"@!{DYNAMIC_NAMESPACE}.{TIER_TOKEN_PREFIX}{seat}!@" for seat in TIERS)
     raise InputError(
         f"{rel(path)}: output '{name}' pins 'model: {pin}' literally, which "
         f"resolves no tier — declare the tier with one of {tokens}, whose "
-        f"rendered text the pin map supplies"
+        f"rendered text the tier map supplies"
     )
 
 
@@ -171,9 +256,17 @@ def render_template(
     resolve = as_resolver(overlays)
     rendered = []
     for name, params in sorted(outputs.items()):
-        expansion, tier = _expand_output(body, binding, params, resolve)
+        expansion, tier, pin = _expand_output(
+            body,
+            binding,
+            params,
+            resolve,
+            frontmatter=None if surface == COMMAND_SURFACE else binding.frontmatter,
+            output=name,
+            where=f"{rel(path)}: output '{name}'",
+        )
         text = expansion.text
-        assert_tiered(text, tier, path=path, name=name)
+        assert_tiered(pin, tier, path=path, name=name)
         assert_no_residual_markers(expansion, path=path, name=name)
         if text.startswith("---\n"):
             # YAML comments: valid frontmatter, dropped by every parser, and

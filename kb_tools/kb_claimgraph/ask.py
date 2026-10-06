@@ -53,7 +53,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import MappingProxyType
 
-from .. import inference
+from .. import inference, kb_pipeline
 from ..kb_driver import prompt_templates
 from .graph import ClaimNode
 from .letters import CallStats, Kind, LetterItem, LetterQuestion, Reply
@@ -111,7 +111,7 @@ class ClassifyLetter(StrEnum):
 class UnmarkedLetter(StrEnum):
     """The unmarked ask's letters: does the source claim's text point at the candidate's result."""
 
-    POINTS = "A"
+    POINTS = kb_pipeline.UNMARKED_POINTS_LETTER
     DOES_NOT = "B"
 
 

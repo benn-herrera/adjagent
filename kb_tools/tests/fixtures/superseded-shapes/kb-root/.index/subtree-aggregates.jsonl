@@ -1,0 +1,6 @@
+{"node_path": "alpha/index.md", "node_kind": "index", "subtree_claims": ["clm-alp011"], "subtree_experiments": []}
+{"node_path": "beta/index.md", "node_kind": "index", "subtree_claims": ["clm-bet021"], "subtree_experiments": []}
+{"node_path": "core/index.md", "node_kind": "index", "subtree_claims": ["clm-drf024", "clm-drf025"], "subtree_experiments": []}
+{"node_path": "core/sub2.4/index.md", "node_kind": "index", "subtree_claims": ["clm-drf024", "clm-drf025"], "subtree_experiments": []}
+{"node_path": "entry-point.md", "node_kind": "entry-point", "subtree_claims": ["clm-alp011", "clm-bet021", "clm-drf024", "clm-drf025"], "subtree_experiments": []}
+{"node_path": "gamma/index.md", "node_kind": "index", "subtree_claims": [], "subtree_experiments": []}

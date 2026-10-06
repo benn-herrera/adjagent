@@ -74,6 +74,10 @@ rules.
 - Security: EncryptedSharedPreferences for sensitive data, Play Integrity for attestation, no
   secrets in code/assets
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent="AndroidManifest.xml, build.gradle, ProGuard rules, CMakeLists.txt"!@
@@ -103,6 +107,8 @@ OEM skins. @!integration-logging-signal sink="logcat"!@
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

@@ -7,17 +7,14 @@ field set is a contract: the terminal code, the barrier record path, and the
 
 import json
 import logging
-import os
-import subprocess
-import sys
-import threading
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from kb_tools import inference
+from kb_tools import inference, kb_lock
 from kb_tools.kb_driver import runlog
+from kb_tools.tests import _lock_holder
 
 EXIT_JSON_FIELDS = {"exit_code", "barrier_record", "unconsumed_decisions"}
 
@@ -224,135 +221,20 @@ def test_write_cadence_emits_one_json_object_per_line(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_lock_is_anchored_at_the_repo_root_not_the_run_directory(tmp_path: Path) -> None:
-    """Two ``--run-dir`` values under one repo must contend for one lock.
-
-    The lock used to be ``<run-dir-parent>/run.lock``, so this pair took two
-    different locks and both proceeded against one KB — the cross-process
-    guarantee enforced nothing, while exit 16's baton claimed it had.
-    """
+@pytest.mark.skipif(kb_lock.fcntl is None, reason="no advisory lock without fcntl (Windows)")
+def test_a_writer_holding_the_write_lock_past_the_wait_refuses_the_run_and_frees_the_run_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = tmp_path / "repo"
-    repo.mkdir()
-    assert runlog.repo_lock_path(repo) == repo / ".claude-temp" / "kb-driver.lock"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(kb_lock, "WRITE_LOCK_WAIT", 0.05)
 
-    with runlog.run_lock(runlog.repo_lock_path(repo), run_id="run-under-run-dir-a"):
+    with _lock_holder.held(repo):
         with pytest.raises(runlog.LockedError):
-            with runlog.run_lock(runlog.repo_lock_path(repo), run_id="run-under-run-dir-b"):
-                pytest.fail("a second run directory under the same repo must not acquire")
-
-
-def test_lock_is_held_for_the_run_and_released_after(tmp_path: Path) -> None:
-    path = runlog.repo_lock_path(tmp_path)
-    with runlog.run_lock(path, run_id="run-1") as lock:
-        held = json.loads(lock.read_text(encoding="utf-8"))
-        assert held["run_id"] == "run-1"
-        assert held["pid"] > 0
-    assert not lock.exists()
-
-
-def test_a_live_holder_refuses_the_lock(tmp_path: Path) -> None:
-    path = runlog.repo_lock_path(tmp_path)
-    with runlog.run_lock(path, run_id="run-1"):
-        with pytest.raises(runlog.LockedError) as excinfo:
-            with runlog.run_lock(path, run_id="run-2"):
-                pytest.fail("the second run must not acquire a held lock")
-    assert excinfo.value.pid is not None
-
-
-def test_a_stale_lock_is_taken_over(tmp_path: Path) -> None:
-    path = runlog.repo_lock_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    reaped = subprocess.Popen([sys.executable, "-c", "pass"])
-    reaped.wait()
-    path.write_text(json.dumps({"pid": reaped.pid, "run_id": "old"}), encoding="utf-8")
-
-    with runlog.run_lock(path, run_id="run-2") as lock:
-        assert json.loads(lock.read_text(encoding="utf-8"))["run_id"] == "run-2"
-
-
-def test_an_unreadable_lock_is_treated_as_stale(tmp_path: Path) -> None:
-    path = runlog.repo_lock_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_text("not json at all", encoding="utf-8")
-
-    with runlog.run_lock(path, run_id="run-2") as lock:
-        assert json.loads(lock.read_text(encoding="utf-8"))["run_id"] == "run-2"
-
-
-def test_the_lock_is_never_visible_without_its_payload(tmp_path: Path) -> None:
-    """The create-then-write shape left a zero-byte lock a rival read as stale.
-
-    The acquire is atomic from any other starter's point of view, so there is
-    no state in which the file exists and does not yet name its holder. This
-    drives it the only way that is observable from outside: the moment the path
-    exists, it parses.
-    """
-    path = runlog.repo_lock_path(tmp_path)
-    seen: list[str] = []
-
-    def watch() -> None:
-        while len(seen) < 200:
-            try:
-                seen.append(path.read_text(encoding="utf-8"))
-            except OSError:
-                pass
-
-    watcher = threading.Thread(target=watch, daemon=True)
-    watcher.start()
-    for round_number in range(200):
-        with runlog.run_lock(path, run_id=f"run-{round_number}"):
-            pass
-    watcher.join(timeout=5.0)
-
-    assert seen, "the watcher never caught the lock in existence"
-    for text in seen:
-        assert json.loads(text)["pid"] > 0
-
-
-def test_release_leaves_a_lock_this_run_no_longer_owns(tmp_path: Path) -> None:
-    """Release unlinked by path, so A's exit deleted B's live lock."""
-    path = runlog.repo_lock_path(tmp_path)
-
-    with runlog.run_lock(path, run_id="holder-a"):
-        # Exactly what run_lock's own stale-recovery path does to a lock it has
-        # judged dead: replace it. B is live and holds it now.
-        path.unlink()
-        path.write_text(json.dumps({"pid": os.getpid(), "run_id": "holder-b", "token": "b"}), encoding="utf-8")
-
-    assert path.is_file(), "A's release deleted B's live lock"
-    assert json.loads(path.read_text(encoding="utf-8"))["run_id"] == "holder-b"
-
-
-def test_a_stale_recovery_that_loses_the_race_refuses_rather_than_double_holding(tmp_path: Path) -> None:
-    """Two starters recovering one stale lock must not both end up holding it.
-
-    The window is between judging a lock stale and removing it. Here it is
-    driven deterministically: a live holder publishes inside that window, and
-    the recovering starter must find its judgement out of date.
-    """
-    path = runlog.repo_lock_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({"pid": 999_999, "run_id": "crashed"}), encoding="utf-8")
-
-    real_holder = runlog._holder
-
-    def holder_then_a_live_rival_publishes(candidate: Path) -> int | None:
-        verdict = real_holder(candidate)
-        if verdict is None:  # judged stale — a live starter takes it in the window
-            candidate.write_text(
-                json.dumps({"pid": os.getpid(), "run_id": "rival", "token": "rival"}), encoding="utf-8"
-            )
-        return verdict
-
-    runlog._holder = holder_then_a_live_rival_publishes
-    try:
-        with pytest.raises(runlog.LockedError):
-            with runlog.run_lock(path, run_id="recovering"):
-                pytest.fail("must not acquire over a lock that changed under the staleness judgement")
-    finally:
-        runlog._holder = real_holder
-
-    assert json.loads(path.read_text(encoding="utf-8"))["run_id"] == "rival"
+            with runlog.run_lock(repo, state_dir=tmp_path / "runs" / "run-1"):
+                pytest.fail("a run must not start while a writer holds the KB")
+        assert kb_lock.running_build(repo) is None
+    assert not kb_lock.run_lock_path(repo).exists()
 
 
 # ---------------------------------------------------------------------------

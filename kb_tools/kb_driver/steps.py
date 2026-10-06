@@ -97,13 +97,13 @@ AMBIGUOUS_STAGE_IDS = frozenset({"start"})
 # by name: banning only one leaves a brief free to spell the other.
 SEQUENCING_TOKENS: tuple[str, ...] = (LedgerOp.ADVANCE_STEP.value, LedgerOp.START_BUILD.value)
 
-# The three metadata marker openers `kb_write.render` alone composes.
+# The two metadata marker openers `kb_write.render` alone composes.
 # A brief that spells one is a freehand
 # instruction — the agent is being told to hand-write metadata the write API
 # exists to compose — and freehand sites are not a list a reviewer re-checks by
 # hand. They join the sequencing tokens in one map because the lint asks one
 # question of a template line: does it say something it may not say.
-METADATA_MARKER_TOKENS: tuple[str, ...] = ("<!-- id:", "<!-- kb-frontmatter", "<!-- claim-quality:")
+METADATA_MARKER_TOKENS: tuple[str, ...] = ("<!-- id:", "<!-- claim-quality:")
 
 # The write ops' one flag. A template that needs it names it through a slot the
 # caller's constant pool fills; spelling it by hand is the same freehand act
@@ -223,9 +223,9 @@ TABLE_STAGE_IDS: tuple[str, ...] = _through(_OVERVIEW_DRAFTED)
 
 STEPS: tuple[Step, ...] = (
     # --- pre-stage: before `start` is recorded -------------------------------
-    # `pre.lock` holds <repo>/<scratch>/kb-driver.lock — the REPOSITORY's
-    # lock, not the run directory's, so a second `--run-dir` cannot slip past
-    # it. A live pid there is exit 16.
+    # `pre.lock` holds <git dir>/kbase-build.lock — the REPOSITORY's lock, not
+    # the run directory's, so a second `--run-dir` cannot slip past it, and
+    # kbase's builds take the same one. A held lock there is exit 16.
     Step(id="pre.lock", stage=_START, unit=Unit.DRIVER_OP, writer=Writer.DRIVER),
     # Preflight's stdout is relayed verbatim; rc != 0 is exit 14. Nothing is
     # read back off it: its `runner-file` FACT is a statement to the operator,

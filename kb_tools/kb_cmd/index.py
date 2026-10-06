@@ -1,6 +1,6 @@
 """Runtime query interface over the KB derived index.
 
-Consumes the JSONL artifact set under the KB's ``.index/`` directory and
+Consumes the index streams under the KB's ``.index/`` directory and
 exposes the canonical question shapes documented in ``kb_tools/CONVENTIONS.md``
 §"Query surface" as pure in-memory lookups. Path resolution is shared with the
 build side via the ``kb_util`` module; this module uses stdlib only otherwise.
@@ -9,14 +9,13 @@ Construct an ``Index`` via ``load()``; all queries are dict lookups against
 pre-built inverse indices.
 """
 
-import json
-import re
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 # Route default index-dir resolution through the kb_util module.
-from kb_tools import kb_links, kb_schema, kb_util
+from kb_tools import kb_index_lib, kb_links, kb_load, kb_schema, kb_util, kb_yaml
 
 # The KB's navigation convention has one publisher. This is the query
 # side's use of it: a directory argument resolves to that directory's node file.
@@ -25,20 +24,15 @@ from kb_tools import kb_links, kb_schema, kb_util
 # support record carries no ``build_band`` of its own (the emitter writes
 # ``quality`` and ``solidity`` only), so the query side derives it through that
 # same function rather than restating the ladder.
-from kb_tools.kb_index_lib import INDEX_FILENAME, derive_build_band
+from kb_tools.kb_index_lib import INDEX_FILENAME, INDEX_FILES, derive_build_band
 
 # Repo-root-relative hint for where the index lives by default. A static
 # string, not a resolved path — importing this module must never trigger
 # repo-root discovery (resolution happens lazily in _default_index_dir).
 DEFAULT_INDEX_DIR_HINT = f"{kb_util.KB_DIRNAME}/{kb_util.INDEX_DIRNAME}"
 
-_REQUIRED_FILES = (
-    "claims.jsonl",
-    "depends-on.jsonl",
-    "strengthen-by.jsonl",
-    "cites.jsonl",
-    "subtree-aggregates.jsonl",
-)
+_log = logging.getLogger(__name__)
+
 
 # Canonical build-band enum, in descending-solidity order. The slugs are the
 # values written into each claim's ``build_band`` field by the derived-index
@@ -156,7 +150,7 @@ class ExternalWorkNode:
     strength: float | None
 
 
-# Every node kind ``claims.jsonl`` carries. The union is closed: it is
+# Every node kind ``claims.yaml`` carries. The union is closed: it is
 # ``kb_schema.NODE_KINDS``, which is what ``kb_index_lib.build_claims_records``
 # emits, with the framework pair sharing one shape.
 GraphNode = Claim | FrameworkNode | SupportNode | ExperimentNode | ExternalWorkNode
@@ -184,8 +178,13 @@ class DependsOnEdge:
       takes the pairing out of that ``min`` entirely, and either value pending
       leaves the source's solidity pending
       (``kb_index_lib.compute_solidity_full``).
+    * ``references`` — one claim's text naming another; no score, gates nothing.
+    * ``demoted`` — a ``depends`` edge the build's cycle breaking cut; carried
+      as ``references`` is, plus ``origin`` (one of
+      :data:`kb_schema.DEMOTED_ORIGINS`, or ``None`` where the row has none),
+      which only this class's rows hold.
 
-    The three edge-class fields are appended rather than interleaved into the
+    The edge-class fields are appended rather than interleaved into the
     emitter's field order, so existing positional construction is unaffected.
     """
 
@@ -197,6 +196,7 @@ class DependsOnEdge:
     relation: str = "depends"
     strength: float | None = None
     fraction: float | str | None = None
+    origin: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,29 +255,6 @@ def _default_index_dir() -> Path:
     ``FileNotFoundError`` — when no root is findable).
     """
     return kb_util.index_dir()
-
-
-# ---------------------------------------------------------------------------
-# JSONL parsing
-# ---------------------------------------------------------------------------
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    """Parse a JSONL file. Blank lines skipped; malformed lines raise ValueError."""
-    out: list[dict] = []
-    with path.open("r", encoding="utf-8") as fh:
-        for lineno, line in enumerate(fh, start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                obj = json.loads(stripped)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"{path}:{lineno}: malformed JSON: {exc.msg}") from exc
-            if not isinstance(obj, dict):
-                raise ValueError(f"{path}:{lineno}: expected JSON object, got {type(obj).__name__}")
-            out.append(obj)
-    return out
 
 
 def _claim_from_record(rec: dict) -> Claim:
@@ -362,7 +339,7 @@ _NODE_BUILDERS = kb_schema.kind_table(
 
 
 def _node_from_record(rec: dict) -> GraphNode:
-    """Dispatch a claims.jsonl record on its ``node_type`` discriminator.
+    """Dispatch a claims.yaml record on its ``node_type`` discriminator.
 
     Raises:
         ValueError: on a discriminator outside :data:`kb_schema.NODE_KINDS`. The
@@ -374,7 +351,7 @@ def _node_from_record(rec: dict) -> GraphNode:
     builder = _NODE_BUILDERS.get(node_type)
     if builder is None:
         raise ValueError(
-            f"claims.jsonl: unknown node_type {node_type!r} on record id {rec.get('id')!r}; "
+            f"claims.yaml: unknown node_type {node_type!r} on record id {rec.get('id')!r}; "
             f"known types: {', '.join(sorted(_NODE_BUILDERS))}"
         )
     return builder(rec)
@@ -390,6 +367,7 @@ def _depends_on_from_record(rec: dict) -> DependsOnEdge:
         relation=rec.get("relation", "depends"),
         strength=rec.get("strength"),
         fraction=rec.get("fraction"),
+        origin=rec.get("origin"),
     )
 
 
@@ -424,25 +402,34 @@ def _subtree_from_record(rec: dict) -> SubtreeAggregate:
 # ---------------------------------------------------------------------------
 
 
-# A leaf's `kind:` line inside the `<!-- kb-frontmatter ... -->` block. The
-# reverse-find scans leaf BODIES only (not index/entry-point containers or the
-# claim-quality.md register), so a referencing file must be a leaf.
-_KIND_RE = re.compile(r"^\s*kind:\s*(\S+)", re.MULTILINE)
-
-
 def _is_leaf_file(text: str) -> bool:
-    """True if ``text`` declares a leaf ``kind:`` in its frontmatter block.
+    """True if ``text``'s frontmatter declares ``kind: leaf``.
 
     Index/entry-point containers and the claim-quality.md register link to a
     leaf for navigation / derived footers; those are not body references and
     are excluded from the reverse-find.
     """
-    m = _KIND_RE.search(text)
-    return bool(m) and m.group(1) == "leaf"
+    fields = kb_index_lib.parse_frontmatter(text)
+    return fields is not None and fields.get("kind") == "leaf"
+
+
+#: Per relation, the end that rests on the other — the end whose solidity the
+#: other end enters — or None where neither does: a `references` or `demoted`
+#: edge records a mention and gates nothing.
+_RESTING_END: dict[str, str | None] = {
+    "depends": "source",
+    "strengthens": "target",
+    "supports": "target",
+    "rests-on": "source",
+    "references": None,
+    "demoted": None,
+}
+if set(_RESTING_END) != set(kb_schema.EDGE_RELATIONS):
+    raise ValueError(f"_RESTING_END is not keyed on exactly {kb_schema.EDGE_RELATIONS!r}")
 
 
 class Index:
-    """In-memory query interface over the .index/*.jsonl artifact set.
+    """In-memory query interface over the .index/*.yaml streams.
 
     Construct via :func:`load`. After construction, all queries are dict lookups
     against pre-built indices — microseconds at current KB scale.
@@ -456,7 +443,7 @@ class Index:
         cites: list[CitationEdge],
         subtree_aggregates: list[SubtreeAggregate],
     ) -> None:
-        # claims.jsonl is a type-tagged union; bucket it by the node-kind
+        # claims.yaml is a type-tagged union; bucket it by the node-kind
         # vocabulary itself, one bucket per `kb_schema.NODE_KINDS` entry present
         # whether or not this KB populates it. The buckets partition the file by
         # construction — every record lands in exactly one — which is what makes
@@ -493,14 +480,19 @@ class Index:
         # of any kind resolves.
         self._node_by_id: dict[str, GraphNode] = {node.id: node for node in self._every_node()}
 
-        # Forward / inverse dependency adjacency.
+        # Forward adjacency over every edge; the inverse over premises alone, so
+        # a node's dependents are the nodes resting on it.
         deps_fwd: dict[str, set[str]] = defaultdict(set)
         deps_rev: dict[str, set[str]] = defaultdict(set)
         deps_fwd_edges: dict[str, list[DependsOnEdge]] = defaultdict(list)
         for edge in self._depends_on:
             deps_fwd[edge.source].add(edge.target)
-            deps_rev[edge.target].add(edge.source)
             deps_fwd_edges[edge.source].append(edge)
+            resting = _RESTING_END.get(edge.relation)
+            if resting == "source":
+                deps_rev[edge.target].add(edge.source)
+            elif resting == "target":
+                deps_rev[edge.source].add(edge.target)
         self._deps_fwd: dict[str, list[str]] = {k: sorted(v) for k, v in deps_fwd.items()}
         self._deps_rev: dict[str, list[str]] = {k: sorted(v) for k, v in deps_rev.items()}
         self._deps_fwd_edges: dict[str, list[DependsOnEdge]] = {
@@ -556,10 +548,14 @@ class Index:
         return list(self._deps_fwd.get(node_id, ()))
 
     def dependents_of(self, node_id: str) -> list[str]:
-        """Claim ids that depend on ``node_id`` (inverse, deduplicated, sorted).
+        """Node ids resting on ``node_id`` (inverse, deduplicated, sorted).
 
-        Works for any node id, including framework ids — answers "which
-        claims break if this invariant / axiom changes?".
+        A node rests on the nodes whose solidity enters its own: the targets of
+        its ``depends`` and ``rests-on`` edges, and the experiments and supports
+        whose ``strengthens`` and ``supports`` edges reach it. A ``references``
+        or ``demoted`` edge makes neither end a dependent. Works for any node
+        id, including framework ids — answers "which claims break if this
+        invariant / axiom changes?".
         """
         return list(self._deps_rev.get(node_id, ()))
 
@@ -621,16 +617,18 @@ class Index:
             return []
         root = kb_root if kb_root is not None else kb_util.kb_root()
         origin_abs = (root / origin_rel).resolve()
+        kb_format = kb_load.open_kb(root)
 
         referencing: set[str] = set()
         for md_file in kb_links.iter_markdown_files(root):
             if md_file.resolve() == origin_abs:
                 continue  # never count a leaf as referencing its own claim
             try:
-                text = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+                text = kb_load.read_document(root, md_file.relative_to(root).as_posix(), kb_format=kb_format)
+                is_leaf = _is_leaf_file(text)
+            except (OSError, kb_load.FormatRefusal, kb_load.MigrationError, kb_yaml.KbYamlError):
                 continue
-            if not _is_leaf_file(text):
+            if not is_leaf:
                 continue  # leaf bodies only — skip index/entry-point/register
             body = kb_links.strip_code(text)
             for match in kb_links.LINK_RE.finditer(body):
@@ -701,7 +699,7 @@ class Index:
 
         A claim qualifies when its ``solidity`` is non-null and strictly below
         ``max_solidity`` (genuinely shaky) and at least ``min_dependents``
-        claims depend on it (something rests on it). Strengthening such a claim
+        nodes rest on it (:meth:`dependents_of`). Strengthening such a claim
         lifts the most downstream work.
 
         Pending claims (``solidity is None``) are unassessed, not weak, and are
@@ -739,7 +737,7 @@ class Index:
     def node(self, node_id: str) -> GraphNode | None:
         """Return the graph node for ``node_id`` regardless of node kind.
 
-        Resolves every id in ``claims.jsonl`` — every kind in
+        Resolves every id in ``claims.yaml`` — every kind in
         :data:`kb_schema.NODE_KINDS` — each as its own record type. Returns
         ``None`` if no node carries that id.
         """
@@ -772,7 +770,7 @@ class Index:
 
     @property
     def all_nodes(self) -> list[GraphNode]:
-        """Every graph node — every ``claims.jsonl`` kind, sorted by id.
+        """Every graph node — every ``claims.yaml`` kind, sorted by id.
 
         The union is taken over the whole node-kind vocabulary rather than over
         a list of buckets, which is the same set :attr:`stats` censuses: a
@@ -785,7 +783,7 @@ class Index:
 
     @property
     def all_depends_on_edges(self) -> list[DependsOnEdge]:
-        """Every ``depends-on.jsonl`` record, in the order the file carries them.
+        """Every ``depends-on.yaml`` record, in the order the file carries them.
 
         The whole-file counterpart to :attr:`all_nodes`. :meth:`depends_on_edges`
         answers "what does this claim lean on?" and so reaches only edges whose
@@ -805,12 +803,15 @@ class Index:
         The node counts are a **census**: one bucket per
         :data:`kb_schema.NODE_KINDS` entry, keyed by
         :func:`kb_schema.node_kind_plural`, in that vocabulary's own order. They
-        partition ``claims.jsonl``, so they sum to the number of records in that
-        file and nothing loaded is counted in no bucket.
+        partition ``claims.yaml``, so they sum to the number of records in that
+        file and nothing loaded is counted in no bucket. ``depends_on_edges``
+        counts every ``depends-on.yaml`` row, ``demoted_edges`` the cut ones
+        among them.
         """
         return {
             **{kb_schema.node_kind_plural(kind): len(bucket) for kind, bucket in self._by_kind.items()},
             "depends_on_edges": len(self._depends_on),
+            "demoted_edges": sum(1 for edge in self._depends_on if edge.relation == "demoted"),
             "strengthen_by_items": len(self._strengthen_by),
             "citation_edges": len(self._cites),
             "subtree_aggregates": len(self._subtree_aggregates),
@@ -838,29 +839,48 @@ class Index:
 
 
 def load(path: Path | str | None = None) -> Index:
-    """Load the index from a directory of ``.index/*.jsonl`` files.
+    """Load the index from a KB's ``.index/`` directory, through ``kb_load``.
 
-    If ``path`` is None, the directory is auto-resolved via
-    :func:`_default_index_dir` (walks up from the cwd to find the repo root).
+    ``path`` is the ``.index`` directory; the KB root is its parent, and that
+    KB's format is read first. An older KB is read converted and nothing is
+    written. A line that is not a record is dropped with a warning. If ``path``
+    is None, the directory is auto-resolved via :func:`_default_index_dir`
+    (walks up from the cwd to find the repo root).
 
     Raises:
-        FileNotFoundError: if any required JSONL file is missing.
-        ValueError: if any JSONL line fails to parse.
+        FileNotFoundError: if any stream in ``kb_index_lib.INDEX_FILES`` is missing.
+        ValueError: if ``path`` is not a directory named ``.index``.
+        kb_load.FormatRefusal: if the KB is newer than this toolchain, has no entry point, or holds a
+            stream that is not UTF-8.
     """
     base = Path(path) if path is not None else _default_index_dir()
-    missing = [name for name in _REQUIRED_FILES if not (base / name).is_file()]
+    if base.name != kb_util.INDEX_DIRNAME:
+        raise ValueError(f"{base} is not a KB's {kb_util.INDEX_DIRNAME}/ directory")
+    kb = base.parent
+    kb_format = kb_load.open_kb(kb)
+    streams: dict[str, list[dict]] = {}
+    missing: list[str] = []
+    for name in INDEX_FILES:
+        try:
+            records, problems = kb_load.read_index(kb, name, kb_format=kb_format)
+        except FileNotFoundError:
+            missing.append(name)
+            continue
+        for problem in problems:
+            _log.warning("%s index line %d dropped: %s", name, problem.line, problem.detail)
+        streams[name] = records
     if missing:
         bullet_list = "\n".join(f"  - {name}" for name in missing)
         raise FileNotFoundError(
-            f"Index files missing under {base}:\n{bullet_list}\n"
+            f"Index streams missing under {base}:\n{bullet_list}\n"
             f"Run `{kb_util.refresh_cmd()}` from the repository root to regenerate."
         )
 
-    nodes = [_node_from_record(r) for r in _read_jsonl(base / "claims.jsonl")]
-    depends_on = [_depends_on_from_record(r) for r in _read_jsonl(base / "depends-on.jsonl")]
-    strengthen_by = [_strengthen_by_from_record(r) for r in _read_jsonl(base / "strengthen-by.jsonl")]
-    cites = [_citation_from_record(r) for r in _read_jsonl(base / "cites.jsonl")]
-    subtree_aggregates = [_subtree_from_record(r) for r in _read_jsonl(base / "subtree-aggregates.jsonl")]
+    nodes = [_node_from_record(r) for r in streams["claims"]]
+    depends_on = [_depends_on_from_record(r) for r in streams["depends-on"]]
+    strengthen_by = [_strengthen_by_from_record(r) for r in streams["strengthen-by"]]
+    cites = [_citation_from_record(r) for r in streams["cites"]]
+    subtree_aggregates = [_subtree_from_record(r) for r in streams["subtree-aggregates"]]
 
     return Index(
         nodes=nodes,

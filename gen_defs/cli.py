@@ -5,12 +5,16 @@ Flags common to generate and install:
                             family name resolved against templates/family/
                             (default: claude), or a path to a family file.
                             Bare MODEL names are not valid values.
-    --model-tier-map SPEC   override the tier -> family member map the family
-                            declares: comma-separated tier=member pairs, or
-                            all=member. Named tiers mask only themselves.
-    --model-pin-map SPEC    override the tier -> rendered pin map: same syntax,
-                            over model_tuning.DEFAULT_PIN_MAP. Pin text is
-                            always in the claude model namespace.
+    --model-tier-map SPEC   replace the tier -> family member map the family
+                            declares: tier=member for every tier,
+                            comma-separated, or all=member. The member is
+                            the tier's rendered model text.
+    --model-pin-tier-alias-map SPEC
+                            render an alias in place of each tier's member:
+                            the same syntax, tier=alias. Optional, with no
+                            default; it changes the rendered model text only,
+                            never tuning. For a harness that resolves aliases
+                            itself (Claude Code's ANTHROPIC_* remapping).
     --harness NAME          the harness whose templates/harness/<NAME>.toml
                             fills @!hrn.<key>!@ markers (default: claude).
     --verbose, -v           list every file, not just the exceptions.
@@ -56,7 +60,6 @@ from . import __version__
 from .agents_file import (
     agents_file_name,
     install_agents_file,
-    load_harness,
     probe_dirty_templates,
     render_agents_file_text,
     write_agents_file_renders,
@@ -65,6 +68,7 @@ from .chunks import load_chunks
 from .discovery import GlobMap, output_keys, report_selection, split_globs, surface_map, templates, validate_selection
 from .errors import InputError
 from .generation import generate
+from .harness import load_harness
 from .installation import install
 from .markers import FAMILY_NAMESPACE, collect_anchors
 from .model_tuning import (
@@ -72,7 +76,7 @@ from .model_tuning import (
     DEFAULT_HARNESS,
     effective_tuning,
     load_family,
-    report_divergence,
+    report_aliases,
     report_overlays,
     report_tuned,
     report_tuning,
@@ -118,19 +122,22 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--model-tier-map",
         metavar="SPEC",
-        help="override the tier -> family member map the family declares: "
-        "comma-separated tier=member pairs, or all=member "
-        "(--model-tier-map medium=haiku). Named tiers mask only themselves; "
-        "the rest keep the family's own [tiers] value. Drives which member's "
-        "overlay overrides render, never the rendered pin text",
+        help="replace the tier -> family member map the family declares: "
+        "tier=member for every tier (highest, high, medium, low, lowest), "
+        "comma-separated, or all=member, optionally followed by named tiers "
+        "(--model-tier-map all=haiku,high=opus). A map naming only some tiers "
+        "is refused. Drives which member's overlay overrides render, and the "
+        "member is the tier's rendered model text unless the alias map is set",
     )
     common.add_argument(
-        "--model-pin-map",
+        "--model-pin-tier-alias-map",
         metavar="SPEC",
-        help="override the tier -> rendered pin map: the same syntax, over "
-        "this tool's DEFAULT_PIN_MAP (--model-pin-map all=haiku). Pin text is "
-        "always in the claude model namespace, and is the sole source of the "
-        "five @!dyn.tier-*!@ tokens' text",
+        help="render an alias in place of each tier's member: the same syntax, "
+        "tier=alias (--model-pin-tier-alias-map all=sonnet). Optional, with "
+        "no default; changes the rendered model text only, never tuning. For a "
+        "harness that resolves aliases itself, such as Claude Code remapping "
+        "aliases through its ANTHROPIC_* model variables. Every rendered value "
+        "must match the shape the harness's [harness.model] pattern declares",
     )
     common.add_argument(
         "--harness",
@@ -308,12 +315,15 @@ def main() -> None:
         # absent — so there is no untuned path left to branch on.
         family_path = resolve_family(args.family)
         family = load_family(family_path)
+        loaded = load_harness(args.harness)
         tuning = effective_tuning(
             family_path,
             family,
             tier_spec=args.model_tier_map,
-            pin_spec=args.model_pin_map,
+            alias_spec=args.model_pin_tier_alias_map,
             harness=args.harness,
+            model_pattern=loaded.model.pattern,
+            model_shape=loaded.model.shape,
         )
         # Anchors are collected across ALL templates and chunks, not just the
         # --surfaces selection, so a filtered render never miscalls a real
@@ -323,11 +333,17 @@ def main() -> None:
             family.entries, collect_anchors(chunks, templates(surface_map(args.root)), namespace=FAMILY_NAMESPACE)
         )
         validate_family_members(family, tuning.tier_map, family_path)
-        binding = tier_binding(chunks, pin_map=tuning.pin_map, harness=load_harness(tuning.harness))
+        binding = tier_binding(
+            chunks,
+            models=tuning.models,
+            harness=loaded.values,
+            frontmatter=loaded.frontmatter,
+            inherit_text=loaded.model.inherit_text,
+        )
         overlays = tier_resolver(family.entries, tuning.tier_map)
 
         report_tuning(tuning)
-        report_divergence(tuning)
+        report_aliases(tuning)
         report_tuned(tuning)
 
         if args.verb == "install":

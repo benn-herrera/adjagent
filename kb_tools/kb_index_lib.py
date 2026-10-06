@@ -1,26 +1,26 @@
 """Foundation library for the Knowledge Base derived-index pipeline.
 
-Pure-function parsing and record building for the ``<kb-root>/.index/*.jsonl``
-files: the record shapes and field orders are the emitters below, which are
-their own definition rather than a second view of one. This module is the
-canonical parser for
+Pure-function parsing and record building for the ``<kb-root>/.index/*.yaml``
+streams: the record shapes and field orders are the emitters below, which are
+their own definition rather than a second view of one, and :data:`INDEX_FILES`
+is the streams' inventory. This module is the canonical parser for
 KB frontmatter, claim-quality entries, and leaf metadata; downstream tools
 (``refresh_kb_metadata``, ``verify_kb_metadata``) will be unified onto it in
 later phases. The library is side-effect-free with respect to KB content; the
-only file I/O it performs is reading canonical sources via pathlib and writing
-JSONL through ``write_jsonl`` for callers that own a destination path.
+only file I/O it performs is reading canonical sources via pathlib. A stream's
+text is :func:`serialize_records`; where it lives, and reading it back, are
+``kb_load``'s.
 
 Stdlib only. No timestamps, no environment-dependent paths in emitted records.
 Same canonical input -> byte-identical output.
 """
 
-import json
 import posixpath
 import re
 import sys
 from collections import Counter
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path, PurePosixPath
 from typing import TextIO
@@ -28,11 +28,11 @@ from typing import TextIO
 # Route all KB path construction through the kb_util module (the single source
 # of path truth). Root discovery is lazy — nothing here resolves a repo root
 # at import time.
-from kb_tools import kb_links, kb_schema, kb_util
+from kb_tools import kb_links, kb_schema, kb_util, kb_yaml
 
 # The on-disk literal that marks a value as unassessed throughout the KB
 # (quality / solidity / support on-point fraction). Used both as the authored
-# token in frontmatter and as the materialized JSONL value for a pending
+# token in frontmatter and as the materialized index value for a pending
 # support fraction. Defined in kb_schema, which is where the write API reads it
 # from too — one object rather than two spellings of the same intent.
 PENDING_LITERAL = kb_schema.PENDING_LITERAL
@@ -100,11 +100,11 @@ WORKS_REGISTER = "claim-quality.md"
 # design-time reachability, the query side's directory-to-node resolution, and
 # this package's verifier — lets a convention change miss one and leave
 # design-time and post-build reachability disagreeing about the same tree.
-ENTRY_POINT_FILENAME = "entry-point.md"
+ENTRY_POINT_FILENAME = kb_schema.ENTRY_POINT_FILENAME
 INDEX_FILENAME = "index.md"
 UPLINK_MARKER = "↑"
 
-EXCLUDE_DIRS = {"session", ".index", "tools"}
+EXCLUDE_DIRS = {"session", kb_schema.INDEX_DIRNAME, "tools"}
 EXCLUDE_NAMES = {
     "claim-quality.md",
     "claim-quality-closure-roadmap.md",
@@ -142,19 +142,18 @@ _CANONICAL_NODE_ID_RE = re.compile(rf"<!--\s*id:\s*({kb_schema.id_body()}|{kb_sc
 _EXP_ID_RE = re.compile(rf"\b({kb_schema.id_body('exp')})\b")
 # Support-ID pattern: `sup-` prefix plus the hash body.
 _SUP_ID_RE = re.compile(rf"\b({kb_schema.id_body('sup')})\b")
-# The optional bullet marker both pair patterns below lead with, and the reason
+# The optional bullet marker the pair pattern below leads with, and the reason
 # it is spelled `(?:-\s*)?` rather than `-?\s*`.
 #
 # `^\s*-?\s*` is two whitespace runs separated by an optional atom: on a line of
 # n leading spaces with no `-` in it, the first run can end at any of n
 # positions and the second can then consume any of the rest, so the match fails
-# n²/2 times before it fails once. Both patterns are run per line by
-# `parse_support_leaf`, `parse_experiment_leaf` and
-# `parse_register_staged_supports` — the last of which every census and every
-# write-API `_prove` call reaches — so one long whitespace line in one KB file
-# was a hang with no cycle in it: 40 000 spaces cost 5.3 s in a single
-# `.match()`, and a `set-on-point-fraction` over an entry carrying that one line
-# took 10.3 s and exited 0.
+# n²/2 times before it fails once. The pattern is run per line by
+# `parse_register_staged_supports`, which every census and every write-API
+# `_prove` call reaches, so one long whitespace line in one KB file was a hang
+# with no cycle in it: 40 000 spaces cost 5.3 s in a single `.match()`, and a
+# `set-on-point-fraction` over an entry carrying that one line took 10.3 s and
+# exited 0.
 #
 # Binding `\s*` inside the optional group makes it reachable only after a
 # literal `-`, which leaves exactly one whitespace run per position and one
@@ -163,41 +162,17 @@ _SUP_ID_RE = re.compile(rf"\b({kb_schema.id_body('sup')})\b")
 # of pair-line spellings through both spellings of the pattern, and a timing
 # bound stands over the adversarial input.
 _PAIR_BULLET = r"^\s*(?:-\s*)?"
-# A `strengthens:` block pair line: `clm-<id>: <strength>` (strength a float
-# in [0,1]). Indented under the `strengthens:` frontmatter key.
-_STRENGTHENS_PAIR_RE = re.compile(_PAIR_BULLET + rf"({kb_schema.id_body('clm')})\s*:\s*(-?\d+(?:\.\d+)?)\s*$")
-# A `supports:` block pair line: `clm-<id>: <fraction>`, where <fraction> is
-# either an on-point fraction float in [0,1] OR the literal `*pending*` (the
-# fraction is an intended-but-unassessed edge — see PENDING_FRACTION). Indented
-# under the `supports:` frontmatter key. Group 2 captures the raw fraction
-# token; the loop in parse_support_leaf converts and validates it.
-_SUPPORTS_PAIR_RE = re.compile(_PAIR_BULLET + rf"({kb_schema.id_body('clm')})\s*:\s*(-?\d+(?:\.\d+)?|\*pending\*)\s*$")
-# Leaf-frontmatter id DECLARATIONS — the keys that ORIGINATE a node body in the
-# container that carries them. Each key may repeat (a container hosts any number
-# of experiment / support bodies), so these are scanned over the whole
-# frontmatter block rather than read out of the flat parse_frontmatter dict,
-# whose later duplicate keys overwrite earlier ones.
-_LEAF_DECL_RES = (
-    re.compile(rf"^\s*-?\s*exp-id:\s*({kb_schema.id_body('exp')})\s*$", re.MULTILINE),
-    re.compile(rf"^\s*-?\s*sup-id:\s*({kb_schema.id_body('sup')})\s*$", re.MULTILINE),
+# A staged `supports:` pair line in a `sup-` register entry: `clm-<id>:
+# <fraction>`, where <fraction> is either an on-point fraction float in [0,1] OR
+# the literal `*pending*` (the fraction is an intended-but-unassessed edge — see
+# PENDING_FRACTION). Group 2 captures the raw fraction token.
+_SUPPORTS_PAIR_RE = re.compile(
+    _PAIR_BULLET + rf"({kb_schema.id_body('clm')})\s*:\s*({kb_schema.NUMBER_TOKEN_RE}|\*pending\*)\s*$"
 )
 # Leaf-frontmatter id CITATIONS — the list-valued keys naming nodes the leaf
 # hosts (`claims:`; for a clm- id the citing leaf IS the hosting leaf, per
 # build_leaf_references) or merely references (`experiments:`).
 _LEAF_CITE_KEYS = ("claims", "experiments")
-# The kb-frontmatter block. The closing `-->` may carry leading whitespace:
-# without that, an authored block indented under a list item fails the column-0
-# close, so the non-greedy body runs on to the NEXT `-->` in the file —
-# swallowing the document body into the frontmatter, and deleting it outright at
-# the `.sub("")` site below. Public because `refresh_kb_metadata` and
-# `verify_kb_metadata` bind it rather than re-compiling their own copies; three
-# copies of a block delimiter is three chances for the emitter and the checker
-# to disagree about where a document starts.
-FRONTMATTER_RE = re.compile(r"<!--\s*kb-frontmatter\s*\n(.*?)\n[ \t]*-->", re.DOTALL)
-# The opener alone. Used to find where a block COULD start without paying for
-# the lazy body scan at each candidate — see :func:`find_frontmatter`, which is
-# how every reader in this module reaches the pattern above.
-_FRONTMATTER_OPEN_RE = re.compile(r"<!--\s*kb-frontmatter\s*\n")
 _TIER2_INLINE_RE = re.compile(r"<!--\s*claim-quality:\s*(.*?)\s*-->", re.DOTALL)
 
 # Framework-node parsing (from the KB's framework source).
@@ -217,7 +192,6 @@ _WORK_TOKEN_RE = re.compile(rf"(?<![\w-])({kb_schema.WORK_ID_RE})")
 
 # Quality-field parsing.
 # `confidence: 0.X` and `solidity: 0.X (build-status phrase) [optional arithmetic]`
-_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 # Captures a parenthetical group that does not start with `=` (which marks the
 # arithmetic annotation). Build-status is the first parenthetical after the
 # numeric value.
@@ -246,6 +220,7 @@ QUALITY_FIELD_KEYS: tuple[str, ...] = (
     "rationale",
     "depends-on",
     "references",
+    "demoted",
     "strengthen-by",
 )
 
@@ -258,6 +233,7 @@ def _field_break(excluding: str) -> re.Pattern[str]:
 _BREAK_AFTER_RATIONALE = _field_break("rationale")
 _BREAK_AFTER_DEPENDS_ON = _field_break("depends-on")
 _BREAK_AFTER_REFERENCES = _field_break("references")
+_BREAK_AFTER_DEMOTED = _field_break("demoted")
 _BREAK_AFTER_STRENGTHEN_BY = _field_break("strengthen-by")
 
 
@@ -296,6 +272,12 @@ class DependsOnEdge:
       :attr:`ClaimEntry.references` rather than on ``depends_on`` so that
       :func:`compute_solidity_full`, which reads only the latter, cannot see
       one.
+    * ``"demoted"`` (non-gating, no branch): a ``depends`` edge between two
+      claims that the build's cycle breaking cut. It is a ``references`` edge
+      in every field and in every consumer's eyes, carried on
+      :attr:`ClaimEntry.demoted`, plus ``origin`` — ``cited`` or ``inferred``
+      as its bullet's ``(origin …)`` annotation names, ``None`` where it names
+      none. ``origin`` is ``None`` on every other relation.
 
     ``target_kind`` discriminates the target node type: ``"claim"`` for an
     edge to another claim, ``"invariant"`` / ``"axiom"`` for an edge to a
@@ -306,7 +288,7 @@ class DependsOnEdge:
 
     source: str
     target: str
-    relation: str  # "depends" | "strengthens" | "supports" | "rests-on" | "references"
+    relation: str  # one of kb_schema.EDGE_RELATIONS
     target_kind: str
     target_solidity_recorded: float | None
     strength: float | None
@@ -315,6 +297,7 @@ class DependsOnEdge:
     # PENDING_FRACTION when the fraction is authored but unassessed. None for
     # non-supports edge classes (a depends edge carries no fraction at all).
     fraction: float | _PendingFraction | None = None
+    origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -457,6 +440,9 @@ class ClaimEntry:
     # reference gates nothing" structural rather than a branch each consumer
     # remembers to write.
     references: tuple[DependsOnEdge, ...] = ()
+    # The ``- demoted:`` bullets: depends edges the build's cycle breaking cut.
+    # Off ``depends_on`` for the reason ``references`` is.
+    demoted: tuple[DependsOnEdge, ...] = ()
     # The on-disk arithmetic trace (``[= min(...)]`` / ``[= max(...)]``),
     # verbatim and including its leading space. A derived field like the value
     # and the phrase beside it, and gated with them.
@@ -518,163 +504,69 @@ class KbState:
 # ---------------------------------------------------------------------------
 
 
-# A YAML-block list item inside a frontmatter body: `  - clm-aaaaaa`.
-_FM_BULLET_RE = re.compile(r"^\s*-\s+(.*)$")
+@dataclass(frozen=True)
+class FrontmatterBlock:
+    """A document's frontmatter block.
 
-
-def _frontmatter_value(value: str):
-    """Type one already-joined frontmatter value."""
-    if value.startswith("[") and value.endswith("]"):
-        # Id-list values hold clm- ids (e.g. claims:, subtree-claims:) or
-        # exp- ids (experiments:, subtree-experiments:); accept both.
-        return _ANY_ID_RE.findall(value)
-    if value.startswith('"') and value.endswith('"'):
-        return value[1:-1]
-    if value in ("true", "false"):
-        return value == "true"
-    return value
-
-
-def _frontmatter_fields(body: str) -> dict:
-    """Parse a kb-frontmatter block body into typed fields.
-
-    THE frontmatter reader for the toolchain: ``parse_frontmatter`` here, the
-    hosting-leaf citation scan, ``refresh_kb_metadata`` and
-    ``verify_kb_metadata`` all reach this function, so a field means the same
-    thing to each of them. Four copies of a field parser is four chances for
-    the emitter and the checker to disagree about what a leaf declares.
-
-    A field's value may span more than one physical line in two authored
-    shapes, both of which a single-line parser mangles silently:
-
-    * **wrapped** — ``claims: [clm-aaaaaa,`` / ``          clm-bbbbbb]``. The
-      opening line does not end in ``]``, so the value falls through to the
-      string branch, and every consumer that iterates it (``tuple(fm["claims"])``
-      at the leaf-index builder, the subtree union, the orphan-ref check) gets
-      one "claim id" per CHARACTER.
-    * **YAML-block** — ``claims:`` / ``  - clm-aaaaaa`` / ``  - clm-bbbbbb``.
-      The value is empty and the bullet lines carry no colon, so they are
-      skipped entirely and the field reads as the empty list — a leaf's whole
-      claim set dropped with no diagnostic anywhere.
-
-    Continuation lines are joined into the logical value before it is typed, so
-    all three shapes yield the same ``list[str]``.
+    ``text[start:end]`` is what removing the block removes: it opens the text
+    and runs through the line break after its closing fence, so ``end`` is where
+    the document's body, up-link first, begins. ``body`` is the text between the
+    fences.
     """
-    fields: dict = {}
-    lines = body.splitlines()
-    i = 0
-    while i < len(lines):
-        line = lines[i].rstrip()
-        if not line or ":" not in line:
-            i += 1
-            continue
-        end = frontmatter_field_end(lines, i)
-        key, _, value = line.partition(":")
-        fields[key.strip()] = _frontmatter_value(_join_frontmatter_value(lines, i, end))
-        i = end
-    return fields
+
+    start: int
+    end: int
+    body: str
 
 
-def _join_frontmatter_value(lines: list[str], start: int, end: int) -> str:
-    """Join the physical lines ``[start, end)`` into one logical field value."""
-    _, _, value = lines[start].rstrip().partition(":")
-    value = value.strip()
-    tail = lines[start + 1 : end]
-    if not tail:
-        return value
-    if value.startswith("["):
-        return " ".join([value, *(line.strip() for line in tail)])
-    # YAML-block list: the bullets ARE the value.
-    items = [_FM_BULLET_RE.match(line).group(1).strip() for line in tail]  # type: ignore[union-attr]
-    return "[" + ", ".join(items) + "]"
-
-
-def frontmatter_field_end(lines: list[str], start: int) -> int:
-    """Index one past the last physical line of the field beginning at ``start``.
-
-    ONE rule for how many physical lines a logical frontmatter field occupies,
-    shared by the reader (:func:`_frontmatter_fields`) and the writer
-    (``refresh_kb_metadata._replace_or_insert_field``). A value the reader joins
-    is therefore exactly the span the writer replaces: a wrapped list rewritten
-    by its first line alone would strand its tail as orphaned text for the next
-    parse to fold into the following field.
-    """
-    _, _, value = lines[start].rstrip().partition(":")
-    value = value.strip()
-    i = start + 1
-    if value.startswith("[") and not value.endswith("]"):
-        # Wrapped list: runs to the line carrying the closing bracket. An
-        # unterminated list runs out at the end of the block and stays a
-        # string, exactly as any malformed value does.
-        while i < len(lines) and not lines[i].strip().endswith("]"):
-            i += 1
-        return min(i + 1, len(lines))
-    if not value:
-        # YAML-block list: runs to the last `- item` bullet.
-        while i < len(lines) and _FM_BULLET_RE.match(lines[i]):
-            i += 1
-    return i
-
-
-def find_frontmatter(text: str, pos: int = 0) -> "re.Match[str] | None":
-    """The first ``kb-frontmatter`` block at or after ``pos``, in one pass.
-
-    Returns exactly what ``FRONTMATTER_RE.search(text, pos)`` returns — and
-    produces it with that very pattern, so there is one grammar and one compiled
-    object, not a second reader of the block delimiter. What differs is the cost
-    of the case where the answer is "none".
-
-    ``FRONTMATTER_RE``'s body is a lazy ``(.*?)`` under ``DOTALL``, so at every
-    candidate opener the engine scans forward to the end of the document looking
-    for a closer. A document carrying many openers and no ``-->`` at line start
-    therefore costs O(openers x length): measured at 100 openers 17 ms, 400
-    openers 281 ms, 1 600 openers **4 493 ms**. Only a
-    truncated or hostile document has that shape — one *about* the format shows
-    its closer — but ``parse_frontmatter`` runs over every file in the KB, so
-    the shape only has to arrive once.
-
-    The one-pass form rests on a property of the pattern rather than on a
-    rewrite of it: **if the FIRST opener has no closer after it, no later opener
-    has one either.** Closer positions only increase, and the lazy body spans
-    anything, so any closer that a later opener could reach is also reachable
-    from the first. The leftmost match, when one exists, therefore begins at the
-    first opener — one opener search and one anchored match attempt, each linear
-    in the document.
-    """
-    opener = _FRONTMATTER_OPEN_RE.search(text, pos)
-    if opener is None:
+def find_frontmatter(text: str) -> FrontmatterBlock | None:
+    """The document's frontmatter, located by ``kb_yaml.find_frontmatter``, or None."""
+    span = kb_yaml.find_frontmatter(text)
+    if span is None:
         return None
-    return FRONTMATTER_RE.match(text, opener.start())
+    return FrontmatterBlock(start=0, end=span.end, body=text[span.body_start : span.body_end])
 
 
 def strip_frontmatter(text: str) -> str:
-    """``text`` with every ``kb-frontmatter`` block removed.
-
-    What ``FRONTMATTER_RE.sub("", text)`` returns, found through
-    :func:`find_frontmatter` so a hostile document costs one pass rather than
-    one per opener. Each round advances past the block it removed, so the whole
-    walk is linear in the document.
-    """
-    out: list[str] = []
-    pos = 0
-    while (match := find_frontmatter(text, pos)) is not None:
-        out.append(text[pos : match.start()])
-        pos = match.end()
-    out.append(text[pos:])
-    return "".join(out)
+    """``text`` with its frontmatter removed."""
+    block = find_frontmatter(text)
+    return text if block is None else text[block.end :]
 
 
 def parse_frontmatter(text: str) -> dict | None:
-    """Return parsed kb-frontmatter fields, or None if no block found.
+    """The document's frontmatter fields, or None where it has no block.
 
-    ID-lists return as ``list[str]`` — in any of the three authored shapes,
-    see :func:`_frontmatter_fields` — quoted strings are unquoted, booleans
-    become Python bool, everything else stays a string.
+    The block reads through ``kb_yaml``, which raises ``KbYamlError`` naming the
+    document line for anything outside the dialect.
     """
-    m = find_frontmatter(text)
-    if not m:
+    block = find_frontmatter(text)
+    if block is None:
         return None
-    return _frontmatter_fields(m.group(1))
+    return _block_fields(block)
+
+
+def _block_fields(block: FrontmatterBlock) -> dict:
+    try:
+        return kb_yaml.parse(block.body)  # type: ignore[return-value]  # a located block opens with a key
+    except kb_yaml.KbYamlError as error:
+        # The body begins on the document's second line, under the opening fence.
+        raise kb_yaml.KbYamlError(error.line + 1, f"frontmatter: {error.detail}") from error
+
+
+def uplink_index(text: str) -> int | None:
+    """The 0-based line where the document's up-link stands.
+
+    The first line after the frontmatter's closing fence, or line 0 where the
+    document has none. None where the frontmatter ends the text, leaving no line
+    for an up-link. Whether that line holds an up-link is the caller's to read;
+    where it would stand is computed here and nowhere else.
+    """
+    span = kb_yaml.find_frontmatter(text)
+    if span is None:
+        return 0
+    if span.end == len(text):
+        return None
+    return text.count("\n", 0, span.end)
 
 
 class FrameworkNodeParseError(ValueError):
@@ -682,7 +574,7 @@ class FrameworkNodeParseError(ValueError):
     parse out of the KB's framework source (:func:`framework_source`).
 
     Raised by :func:`build_all_records` when the assembled depends-on edges
-    target framework nodes that are absent from the rebuilt ``claims.jsonl``
+    target framework nodes that are absent from the rebuilt ``claims.yaml``
     node set. The usual cause is a transient source state where the
     INVARIANT-S2 axiom bullets or ``### INVARIANT-*`` headings don't match the
     parser (e.g. indented, reflowed, or carrying merge-conflict markers mid
@@ -816,7 +708,7 @@ def _slugify_heading(text: str) -> str:
     """Heading anchor: lowercase, punctuation dropped, each whitespace run one hyphen.
 
     The collapse is a stored-format invariant: `canonical_anchor` in every existing
-    KB's `.index/claims.jsonl` was written in this form, so an em dash in a heading
+    KB's `.index/claims` stream was written in this form, so an em dash in a heading
     ("A — B") anchors at ``a-b``, not GitHub's ``a--b``.
     """
     s = text.strip().lower()
@@ -923,8 +815,7 @@ def _parse_solidity_line(line: str) -> tuple[float | None, str | None, str]:
     hand-mangled outright — would pass the gate forever.
     """
     value = line.split(":", 1)[1].strip() if ":" in line else line.strip()
-    num_match = _NUMBER_RE.search(value)
-    solidity = float(num_match.group(0)) if num_match else None
+    solidity = kb_schema.number_token(value)
     paren = _FIRST_PAREN_RE.search(value)
     status = paren.group(1).strip() if paren else None
     trace_match = _SOLIDITY_TRACE_RE.search(value)
@@ -948,8 +839,7 @@ def format_solidity(value: float | None) -> str:
 def _parse_confidence_line(line: str) -> float | None:
     """Parse `- confidence: 0.X`."""
     value = line.split(":", 1)[1].strip() if ":" in line else ""
-    num_match = _NUMBER_RE.search(value)
-    return float(num_match.group(0)) if num_match else None
+    return kb_schema.number_token(value)
 
 
 def _parse_scalar_number_line(line: str) -> float | None:
@@ -960,8 +850,7 @@ def _parse_scalar_number_line(line: str) -> float | None:
     (no numeric token) yields ``None``.
     """
     value = line.split(":", 1)[1].strip() if ":" in line else ""
-    num_match = _NUMBER_RE.search(value)
-    return float(num_match.group(0)) if num_match else None
+    return kb_schema.number_token(value)
 
 
 def _normalize_text(s: str) -> str:
@@ -1058,6 +947,34 @@ def _parse_references_line(
             known_ids=known_ids,
             diagnostic_stream=diagnostic_stream,
             canonical_path=canonical_path,
+        )
+    ]
+
+
+_ORIGIN_IN_PAREN_RE = re.compile(r"\(origin\s+([^()]*)\)")
+
+
+def _parse_demoted_line(
+    line: str,
+    source_id: str,
+    known_ids: set[str] | None = None,
+    diagnostic_stream: TextIO | None = None,
+    canonical_path: str | None = None,
+) -> list[DependsOnEdge]:
+    """Parse a ``- demoted:`` sub-bullet: a references bullet carrying its origin.
+
+    ``  - <target> — <title> (origin cited|inferred) [context]``. The origin is
+    what the ``(origin …)`` annotation names, the last where several stand, and
+    ``None`` where none does; it is read whole rather than against
+    :data:`kb_schema.DEMOTED_ORIGINS`, so a hand-edited value reaches the index
+    for verify to judge instead of vanishing here.
+    """
+    found = _ORIGIN_IN_PAREN_RE.findall(line)
+    origin = (found[-1].strip() or None) if found else None
+    return [
+        replace(edge, relation="demoted", origin=origin)
+        for edge in _parse_references_line(
+            line, source_id, known_ids=known_ids, diagnostic_stream=diagnostic_stream, canonical_path=canonical_path
         )
     ]
 
@@ -1395,6 +1312,27 @@ def mis_bound_entries(entries: Sequence[RegisterEntry]) -> tuple[RegisterEntry, 
     )
 
 
+def _claim_edge_bullets(qlines: Sequence[str], start: int, break_re: re.Pattern[str]) -> tuple[list[str], int]:
+    """The sub-bullets of a ``- references:`` or ``- demoted:`` list, and the index after it.
+
+    A continuation line joins the bullet above it; the list ends at the next
+    quality key or the entry-separating ``---``.
+    """
+    bullets: list[str] = []
+    i = start
+    while i < len(qlines):
+        line = qlines[i]
+        stripped = line.strip()
+        if break_re.match(stripped) or stripped == "---":
+            break
+        if re.match(r"^\s+-\s+", line):
+            bullets.append(line)
+        elif stripped and bullets:
+            bullets[-1] = bullets[-1] + " " + stripped
+        i += 1
+    return bullets, i
+
+
 def parse_claim_quality_file(
     path: Path,
     kb_root: Path,
@@ -1467,6 +1405,7 @@ def parse_claim_quality_file(
         rationale = ""
         depends_on: list[DependsOnEdge] = []
         references: list[DependsOnEdge] = []
+        demoted: list[DependsOnEdge] = []
         strengthen_items: tuple[StrengthenByItem, ...] = ()
 
         if qstart is not None and qend is not None:
@@ -1525,26 +1464,23 @@ def parse_claim_quality_file(
                             )
                         )
                 elif stripped.startswith("- references:"):
-                    i += 1
-                    ref_lines: list[str] = []
-                    while i < len(qlines):
-                        nxt = qlines[i]
-                        nxt_strip = nxt.strip()
-                        if _BREAK_AFTER_REFERENCES.match(nxt_strip):
-                            break
-                        if nxt_strip == "---":
-                            break
-                        if re.match(r"^\s+-\s+", nxt):
-                            ref_lines.append(nxt)
-                        elif not nxt_strip:
-                            pass
-                        elif ref_lines:
-                            ref_lines[-1] = ref_lines[-1] + " " + nxt_strip
-                        i += 1
-                    for ref_line in ref_lines:
+                    bullets, i = _claim_edge_bullets(qlines, i + 1, _BREAK_AFTER_REFERENCES)
+                    for bullet in bullets:
                         references.extend(
                             _parse_references_line(
-                                ref_line,
+                                bullet,
+                                claim_id,
+                                known_ids=known_ids,
+                                diagnostic_stream=diagnostic_stream,
+                                canonical_path=canonical_rel,
+                            )
+                        )
+                elif stripped.startswith("- demoted:"):
+                    bullets, i = _claim_edge_bullets(qlines, i + 1, _BREAK_AFTER_DEMOTED)
+                    for bullet in bullets:
+                        demoted.extend(
+                            _parse_demoted_line(
+                                bullet,
                                 claim_id,
                                 known_ids=known_ids,
                                 diagnostic_stream=diagnostic_stream,
@@ -1591,6 +1527,7 @@ def parse_claim_quality_file(
                 depends_on=tuple(depends_on),
                 strengthen_by=strengthen_items,
                 references=tuple(references),
+                demoted=tuple(demoted),
             )
         )
     return out
@@ -1862,74 +1799,39 @@ def parse_experiment_leaf(path: Path, kb_root: Path) -> list[ExperimentNode]:
     file has no frontmatter, is not a leaf-kind container, or declares no
     ``exp-id``.
 
-    **Multi-exp syntax (scalar-or-list via repetition).** Each ``exp-id:`` key
-    opens a new experiment block; its following ``status:`` and ``strengthens:``
-    sub-block belong to that block until the next ``exp-id:`` (or end of
-    frontmatter). A single ``exp-id:`` parses as a one-element list — so the
-    a scalar single-experiment leaf parses unchanged.
-
-    Each block's ``strengthens`` pairs are returned in source order; a target
-    may include a claim originated by this same leaf (a node→node edge between
-    two distinct co-located node-bodies — not a self-loop).
+    The declarations are the mappings listed under ``experiment-nodes:``, each
+    an ``exp-id``, its ``status`` and its ``strengthens`` pairs, returned in
+    source order; a target may include a claim originated by this same leaf (a
+    node→node edge between two distinct co-located node-bodies — not a
+    self-loop).
 
     Raises :class:`ExperimentLeafError` when the leaf carries an
     ``experiments:`` reference field (an owning experiment-hosting leaf must not
     also reference other experiments), any ``exp-id`` is malformed, any
-    block's ``status`` is outside ``{run, pending}``, or any strengthens pair's
-    strength is outside ``[0, 1]``.
+    node's ``status`` is outside ``{run, pending}``, any strengthens pair's
+    strength is outside ``[0, 1]``, or a node list or a pair is of the wrong
+    shape (:func:`_yaml_node_decls`).
     """
     text = path.read_text(encoding="utf-8")
-    m = find_frontmatter(text)
-    if not m:
+    block = find_frontmatter(text)
+    if block is None:
         return []
-    lines = m.group(1).splitlines()
-
-    # Top-level scan. Each `exp-id:` opens a new block; `status:` / `strengthens:`
-    # attach to the currently-open block. `claims:` / `no-claim:` / `sup-id:` are
-    # NOT inspected here — they are separate, orthogonal node-bodies.
-    kind = ""
-    has_experiments_ref = False
-    in_strengthens = False
-    # Per-block accumulators, parallel-indexed: exp_ids[i] owns statuses[i] and
-    # strengthens_pairs[i]. A new exp-id appends a fresh slot.
-    exp_ids: list[str] = []
-    statuses: list[str | None] = []
-    strengthens_pairs: list[list[tuple[str, float]]] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        pair = _STRENGTHENS_PAIR_RE.match(line)
-        if in_strengthens and pair and strengthens_pairs:
-            strengthens_pairs[-1].append((pair.group(1), float(pair.group(2))))
-            continue
-        if ":" in stripped:
-            key = stripped.split(":", 1)[0].strip().lstrip("- ").strip()
-            value = stripped.split(":", 1)[1].strip()
-            if key == "strengthens":
-                in_strengthens = True
-                continue
-            in_strengthens = False
-            if key == "kind":
-                kind = value
-            elif key == "exp-id":
-                exp_ids.append(value)
-                statuses.append(None)
-                strengthens_pairs.append([])
-            elif key == "status":
-                if statuses:
-                    statuses[-1] = value
-            elif key == "experiments":
-                if value:
-                    has_experiments_ref = True
-
-    if kind != "leaf":
-        return []
-    if not exp_ids:
-        return []
-
     rel = _posix_relative(path, kb_root)
-    if has_experiments_ref:
+    fields = _block_fields(block)
+    if fields.get("kind") != "leaf":
+        return []
+    declared = _yaml_node_decls(
+        fields,
+        kb_schema.EXPERIMENT_NODES_KEY,
+        pairs_key="strengthens",
+        rel=rel,
+        error=ExperimentLeafError,
+        pending_allowed=False,
+    )
+    decls = [(node.get("exp-id"), node.get("status"), pairs) for node, pairs in declared]
+    if not decls:
+        return []
+    if fields.get("experiments"):
         raise ExperimentLeafError(
             f"{rel}: experiment-hosting leaf carries experiments: — an owning "
             f"experiment leaf must not also reference other experiments."
@@ -1938,8 +1840,8 @@ def parse_experiment_leaf(path: Path, kb_root: Path) -> list[ExperimentNode]:
     heading = _experiment_heading(text)
     anchor = _slugify_heading(heading)
     nodes: list[ExperimentNode] = []
-    for exp_id, status, pairs in zip(exp_ids, statuses, strengthens_pairs):
-        if not _EXP_ID_RE.fullmatch(exp_id):
+    for exp_id, status, pairs in decls:
+        if not (isinstance(exp_id, str) and _EXP_ID_RE.fullmatch(exp_id)):
             raise ExperimentLeafError(
                 f"{rel}: experiment-hosting leaf has malformed exp-id "
                 f"{exp_id!r} (expected \\b{kb_schema.id_body('exp')}\\b)."
@@ -1993,65 +1895,44 @@ def parse_support_leaf(path: Path, kb_root: Path) -> list[SupportNode]:
     node-bodies). Returns ``[]`` if the file has no frontmatter, is not a
     leaf-kind container, or declares no ``sup-id``.
 
-    **Multi-sup syntax (scalar-or-list via repetition).** Each ``sup-id:`` key
-    opens a new support block; its following ``supports:`` sub-block of
-    ``clm-<id>: <fraction>`` beneficiary pairs (one per line, indented) belongs
-    to that block until the next ``sup-id:`` (or end of frontmatter). A single
-    ``sup-id:`` parses as a one-element list. ``<fraction>`` is the on-point
-    fraction f ∈ [0, 1] or the literal ``*pending*`` (an intended-but-unassessed
-    edge, stored as PENDING_FRACTION). Each returned node carries the
-    canonical_path/anchor/title from the leaf and its own ``supports`` fan-out;
-    its ``quality`` / ``depends_on`` / ``rationale`` are filled in from the
-    support's claim-quality entry by :func:`discover_kb`.
+    The declarations are the mappings listed under ``support-nodes:``, each a
+    ``sup-id`` and its ``supports`` list of ``clm-<id>: <fraction>`` beneficiary
+    pairs. ``<fraction>`` is the on-point fraction f ∈ [0, 1] or the literal
+    ``*pending*`` (an intended-but-unassessed edge, stored as
+    PENDING_FRACTION). Each returned node carries the canonical_path/anchor/title
+    from the leaf and its own ``supports`` fan-out; its ``quality`` /
+    ``depends_on`` / ``rationale`` are filled in from the support's claim-quality
+    entry by :func:`discover_kb`.
 
     Raises :class:`SupportLeafError` for a malformed ``sup-id``, a malformed
-    ``supports:`` claim id, or an on-point fraction outside ``[0, 1]``.
+    ``supports`` claim id, an on-point fraction outside ``[0, 1]``, or a node
+    list or a pair of the wrong shape (:func:`_yaml_node_decls`).
     """
     text = path.read_text(encoding="utf-8")
-    m = find_frontmatter(text)
-    if not m:
+    block = find_frontmatter(text)
+    if block is None:
         return []
-    lines = m.group(1).splitlines()
-
-    kind = ""
-    in_supports = False
-    # Per-block accumulators, parallel-indexed: sup_ids[i] owns supports_pairs[i].
-    sup_ids: list[str] = []
-    supports_pairs: list[list[tuple[str, float | _PendingFraction]]] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        pair = _SUPPORTS_PAIR_RE.match(line)
-        if in_supports and pair and supports_pairs:
-            raw = pair.group(2)
-            fraction = PENDING_FRACTION if raw == PENDING_LITERAL else float(raw)
-            supports_pairs[-1].append((pair.group(1), fraction))
-            continue
-        if ":" in stripped:
-            key = stripped.split(":", 1)[0].strip().lstrip("- ").strip()
-            value = stripped.split(":", 1)[1].strip()
-            if key == "supports":
-                in_supports = True
-                continue
-            in_supports = False
-            if key == "kind":
-                kind = value
-            elif key == "sup-id":
-                sup_ids.append(value)
-                supports_pairs.append([])
-
-    if kind != "leaf":
-        return []
-    if not sup_ids:
-        return []
-
     rel = _posix_relative(path, kb_root)
+    fields = _block_fields(block)
+    if fields.get("kind") != "leaf":
+        return []
+    declared = _yaml_node_decls(
+        fields,
+        kb_schema.SUPPORT_NODES_KEY,
+        pairs_key="supports",
+        rel=rel,
+        error=SupportLeafError,
+        pending_allowed=True,
+    )
+    decls = [(node.get("sup-id"), pairs) for node, pairs in declared]
+    if not decls:
+        return []
+
     heading = _experiment_heading(text)
     anchor = _slugify_heading(heading)
     nodes: list[SupportNode] = []
-    for sup_id, pairs in zip(sup_ids, supports_pairs):
-        if not _SUP_ID_RE.fullmatch(sup_id):
+    for sup_id, pairs in decls:
+        if not (isinstance(sup_id, str) and _SUP_ID_RE.fullmatch(sup_id)):
             raise SupportLeafError(
                 f"{rel}: support-hosting leaf has malformed sup-id {sup_id!r} "
                 f"(expected \\b{kb_schema.id_body('sup')}\\b)."
@@ -2079,6 +1960,68 @@ def parse_support_leaf(path: Path, kb_root: Path) -> list[SupportNode]:
             )
         )
     return nodes
+
+
+def _yaml_node_decls(
+    fields: dict,
+    list_key: str,
+    *,
+    pairs_key: str,
+    rel: str,
+    error: type[ValueError],
+    pending_allowed: bool,
+) -> list[tuple[dict, list[tuple[str, float | _PendingFraction]]]]:
+    """Each node mapping under ``list_key``, with its ``pairs_key`` list read to ``(claim_id, value)`` pairs.
+
+    Raises ``error`` for a ``list_key`` value that is not a list of mappings,
+    and for a pair that is not one ``clm-<id>: <number>`` mapping — or
+    ``*pending*``, where ``pending_allowed``. A hand edit can write either, and
+    no reading of it names a node or an edge.
+    """
+    nodes = fields.get(list_key)
+    if nodes is None:
+        return []
+    if not isinstance(nodes, list) or not all(isinstance(node, dict) for node in nodes):
+        raise error(f"{rel}: {list_key}: is not a list of node mappings.")
+    accepted = f"a number or {PENDING_LITERAL}" if pending_allowed else "a number"
+    out: list[tuple[dict, list[tuple[str, float | _PendingFraction]]]] = []
+    for node in nodes:
+        raw_pairs = node.get(pairs_key)
+        if raw_pairs is None:
+            raw_pairs = []
+        if not isinstance(raw_pairs, list):
+            raise error(f"{rel}: {list_key} {pairs_key}: is not a list of `clm-<id>: <value>` pairs.")
+        pairs: list[tuple[str, float | _PendingFraction]] = []
+        for item in raw_pairs:
+            if not (isinstance(item, dict) and len(item) == 1):
+                raise error(f"{rel}: {list_key} {pairs_key}: {item!r} is not one `clm-<id>: <value>` pair.")
+            ((claim_id, value),) = item.items()
+            if not _CLAIM_ID_RE.fullmatch(claim_id):
+                raise error(
+                    f"{rel}: {list_key} {pairs_key}: malformed claim id {claim_id!r} "
+                    f"(expected \\b{kb_schema.id_body('clm')}\\b)."
+                )
+            if pending_allowed and value == PENDING_LITERAL:
+                pairs.append((claim_id, PENDING_FRACTION))
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                pairs.append((claim_id, float(value)))
+            else:
+                raise error(f"{rel}: {list_key} {pairs_key}: {claim_id}'s value {value!r} is not {accepted}.")
+        out.append((node, pairs))
+    return out
+
+
+def _declared_node_ids(fields: dict) -> list[str]:
+    """Every well-formed ``exp-`` and ``sup-`` id the frontmatter declares, as the node readers read declarations."""
+    candidates: list[tuple[re.Pattern[str], object]] = []
+    for list_key, id_key, pattern in (
+        (kb_schema.EXPERIMENT_NODES_KEY, "exp-id", _EXP_ID_RE),
+        (kb_schema.SUPPORT_NODES_KEY, "sup-id", _SUP_ID_RE),
+    ):
+        nodes = fields.get(list_key)
+        if isinstance(nodes, list):
+            candidates += [(pattern, node.get(id_key)) for node in nodes if isinstance(node, dict)]
+    return [node_id for pattern, node_id in candidates if isinstance(node_id, str) and pattern.fullmatch(node_id)]
 
 
 def _parse_index(path: Path, kb_root: Path) -> IndexRecord | None:
@@ -2223,18 +2166,16 @@ def scan_authored_ids(kb_root: Path | None = None) -> dict[str, IdRecord]:
     declared: dict[str, str] = {}
     cited: dict[str, str] = {}
     for path in kb_files(kb_root):
-        fm = find_frontmatter(path.read_text(encoding="utf-8"))
-        if fm is None:
+        block = find_frontmatter(path.read_text(encoding="utf-8"))
+        if block is None:
             continue
         leaf_rel = _posix_relative(path, kb_root)
-        block = fm.group(1)
-        for pattern in _LEAF_DECL_RES:
-            for node_id in pattern.findall(block):
-                declared.setdefault(node_id, leaf_rel)
-        fields = _frontmatter_fields(block)
+        fields = _block_fields(block)
+        for node_id in _declared_node_ids(fields):
+            declared.setdefault(node_id, leaf_rel)
         for key in _LEAF_CITE_KEYS:
             for node_id in fields.get(key, []) or ():
-                if _ANY_ID_RE.fullmatch(node_id):
+                if isinstance(node_id, str) and _ANY_ID_RE.fullmatch(node_id):
                     cited.setdefault(node_id, leaf_rel)
 
     return {
@@ -2900,6 +2841,72 @@ def _sup_solidity_from_deps(
     return round_half_up_2dp(min(quality, *dep_finals))
 
 
+def _supporters(supports: Iterable[SupportNode]) -> dict[str, list[tuple[str, float | _PendingFraction]]]:
+    """Per claim, the ``(sup_id, fraction)`` of every support that supports it."""
+    supporters: dict[str, list[tuple[str, float | _PendingFraction]]] = {}
+    for sup in supports:
+        for claim_id, fraction in sup.supports:
+            supporters.setdefault(claim_id, []).append((sup.id, fraction))
+    return supporters
+
+
+def _premise_edges(entries, sups, supporters) -> Iterator[tuple[str, str]]:
+    """Every ``(dependent, premise)`` pair of the claim + support graph.
+
+    A claim or support to each claim it ``depends`` on, and a claim to each
+    support that supports it. Experiments are terminal and introduce none, and
+    ``references`` and ``demoted`` edges are on fields this never reads. A pair
+    with an end no claim or support keys is not an edge: a dangling target
+    orders nothing and cannot close a cycle.
+    """
+    nodes = set(entries) | set(sups)
+    for node_id, record in (*entries.items(), *sups.items()):
+        for edge in record.depends_on:
+            if edge.relation == "depends" and edge.target_kind == "claim" and edge.target in nodes:
+                yield node_id, edge.target
+        for sup_id, _fraction in supporters.get(node_id, ()):
+            if sup_id in nodes:
+                yield node_id, sup_id
+
+
+def premise_graph(claim_entries: Iterable[ClaimEntry], supports: Iterable[SupportNode]) -> dict[str, list[str]]:
+    """The graph the acyclicity check walks, as each node's premises.
+
+    The same pairs :func:`_dependency_order` orders (:func:`_premise_edges`),
+    keyed by dependent, so a path :func:`depends_path` finds through it is one
+    the cycle check would follow.
+    """
+    supports = tuple(supports)
+    graph: dict[str, list[str]] = {}
+    for dependent, premise in _premise_edges(
+        {e.id: e for e in claim_entries}, {s.id: s for s in supports}, _supporters(supports)
+    ):
+        graph.setdefault(dependent, []).append(premise)
+    return graph
+
+
+def depends_path(edges: Mapping[str, Iterable[str]], start: str, goal: str) -> tuple[str, ...] | None:
+    """A shortest path ``start → … → goal`` through ``edges``, both ends included.
+
+    Breadth-first, each node's successors taken in sorted order, so the path
+    named is the same whatever order the graph was built in. ``None`` where
+    ``goal`` is unreachable; ``(start,)`` where the two are one node.
+    """
+    previous: dict[str, str | None] = {start: None}
+    queue = [start]
+    for at in queue:
+        if at == goal:
+            path = [at]
+            while (back := previous[path[-1]]) is not None:
+                path.append(back)
+            return tuple(reversed(path))
+        for following in sorted(edges.get(at, ())):
+            if following not in previous:
+                previous[following] = at
+                queue.append(following)
+    return None
+
+
 def _dependency_order(entries, sups, supporters) -> list[str]:
     """Kahn order over the combined claim + support graph, cycle-checked whole.
 
@@ -2912,31 +2919,15 @@ def _dependency_order(entries, sups, supporters) -> list[str]:
     the nodes it has one for; which nodes those are decides nothing about which
     graphs are cyclic.
 
-    Edges (X before Y): claim/support → each claim it depends on; claim → each
-    support that supports it. Experiments are terminal and introduce none. An
-    edge to an id no node in the graph keys is not an edge — a dangling target
-    orders nothing and cannot close a cycle.
+    The edges are :func:`_premise_edges`', each premise ordered before its
+    dependent.
     """
     nodes = set(entries) | set(sups)
     indegree: dict[str, int] = {n: 0 for n in nodes}
     dependents: dict[str, list[str]] = {n: [] for n in nodes}
-
-    def add_edge(before: str, after: str) -> None:
-        # `after` cannot be processed until `before` is done.
-        if before in nodes and after in nodes:
-            indegree[after] += 1
-            dependents[before].append(after)
-
-    for cid, entry in entries.items():
-        for edge in entry.depends_on:
-            if edge.relation == "depends" and edge.target_kind == "claim":
-                add_edge(edge.target, cid)
-        for sup_id, _fraction in supporters.get(cid, ()):
-            add_edge(sup_id, cid)
-    for sid, sup in sups.items():
-        for edge in sup.depends_on:
-            if edge.relation == "depends" and edge.target_kind == "claim":
-                add_edge(edge.target, sid)
+    for dependent, premise in _premise_edges(entries, sups, supporters):
+        indegree[dependent] += 1
+        dependents[premise].append(dependent)
 
     queue = sorted(n for n in nodes if indegree[n] == 0)
     order: list[str] = []
@@ -3054,11 +3045,7 @@ def compute_solidity_full(claim_entries, experiments=(), supports=(), works=()) 
             if prev is None or strength > prev:
                 experimental[claim_id] = strength
 
-    # --- supporters[C]: list of (sup_id, fraction) supporting claim C ---
-    supporters: dict[str, list[tuple[str, float]]] = {}
-    for sup in supports:
-        for claim_id, fraction in sup.supports:
-            supporters.setdefault(claim_id, []).append((sup.id, fraction))
+    supporters = _supporters(supports)
 
     # The whole graph is walked, and the cycle check is that walk's; a claim
     # carries a computed result only where there is something to compute one
@@ -3156,7 +3143,7 @@ def compute_solidity_full(claim_entries, experiments=(), supports=(), works=()) 
             # a raw float product — so without it a dependency-FREE lifted claim
             # carries an unrounded solidity while the same claim with any
             # dependency carries a rounded one. 0.2 x 0.98 writes 0.196 into
-            # claims.jsonl and renders "0.20" in the markdown, which puts the
+            # claims.yaml and renders "0.20" in the markdown, which puts the
             # two on opposite sides of a band threshold and makes `verify` FAIL
             # "refresh-fixable" at 1e-9 while `refresh` reports 0 changes: a
             # permanent hard block on a legal KB shape.
@@ -3290,7 +3277,7 @@ def min_dependency_solidity(entry: ClaimEntry, solidity: dict[str, float]) -> fl
 def build_claims_records(state: KbState) -> list[dict]:
     """One record per graph node, sorted by ``(node_type, id)``.
 
-    ``claims.jsonl`` holds a type-tagged union over
+    ``claims.yaml`` holds a type-tagged union over
     :data:`kb_schema.NODE_KINDS`, discriminated by ``node_type``. Each kind's
     record shape differs, which is why each is emitted by its own branch below:
 
@@ -3446,7 +3433,12 @@ def build_depends_on_records(state: KbState) -> list[dict]:
       corpus states and gate nothing: no solidity computation reads them, and
       the acyclicity gate is over ``depends`` alone, two claims naming each
       other being the author's argument rather than circular reasoning.
+    * ``demoted`` edges come from a claim entry's ``- demoted:`` bullets: every
+      field a ``references`` record carries, then a ninth, ``origin``, which
+      only this class's records have.
 
+    Emitted per claim as depends, references, demoted, so the stable sort
+    keeps that order between records of one source, target and context.
     Sorted by ``(source, target, context)`` — a null context sorts as the empty
     string — so two edges from one source to one target with different context
     notes stay deterministically ordered.
@@ -3462,26 +3454,28 @@ def build_depends_on_records(state: KbState) -> list[dict]:
         strength=None,
         context=None,
         fraction=None,
+        origin=None,
     ):
-        edges.append(
-            {
-                "source": source,
-                "target": target,
-                "relation": relation,
-                "target_kind": target_kind,
-                "target_solidity_recorded": target_solidity_recorded,
-                "strength": strength,
-                "context": context,
-                # The pending sentinel is an in-memory object; on disk it is the
-                # literal, so an unassessed fraction stays distinguishable from
-                # a class that carries none. Converted here rather than at each
-                # call site, so no edge class can reach the file holding it.
-                "fraction": PENDING_LITERAL if fraction is PENDING_FRACTION else fraction,
-            }
-        )
+        record = {
+            "source": source,
+            "target": target,
+            "relation": relation,
+            "target_kind": target_kind,
+            "target_solidity_recorded": target_solidity_recorded,
+            "strength": strength,
+            "context": context,
+            # The pending sentinel is an in-memory object; on disk it is the
+            # literal, so an unassessed fraction stays distinguishable from
+            # a class that carries none. Converted here rather than at each
+            # call site, so no edge class can reach the file holding it.
+            "fraction": PENDING_LITERAL if fraction is PENDING_FRACTION else fraction,
+        }
+        if relation == "demoted":
+            record["origin"] = origin
+        edges.append(record)
 
     for entry in state.claim_entries:
-        for edge in (*entry.depends_on, *entry.references):
+        for edge in (*entry.depends_on, *entry.references, *entry.demoted):
             _emit(
                 edge.source,
                 edge.target,
@@ -3491,6 +3485,7 @@ def build_depends_on_records(state: KbState) -> list[dict]:
                 edge.strength,
                 edge.context,
                 edge.fraction,
+                edge.origin,
             )
     for sup in state.supports:
         # A support's OWN dependencies — depends edges sourced at the sup-id.
@@ -3556,7 +3551,7 @@ def build_supported_by_records(state: KbState) -> list[dict]:
     The ``supported-by`` view answers "which support nodes lift claim X, and by
     how much?" — analogous to ``strengthen-by`` as untraversed bookkeeping.
     It is NOT consulted for solidity (that flows forward
-    through the ``supports`` edges in ``depends-on.jsonl``); it is a convenience
+    through the ``supports`` edges in ``depends-on.yaml``); it is a convenience
     reverse index. Each record carries the on-point ``fraction`` and the
     support's computed ``sup_solidity`` (the SAME shared computation; pending =>
     ``null``) so a reviewer sees the realized lift contribution at a glance.
@@ -3626,7 +3621,7 @@ def build_leaf_references(state: KbState) -> dict[str, list[str]]:
     leaves whose frontmatter hosts that id — fully derivable from leaf metadata:
 
     * ``clm-`` — every leaf whose ``claims:`` frontmatter lists the id (the same
-      leaf→claim edges materialized in ``cites.jsonl``).
+      leaf→claim edges materialized in ``cites.yaml``).
     * ``exp-`` — the experiment's canonical home (the leaf hosting the
       ``exp-id:``) plus every leaf that REFERENCES it via ``experiments:``.
     * ``sup-`` — the support's canonical home (the leaf hosting the ``sup-id:``).
@@ -3815,7 +3810,7 @@ def build_subtree_aggregate_records(state: KbState) -> list[dict]:
     """One record per index/entry-point node, sorted by node_path.
 
     Both ``subtree_claims`` and ``subtree_experiments`` come from the single
-    shared :func:`compute_subtree_aggregates` so the materialized JSONL cannot
+    shared :func:`compute_subtree_aggregates` so the materialized index cannot
     diverge from what the frontmatter refresh and the verify check derive.
     ``subtree_experiments`` is owned-only (see that function).
     """
@@ -3892,8 +3887,20 @@ def _assert_work_node_coverage(claims_records: list[dict], depends_on_records: l
     )
 
 
+#: The index streams under ``<kb-root>/.index/``, by name, in emission order —
+#: the keys :func:`build_all_records` returns.
+INDEX_FILES: tuple[str, ...] = (
+    "claims",
+    "depends-on",
+    "strengthen-by",
+    "supported-by",
+    "cites",
+    "subtree-aggregates",
+)
+
+
 def build_all_records(state: KbState) -> dict[str, list[dict]]:
-    """Return every JSONL file's records keyed by short file name.
+    """Return every index stream's records keyed by its name in :data:`INDEX_FILES`.
 
     Raises :class:`FrameworkNodeParseError` if the assembled edges reference
     framework nodes that did not parse from the framework source (issue #28 guard), and
@@ -3915,46 +3922,17 @@ def build_all_records(state: KbState) -> dict[str, list[dict]]:
 
 
 # ---------------------------------------------------------------------------
-# JSONL I/O
+# Index stream text
 # ---------------------------------------------------------------------------
 
 
 def serialize_records(records: list[dict]) -> str:
-    """Serialize records to canonical JSONL text.
+    """One index stream's text: a ``--- <JSON object>`` line per record, in order.
 
-    Each line is ``json.dumps(rec, ensure_ascii=False, separators=(', ', ': '))``.
-    Keys appear in the dict's insertion order (Python 3.7+), so callers must
-    construct records with keys in the documented order. The result has one
-    trailing ``\\n`` for non-empty inputs and is the empty string for ``[]``.
+    Keys appear in each dict's insertion order, so callers construct records
+    with keys in the documented order. No records is the empty string.
     """
-    lines = [json.dumps(rec, ensure_ascii=False, separators=(", ", ": ")) for rec in records]
-    body = "\n".join(lines)
-    if body:
-        body += "\n"
-    return body
-
-
-def write_jsonl(path: Path, records: list[dict]) -> None:
-    """Write records as JSONL, one object per line, single trailing newline.
-
-    Thin wrapper around :func:`serialize_records` that writes the canonical
-    text to ``path`` as UTF-8 with LF line endings.
-    """
-    path.write_text(serialize_records(records), encoding="utf-8", newline="\n")
-
-
-def read_jsonl(path: Path) -> list[dict]:
-    """Parse JSONL file. Blank lines skipped; malformed lines raise ValueError."""
-    out: list[dict] = []
-    text = path.read_text(encoding="utf-8")
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{path}:{lineno}: malformed JSON: {exc.msg}") from exc
-    return out
+    return "".join(kb_yaml.index_line(record) for record in records)
 
 
 __all__ = [
@@ -4000,6 +3978,8 @@ __all__ = [
     "round_half_up_2dp",
     "compute_solidity",
     "compute_solidity_full",
+    "premise_graph",
+    "depends_path",
     "compute_support_solidity",
     "min_dependency_solidity",
     "SolidityCycleError",
@@ -4018,11 +3998,9 @@ __all__ = [
     "locate_leaf_reference_footers",
     "build_leaf_references",
     "render_leaf_references",
-    "frontmatter_field_end",
     "compute_subtree_aggregates",
     "build_subtree_aggregate_records",
     "build_all_records",
+    "INDEX_FILES",
     "serialize_records",
-    "write_jsonl",
-    "read_jsonl",
 ]

@@ -406,7 +406,7 @@ def test_titles_are_unique_in_their_leaf_and_the_author_s_own_words():
     """A repeated opening takes its paragraph's position; markup is reduced to what the page shows; long is cut."""
     long = " ".join(["The operator is monotone on the cone"] * 6) + "."
     body = (
-        "<!-- kb-frontmatter\nkind: leaf\n-->\n\n"
+        "---\nkind: leaf\n---\n\n"
         "The bound holds on the cone. It is sharp.\n\n"
         "The bound holds on the cone. It is not sharp here.\n\n"
         'As <a href="b.md#lem:x" data-reference-type="ref" data-reference="lem:x">Lemma 2</a> and '

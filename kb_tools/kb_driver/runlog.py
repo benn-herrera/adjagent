@@ -15,8 +15,6 @@ governing build *artifacts*, while these are *evidence* nothing in the
 pipeline reads. ``<scratch>`` is the project's scratch directory
 (``kb_util.scratch_dirname``, ``.claude-temp`` under Claude Code)::
 
-    <repo-root>/<scratch>/kb-driver.lock the run lock (one per REPO)
-
     <parent>/                            default <scratch>/kb-driver
       LATEST                             (at the parent)
       <run-id>/
@@ -24,16 +22,10 @@ pipeline reads. ``<scratch>`` is the project's scratch directory
         briefs/ · calls/ · barriers/
         deviations.jsonl · cadence.jsonl
 
-The lock is deliberately *not* under ``<parent>``. LATEST is about this run's
-evidence and belongs beside it; the lock is about the repository, and anchoring
-it at the run-directory parent made it per-``--run-dir`` — two invocations
-passing different ``--run-dir`` (which kb-testing is required to do) would take
-different locks and both proceed against one KB.
-
-Whether a lock is live, stale or absent is one judgement — :func:`lock_state` —
-read by the acquire path here and, from outside the driver, by ``kb_util``'s
-read-only ``show-run-lock`` op. A caller that needs the answer asks it; a second
-pid test is a second definition of a live run.
+The run lock is not under ``<parent>``: it is the repository's, ``kb_lock``'s
+``<git dir>/kbase-build.lock``, recording the run directory, so two invocations
+passing different ``--run-dir`` (which kb-testing is required to do) still
+contend for one lock — and so does a kbase build.
 
 Turning a terminating signal into an ordinary unwind lives here too
 (:func:`terminating_signals`), beside the directory it exists to protect: a run
@@ -49,15 +41,13 @@ import os
 import re
 import signal
 import sys
-import tempfile
-import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .. import inference, kb_util
+from .. import inference, kb_lock
 
 _LOGGER_NAME = "kb_driver"
 
@@ -72,11 +62,7 @@ class BoundaryError(RuntimeError):
 
 
 class LockedError(RuntimeError):
-    """Another driver run is alive in this repo. Exit 16."""
-
-    def __init__(self, message: str, *, pid: int | None = None) -> None:
-        super().__init__(message)
-        self.pid = pid
+    """Another build holds this repository's run lock, or a writer held the KB past the wait. Exit 16."""
 
 
 #: What a shell reports for a process a signal killed: ``128 + n``.
@@ -314,212 +300,32 @@ def write_exit_json(
 
 # --- the lock ---------------------------------------------------------------
 
-LOCK_FILENAME = "kb-driver.lock"
-
-
-def repo_lock_path(repo_root: Path) -> Path:
-    """The run lock's anchor: one driver run per **repository**."""
-    return repo_root / kb_util.scratch_dirname() / LOCK_FILENAME
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Alive, owned by somebody else — still a live run.
-        return True
-    return True
-
-
-#: The three answers to "does a run hold this lock?". Named because two callers
-#: report them — the acquire path below, and the read-only op that answers the
-#: question for a recipe about to wipe a workspace — and a spelling each would
-#: be two vocabularies for one judgement.
-LOCK_LIVE = "live"
-LOCK_STALE = "stale"
-LOCK_ABSENT = "absent"
-
-
-@dataclass(frozen=True)
-class LockState:
-    """What a lock file says, and whether the holder it names is alive.
-
-    ``state`` is one of :data:`LOCK_LIVE` / :data:`LOCK_STALE` /
-    :data:`LOCK_ABSENT`. The holder fields carry the payload
-    :func:`run_lock` wrote and are all ``None`` wherever there is nobody to
-    name: an absent lock, or a stale one whose payload will not parse, which is
-    a lock nothing can attribute rather than a lock with no holder.
-    """
-
-    state: str
-    pid: int | None = None
-    run_id: str | None = None
-    started: str | None = None
-
-
-def lock_state(path: Path) -> LockState:
-    """Judge ``path`` — live, stale or absent — naming its holder where there is one.
-
-    **The one definition of a holder's liveness.** The acquire path reads it
-    through :func:`_holder` and every caller outside this package reads it
-    directly, so a second pid test anywhere — in another module, in a shell
-    recipe — is a second definition and not a second opinion.
-
-    Reads and judges; it neither takes the lock nor clears a stale one. An
-    unparseable payload is :data:`LOCK_STALE` for the reason the acquire path
-    treats it as one: a lock nobody can be read out of is a lock no run can be
-    shown to hold.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return LockState(LOCK_ABSENT)
-    except OSError:
-        return LockState(LOCK_STALE)
-    try:
-        record = json.loads(text)
-        pid = int(record["pid"])
-    except (ValueError, KeyError, TypeError):
-        return LockState(LOCK_STALE)
-    state = LOCK_LIVE if _pid_alive(pid) else LOCK_STALE
-    return LockState(state, pid=pid, run_id=record.get("run_id"), started=record.get("started"))
-
-
-def _holder(path: Path) -> int | None:
-    """The live pid holding ``path``, or None if the lock is stale or unreadable."""
-    state = lock_state(path)
-    if state.pid is None:
-        # Nothing could be read out of it. Logged here rather than in the
-        # judgement itself, because this is the caller about to break the lock:
-        # a read-only report of the same state is an answer, not a warning.
-        _log.warning("lock file is unreadable; treating it as stale", extra={"context": {"lock": str(path)}})
-    return state.pid if state.state == LOCK_LIVE else None
-
-
-def _publish(path: Path, payload: str) -> bool:
-    """Make ``path`` exist already holding ``payload``, or report that it exists.
-
-    The payload is written to a private staging file first and ``os.link``
-    publishes it under the lock's name; ``link`` fails with ``FileExistsError``
-    if anything is there, so testing and taking the lock are one atomic act
-    from any other starter's point of view. A create-then-write shape
-    (``O_EXCL`` open, *then* write the pid) would leave a zero-byte lock
-    visible between the two syscalls, which a second starter reads as
-    "unreadable; treating it as stale", unlinks, and takes — two drivers on one
-    repo.
-    """
-    fd, staging_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".staging")
-    staging = Path(staging_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload + "\n")
-        os.chmod(staging, 0o644)
-        try:
-            os.link(staging, path)
-        except FileExistsError:
-            return False
-        return True
-    finally:
-        staging.unlink(missing_ok=True)
-
-
-def _clear_stale(path: Path, *, judged: str) -> bool:
-    """Remove a lock judged stale — but only if it is still that same lock.
-
-    Renaming aside and then reading is what makes this safe: a plain
-    ``unlink()`` here is the check-then-act that lets two starters recovering
-    one stale lock each delete the other's freshly published one. If
-    what moved is not the content that was judged stale, a live holder arrived
-    in the window and it is put straight back.
-    """
-    breaker = path.with_name(f"{path.name}.stale-{uuid.uuid4().hex}")
-    try:
-        os.rename(path, breaker)
-    except OSError:
-        return True  # somebody else cleared it first; the acquire retry decides
-    moved = breaker.read_text(encoding="utf-8")
-    if moved.strip() != judged.strip():
-        os.rename(breaker, path)
-        _log.warning(
-            "the lock changed while it was being judged stale; leaving it to its holder",
-            extra={"context": {"lock": str(path)}},
-        )
-        return False
-    breaker.unlink(missing_ok=True)
-    _log.warning("removed a stale run lock", extra={"context": {"lock": str(path)}})
-    return True
-
-
-def _read(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
 
 @contextmanager
-def run_lock(path: Path, *, run_id: str) -> Iterator[Path]:
-    """Hold ``path`` for the run; a live holder raises LockedError (exit 16).
+def run_lock(repo_root: Path, *, state_dir: Path) -> Iterator[Path]:
+    """Hold the repository's run lock for the run, recording ``state_dir``; LockedError (exit 16) where it cannot.
 
-    ``path`` is the repository's lock — :func:`repo_lock_path`. It is passed in
-    rather than derived because the anchor is a decision about *scope*, and the
-    module that resolves the repo root is the one that should make it.
+    The lock is ``kb_lock``'s, the one kbase's builds take, so a driver run and
+    a kbase build exclude each other too. Once it records this run, the writers
+    already holding the KB write lock are waited out — any that arrive later find
+    the run lock and are refused — and the lock file is removed on the way out.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # A token, not the pid: pids recycle, and run_id embeds one. This is what
-    # release compares against, so that "is this still my lock" is answerable
-    # without trusting either.
-    token = uuid.uuid4().hex
-    payload = json.dumps(
-        {
-            "pid": os.getpid(),
-            "run_id": run_id,
-            "token": token,
-            "started": datetime.now(UTC).isoformat(timespec="seconds"),
-        },
-        ensure_ascii=False,
-    )
-
-    for attempt in (1, 2):
-        if _publish(path, payload):
-            break
-        judged = _read(path)
-        pid = _holder(path)
-        if pid is not None:
-            raise LockedError(f"another driver run is live: pid {pid} holds {path}", pid=pid)
-        if attempt == 2 or not _clear_stale(path, judged=judged):
-            # Lost the race to another starter that has since gone stale too,
-            # or a live holder arrived mid-recovery; refusing beats spinning.
-            raise LockedError(f"{path} is contended by repeatedly stale holders")
-
     try:
-        yield path
+        held = kb_lock.take_run_lock(repo_root, state_dir)
+    except kb_lock.BuildRunning as exc:
+        raise LockedError(f"another build is running in this repository; its state-dir is {exc.state_dir}") from None
+    except kb_lock.LockBusy as exc:
+        raise LockedError(f"another build holds {exc.path} and is starting or has just released it") from None
+    try:
+        try:
+            kb_lock.await_writers(repo_root)
+        except kb_lock.LockBusy as exc:
+            raise LockedError(
+                f"a write op or refresh held the KB write lock on {exc.path} past the wait; nothing was built"
+            ) from None
+        yield held.path
     finally:
-        _release(path, token=token)
-
-
-def _release(path: Path, *, token: str) -> None:
-    """Unlink the lock only while it still names this run.
-
-    Releasing by path would delete whatever happened to be there — a run whose
-    lock had already been recovered as stale by a *live* successor would delete
-    that successor's lock on its way out, and a third starter could then acquire
-    freely.
-    """
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        _log.warning("the run lock was gone or unreadable at release", extra={"context": {"lock": str(path)}})
-        return
-    if not isinstance(record, dict) or record.get("token") != token:
-        _log.warning(
-            "the run lock is no longer this run's; leaving it for its holder",
-            extra={"context": {"lock": str(path), "holder_pid": str(record.get("pid"))}},
-        )
-        return
-    path.unlink(missing_ok=True)
+        held.release()
 
 
 # --- logging ----------------------------------------------------------------

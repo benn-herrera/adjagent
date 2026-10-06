@@ -2,12 +2,14 @@
 
 Nothing here is mocked: every case builds a consuming repo with ``git init`` in
 ``tmp_path`` and drives the shipped ``python3 -m kb_tools.kb_util`` surface as a
-subprocess, which is what the adapter does in a real run. The two properties
-under test are the rc→exit mapping and the display relay: the tool's complete
+subprocess, which is what the adapter does in a real run. The properties
+under test are the rc→exit mapping, the display relay — the tool's complete
 stdout reaches the driver's stdout byte-for-byte, never trimmed and never
-re-rendered.
+re-rendered — and the build's inputs: the lines every boundary body ends with,
+and a resume refused before it writes when it was given others.
 """
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -15,13 +17,16 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import install_location, kb_pipeline, kb_util
-from kb_tools.kb_driver import baton, ledger, runlog
+from kb_tools import install_location, kb_load, kb_pipeline, kb_util
+from kb_tools.kb_driver import barriers, baton, call, config, ledger, run, runlog
+from kb_tools.tests import _fake_model as fake_model
+from kb_tools.tests._stamped_kb import stamped
 
 _THIS_DIR = Path(__file__).resolve().parent
 _PKG_PARENT = install_location.current().agents_dir
 
 _CHARTER = "docs/charter.md"
+
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
@@ -61,17 +66,20 @@ def _repo(root: Path, *, docent: bool = True, files: dict[str, str] | None = Non
 #: precondition. The verb initialises claim-graph metadata over documents, so a
 #: fixture with none exercises only its refusal.
 _DOCUMENT_TREE: dict[str, str] = {
-    "kb-root/entry-point.md": (
-        "<!-- kb-frontmatter\nkind: entry-point\n-->\n\n# Entry Point\n\n- [Volume](vol/index.md)\n"
-    ),
+    "kb-root/entry-point.md": "---\nkind: entry-point\n---\n\n# Entry Point\n\n- [Volume](vol/index.md)\n",
     "kb-root/vol/index.md": (
-        "[\u2191 Entry Point](../entry-point.md)\n\n<!-- kb-frontmatter\nkind: index\n-->\n\n"
-        "# Volume\n\n- [Leaf](leaf.md)\n"
+        "---\nkind: index\n---\n[\u2191 Entry Point](../entry-point.md)\n\n# Volume\n\n- [Leaf](leaf.md)\n"
     ),
     "kb-root/vol/leaf.md": (
-        '[\u2191 Volume](index.md)\n\n<!-- kb-frontmatter\nkind: leaf\nno-claim: "fixture leaf; it '
-        'states no result"\n-->\n\n# Leaf\n\nBody text.\n'
+        '---\nkind: leaf\nno-claim: "fixture leaf; it states no result"\n---\n'
+        "[\u2191 Volume](index.md)\n\n# Leaf\n\nBody text.\n"
     ),
+}
+
+#: The same tree as the seed leaves it: the entry point stamped.
+_SEEDED_TREE: dict[str, str] = {
+    **_DOCUMENT_TREE,
+    "kb-root/entry-point.md": stamped(_DOCUMENT_TREE["kb-root/entry-point.md"]),
 }
 
 
@@ -86,7 +94,7 @@ def _seeded_repo(root: Path, **files: str) -> Path:
     The ledger records against what a stage produced, so a repo standing in for
     a build in flight carries the document tree as well as the spine.
     """
-    return _repo(root, files={**_DOCUMENT_TREE, "kb-root/.index/.keep": "", _CHARTER: "# Charter\n", **files})
+    return _repo(root, files={**_SEEDED_TREE, "kb-root/.index/.keep": "", _CHARTER: "# Charter\n", **files})
 
 
 def _kb_util_directly(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -143,7 +151,7 @@ def test_graph_init_initialises_over_a_document_tree(tmp_path: Path) -> None:
     outcome = ledger.graph_init(repo)
 
     assert outcome.ok, outcome.detail
-    assert (repo / "kb-root" / ".index" / "claims.jsonl").is_file()
+    assert kb_load.index_path(repo / "kb-root", "claims").is_file()
     assert not (repo / "kb-root" / ".index" / "SCHEMA.md").exists()
 
 
@@ -279,6 +287,135 @@ def test_record_start_without_a_charter_records_the_boundary_and_names_the_absen
     ).stdout
     assert "start" in subject_and_body
     assert kb_pipeline.NO_CHARTER_BODY in subject_and_body
+
+
+# ---------------------------------------------------------------------------
+# The build's inputs on the trail
+# ---------------------------------------------------------------------------
+
+
+def _git_out(root: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout
+
+
+_START_SUBJECT = f"{kb_pipeline.LEDGER_PREFIX} start | {kb_pipeline.stage_by_id('start').display}"
+
+
+@pytest.mark.parametrize(
+    ("volume_roots", "bibliographies", "input_lines"),
+    [
+        (("main.tex",), (), "volume-root: main.tex"),
+        (("vol-b/main.tex", "vol-a/main.tex"), (), "volume-root: vol-b/main.tex\nvolume-root: vol-a/main.tex"),
+        (("main.tex",), ("refs.bib",), "volume-root: main.tex\nbibliography: refs.bib"),
+    ],
+)
+def test_the_start_boundary_ends_with_the_inputs_in_the_order_given(
+    tmp_path: Path, volume_roots: tuple[str, ...], bibliographies: tuple[str, ...], input_lines: str
+) -> None:
+    """After the charter line and a blank line, ``volume-root:`` lines then ``bibliography:`` lines — kbase's bytes."""
+    repo = _seeded_repo(tmp_path / "consumer", **{kb_pipeline.CHARTER_RELPATH: "# Charter\n"})
+
+    outcome = ledger.record_start(
+        repo, charter=kb_pipeline.CHARTER_RELPATH, volume_roots=volume_roots, bibliographies=bibliographies
+    )
+
+    assert outcome.ok, outcome.detail
+    assert _git_out(repo, "log", "-1", "--format=%B") == (
+        f"{_START_SUBJECT}\n\ncharter: {kb_pipeline.CHARTER_RELPATH}\n\n{input_lines}\n\n"
+    )
+
+
+def test_a_boundary_with_no_note_carries_the_input_lines_alone(tmp_path: Path) -> None:
+    repo = _seeded_repo(tmp_path / "consumer")
+    subprocess.run(
+        [sys.executable, "-m", "kb_tools.refresh_kb_metadata"],
+        cwd=repo,
+        env={**os.environ, "PYTHONPATH": str(_PKG_PARENT), "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True,
+        check=True,
+    )
+    assert ledger.record_start(repo, charter=_CHARTER, volume_roots=("main.tex",)).ok
+
+    outcome = ledger.record_stage(repo, stage=kb_pipeline.STAGE_IDS[1], volume_roots=("main.tex",))
+
+    assert outcome.ok, outcome.detail
+    assert _git_out(repo, "log", "-1", "--format=%b") == "volume-root: main.tex\n\n"
+
+
+def test_an_input_is_recorded_repository_relative_with_forward_slashes(tmp_path: Path) -> None:
+    """An absolute path, or one that wanders, records as the same repository-relative path."""
+    repo = tmp_path / "consumer"
+    inputs = kb_pipeline.BuildInputs.given(
+        repo, volume_roots=(str(repo / "vol" / "main.tex"), "vol/../vol/main.tex"), bibliographies=()
+    )
+
+    assert inputs.volume_roots == ("vol/main.tex", "vol/main.tex")
+
+
+def _resuming_runner(tmp_path: Path, repo: Path, *, sources: tuple[str, ...]) -> run.Runner:
+    """A ``Runner`` over real ledger ops, bounded at ``start`` so a resume that proceeds walks nothing."""
+    paths = runlog.prepare(tmp_path / "runs", "20260901T120000-1")
+    cfg = config.load(None, run_overrides={"sources": sources, "through": "start"}, admissible=barriers.ADMISSIBLE)
+    return run.Runner(
+        config=cfg,
+        paths=paths,
+        repo_root=repo,
+        caller=call.Caller(config=cfg, repo_root=repo, paths=paths, transport=fake_model.FakeChat(fake_model.clean())),
+        answers=barriers.Resolver(config_decisions={}),
+        ops=run.ledger_ops_for(repo),
+    )
+
+
+def _written(repo: Path) -> tuple[str, str]:
+    """The working tree's digest, every file outside ``.git``, and the trail's length."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in repo.rglob("*") if p.is_file() and ".git" not in p.relative_to(repo).parts):
+        digest.update(path.relative_to(repo).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest(), _git_out(repo, "rev-list", "--count", "HEAD").strip()
+
+
+def test_a_resume_given_the_recorded_inputs_proceeds(tmp_path: Path) -> None:
+    repo = _seeded_repo(tmp_path / "consumer")
+    assert ledger.record_start(repo, charter=_CHARTER, volume_roots=("a.tex", "b.tex")).ok
+
+    result = _resuming_runner(tmp_path, repo, sources=("a.tex", "b.tex")).run()
+
+    assert result.exit_code == baton.EXIT_BOUNDED, result.detail
+
+
+@pytest.mark.parametrize(
+    ("recorded", "given", "change"),
+    [
+        (("a.tex",), ("a.tex", "b.tex"), "added b.tex"),
+        (("a.tex", "b.tex"), ("a.tex",), "removed b.tex"),
+        (("a.tex", "b.tex"), ("b.tex", "a.tex"), "the same paths in another order"),
+    ],
+)
+def test_a_resume_given_other_volume_roots_is_refused_and_writes_nothing(
+    tmp_path: Path, recorded: tuple[str, ...], given: tuple[str, ...], change: str
+) -> None:
+    repo = _seeded_repo(tmp_path / "consumer")
+    assert ledger.record_start(repo, charter=_CHARTER, volume_roots=recorded).ok
+    before = _written(repo)
+
+    with pytest.raises(run._Halt) as halted:
+        _resuming_runner(tmp_path, repo, sources=given).run()
+
+    assert halted.value.result.exit_code == baton.EXIT_ENVIRONMENT
+    assert halted.value.result.detail == (
+        f"inputs: <volume-root>: {repo}: the kb-build: trail records volume roots [{', '.join(recorded)}] and this "
+        f"run was given [{', '.join(given)}]: {change} — restore: {kb_pipeline.INPUTS_REMEDY}",
+    )
+    assert _written(repo) == before
+
+
+def test_a_trail_whose_newest_boundary_records_no_inputs_resumes_without_comparison(tmp_path: Path) -> None:
+    repo = _seeded_repo(tmp_path / "consumer")
+    assert ledger.record_start(repo, charter=_CHARTER).ok
+
+    result = _resuming_runner(tmp_path, repo, sources=("anything.tex",)).run()
+
+    assert result.exit_code == baton.EXIT_BOUNDED, result.detail
 
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,14 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 claims: [clm-co1111]
-exp-id: exp-cohst1
-status: run
-strengthens:
-  - clm-co1111: 0.90
--->
+experiment-nodes:
+  - exp-id: exp-cohst1
+    status: run
+    strengthens:
+      - clm-co1111: 0.90
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## Co-Hosted Prediction And Its Bench Test
 

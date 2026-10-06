@@ -27,10 +27,13 @@ Stages, in order:
   whole corpus before the first ask.
 * **:mod:`classify`** — one letter ask per candidate, grouped by source, each
   group recorded as it lands; then every ``depends`` edge on a cycle of the
-  classified set is demoted to a reference. Inference reaches it through an
+  classified set is cut, and every cut — those and the ring pairs that kept
+  their drafted *mention* — lands as a ``demoted`` record carrying its origin
+  (:func:`classify.cuts`). Inference reaches it through an
   injected :class:`~.letters.LetterReader`, which is why this pipeline takes a
   reader rather than building one.
-* **F′, :func:`write.write_edges`** — pass 3 of the write path, one batch.
+* **F′, :func:`write.write_edges`** — pass 3 of the write path, one
+  ``add-build-edges`` batch.
 * **G, :mod:`gate`** — refresh, then the build-time check, in-process. Exits
   on the return codes.
 
@@ -114,7 +117,8 @@ def _candidate_findings(narrowed: attribute.Attribution) -> list[Finding]:
             (
                 "no pair containment directed lay on a cycle"
                 if not narrowed.demoted
-                else f"{len(narrowed.demoted)} pairs containment directed lay on a cycle and are drafted mention: "
+                else f"{len(narrowed.demoted)} pairs containment directed lay on a cycle and are drafted mention, "
+                f"landing as demoted where they keep that draft: "
                 + ", ".join(f"{source} -> {target}" for source, target in narrowed.demoted)
             ),
         ),
@@ -159,7 +163,7 @@ def _classification_findings(classified: classify.Classification, *, asked: bool
             + (
                 "no classified edge lay on a cycle, so none was demoted"
                 if not classified.demoted
-                else f"{len(classified.demoted)} classified edges lay on a cycle and are recorded as references "
+                else f"{len(classified.demoted)} classified edges lay on a cycle and are recorded as demoted "
                 f"instead: " + ", ".join(f"{source} -> {target}" for source, target in classified.demoted)
             ),
         )
@@ -216,7 +220,11 @@ def build(
         report.findings += _classification_findings(classified, asked=reader is not None)
 
         report.findings += write.write_edges(
-            classified.edges, kb_root=kb_root, scratch=scratch, references=classified.references
+            classified.edges,
+            kb_root=kb_root,
+            scratch=scratch,
+            references=classified.references,
+            demoted=classify.cuts(narrowed.demoted, classified, yeses),
         )
     except ClaimGraphError as error:
         report.findings.append(error.finding())

@@ -25,7 +25,6 @@ that the driver drives the front ends, and the front ends' own coverage is
 ``test_docgraph_build.py``'s.
 """
 
-import json
 import os
 import shutil
 import subprocess
@@ -36,10 +35,9 @@ from types import MappingProxyType
 
 import pytest
 
-from kb_tools import install_location, kb_pipeline, kb_util
+from kb_tools import install_location, kb_index_lib, kb_pipeline, kb_util
 from kb_tools.kb_claimgraph import tree
 from kb_tools.kb_driver import barriers, baton, config, run, runlog, steps
-from kb_tools.kb_write.render import FRONTMATTER_OPENER
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -130,17 +128,15 @@ def _walk_head(
     resolved rather than named.
     """
     paths = runlog.prepare(runs, "20260901T120000-1")
-    lock = runlog.repo_lock_path(consumer)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": os.getpid(), "run_id": paths.run_id}), encoding="utf-8")
-    return run.execute(
-        config=config.load(
-            None, run_overrides={"sources": tuple(sources), **overrides}, admissible=barriers.ADMISSIBLE
-        ),
-        paths=paths,
-        repo_root=consumer,
-        stages=stages,
-    )
+    with runlog.run_lock(consumer, state_dir=paths.run_dir):
+        return run.execute(
+            config=config.load(
+                None, run_overrides={"sources": tuple(sources), **overrides}, admissible=barriers.ADMISSIBLE
+            ),
+            paths=paths,
+            repo_root=consumer,
+            stages=stages,
+        )
 
 
 @pytest.fixture(scope="module")
@@ -203,7 +199,9 @@ def test_the_declared_pass_stamps_every_document_of_the_tree(walked: run.Result,
     documents = _documents(kb_util.kb_root(fresh_consumer))
 
     assert documents
-    assert [path for path, text in documents.items() if FRONTMATTER_OPENER not in text] == []
+    assert [
+        path for path, text in documents.items() if "kind" not in (kb_index_lib.parse_frontmatter(text) or {})
+    ] == []
 
 
 def test_every_stage_commits_its_own_product_and_leaves_the_worktree_clean(

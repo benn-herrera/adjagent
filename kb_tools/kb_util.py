@@ -43,21 +43,17 @@ consumer's file.
 handed a KB tree, it walks that tree and checks its structure. The tree is the
 whole of what it is told, and the tree is produced upstream of this op.
 
-``show-run-lock`` reports the driver's run lock — live, stale or absent, with
-the holder named where there is one — so a caller outside ``kb_driver`` (a
-staging recipe about to wipe a workspace) can ask whether a build is running in
-this repository. It writes nothing, clears nothing, and restates nothing: the
-judgement is ``kb_driver.runlog.lock_state``'s, and its own answer rides its
-stdout rather than its exit status.
+``show-run-lock`` reports the repository's run lock — held, naming the running
+build's state dir, or absent — so a caller outside ``kb_driver`` (a staging
+recipe about to wipe a workspace) can ask whether a build is running in this
+repository. It writes nothing and takes no lock: the answer is ``kb_lock``'s,
+and it rides stdout rather than the exit status.
 
-The nine metadata **write** ops — ``insert-claim-entry``,
-``insert-support-entry``, ``insert-experiment-entry``, ``set-rigor``,
-``set-rationale``, ``add-depends-on``, ``set-frontmatter``,
-``mark-claim-in-leaf`` and ``set-on-point-fraction`` — join the set as the front
+The metadata **write** ops — :data:`WRITE_OPS` — join the set as the front
 end of ``kb_write``. Each takes its values in a TOML
-file named by ``--values`` rather than on the command line, and the two register
+file named by ``--values`` rather than on the command line, and the register
 inserts alone take ``--create``. Their semantics — the validation ladder, the
-refusal reasons, the report lines and the three exit codes — live entirely in
+refusal reasons, the report lines and the exit codes — live entirely in
 ``kb_write.ops`` with no argparse in the picture; what is here is the surface
 binding and one adapter, so nothing about an op changes when its surface does.
 
@@ -77,11 +73,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from kb_tools import __version__, dot, install_location, pandoc
-
-KB_DIRNAME = "kb-root"
-INDEX_DIRNAME = ".index"
-CLAIMS_FILENAME = "claims.jsonl"
+from kb_tools import __version__, dot, install_location, kb_lock, pandoc
+from kb_tools.kb_schema import INDEX_DIRNAME, KB_DIRNAME
 
 # No INVARIANTS_FILENAME here: the corpus-invariant source is `invariants.md`
 # (`AGENTS.md` is the legacy spelling), and `kb_index_lib` owns both names.
@@ -260,20 +253,22 @@ OP_SHOW_STAGE_STATUS = "show-stage-status"
 # The built-tree validator: walks a built KB tree and checks its structure.
 OP_VALIDATE_BUILD = "validate-build"
 
-# The driver's run lock, read from outside the driver. The lock is the
-# repository's and a recipe that is about to wipe a workspace has to know
-# whether a build is running in it; the judgement stays `kb_driver.runlog`'s and
-# this op only reports it, so nothing outside that module tests a pid.
+# The repository's run lock, read from outside the driver. A recipe that is
+# about to wipe a workspace has to know whether a build is running in it.
 OP_SHOW_RUN_LOCK = "show-run-lock"
 
 #: The fields :data:`OP_SHOW_RUN_LOCK` prints, in this order. Closed and total:
-#: every answer carries all five, empty where there is nobody to name, so a
+#: every answer carries all three, empty where there is nothing to name, so a
 #: shell reading them branches on the value and never on which keys arrived.
 #: Spelled with underscores because a caller reads them into variables of the
 #: same names.
-RUN_LOCK_KEYS: tuple[str, ...] = ("state", "pid", "run_id", "started", "lock")
+RUN_LOCK_KEYS: tuple[str, ...] = ("state", "state_dir", "lock")
 
-# The nine metadata write ops. Their
+#: :data:`OP_SHOW_RUN_LOCK`'s two answers to "is a build running here?".
+RUN_LOCK_HELD = "held"
+RUN_LOCK_ABSENT = "absent"
+
+# The metadata write ops a surface binds. Their
 # semantics live in `kb_write.ops`, which imports this module — so the direction
 # that would let one read the other's names is the one that exists, and these
 # tokens are defined here, upstream of the package implementing them.
@@ -292,6 +287,7 @@ OP_ADD_DEPENDS_ON = "add-depends-on"
 OP_SET_FRONTMATTER = "set-frontmatter"
 OP_MARK_CLAIM_IN_LEAF = "mark-claim-in-leaf"
 OP_SET_ON_POINT_FRACTION = "set-on-point-fraction"
+OP_RESOLVE_DEMOTED = "resolve-demoted"
 
 #: The write ops, in the order they are declared in and the order a renderer
 #: iterating the write surface meets them.
@@ -308,6 +304,7 @@ WRITE_OPS: tuple[str, ...] = (
     OP_SET_FRONTMATTER,
     OP_MARK_CLAIM_IN_LEAF,
     OP_SET_ON_POINT_FRACTION,
+    OP_RESOLVE_DEMOTED,
 )
 
 # The metadata surface's one read-only op. Kept out
@@ -405,11 +402,6 @@ def kb_root(repo_root: Path | None = None) -> Path:
 def index_dir(repo_root: Path | None = None) -> Path:
     """The derived-index directory (``<kb_root>/.index``)."""
     return kb_root(repo_root) / INDEX_DIRNAME
-
-
-def claims_jsonl(repo_root: Path | None = None) -> Path:
-    """The type-tagged node register (``<index_dir>/claims.jsonl``)."""
-    return index_dir(repo_root) / CLAIMS_FILENAME
 
 
 def _has_runner_file(repo_root: Path, names: tuple[str, ...]) -> bool:
@@ -662,9 +654,7 @@ def document_tree_present(repo_root: Path) -> bool:
     return any(entry.is_dir() and entry.name != INDEX_DIRNAME for entry in kb.iterdir())
 
 
-def _binary_item(
-    name: str, version: Callable[[], str], failure: type[Exception], *, unavailable: str
-) -> PreflightItem:
+def _binary_item(name: str, version: Callable[[], str], failure: type[Exception], *, unavailable: str) -> PreflightItem:
     """``PASS`` with the binary's version, else ``unavailable`` with its seam's own message — the absent binary's included."""
     try:
         return PreflightItem(PASS, name, version())
@@ -1000,6 +990,28 @@ def graph_init_kb(repo_root: Path, runner: str | None = None) -> int:
 #: runs it are two surfaces over one token.
 CHARTER_FLAG = "--charter"
 
+#: The two record ops' flags naming the build's inputs, which every boundary
+#: body ends with. Spelled once for ``CHARTER_FLAG``'s reason.
+VOLUME_ROOT_FLAG = "--volume-root"
+BIBLIOGRAPHY_FLAG = "--bibliography"
+
+
+def _add_input_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        VOLUME_ROOT_FLAG,
+        action="append",
+        default=[],
+        help="a volume root the build reads, relative to the repository root; repeatable, in the build's order. "
+        "Recorded on its own line at the end of the commit's body",
+    )
+    parser.add_argument(
+        BIBLIOGRAPHY_FLAG,
+        action="append",
+        default=[],
+        help="a bibliography the build was told to use; repeatable, recorded after the volume roots. A .bib the "
+        "build found beside a volume root by default is not one",
+    )
+
 
 # ---------------------------------------------------------------------------
 # validate-build: the survey validator's front end
@@ -1083,7 +1095,7 @@ def run_validate(*, kb_root: Path) -> int:
 # and the stage that opens the build precedes it. The lock read is there because
 # the lock is the repository's, and its caller is often one that is about to
 # remove `kb-root/` or has already.
-# `install-targets`, `uninstall-targets`, the nine write ops and the one
+# `install-targets`, `uninstall-targets`, the write ops and the one
 # read-only metadata op anchor on `find_repo_root()`, which additionally
 # requires the KB tree — the read-only op among them because a citation is
 # checked against the KB it will live in.
@@ -1143,19 +1155,23 @@ def _handle_show_stage_status(args: argparse.Namespace) -> int:
 def _handle_start_build(args: argparse.Namespace) -> int:
     from kb_tools import kb_pipeline
 
-    return kb_pipeline.run_op(find_git_root(), op=OP_START_BUILD, stage=None, charter=args.charter, note=None)
+    root = find_git_root()
+    inputs = kb_pipeline.BuildInputs.given(root, volume_roots=args.volume_root, bibliographies=args.bibliography)
+    return kb_pipeline.run_op(root, op=OP_START_BUILD, stage=None, charter=args.charter, note=None, inputs=inputs)
 
 
 def _handle_advance_step(args: argparse.Namespace) -> int:
     from kb_tools import kb_pipeline
 
+    root = find_git_root()
     return kb_pipeline.run_op(
-        find_git_root(),
+        root,
         op=OP_ADVANCE_STEP,
         stage=args.stage,
         charter=None,
         note=args.note,
         no_inference=args.no_inference,
+        inputs=kb_pipeline.BuildInputs.given(root, volume_roots=args.volume_root, bibliographies=args.bibliography),
     )
 
 
@@ -1166,10 +1182,10 @@ def _handle_validate_build(args: argparse.Namespace) -> int:
 def _run_lock_field(value: object) -> str:
     """One reported field: empty where there is nothing to name, never more than a line.
 
-    The format's whole promise to a shell is one ``key=value`` per line, and a
-    lock file is a file on disk somebody may have written by hand — so a value
-    carrying a newline or a tab is folded to spaces here rather than allowed to
-    invent a line a caller would read as a key it does not know.
+    The format's whole promise to a shell is one ``key=value`` per line, and the
+    state dir is read from a file another process wrote — so a value carrying a
+    newline or a tab is folded to spaces here rather than allowed to invent a
+    line a caller would read as a key it does not know.
     """
     return "" if value is None else re.sub(r"\s", " ", str(value))
 
@@ -1177,40 +1193,30 @@ def _run_lock_field(value: object) -> str:
 def _handle_show_run_lock(args: argparse.Namespace) -> int:
     """Print the run lock's state as ``key=value`` lines. The answer is the output.
 
-    Read-only in the strong sense: it does not take the lock, does not clear a
-    stale one, and writes nothing anywhere — breaking a stale lock is the
-    driver's own recovery and stays there, so a caller learns the state here and
-    acts on it itself.
-
-    The judgement is ``runlog.lock_state``'s and is never restated: this reports
-    what that function returns, which is why no pid test lives on this side of
-    the boundary.
-
-    ``find_git_root``, because that is the root the driver's own lock is anchored
-    at — and because a caller asking about the lock is typically one that is
-    about to delete ``kb-root/`` or has already, so requiring it would refuse
-    exactly the question this op exists to answer.
-
-    The import is local, as ``kb_pipeline``'s and ``kb_write.ops``' are:
-    ``kb_driver`` imports this module, so the dependency resolves in that one
-    direction at call time.
+    Read-only: it probes the lock without taking it and writes nothing.
+    ``find_git_root``, because the lock is in the git directory — and because a
+    caller asking about it is typically one that is about to delete ``kb-root/``
+    or has already, so requiring it would refuse exactly the question this op
+    exists to answer.
     """
-    from kb_tools.kb_driver import runlog
-
-    path = runlog.repo_lock_path(find_git_root())
-    state = runlog.lock_state(path)
-    reported = {"state": state.state, "pid": state.pid, "run_id": state.run_id, "started": state.started, "lock": path}
+    repo = find_git_root()
+    state_dir = kb_lock.running_build(repo)
+    reported = {
+        "state": RUN_LOCK_ABSENT if state_dir is None else RUN_LOCK_HELD,
+        "state_dir": state_dir,
+        "lock": kb_lock.run_lock_path(repo),
+    }
     for key in RUN_LOCK_KEYS:
         print(f"{key}={_run_lock_field(reported[key])}")
     return 0
 
 
 def _handle_write_op(args: argparse.Namespace) -> int:
-    """One adapter for all nine write ops — root discovery, the call, the report.
+    """One adapter for every write op — root discovery, the call, the report.
 
     The op's semantics are ``kb_write.ops``' and there is no argparse in that
     module; this binds the surface shape to them and does nothing else. It
-    is one adapter rather than nine because the nine differ only in which member
+    is one adapter rather than one per op because the ops differ only in which member
     of :data:`kb_write.ops.OPS` they run and in whether ``--create`` is
     admissible — and that second fact is already declared, on ``Op``, so reading
     it here is what keeps the surface and the semantics from disagreeing about
@@ -1223,16 +1229,27 @@ def _handle_write_op(args: argparse.Namespace) -> int:
     imports this module, so the dependency is only ever resolved in that one
     direction at call time.
 
-    Nothing here decides an exit code: the op returns one of its three and it
+    Nothing here decides an exit code: the op returns one of its own and it
     passes through :func:`main` untouched, as ``EXIT_NO_DOCUMENT_TREE`` does.
+
+    The command holds the write lock around the op and is refused while a build
+    runs (``kb_lock.command_write_lock``); the build's own in-process calls to
+    the op hold only the lock, so a build never refuses itself.
     """
     from kb_tools.kb_write import ops as write_ops
 
     op = write_ops.OPS[args.op]
-    arguments: dict[str, object] = {"kb_root": kb_root(find_repo_root()), "values_file": args.values}
+    repo_root = find_repo_root()
+    arguments: dict[str, object] = {"kb_root": kb_root(repo_root), "values_file": args.values}
     if op.creates_register:
         arguments["create"] = args.create
-    result = op.run(**arguments)
+    try:
+        with kb_lock.command_write_lock(repo_root):
+            result = op.run(**arguments)
+    except kb_lock.BuildRunning as exc:
+        result = write_ops.build_running(args.op, exc.state_dir)
+    except kb_lock.LockBusy as exc:
+        result = write_ops.lock_busy(args.op, exc.path)
     for line in result.lines():
         print(line)
     return int(result.exit_code)
@@ -1280,7 +1297,7 @@ def _add_values_option(parser: argparse.ArgumentParser) -> None:
 
     A file rather than argv, on every op including the scalar-only ones: the
     ops' own signatures take a values file and nothing else, and one transport
-    across the nine is also what lets
+    across them all is also what lets
     a batch — a scoring wave's set of entries for one register — arrive as one
     all-or-nothing call.
     """
@@ -1312,16 +1329,17 @@ def _add_create_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _write_op_help(writes: str) -> str:
-    """One write op's help line: what it writes, then the contract shared by all nine.
+    """One write op's help line: what it writes, then the contract every write op shares.
 
     The per-op half names the file class the op writes into, because that is
     what a caller has to know before running it; the shared half is the exit
     ladder, which is what a caller branches on afterwards.
     """
     return (
-        f"{writes} Values arrive in the {VALUES_FLAG} file. Exit 0 written, 7 the values were refused "
-        f"and nothing was written, 8 a concurrent writer moved the file — re-run unchanged, never "
-        f"re-author the values"
+        f"{writes} Values arrive in the {VALUES_FLAG} file. Exit 0 written, 2 the KB is unfit and nothing "
+        f"was written — a KB in an older format until {TARGET_REFRESH} migrates it, 7 the values were refused, "
+        f"or a build is running, and nothing was written, 8 a concurrent writer moved the file or held the "
+        f"KB's write lock — re-run unchanged, never re-author the values"
     )
 
 
@@ -1349,7 +1367,7 @@ def _described(help_text: str, op: str) -> str:
     """An op's ``description=``: its help line, then its value vocabulary.
 
     The two differ on purpose. ``help=`` is the one-liner the subcommand list
-    prints for every op at once, and nine key lists there would bury it;
+    prints for every op at once, and a key list per op there would bury it;
     ``description=`` is what a caller reading ``<op> --help`` came for, and the
     vocabulary is the thing they are about to have to get right.
     """
@@ -1469,6 +1487,7 @@ def build_parser() -> argparse.ArgumentParser:
             "words rather than standing empty"
         ),
     )
+    _add_input_arguments(start_build)
     start_build.set_defaults(handler=_handle_start_build)
 
     advance_step_help = (
@@ -1496,17 +1515,18 @@ def build_parser() -> argparse.ArgumentParser:
         "asserting the stage did its work has nothing to assert where the work was excluded and reports "
         "as vacuous; a unit asserting the state is valid for the next stage runs unchanged",
     )
+    _add_input_arguments(advance_step)
     advance_step.set_defaults(handler=_handle_advance_step)
 
     show_run_lock_help = (
-        "report whether a driver run holds this repository's run lock: live with the holder named, "
-        "stale where the recorded holder is gone, absent where no lock file stands. Judged by the "
-        "driver's own liveness test, so a caller never writes a second one. Writes nothing and "
-        "clears nothing — a stale lock is reported, never broken. Its answer is its output and not "
-        "its exit status: all three states exit 0, and its one nonzero code is 2, a repo root that "
-        f"will not resolve. Output is one key=value line per field — {', '.join(RUN_LOCK_KEYS)}, in "
-        "that order, all of them on every answer, the value empty where there is nobody to name — so "
-        "a shell reads it with `while IFS='=' read -r key value` and needs neither a JSON tool nor a "
+        "report whether a build holds this repository's run lock (kbase's too): "
+        f"{RUN_LOCK_HELD}, naming the running build's state dir, or {RUN_LOCK_ABSENT}. The lock is "
+        "the kernel's, released when its holder exits however it exits, so there is no stale state "
+        "to report or clear. Writes nothing and takes no lock. Its answer is its output and not its "
+        "exit status: both states exit 0, and its one nonzero code is 2, a repo root that will not "
+        f"resolve. Output is one key=value line per field — {', '.join(RUN_LOCK_KEYS)}, in that "
+        "order, all of them on every answer, the value empty where there is nothing to name — so a "
+        "shell reads it with `while IFS='=' read -r key value` and needs neither a JSON tool nor a "
         "branch per state"
     )
     show_run_lock = add_parser(OP_SHOW_RUN_LOCK, help=show_run_lock_help, description=show_run_lock_help)
@@ -1559,7 +1579,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     insert_experiment_help = _write_op_help(
         "mint an exp- id and write its canonical declaration into its hosting document's "
-        "kb-frontmatter block; prints the id it minted. Takes no --create: an experiment's host "
+        "YAML frontmatter block; prints the id it minted. Takes no --create: an experiment's host "
         "is authored prose this tool never brings into being."
     )
     insert_experiment = add_parser(
@@ -1636,8 +1656,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_depends.set_defaults(handler=_handle_write_op)
 
     set_frontmatter_help = _write_op_help(
-        "replace or insert a document's whole kb-frontmatter block, carrying its derived roll-ups "
-        "over verbatim; the document's body prose is never touched."
+        "replace or insert a document's whole YAML frontmatter block, carrying its derived roll-ups "
+        "and kb-format stamp over verbatim; the document's body prose is never touched."
     )
     set_frontmatter = add_parser(
         OP_SET_FRONTMATTER, help=set_frontmatter_help, description=_described(set_frontmatter_help, OP_SET_FRONTMATTER)
@@ -1657,7 +1677,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     set_fraction_help = _write_op_help(
         "rewrite one support-to-claim on-point fraction line in the hosting document's "
-        "kb-frontmatter block; nothing else in the block moves."
+        "YAML frontmatter block; nothing else in the block moves."
     )
     set_fraction = add_parser(
         OP_SET_ON_POINT_FRACTION,
@@ -1667,7 +1687,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_values_option(set_fraction)
     set_fraction.set_defaults(handler=_handle_write_op)
 
-    # The metadata surface's one read-only op. It takes --values like the nine
+    resolve_demoted_help = _write_op_help(
+        "remove a demoted edge — a dependency the build cut to break a circle — or restore it to "
+        "depends-on; a restore that would close a cycle is refused naming the cycle, and a pair "
+        "already as asked is left untouched."
+    )
+    resolve_demoted = add_parser(
+        OP_RESOLVE_DEMOTED, help=resolve_demoted_help, description=_described(resolve_demoted_help, OP_RESOLVE_DEMOTED)
+    )
+    _add_values_option(resolve_demoted)
+    resolve_demoted.set_defaults(handler=_handle_write_op)
+
+    # The metadata surface's one read-only op. It takes --values like the write ops
     # — an excerpt is prose, and prose travels in a file — and its help line
     # says what it PRINTS, because that output is its whole product: nothing on
     # disk changes, so a caller who does not capture stdout gets nothing.

@@ -8,7 +8,10 @@ exposed as flags or as subcommands is therefore a change to the CLI and nothing
 else.
 
 **The ladder, in order.** Steps 1–4 refuse before anything is composed;
-5–7 compose and prove; only step 8 touches a live file.
+5–7 compose and prove; only step 8 touches a live file. Ahead of step 1 the
+KB's format is read (:func:`kb_load.require_current`): a KB older or newer than
+the format these ops write is exit 2, because a save into it would mix two
+formats, and an older one names the refresh that migrates it.
 
 1. **Well-formedness** — delegated whole to :mod:`values`. The grammar, the
    closed per-op key vocabulary and the inherited value domains are that
@@ -53,11 +56,14 @@ a future op that accepted an id for insert fails there rather than shipping.
 **Three outcomes, three codes.** :class:`ExitCode` and
 :data:`EXIT_FOR_STATUS` are the stable mapping the CLI binds and ``ledger.py``'s
 per-op ``exits`` vocabulary enrolls. **7 — refused**: the values are
-wrong; fix them and call again. **8 — retry unchanged**: the values were right
-and the write did not happen for a reason nothing about them can fix.
-**2 — environment unfit**: an unresolvable root, an unreadable tree, a usage
-error. Re-asking a model for values that were already correct is how a duplicate
-id gets written, which is why 7 and 8 are not one code.
+wrong; fix them and call again — or a build is running, and the call waits for
+it. **8 — retry unchanged**: the values were right and the write did not happen
+for a reason nothing about them can fix — a concurrent writer moved the file,
+or held the KB write lock past the wait.
+**2 — environment unfit**: an unresolvable root, an unreadable tree, a KB not
+in the current metadata format, a usage error. Re-asking a model for values that
+were already correct is how a duplicate id gets written, which is why 7 and 8
+are not one code.
 
 **Report lines, not a logging framework.** Output is the existing uniform
 ``[<tag>] STATUS name detail`` convention (``kb_util.PreflightItem``), with
@@ -70,30 +76,33 @@ own invocation constant may hand-write one.
 
 **Dependency direction**: ``ops`` → :mod:`values`, :mod:`store`,
 :mod:`render`, :mod:`kb_index_lib`'s two scan functions and production parsers,
-:mod:`kb_schema`'s mint, and ``kb_util``'s report-status tokens. Plus
+:mod:`kb_schema`'s mint, ``kb_util``'s report-status tokens, and
+:mod:`kb_load`'s format gate and document reader. Plus
 :mod:`kb_links`, for the one thing that module owns: the link primitive every
 gate reads a markdown link with. It dispatches no inference, composes no brief,
 names no stage id and names no record verb — and it still imports no
 ``verify_*`` module, which is why the read-only op reaches the citation gate's
 checks through objects the gate shares rather than through the gate.
 
-**Two registries, one vocabulary.** :data:`OPS` is the write surface — the nine
-ops that touch a file — and :data:`READ_OPS` is the one op that reads to
-verify and prints. They are disjoint, and their union is exactly
-:data:`values.OP_FIELDS`' key set.
+**Three registries, one vocabulary.** :data:`OPS` is the write surface a
+surface binds, :data:`READ_OPS` is the one op that reads to verify and prints,
+and :data:`BUILD_OPS` is what only the build issues, bound by no surface. They
+are disjoint, and their union is exactly :data:`values.OP_FIELDS`' key set.
 
-**Six in-package reaches, all deliberate, all for one reason**: the alternative
+**Seven in-package reaches, all deliberate, all for one reason**: the alternative
 to each is a second copy of a rule that already has exactly one owner, which is
 where drift starts. :class:`store._Refused` is caught around
 :func:`store.resolve_target` so step 2 runs in its stated place without a second
 implementation of the containment rule; store's two fold-break patterns bound
 the depends-on bullet insert rather than a re-typed key list;
 ``render._format_score`` renders a rigor value's text;
-``kb_index_lib._LEAF_DECL_RES`` is what decides which frontmatter keys declare a
-node; ``kb_index_lib._SUPPORTS_PAIR_RE`` is what decides where a staged
+``kb_index_lib._declared_node_ids`` is what decides which frontmatter entries
+declare a node; ``kb_index_lib._SUPPORTS_PAIR_RE`` is what decides where a staged
 fan-out block ends; and ``kb_index_lib._parse_depends_on_line`` is what says
 which edge a rendered depends-on bullet *is*, which is the question
-:func:`_reader_target` has to answer to tell a new edge from one already there.
+:func:`_reader_target` has to answer to tell a new edge from one already there;
+``kb_index_lib._parse_demoted_line`` answers the same of a demoted bullet for
+:func:`_drop_demoted`.
 Each is the same reach ``store`` itself makes into ``kb_index_lib``'s compiled
 patterns, for the same reason.
 
@@ -121,7 +130,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import TypeVar
 
-from kb_tools import kb_index_lib, kb_links, kb_schema, kb_util
+from kb_tools import kb_index_lib, kb_links, kb_load, kb_lock, kb_schema, kb_util, kb_yaml
 from kb_tools.kb_write import render, store, values
 
 #: One store scan's return, so :func:`_scanned` wraps either of the two scan
@@ -153,10 +162,11 @@ class ExitCode(IntEnum):
     #: Environment unfit: unresolvable root, unreadable tree, usage error.
     ENVIRONMENT = 2
     #: Refused: the values are wrong, nothing was written. Fix and call again.
+    #: Also a command refused while a build runs (:func:`build_running`).
     REFUSED = 7
-    #: Retry unchanged: a concurrent writer moved the file. Nothing was
-    #: written and nothing about the values can fix it — re-run them as they
-    #: are, never re-author them.
+    #: Retry unchanged: a concurrent writer moved the file, or held the KB
+    #: write lock past the wait. Nothing was written and nothing about the
+    #: values can fix it — re-run them as they are, never re-author them.
     RETRY = 8
 
 
@@ -203,6 +213,15 @@ class ReportItem:
 
 
 @dataclass(frozen=True)
+class DemotedResolution:
+    """One ``demoted`` edge ``resolve-demoted`` resolved: its ends, and ``removed`` or ``restored``."""
+
+    source: str
+    target: str
+    action: str
+
+
+@dataclass(frozen=True)
 class Result:
     """What an op did: the exit code, the report, and the two facts a caller acts on.
 
@@ -225,6 +244,9 @@ class Result:
     a report line is read by whoever is diagnosing the call, and a printed line
     is copied verbatim into a document, so a surface that interleaved them
     would be inviting the wrong bytes into the corpus.
+
+    ``resolved`` is each ``demoted`` edge ``resolve-demoted`` removed or
+    restored, in entry order; a pair already as asked is not among them.
     """
 
     op: str
@@ -233,6 +255,7 @@ class Result:
     minted: tuple[str, ...] = ()
     written: tuple[str, ...] = ()
     printed: tuple[str, ...] = ()
+    resolved: tuple[DemotedResolution, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -282,8 +305,8 @@ class _Unreadable(Exception):
     The decode stays strict and a failure stays *refused* rather than
     ``errors="replace"``d. What is never licensed is the traceback: an uncaught
     :class:`UnicodeDecodeError` leaves the process at rc 1, which is outside the
-    ladder and unenrolled in ``ledger._WRITE_OP_EXITS`` — so a driver-invoked op
-    reports **15, broken tool** for a KB the tool read perfectly correctly.
+    ladder — so a caller branching on the ladder reads a broken tool for a KB
+    the tool read perfectly correctly.
     """
 
     def __init__(self, name: str, detail: str, *, restore: str) -> None:
@@ -332,6 +355,7 @@ class _Context:
     #: cannot return any other way. Filled during the splice, so it describes
     #: the baseline that was actually written into.
     noted: list[ReportItem] = field(default_factory=list)
+    resolved: list[DemotedResolution] = field(default_factory=list)
     _titles: dict[str, str] = field(default_factory=dict)
     _read_registers: set[str] = field(default_factory=set)
 
@@ -509,8 +533,10 @@ def _resolve(ctx: _Context, node_id: str, *, key: str, needs_register: bool) -> 
     return record
 
 
-def _depends_targets(ctx: _Context, supplied: Iterable[values.DependsOnValue]) -> tuple[render.DependsOnTarget, ...]:
-    """Resolve a ``depends-on`` list into rendered-bullet values.
+def _depends_targets(
+    ctx: _Context, supplied: Iterable[values.DependsOnValue], *, key: str
+) -> tuple[render.DependsOnTarget, ...]:
+    """Resolve one outgoing-edge list into rendered-bullet values; ``key`` names the list's ``id``.
 
     A framework target — ``INVARIANT-XX`` or ``Axiom N`` — is passed through
     unresolved: it is not a node id, it is absent from the authored-id inventory
@@ -525,13 +551,14 @@ def _depends_targets(ctx: _Context, supplied: Iterable[values.DependsOnValue]) -
             # A work id resolves like a claim id and for the same reason: its
             # node is a register entry, so an edge into one that does not exist
             # is the dangling-target defect rather than a token to pass through.
-            _resolve(ctx, value.id, key="depends-on.id", needs_register=True)
+            _resolve(ctx, value.id, key=key, needs_register=True)
             out.append(
                 render.DependsOnTarget(
                     target=value.id,
                     title=ctx.title_of(value.id),
                     context=value.context,
                     applicability=value.applicability,
+                    origin=value.origin,
                 )
             )
         else:
@@ -662,6 +689,7 @@ def _current_entry(read: _RegisterRead, node_id: str) -> store.ExpectedEntry:
         rationale=record.rationale,
         depends_on=tuple(store.edge_of(e) for e in record.depends_on),
         references=tuple(store.edge_of(e) for e in record.references),
+        demoted=tuple(store.edge_of(e) for e in record.demoted),
         strengthen_by=tuple(item.text for item in record.strengthen_by),
     )
 
@@ -975,25 +1003,30 @@ def _replace_line(node_id: str, field_name: str, line: str) -> Callable[[str], s
     return splice
 
 
-#: The ``### Quality`` fields ``add-depends-on`` appends bullets to, each mapped
-#: to the renderer composing one of its bullets. Both sections anchor above
+#: The ``### Quality`` fields the edge-adding ops append bullets to, each mapped
+#: to the renderer composing one of its bullets. Every section anchors above
 #: ``- solidity:`` when absent, which is the canonical field order
-#: (``render.render_entry``); ``references`` leads ``depends-on`` in the search
-#: for that anchor so a section added second still lands below one added first.
+#: (``render.render_entry``); the later sections lead the earlier ones in the
+#: search for that anchor so a section added second still lands below one added
+#: first.
 _BULLET_SECTIONS: Mapping[str, Callable[[render.DependsOnTarget], str]] = {
     "depends-on": render.render_depends_on_bullet,
     "references": render.render_references_bullet,
+    "demoted": render.render_demoted_bullet,
 }
 
 #: The lines a missing section is anchored above, in the order they are looked
-#: for: the first one present wins. ``references`` sits between ``depends-on``
-#: and ``solidity``, so a new ``depends-on`` section goes above an existing
-#: ``references`` one and the reader's canonical order survives either order of
-#: writing.
+#: for: the first one present wins. The order is ``depends-on``, ``references``,
+#: ``demoted``, ``solidity``, so a new section goes above any later one already
+#: there and the reader's canonical order survives any order of writing.
 _SECTION_ANCHORS: Mapping[str, tuple[str, ...]] = {
-    "depends-on": ("- references:", "- solidity:"),
-    "references": ("- solidity:",),
+    "depends-on": ("- references:", "- demoted:", "- solidity:"),
+    "references": ("- demoted:", "- solidity:"),
+    "demoted": ("- solidity:",),
 }
+
+#: Each section's :class:`store.ExpectedEntry` field.
+_SECTION_FIELDS: Mapping[str, str] = {"depends-on": "depends_on", "references": "references", "demoted": "demoted"}
 
 
 def _add_bullets(addition: "_EdgeAddition", *, section: str) -> Callable[[str], str]:
@@ -1052,6 +1085,47 @@ def _add_bullets(addition: "_EdgeAddition", *, section: str) -> Callable[[str], 
     return splice
 
 
+def _drop_demoted(node_id: str, targets: frozenset[str]) -> Callable[[str], str]:
+    """Delete the ``- demoted:`` bullets of ``node_id``'s entry naming any of ``targets``.
+
+    Each goes with its continuation lines, and the list's header goes too where
+    no bullet is left; an entry with no such list comes back untouched, the
+    expectation being read off the same baseline. Which target a bullet names
+    is the reader's answer (``kb_index_lib._parse_demoted_line``), for
+    :func:`_reader_target`'s reason.
+    """
+    break_re = store._fold_break_for(node_id)
+    header = "- demoted:"
+
+    def splice(document: str) -> str:
+        entry = next((e for e in store.locate_entries(document) if e.node_id == node_id), None)
+        if entry is None or entry.quality_start is None or entry.quality_end is None:
+            raise store.SpliceError(f"no ### Quality section for {node_id} in this register")
+        lines = document.splitlines()
+        limit = min(entry.quality_end, len(lines))
+        head = next((i for i in range(entry.quality_start, limit) if lines[i].strip().startswith(header)), None)
+        if head is None:
+            return document
+        end = head + 1
+        while end < limit and not break_re.match(lines[end].strip()) and lines[end].strip() != "---":
+            end += 1
+        while end > head + 1 and not lines[end - 1].strip():
+            end -= 1
+
+        kept: list[str] = []
+        dropping = False
+        for line in lines[head + 1 : end]:
+            if line != line.lstrip() and line.lstrip().startswith("- "):
+                named = {edge.target for edge in kb_index_lib._parse_demoted_line(line, node_id)}
+                dropping = bool(named & targets)
+            if not dropping:
+                kept.append(line)
+        remaining = any(line != line.lstrip() and line.lstrip().startswith("- ") for line in kept)
+        return store.splice_lines(document, start=head, end=end, lines=[lines[head], *kept] if remaining else [])
+
+    return splice
+
+
 def _chained(*splices: Callable[[str], str]) -> Callable[[str], str]:
     """One splice running several in order, each over the last one's output.
 
@@ -1075,43 +1149,45 @@ _KNOWN_FRONTMATTER_KEYS = frozenset(
         "claims",
         "no-claim",
         "experiments",
-        "exp-id",
-        "status",
-        "strengthens",
-        "sup-id",
-        "supports",
+        kb_schema.EXPERIMENT_NODES_KEY,
+        kb_schema.SUPPORT_NODES_KEY,
+        kb_schema.FORMAT_KEY,
     }
 )
 
-#: Derived frontmatter fields — ``refresh``'s roll-ups. A block-replacing op
-#: carries their current lines over verbatim rather than dropping them: deleting
-#: a derived value is resetting one, which is forbidden as squarely as computing
-#: one. The anchors are refresh's own documented insertion points.
+#: Derived frontmatter fields — ``refresh``'s roll-ups — each with the key it is
+#: inserted after. A block-replacing op carries their current values over rather
+#: than dropping them: deleting a derived value is resetting one, which is
+#: forbidden as squarely as computing one. The anchors are refresh's own.
 _DERIVED_FRONTMATTER_FIELDS: tuple[tuple[str, str], ...] = (
-    ("subtree-claims", "kind:"),
-    ("subtree-experiments", "subtree-claims:"),
+    ("subtree-claims", "kind"),
+    ("subtree-experiments", "subtree-claims"),
 )
 
 
-def _replace_block(block: str, *, rel: str, redeclared: Sequence[str]) -> Callable[[str], str]:
-    """Replace a document's whole kb-frontmatter block, preserving derived fields.
+def _replace_block(intended: render.FrontmatterValues, *, rel: str, redeclared: Sequence[str]) -> Callable[[str], str]:
+    """Replace a document's whole frontmatter, or open the document with a first one.
 
-    The current block is read **here**, out of the document the splice receives,
-    rather than at plan time out of the live file: two reads describe different
-    generations of the file whenever a writer lands between them, and
-    what this one decides — which derived roll-ups to carry over, and whether
-    the replace would drop a key or a hosted declaration — is a question about
-    exactly the bytes being replaced.
+    Refresh's roll-ups and the ``kb-format`` stamp are carried over, the stamp
+    last. The current block is read **here**, out of the document the splice
+    receives, rather than at plan time out of the live file: two reads describe
+    different generations of the file whenever a writer lands between them, and
+    what this one decides — what to carry over, and whether the replace would
+    drop a key or a hosted declaration — is a question about exactly the bytes
+    being replaced.
     """
 
     def splice(document: str) -> str:
-        existing = _existing_frontmatter(document, rel, redeclared=redeclared)
-        if store.FRONTMATTER_BLOCK.search(document) is None:
-            candidate = _insert_block(document, block)
+        existing = _existing_frontmatter(document, rel, redeclared=redeclared) or {}
+        block = render.render_frontmatter_block(intended)
+        span = kb_yaml.find_frontmatter(document)
+        if span is None:
+            candidate = block + "\n" + document
         else:
-            candidate = store.FRONTMATTER_BLOCK.sub(lambda _m: block, document, count=1)
+            # The rendered block ends at its closing fence; the document keeps the line break after it.
+            candidate = block + document[span.close_start + len("---") :]
         for name, anchor in _DERIVED_FRONTMATTER_FIELDS:
-            carried = (existing or {}).get(name)
+            carried = existing.get(name)
             # Presence, not truth: an empty roll-up and an absent key are
             # different facts — `subtree-claims: []` is a walk that found
             # nothing, no key at all is a walk that never ran — and the
@@ -1119,58 +1195,38 @@ def _replace_block(block: str, *, rel: str, redeclared: Sequence[str]) -> Callab
             # empty one silently.
             if carried is not None:
                 candidate = store.replace_or_insert_frontmatter_field(
-                    candidate, field=name, ids=list(carried), anchor_prefix=anchor
+                    candidate, field=name, ids=list(carried), anchor_key=anchor
                 )
+        stamp = existing.get(kb_schema.FORMAT_KEY)
+        if isinstance(stamp, str) and stamp:
+            candidate = store.set_frontmatter_key(
+                candidate,
+                key=kb_schema.FORMAT_KEY,
+                lines=render.render_frontmatter_field(kb_schema.FORMAT_KEY, stamp),
+                after=None,
+            )
         return candidate
 
     return splice
 
 
-def _insert_block(document: str, block: str) -> str:
-    """Place a first frontmatter block: below the up-link line, else at the top.
+def _append_declaration(key: str, rendered: Sequence[str]) -> Callable[[str], str]:
+    """Append one node declaration to the list under ``key`` in the document's frontmatter.
 
-    Every non-root KB document opens with an up-link to its parent, and the
-    block sits under it — so the insertion point is read off the document rather
-    than fixed, and a document with no up-link (an entry point) takes the block
-    first.
-
-    **A separating blank line is added only where there is not one already.**
-    The op emitted one on each side unconditionally, so the ordinary leaf shape
-    — an up-link, then a blank line — gained two blanks after the block (review
-    finding m3). It is a body edit either way, by an op that owns only the
-    metadata, so the rule is to disturb the prose by the minimum that keeps the
-    block a block.
-    """
-    lines = document.splitlines()
-    at = 0
-    for i, line in enumerate(lines):
-        if not line.strip():
-            continue
-        at = i + 1 if line.lstrip().startswith("[") else i
-        break
-    new = block.splitlines()
-    if at and lines[at - 1].strip():
-        new.insert(0, "")
-    if at < len(lines) and lines[at].strip():
-        new.append("")
-    return store.splice_lines(document, start=at, end=at, lines=new)
-
-
-def _append_to_block(added: Sequence[str]) -> Callable[[str], str]:
-    """Append lines inside the existing kb-frontmatter block, disturbing nothing.
-
-    Repeated ``exp-id:`` / ``sup-id:`` keys each open their own fan-out block —
-    a container hosts any number of any combination of node bodies — so a new
-    declaration appends rather than replacing anything. The delimiters come back
-    from :func:`render.wrap_frontmatter`, the one composer of the opener.
+    ``rendered`` is that list's key line and the one entry. A container hosts
+    any number of any combination of node bodies, so a new declaration appends
+    and replaces nothing; a document without the list gains it at the end of its
+    frontmatter, before the stamp.
     """
 
     def splice(document: str) -> str:
-        if store.FRONTMATTER_BLOCK.search(document) is None:
-            raise store.SpliceError("the document has no kb-frontmatter block to declare a node in")
-        return store.FRONTMATTER_BLOCK.sub(
-            lambda m: render.wrap_frontmatter("\n".join([*m.group(1).splitlines(), *added])), document, count=1
-        )
+        if kb_index_lib.find_frontmatter(document) is None:
+            raise store.SpliceError("the document has no frontmatter to declare a node in")
+        found = store.frontmatter_key_span(document, key)
+        if found is None:
+            return store.set_frontmatter_key(document, key=key, lines=rendered, after=None)
+        _, _, end = found
+        return store.edit_frontmatter_lines(document, lambda lines: [*lines[:end], *rendered[1:], *lines[end:]])
 
     return splice
 
@@ -1224,32 +1280,33 @@ def _insert_marker(marker: str, locator: str, *, node_id: str, rel: str) -> Call
     return splice
 
 
-def _replace_supports_pair(sup_id: str, claim_id: str, line: str) -> Callable[[str], str]:
-    """Rewrite one ``supports:`` pair line inside its own ``sup-id:`` block.
+def _replace_supports_pair(sup_id: str, claim_id: str, fraction: float | None) -> Callable[[str], str]:
+    """Rewrite one ``supports`` pair line inside its own entry of the document's ``support-nodes``.
 
-    The pair belongs to the block its ``sup-id:`` opened and to no other, so the
-    scan is bounded by the next ``sup-id:`` — a container hosting two supports
-    that both name one beneficiary is legal, and rewriting the wrong one would
-    be a silent edit of a value nobody asked about.
+    The pair belongs to the entry its ``sup-id`` opened and to no other, so the
+    scan is bounded by the next entry of the list — a container hosting two
+    supports that both name one beneficiary is legal, and rewriting the wrong
+    one would be a silent edit of a value nobody asked about. Every other line
+    is kept.
     """
-    pair_re = re.compile(rf"^(\s*-?\s*){re.escape(claim_id)}\s*:")
+    pair_re = re.compile(rf"^(\s*-\s*){re.escape(claim_id)}\s*:")
 
     def splice(document: str) -> str:
-        match = store.FRONTMATTER_BLOCK.search(document)
-        if match is None:
-            raise store.SpliceError("the document has no kb-frontmatter block")
-        block = match.group(1).splitlines()
-        start = next((i for i, ln in enumerate(block) if ln.strip() == f"sup-id: {sup_id}"), None)
-        if start is None:
+        found = store.frontmatter_key_span(document, kb_schema.SUPPORT_NODES_KEY)
+        if found is None:
             raise store.SpliceError(f"{sup_id} is not declared in this document's frontmatter")
-        end = next((i for i in range(start + 1, len(block)) if block[i].strip().startswith("sup-id:")), len(block))
-        target = next((i for i in range(start + 1, end) if pair_re.match(block[i])), None)
-        if target is None:
-            raise store.SpliceError(f"{sup_id} declares no supports pair for {claim_id}")
-        # The rendered line carries the canonical indent, so it replaces the
-        # physical line whole rather than being grafted onto its leader.
-        block[target] = line
-        return store.FRONTMATTER_BLOCK.sub(lambda _m: render.wrap_frontmatter("\n".join(block)), document, count=1)
+        lines, start, end = found
+        entry = next((i for i in range(start, end) if lines[i].strip().removeprefix("- ") == f"sup-id: {sup_id}"), None)
+        if entry is None:
+            raise store.SpliceError(f"{sup_id} is not declared in this document's frontmatter")
+        item_indent = lines[entry][: len(lines[entry]) - len(lines[entry].lstrip())]
+        entry_end = next((i for i in range(entry + 1, end) if lines[i].startswith(f"{item_indent}- ")), end)
+        for target in range(entry + 1, entry_end):
+            leader = pair_re.match(lines[target])
+            if leader is not None:
+                line = leader.group(1) + render.render_frontmatter_pair(claim_id, fraction)
+                return store.edit_frontmatter_lines(document, lambda body: [*body[:target], line, *body[target + 1 :]])
+        raise store.SpliceError(f"{sup_id} declares no supports pair for {claim_id}")
 
     return splice
 
@@ -1447,8 +1504,8 @@ def _body(document: str) -> _Body:
     The search runs over the body **only**, since a marker belongs beside the
     text it anchors and never inside the frontmatter block.
     """
-    block = store.FRONTMATTER_BLOCK.search(document)
-    first = document.count("\n", 0, block.end()) + 1 if block else 0
+    block = kb_index_lib.find_frontmatter(document)
+    first = len(document[: block.end].splitlines()) if block else 0
     lines = document.splitlines()
 
     parts: list[str] = []
@@ -1846,11 +1903,36 @@ def add_depends_on(*, kb_root: Path, values_file: Path) -> Result:
     as a ``FACT`` line per entry: re-proposing an edge is fine, and a caller
     that believed it wrote N and wrote fewer can see so.
     """
-    return _execute("add-depends-on", kb_root=kb_root, values_file=values_file, plan=_plan_add_depends_on)
+    return _execute("add-depends-on", kb_root=kb_root, values_file=values_file, plan=_plan_add_edges)
+
+
+def add_build_edges(*, kb_root: Path, values_file: Path) -> Result:
+    """``add-depends-on`` plus the ``demoted`` list: the build's one edge write per source.
+
+    A ``demoted`` edge is a ``depends`` edge the build's cycle breaking cut, and
+    only the build writes one, so this op is in :data:`BUILD_OPS` and no surface
+    binds it. It lands depends, references and demoted bullets for each source
+    in one batch, with ``add-depends-on``'s per-list dedupe.
+    """
+    return _execute("add-build-edges", kb_root=kb_root, values_file=values_file, plan=_plan_add_edges)
+
+
+def resolve_demoted(*, kb_root: Path, values_file: Path) -> Result:
+    """Remove a ``demoted`` edge, or restore it to ``depends-on``.
+
+    ``remove`` deletes the bullet, and the list's header with its last bullet.
+    ``restore`` deletes it the same way and adds a ``depends-on`` bullet for the
+    pair carrying the solidity placeholder — refused where that would close a
+    cycle of the premise graph the acyclicity check walks, the batch's earlier
+    restores included, the refusal naming the path. A pair already as asked (no
+    demoted edge to remove, or a depends edge and no demoted one to restore) is
+    left as it stands, so a re-issued call writes nothing.
+    """
+    return _execute("resolve-demoted", kb_root=kb_root, values_file=values_file, plan=_plan_resolve_demoted)
 
 
 def set_frontmatter(*, kb_root: Path, values_file: Path) -> Result:
-    """Replace or insert a document's whole kb-frontmatter block.
+    """Replace or insert a document's whole frontmatter.
 
     The tool stamps the metadata block into a file the agent wrote: the body
     prose stays authored, the block is composed here. Derived roll-ups present
@@ -1897,7 +1979,7 @@ def _plan_inserts(ctx: _Context, entries: Sequence[values.Entry], *, kind: str, 
         supplied = entry.values
         rel = str(supplied["register"])
         target = _contained(ctx.kb_root, rel, key="register")
-        depends = _depends_targets(ctx, supplied.get("depends-on", ()))  # type: ignore[arg-type]
+        depends = _depends_targets(ctx, supplied.get("depends-on", ()), key="depends-on.id")  # type: ignore[arg-type]
         strengthen_by = tuple(supplied.get("strengthen-by", ()))  # type: ignore[arg-type]
         # A staged beneficiary is an id-valued field like any other, so it
         # resolves against the authored inventory before anything is composed
@@ -1962,16 +2044,11 @@ def _plan_experiments(ctx: _Context, entries: Sequence[values.Entry]) -> list[_I
             status=str(supplied["status"]),
             strengthens=tuple((pair.id, pair.strength) for pair in pairs),
         )
-        # The declaration's lines are lifted out of a whole rendered block
-        # rather than composed here: `render` is the only module that spells a
-        # frontmatter field, and it has no renderer for a bare declaration.
-        block = render.render_frontmatter_block(render.FrontmatterValues(kind="leaf", experiment_nodes=(decl,)))
-        added = [line for line in block.splitlines()[1:-1] if not line.startswith("kind:")]
         intents.append(
             _Intent(
                 path=rel,
                 target=target,
-                splice=_append_to_block(added),
+                splice=_append_declaration(kb_schema.EXPERIMENT_NODES_KEY, render.render_experiment_nodes((decl,))),
                 prove=_experiment_prover(decl),
                 subject=f"{rel}:{exp_id}",
             )
@@ -2260,7 +2337,8 @@ def _reader_target(node_id: str, target: render.DependsOnTarget) -> str:
     return edges[0].target if edges else target.target
 
 
-def _plan_add_depends_on(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+def _plan_add_edges(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+    """``add-depends-on``'s and ``add-build-edges``' plan: each names the lists its vocabulary admits."""
     intents: list[_Intent] = []
     for entry in entries:
         node_id = str(entry.values["id"])
@@ -2268,35 +2346,34 @@ def _plan_add_depends_on(ctx: _Context, entries: Sequence[values.Entry]) -> list
         rel = str(record.register_path)
         register = _contained(ctx.kb_root, rel, key="id")
 
-        depends = _depends_targets(ctx, entry.values.get("depends-on", ()))  # type: ignore[arg-type]
-        referenced = _depends_targets(ctx, entry.values.get("references", ()))  # type: ignore[arg-type]
-        if not depends and not referenced:
+        additions: dict[str, _EdgeAddition] = {}
+        for section in _BULLET_SECTIONS:
+            targets = _depends_targets(ctx, entry.values.get(section, ()), key=f"{section}.id")  # type: ignore[arg-type]
+            if not targets:
+                continue
+            if section != "depends-on" and not render.is_claim_id(node_id):
+                raise _Refused(
+                    node_id,
+                    f"carries a {section} list, and a reference is one claim of this corpus naming another",
+                    restore=f"restore: drop the {section} list, or name a claim entry as the id, then re-run",
+                )
+            additions[section] = _EdgeAddition(node_id=node_id, requested=targets, new=targets)
+        if not additions:
             raise _Refused(
                 node_id,
                 "this op adds an entry's outgoing edges and neither list names one",
-                restore="restore: supply a depends-on list, a references list, or both, then re-run",
+                restore="restore: supply at least one edge list, then re-run",
             )
-        if referenced and not render.is_claim_id(node_id):
-            raise _Refused(
-                node_id,
-                "carries a references list, and a reference is one claim of this corpus naming another",
-                restore="restore: drop the references list, or name a claim entry as the id, then re-run",
-            )
-        additions = {
-            section: _EdgeAddition(node_id=node_id, requested=targets, new=targets)
-            for section, targets in (("depends-on", depends), ("references", referenced))
-            if targets
-        }
 
         # Bound over the loop variable, so each entry narrows its own additions —
         # a bare closure would give every intent in the batch the last one's
         # (late binding).
         def expect(read: _RegisterRead, node_id: str = node_id, additions: Mapping[str, _EdgeAddition] = additions):
             current = _current_entry(read, node_id)
-            held = {"depends-on": current.depends_on, "references": current.references}
-            added: dict[str, tuple[store.ExpectedEdge, ...]] = {}
+            updated: dict[str, tuple[store.ExpectedEdge, ...]] = {}
             for section, addition in additions.items():
-                already = addition.narrow(frozenset(edge.target for edge in held[section]))
+                held: tuple[store.ExpectedEdge, ...] = getattr(current, _SECTION_FIELDS[section])
+                already = addition.narrow(frozenset(edge.target for edge in held))
                 if already:
                     ctx.noted.append(
                         ReportItem(
@@ -2306,14 +2383,10 @@ def _plan_add_depends_on(ctx: _Context, entries: Sequence[values.Entry]) -> list
                             f"edge this entry already has, and were not written a second time",
                         )
                     )
-                added[section] = tuple(store.ExpectedEdge(t.target, t.context, t.applicability) for t in addition.new)
-            return (
-                replace(
-                    current,
-                    depends_on=current.depends_on + added.get("depends-on", ()),
-                    references=current.references + added.get("references", ()),
-                ),
-            )
+                updated[_SECTION_FIELDS[section]] = held + tuple(
+                    store.ExpectedEdge(t.target, t.context, t.applicability, t.origin) for t in addition.new
+                )
+            return (replace(current, **updated),)
 
         intents.append(
             _Intent(
@@ -2324,6 +2397,97 @@ def _plan_add_depends_on(ctx: _Context, entries: Sequence[values.Entry]) -> list
             )
         )
     return intents
+
+
+@dataclass
+class _DemotedResolution:
+    """One entry's changes to its ``demoted`` list: the targets whose bullet goes, and the restored ones."""
+
+    node_id: str
+    path: str
+    target: Path
+    drop: set[str] = field(default_factory=set)
+    restore: list[render.DependsOnTarget] = field(default_factory=list)
+
+
+def _plan_resolve_demoted(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+    state = kb_index_lib.discover_kb(ctx.kb_root, diagnostic_stream=None)
+    graph = kb_index_lib.premise_graph(state.claim_entries, state.supports)
+    claims = {claim.id: claim for claim in state.claim_entries}
+    named: dict[tuple[str, str], int] = {}
+    resolutions: dict[str, _DemotedResolution] = {}
+    for entry in entries:
+        node_id, target, action = (str(entry.values[key]) for key in ("id", "target", "action"))
+        first = named.setdefault((node_id, target), entry.index)
+        if first != entry.index:
+            raise _Refused(
+                f"entry[{entry.index}].target",
+                f"names {node_id} → {target}, which entry {first} already names; a pair takes one action per batch",
+                restore="restore: drop one of the two entries, then re-run",
+            )
+        record = _resolve(ctx, node_id, key="id", needs_register=True)
+        _resolve(ctx, target, key="target", needs_register=True)
+        current = claims.get(node_id)
+        demoted = next((e for e in current.demoted if e.target == target), None) if current else None
+        depends = current is not None and any(
+            e.relation == "depends" and e.target == target for e in current.depends_on
+        )
+        if demoted is None:
+            if action == "remove" or depends:
+                continue
+            raise _Refused(
+                f"target={target}",
+                f"{node_id} carries neither a demoted nor a depends edge to {target}, so there is nothing to "
+                f"restore; only the build writes a demoted edge",
+                restore="restore: add the edge with add-depends-on, or correct target, then re-run",
+            )
+        if node_id not in resolutions:
+            rel = str(record.register_path)
+            resolutions[node_id] = _DemotedResolution(
+                node_id=node_id, path=rel, target=_contained(ctx.kb_root, rel, key="id")
+            )
+        resolution = resolutions[node_id]
+        resolution.drop.add(target)
+        done = "removed"
+        if action == "restore":
+            path = kb_index_lib.depends_path(graph, target, node_id)
+            if path is not None:
+                raise _Refused(
+                    "dependency-cycle",
+                    f"entry {entry.index}: restoring {node_id} → {target} as a depends edge would close the cycle "
+                    f"{' → '.join((*path, target))}",
+                    restore="restore: resolve-demoted with action remove for this pair, or remove a depends edge "
+                    "on the named path first, then re-run",
+                )
+            graph.setdefault(node_id, []).append(target)
+            done = "restored"
+            if not depends:
+                resolution.restore.append(
+                    render.DependsOnTarget(target=target, title=ctx.title_of(target), context=demoted.context)
+                )
+        ctx.resolved.append(DemotedResolution(source=node_id, target=target, action=done))
+    return [_resolution_intent(resolution) for resolution in resolutions.values()]
+
+
+def _resolution_intent(resolution: _DemotedResolution) -> _Intent:
+    """One entry's demoted bullets dropped and its restored ones added, proven as the record less and plus them."""
+    restored = tuple(resolution.restore)
+    splices = [_drop_demoted(resolution.node_id, frozenset(resolution.drop))]
+    if restored:
+        addition = _EdgeAddition(node_id=resolution.node_id, requested=restored, new=restored)
+        splices.append(_add_bullets(addition, section="depends-on"))
+
+    def expect(read: _RegisterRead) -> tuple[store.ExpectedEntry, ...]:
+        current = _current_entry(read, resolution.node_id)
+        return (
+            replace(
+                current,
+                demoted=tuple(edge for edge in current.demoted if edge.target not in resolution.drop),
+                depends_on=current.depends_on + tuple(store.ExpectedEdge(t.target, t.context) for t in restored),
+            ),
+        )
+
+    return _Intent(path=resolution.path, target=resolution.target, splice=_chained(*splices), expect_current=expect)
 
 
 def _plan_set_frontmatter(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
@@ -2381,7 +2545,7 @@ def _plan_set_frontmatter(ctx: _Context, entries: Sequence[values.Entry]) -> lis
             _Intent(
                 path=rel,
                 target=target,
-                splice=_replace_block(render.render_frontmatter_block(intended), rel=rel, redeclared=redeclared),
+                splice=_replace_block(intended, rel=rel, redeclared=redeclared),
                 prove=_frontmatter_prover(intended),
                 subject=rel,
             )
@@ -2408,8 +2572,8 @@ def _existing_frontmatter(text: str, rel: str, *, redeclared: Iterable[str]) -> 
       attributes (``no-claim:``, ``path-stable:``): omitting one removes it, and
       the op that removed it is the op that puts it back.
 
-    The declaration keys are read through ``kb_index_lib``'s own patterns, which
-    are what decides on the reading side what a declaration is.
+    The declarations are read by ``kb_index_lib``'s own declaration reader,
+    which is what decides on the reading side what a declaration is.
 
     Takes the document's text rather than its path: it is called from inside the
     splice, over the baseline ``store`` read, so that what it refuses and what
@@ -2428,8 +2592,7 @@ def _existing_frontmatter(text: str, rel: str, *, redeclared: Iterable[str]) -> 
             restore=f"restore: remove {unknown[0]!r} from the block by hand, or leave this document's "
             f"frontmatter alone, then re-run",
         )
-    block = store.FRONTMATTER_BLOCK.search(text)
-    declared = {node_id for pattern in kb_index_lib._LEAF_DECL_RES for node_id in pattern.findall(block.group(1))}
+    declared = set(kb_index_lib._declared_node_ids(fields))
     dropped = sorted(declared - set(redeclared))
     if dropped:
         raise _Refused(
@@ -2502,7 +2665,7 @@ def _frontmatter_prover(intended: render.FrontmatterValues) -> Prover:
     def prove(path: Path, kb_root: Path) -> list[str]:
         observed = _observed_frontmatter(path, kb_root)
         if observed is None:
-            return ["kb-frontmatter"]
+            return ["frontmatter"]
         # Both free-text fields are emitted collapsed and double-quoted and come
         # back unquoted, so the comparison is against the collapsed supplied
         # value — and against `None` where the value was not supplied, which is
@@ -2581,15 +2744,13 @@ def _plan_set_on_point_fraction(ctx: _Context, entries: Sequence[values.Entry]) 
         fraction = supplied["fraction"]
         record = _resolve(ctx, sup_id, key="id", needs_register=True)
         _resolve(ctx, claim_id, key="claim", needs_register=True)
-        line = render.render_supports_pair_line(claim_id, fraction)  # type: ignore[arg-type]
-
         if record.hosting_leaf is not None:
             rel = record.hosting_leaf
             intents.append(
                 _Intent(
                     path=rel,
                     target=_contained(ctx.kb_root, rel, key="id"),
-                    splice=_replace_supports_pair(sup_id, claim_id, line),
+                    splice=_replace_supports_pair(sup_id, claim_id, fraction),  # type: ignore[arg-type]
                     prove=_fraction_prover(sup_id, claim_id, fraction),  # type: ignore[arg-type]
                     subject=f"{rel}:{sup_id}",
                 )
@@ -2627,7 +2788,9 @@ def _plan_set_on_point_fraction(ctx: _Context, entries: Sequence[values.Entry]) 
             _Intent(
                 path=rel,
                 target=register,
-                splice=_replace_staged_pair(sup_id, claim_id, line),
+                splice=_replace_staged_pair(
+                    sup_id, claim_id, render.render_supports_pair_line(claim_id, fraction)  # type: ignore[arg-type]
+                ),
                 expect_current=expect,
             )
         )
@@ -2652,15 +2815,28 @@ def _fraction_prover(sup_id: str, claim_id: str, fraction: float | None) -> Prov
 
 
 def _execute(op: str, *, kb_root: Path, values_file: Path, plan) -> Result:
-    """Run the ladder for one op over one values file.
+    """Run the ladder for one op over one values file, holding the KB write lock.
 
-    Every exit from this function is one of the three codes, and nothing is
-    written on 7 or 8.
+    Every exit from this function is one of the four codes, and nothing is
+    written on 2 (the batch interrupted between replaces excepted), 7 or 8.
+    The lock is held from the first read of the KB to the last write; another
+    writer holding it past the wait is 8, with nothing read.
     """
     root = Path(kb_root)
     if not root.is_dir():
         return _environment(op, str(kb_root), "is not a directory, so no KB can be resolved under it")
     root = root.resolve()
+    try:
+        with kb_lock.write_lock(root.parent):
+            return _execute_locked(op, root=root, values_file=values_file, plan=plan)
+    except kb_lock.LockBusy as exc:
+        return lock_busy(op, exc.path)
+
+
+def _execute_locked(op: str, *, root: Path, values_file: Path, plan) -> Result:
+    refused = _format_refused(op, root, current_only=True)
+    if refused is not None:
+        return refused
 
     try:
         parsed = values.parse_values_file(Path(values_file), op=op)
@@ -2671,7 +2847,20 @@ def _execute(op: str, *, kb_root: Path, values_file: Path, plan) -> Result:
 
     try:
         ctx = _open_store(root)
-        outcome = store.apply_edits(kb_root=root, edits=_batch(plan(ctx, parsed.entries), kb_root=root))
+        edits = _batch(plan(ctx, parsed.entries), kb_root=root)
+        if not edits:
+            # Reachable only from `resolve-demoted`, the one plan that skips an
+            # entry already as asked; every other plan edits or refuses.
+            return Result(
+                op=op,
+                exit_code=ExitCode.WRITTEN,
+                report=(
+                    ReportItem(
+                        kb_util.FACT, "unchanged", f"every entry is already as asked; nothing was written ({op})"
+                    ),
+                ),
+            )
+        outcome = store.apply_edits(kb_root=root, edits=edits)
     except _Refused as exc:
         return Result(op=op, exit_code=ExitCode.REFUSED, report=(_fail(exc.name, exc.detail, exc.restore),))
     except _Unreadable as exc:
@@ -2694,9 +2883,7 @@ def _execute(op: str, *, kb_root: Path, values_file: Path, plan) -> Result:
         return Result(
             op=op,
             exit_code=ExitCode.REFUSED,
-            report=(
-                _fail("kb-frontmatter", str(exc), "restore: repair the named document's frontmatter, then re-run"),
-            ),
+            report=(_fail("frontmatter", str(exc), "restore: repair the named document's frontmatter, then re-run"),),
         )
     except store.BatchInterrupted as exc:
         # Caught ahead of `OSError` — it is one, by inheritance, so the exit code
@@ -2735,6 +2922,7 @@ def _execute(op: str, *, kb_root: Path, values_file: Path, plan) -> Result:
     if outcome.status is store.Status.WRITTEN:
         report = [ReportItem(kb_util.PASS, path, f"written by {op}") for path in outcome.written]
         report += [ReportItem(kb_util.FACT, "minted", f"{node_id} ({op})") for node_id in ctx.minted]
+        report += [ReportItem(kb_util.FACT, "resolved", f"{r.source} → {r.target} {r.action}") for r in ctx.resolved]
         report += ctx.noted
         return Result(
             op=op,
@@ -2742,6 +2930,7 @@ def _execute(op: str, *, kb_root: Path, values_file: Path, plan) -> Result:
             report=tuple(report),
             minted=tuple(ctx.minted),
             written=outcome.written,
+            resolved=tuple(ctx.resolved),
         )
     if outcome.status is store.Status.RETRY:
         return Result(
@@ -2771,6 +2960,60 @@ def _execute(op: str, *, kb_root: Path, values_file: Path, plan) -> Result:
 
 def _fail(name: str, detail: str, restore: str) -> ReportItem:
     return ReportItem(kb_util.FAIL, name, f"{detail}. {restore}")
+
+
+#: The report name of a call a lock turned away; the line's detail names the path.
+LOCK_ITEM = "lock"
+
+
+def lock_busy(op: str, repo_root: Path) -> Result:
+    """Exit 8: another writer held the KB write lock on ``repo_root`` past the wait. Nothing was read or written."""
+    return Result(
+        op=op,
+        exit_code=ExitCode.RETRY,
+        report=(
+            _fail(
+                LOCK_ITEM,
+                f"another write op or refresh held the KB write lock on {repo_root} past the wait; nothing was "
+                f"read or written",
+                f"restore: re-run {op} with this values file unchanged — never re-author values that were "
+                f"already right",
+            ),
+        ),
+    )
+
+
+def build_running(op: str, state_dir: str) -> Result:
+    """Exit 7: a build holds the repository's run lock and owns ``kb-root/``. Nothing was read or written."""
+    return Result(
+        op=op,
+        exit_code=ExitCode.REFUSED,
+        report=(
+            _fail(
+                LOCK_ITEM,
+                f"a build is running; its state-dir is {state_dir}. Nothing was read or written",
+                f"restore: once the build has ended, re-run {op} with this values file unchanged",
+            ),
+        ),
+    )
+
+
+def _format_refused(op: str, kb_root: Path, *, current_only: bool) -> Result | None:
+    """The exit-2 result where the KB's format bars ``op``, else ``None``.
+
+    Every op refuses a KB newer than this toolchain and one with no entry point;
+    ``current_only`` refuses an older KB as well, which a write op must, since
+    it writes the current format into it.
+    """
+    try:
+        if current_only:
+            kb_load.require_current(kb_root)
+        else:
+            kb_load.open_kb(kb_root)
+    except kb_load.FormatRefusal as refusal:
+        restore = f"restore: {refusal.remedy}, then re-run {op}" if refusal.remedy else ""
+        return _environment(op, refusal.check, f"{refusal.path}: {refusal.detail}", restore=restore)
+    return None
 
 
 def _environment(op: str, name: str, detail: str, *, restore: str = "") -> Result:
@@ -2894,7 +3137,7 @@ def _compose_citation(kb_root: Path, supplied: Mapping[str, object]) -> tuple[st
     # in `cited-document`. Citing a document that will not decode is a bad
     # value, and correcting it is exactly what a 7 asks for.
     try:
-        cited_text = cited.read_text(encoding="utf-8")
+        cited_text = kb_load.read_document(kb_root, cited.relative_to(kb_root).as_posix())
     except OSError as exc:
         # Named, rather than left to the op's boundary handler, which reports
         # the whole KB root as unreadable for one file the caller pointed at.
@@ -2907,12 +3150,12 @@ def _compose_citation(kb_root: Path, supplied: Mapping[str, object]) -> tuple[st
             restore=f"restore: make {cited_rel} readable, then re-run — the values named an existing "
             f"document and must not be re-authored",
         ) from exc
-    except UnicodeError as exc:
+    except kb_load.FormatRefusal as exc:
         raise _Refused(
             "cited-document",
-            f"{cited_rel!r} is not valid UTF-8 ({exc}), so the excerpt cannot be checked against it. A "
-            f"citation is verified by reading the cited section, and a file that will not decode has no "
-            f"sections to read",
+            f"{cited_rel!r} does not read as a KB document ({exc}), so the excerpt cannot be checked "
+            f"against it. A citation is verified by reading the cited section, and a file that will not "
+            f"decode has no sections to read",
             restore=f"restore: cite a document that decodes as UTF-8, or re-encode {cited_rel}, then re-run",
         ) from exc
 
@@ -2983,6 +3226,9 @@ def render_citation(*, kb_root: Path, values_file: Path) -> Result:
     if not root.is_dir():
         return _environment(op, str(kb_root), "is not a directory, so no KB can be resolved under it")
     root = root.resolve()
+    refused = _format_refused(op, root, current_only=False)
+    if refused is not None:
+        return refused
 
     try:
         parsed = values.parse_values_file(Path(values_file), op=op)
@@ -3031,10 +3277,9 @@ class Op:
     creates_register: bool = False
 
 
-#: The write surface: the nine ops that touch a file. Membership here is
-#: what makes an op a write op everywhere else — ``kb_util.WRITE_OPS`` is
-#: asserted equal to these keys, and the driver's ledger refuses to spawn
-#: anything outside them.
+#: The write surface: the ops that touch a file and a surface binds.
+#: Membership here is what makes an op a write op everywhere else —
+#: ``kb_util.WRITE_OPS`` is asserted equal to these keys.
 OPS: Mapping[str, Op] = {
     op.name: op
     for op in (
@@ -3053,19 +3298,25 @@ OPS: Mapping[str, Op] = {
         Op("set-frontmatter", set_frontmatter),
         Op("mark-claim-in-leaf", mark_claim_in_leaf),
         Op("set-on-point-fraction", set_on_point_fraction),
+        Op("resolve-demoted", resolve_demoted),
     )
 }
 
-#: The read surface — a **sibling** registry, deliberately not a tenth row of
+#: The build's write surface — ops only the build issues, in-process. No
+#: surface binds one: a ``demoted`` edge is the build's cycle breaking's alone
+#: to create, so ``add-build-edges`` is in no ``kb_util`` subcommand and no
+#: runner target.
+BUILD_OPS: Mapping[str, Op] = {op.name: op for op in (Op("add-build-edges", add_build_edges),)}
+
+#: The read surface — a **sibling** registry, deliberately not a row of
 #: :data:`OPS`. Everything keyed off the write registry is a statement
-#: about writing: ``ledger._WRITE_OP_EXITS`` says what a driver does with a 7
-#: (a driver defect, because the driver composed the values) and with an 8 (a
-#: contended file, re-run unchanged) — and a read op has no 8 to earn, having
+#: about writing: a 7 tells the caller its values were refused and an 8 that a
+#: file was contended, re-run unchanged — and a read op has no 8 to earn, having
 #: nothing to contend over. The mint partition walks
 #: ``OPS`` asking which ops mint; a read op mints nothing and would answer
 #: vacuously in every clause.
 #:
-#: The two registries are disjoint by test, and their union is exactly the
+#: The three registries are disjoint by test, and their union is exactly the
 #: closed vocabulary of :data:`values.OP_FIELDS`: a values row with no op, or
 #: an op with no vocabulary, is drift between the surface an agent writes
 #: against and the surface this package checks.

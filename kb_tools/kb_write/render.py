@@ -9,7 +9,8 @@ inputs but values.
 
 **Purity, binding.** This module reads no files,
 knows no paths, and holds no validation. It is values → text, total and pure.
-It imports :mod:`kb_tools.kb_schema` and the standard library's :mod:`re` and
+It imports :mod:`kb_tools.kb_schema`, :mod:`kb_tools.kb_yaml` (the YAML
+writer, itself pure) and the standard library's :mod:`re` and
 :mod:`dataclasses`, and nothing else — no :mod:`pathlib`, no :mod:`os`, no
 :mod:`kb_index_lib`. ``test_kb_write_render.py`` asserts the import set
 structurally, because a negative constraint with no instrument is a wish.
@@ -69,7 +70,7 @@ load-bearing details are these:
 import re
 from dataclasses import dataclass
 
-from kb_tools import kb_schema
+from kb_tools import kb_schema, kb_yaml
 
 # ---------------------------------------------------------------------------
 # Literals
@@ -111,22 +112,6 @@ SOLIDITY_ANNOTATION_PENDING = kb_schema.SOLIDITY_ANNOTATION_PENDING
 #: ``kb_index_lib.render_leaf_references`` returns for an empty citing set, so a
 #: refresh over a freshly inserted entry leaves it untouched.
 LEAF_REFERENCES_PENDING_FOOTER = kb_schema.LEAF_REFERENCES_PENDING_FOOTER
-
-# ---------------------------------------------------------------------------
-# Frontmatter block delimiters
-# ---------------------------------------------------------------------------
-#
-# The one composer of the block opener. A second writer re-spelling it inline —
-# `refresh_kb_metadata`'s field splice is the one that can — is exactly what
-# this constant exists to prevent, and the constraint needs an instrument rather
-# than a statement.
-
-#: Opens a leaf's ``<!-- kb-frontmatter … -->`` metadata block.
-FRONTMATTER_OPENER = "<!-- kb-frontmatter"
-
-#: Closes it. Matched by ``kb_index_lib.FRONTMATTER_RE``, which tolerates
-#: leading whitespace on this line; the writer emits it at column zero.
-FRONTMATTER_CLOSER = "-->"
 
 # ---------------------------------------------------------------------------
 # Grammar helpers (kb_schema is the only source of id grammar)
@@ -222,6 +207,9 @@ class DependsOnTarget:
     title: str | None = None
     context: str | None = None
     applicability: float | None = None
+    #: A ``demoted`` bullet's origin, one of :data:`kb_schema.DEMOTED_ORIGINS`;
+    #: read by :func:`render_demoted_bullet` alone.
+    origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -324,9 +312,28 @@ def render_references_bullet(target: DependsOnTarget) -> str:
     ``target.applicability`` is ignored here, as it is on every non-work depends
     target: the values layer refuses one before this is reached.
     """
+    return _claim_bullet(target, annotation="")
+
+
+def render_demoted_bullet(target: DependsOnTarget) -> str:
+    """Render one ``- demoted:`` sub-bullet::
+
+        - clm-aa1111 — Foundation Claim A (origin cited) [context]
+
+    A references bullet with the edge's origin annotated before any context:
+    the build's cycle breaking cut a ``depends`` edge, and the origin says
+    whether the text marked it.
+    """
+    return _claim_bullet(target, annotation=f"(origin {target.origin})")
+
+
+def _claim_bullet(target: DependsOnTarget, *, annotation: str) -> str:
+    """A claim target's bullet: its title, the annotation where one is given, its context."""
     parts = [f"{_BULLET_INDENT}- {target.target}"]
     if target.title:
         parts.append(f"{EM_DASH_SEPARATOR}{collapse_prose(target.title)}")
+    if annotation:
+        parts.append(f" {annotation}")
     if target.context:
         parts.append(f" [{collapse_prose(target.context)}]")
     return "".join(parts)
@@ -409,45 +416,12 @@ def render_solidity_annotation(value_text: str) -> str:
     return f"(solidity {value_text})"
 
 
-def render_id_list_field(field: str, ids: tuple[str, ...] | list[str]) -> str:
-    """Compose a frontmatter ``<field>: [id, id]`` line — the canonical shape.
-
-    The inline list is one of the three shapes the reader accepts and the only
-    one written, so a block this module composes and a field ``refresh``
-    rewrites in place are the same shape rather than two. It occupies one
-    physical line, so the reader's multi-line span rule never has to be
-    exercised on our output.
-
-    No indent is applied: where the line sits is the splice's business, and the
-    splice preserves the indent of the line it replaces
-    (``store.replace_or_insert_frontmatter_field``).
-    """
-    return f"{field}: [{', '.join(ids)}]"
-
-
-def wrap_frontmatter(body: str) -> str:
-    """Wrap a rendered frontmatter body in its block delimiters.
-
-    The single composer of the block opener. ``body`` carries no trailing
-    newline; the delimiters supply the line breaks, so a body and its wrapper
-    cannot disagree about how many blank lines sit between them.
-    """
-    return f"{FRONTMATTER_OPENER}\n{body}\n{FRONTMATTER_CLOSER}"
-
-
-def render_strengthens_pair_line(claim_id: str, strength: float) -> str:
-    """Render one ``strengthens:`` pair line in an experiment's frontmatter block."""
-    return f"{_BULLET_INDENT}- {claim_id}: {strength}"
-
-
 def render_supports_pair_line(claim_id: str, fraction: float | None) -> str:
-    """Render one ``supports:`` pair line, in either of the fan-out's two homes.
+    """Render one staged ``- supports:`` pair line in a ``sup-`` register entry.
 
-    One line for the hosting document's ``sup-id:`` block
-    (:func:`render_frontmatter_block`) and for the register entry's staging
-    block (:func:`render_support_entry`) alike: both are read by the same pair
-    pattern (``kb_index_lib._SUPPORTS_PAIR_RE``), so one renderer is the only
-    honest number of renderers.
+    Read by ``kb_index_lib._SUPPORTS_PAIR_RE``. The hosting document's pairs
+    are frontmatter, written by :func:`render_frontmatter_pair` in YAML, where
+    the pending literal is quoted.
 
     ``fraction`` of ``None`` renders the authored ``*pending*`` literal — an
     intended-but-unassessed beneficiary edge, which contributes nothing to the
@@ -490,8 +464,9 @@ def _render_entry(
     score field name, ``strengthen-by``, and the ``supports:`` staging block.
 
     Field order is the toolchain's own canonical order (``score``, ``supports``,
-    ``depends-on``, ``solidity``, ``rationale``, ``strengthen-by``), and it is
-    not free: each folding field is terminated by the next line matching the
+    ``depends-on``, ``references``, ``demoted``, ``solidity``, ``rationale``,
+    ``strengthen-by``; an insert writes no ``references`` or ``demoted``, which
+    ``ops`` adds later above ``solidity``), and it is not free: each folding field is terminated by the next line matching the
     reader's key list, so ``solidity`` bounds ``depends-on`` and ``rationale``
     bounds nothing but its own collapse. The staging block leads so that an
     unconditional ``- solidity:`` always closes it and no derived line ever sits
@@ -572,8 +547,8 @@ def render_support_entry(
     ``supports:`` block.
 
     **A fan-out has two authored homes and this is the earlier one.** The
-    canonical home — the only one the claim graph reads — is the hosting
-    document's ``sup-id:`` frontmatter block
+    canonical home — the only one the claim graph reads — is the support's
+    entry under the hosting document's ``support-nodes:``
     (:func:`render_frontmatter_block`), parallel to an experiment's
     ``strengthens:``. But a ``sup-`` id can be minted before the leaf that will
     host it exists, so the pairs are staged in the register entry until that
@@ -636,12 +611,12 @@ def render_work_entry(*, node_id: str, title: str, strength: float | None, ratio
 
 @dataclass(frozen=True)
 class FrontmatterValues:
-    """The authored half of a leaf's ``<!-- kb-frontmatter … -->`` block.
+    """The authored half of a document's frontmatter.
 
     Derived fields — ``subtree-claims`` and ``subtree-experiments`` — are
-    absent by construction. They are refresh's roll-ups, inserted anchored
-    after ``kind:``; rendering them here would write a derived value this API
-    never computes.
+    absent by construction, and so is the ``kb-format`` stamp. The roll-ups are
+    refresh's, inserted anchored after ``kind``; rendering them here would write
+    a derived value this API never computes.
     """
 
     kind: str
@@ -653,53 +628,83 @@ class FrontmatterValues:
     support_nodes: tuple[SupportDecl, ...] = ()
 
 
+def render_frontmatter_field(key: str, value: object) -> list[str]:
+    """One top-level frontmatter key and its value as lines, nested values indented two spaces.
+
+    The one composer of frontmatter lines: a whole block, a roll-up a splice
+    replaces, an appended node declaration and the format stamp all come
+    through here. A list of ids goes in as a ``kb_yaml.FlowList``, so it is
+    written inline (``claims: [clm-aaaaaa, clm-bbbbbb]``) on one line.
+    """
+    return kb_yaml.dump_field(key, value)
+
+
+def render_frontmatter_pair(claim_id: str, score: float | None) -> str:
+    """One ``clm-<id>: <score>`` pair of a node's ``strengthens`` or ``supports`` list, unindented.
+
+    ``None`` is the authored ``*pending*`` literal, which YAML writes quoted.
+    """
+    return render_frontmatter_field(claim_id, _frontmatter_score(score))[0]
+
+
+def _frontmatter_score(score: float | None) -> object:
+    return PENDING_LITERAL if score is None else score
+
+
+def _pair_list(pairs: tuple[tuple[str, float | None], ...]) -> list[dict]:
+    return [{claim_id: _frontmatter_score(score)} for claim_id, score in pairs]
+
+
+def render_experiment_nodes(decls: tuple[ExperimentDecl, ...]) -> list[str]:
+    """The ``experiment-nodes`` key and one mapping per declaration, as lines."""
+    nodes = []
+    for decl in decls:
+        node: dict = {"exp-id": decl.exp_id, "status": decl.status}
+        if decl.strengthens:
+            node["strengthens"] = _pair_list(decl.strengthens)
+        nodes.append(node)
+    return render_frontmatter_field(kb_schema.EXPERIMENT_NODES_KEY, nodes)
+
+
+def render_support_nodes(decls: tuple[SupportDecl, ...]) -> list[str]:
+    """The ``support-nodes`` key and one mapping per declaration, as lines."""
+    nodes = []
+    for decl in decls:
+        node: dict = {"sup-id": decl.sup_id}
+        if decl.supports:
+            node["supports"] = _pair_list(decl.supports)
+        nodes.append(node)
+    return render_frontmatter_field(kb_schema.SUPPORT_NODES_KEY, nodes)
+
+
 def render_frontmatter_block(values: FrontmatterValues) -> str:
-    """Render a leaf's kb-frontmatter block.
+    """Render a document's frontmatter, its ``---`` fences included.
 
-    **The canonical output shape is the inline list** — ``claims: [clm-aaaaaa,
-    clm-bbbbbb]`` — one of the three the reader accepts (inline, bracket-
-    wrapped across lines, and YAML bullets). It is chosen because it is the
-    shape refresh's own field writer emits when it replaces or inserts a list
-    field, so a block this module writes and a block refresh rewrites are the
-    same shape rather than two; and because it occupies one physical line, so
-    the reader's multi-line span rule never has to be exercised on our output.
-    The other two shapes stay readable and are never written.
-
-    ``no-claim``'s reason and ``path-stable``'s label are emitted
-    double-quoted. The reader strips exactly one outer quote pair before typing
-    the value, so the quoted form round-trips any single-line text — including
-    one that would otherwise type as the boolean ``true`` or as a bracketed
-    list. Both are free-text document attributes the reader types generically
-    (``kb_index_lib._frontmatter_value``); neither carries a vocabulary or a
-    length this API could inherit, so it authors neither.
+    Byte-equal to kbase's writer for the same values. Lists of ids are written
+    inline, the shape refresh's field splice writes, so a block this module
+    writes and one refresh rewrites are one shape. ``no-claim``'s reason and
+    ``path-stable``'s label are collapsed to one line and written plain where
+    no YAML reader could take them for anything else, double-quoted otherwise.
 
     Field order is ``kind``, ``path-stable``, the primary field (``claims`` or
-    ``no-claim``), the additive ``experiments`` reference list, then one block
-    per hosted experiment and support node. Repeated ``exp-id:`` / ``sup-id:``
-    keys each open their own fan-out block: a container hosts any number of any
-    combination of node bodies. ``path-stable`` follows ``kind`` because the two
-    describe the document rather than its contents; ``refresh``'s roll-ups are
-    inserted after ``kind:`` and so land between them, which no reader minds —
+    ``no-claim``), the additive ``experiments`` reference list, then
+    ``experiment-nodes`` and ``support-nodes``, one mapping per hosted node —
+    a container hosts any number of either. ``refresh``'s roll-ups are inserted
+    after ``kind`` and so land before ``path-stable``, which no reader minds —
     the block is a mapping, not a sequence.
     """
-    lines = [f"kind: {values.kind}"]
+    fields: dict = {"kind": values.kind}
     if values.path_stable is not None:
-        lines.append(f'path-stable: "{collapse_prose(values.path_stable)}"')
+        fields["path-stable"] = collapse_prose(values.path_stable)
     if values.claims:
-        lines.append(render_id_list_field("claims", values.claims))
+        fields["claims"] = kb_yaml.FlowList(values.claims)
     if values.no_claim is not None:
-        lines.append(f'no-claim: "{collapse_prose(values.no_claim)}"')
+        fields["no-claim"] = collapse_prose(values.no_claim)
     if values.experiments:
-        lines.append(render_id_list_field("experiments", values.experiments))
-    for exp in values.experiment_nodes:
-        lines.append(f"exp-id: {exp.exp_id}")
-        lines.append(f"status: {exp.status}")
-        if exp.strengthens:
-            lines.append("strengthens:")
-            lines.extend(render_strengthens_pair_line(cid, strength) for cid, strength in exp.strengthens)
-    for sup in values.support_nodes:
-        lines.append(f"sup-id: {sup.sup_id}")
-        if sup.supports:
-            lines.append("supports:")
-            lines.extend(render_supports_pair_line(cid, fraction) for cid, fraction in sup.supports)
-    return wrap_frontmatter("\n".join(lines))
+        fields["experiments"] = kb_yaml.FlowList(values.experiments)
+    lines = [line for key, value in fields.items() for line in render_frontmatter_field(key, value)]
+    if values.experiment_nodes:
+        lines += render_experiment_nodes(values.experiment_nodes)
+    if values.support_nodes:
+        lines += render_support_nodes(values.support_nodes)
+    return kb_yaml.frontmatter(lines)

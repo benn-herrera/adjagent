@@ -19,6 +19,8 @@ question rather than a portability one.
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -141,6 +143,10 @@ fixed-width type and convert its byte order explicitly.
   anything threaded use the `_r` variants or a lock
 - `read`, `write`, `poll` and other blocking calls can fail with `EINTR` when a signal lands and
   need a retry loop; `close` does not — the descriptor is gone either way
+
+## When Reviewing
+
+@!test-review!@
 
 ## Parallel Execution
 

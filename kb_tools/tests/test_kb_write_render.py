@@ -51,12 +51,12 @@ from kb_tools.kb_write import render
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "writeapi-render-golden"
 
 # The import allowlist: `render` ->
-# `kb_schema` only, plus the stdlib it composes text with. Anything reaching a
+# `kb_schema` and the pure YAML writer `kb_yaml` only, plus the stdlib it composes text with. Anything reaching a
 # path, a file, or a parser is the boundary being crossed. Names are recorded
 # qualified — `from kb_tools import kb_schema` as "kb_tools.kb_schema" — so the
 # allowlist pins which member of a package is imported, not merely which
 # package: `from kb_tools import kb_index_lib` fails here.
-_ALLOWED_IMPORTS = frozenset({"re", "dataclasses.dataclass", "kb_tools.kb_schema"})
+_ALLOWED_IMPORTS = frozenset({"re", "dataclasses.dataclass", "kb_tools.kb_schema", "kb_tools.kb_yaml"})
 
 # Named so a failure says which boundary was crossed rather than only that one
 # was. Not exhaustive by construction — the allowlist above is what gates.
@@ -540,6 +540,23 @@ class TestEntryGrammar(unittest.TestCase):
         self.assertEqual([e.context for e in claim_edges], ["builds directly on the anchor claim", None])
         self.assertEqual(len(record.strengthen_by), 2)
 
+    def test_a_demoted_bullet_is_kbases_spelling_and_reads_back_with_its_origin(self):
+        # kbase `internal/write/render.go` `renderDemotedBullet` and the bytes its
+        # `demoted_test.go` asserts: a references bullet with `(origin …)`
+        # before any context.
+        for context, expected in (
+            (None, "  - clm-bb2222 — Result B (origin cited)"),
+            ("as in the ring", "  - clm-bb2222 — Result B (origin cited) [as in the ring]"),
+        ):
+            with self.subTest(context=context):
+                target = render.DependsOnTarget(target="clm-bb2222", title="Result B", context=context, origin="cited")
+                bullet = render.render_demoted_bullet(target)
+                self.assertEqual(bullet, expected)
+                (edge,) = kb_index_lib._parse_demoted_line(bullet, "clm-aa1111")
+                self.assertEqual(
+                    (edge.target, edge.relation, edge.origin, edge.context), ("clm-bb2222", "demoted", "cited", context)
+                )
+
     def test_minimal_entry_round_trips(self):
         parsed = _parse_one_entry(_claim_entry_minimal())
         self.assertEqual(len(parsed), 1)
@@ -675,20 +692,16 @@ class TestFrontmatterBlock(unittest.TestCase):
         block = _frontmatter_claims()
         self.assertIn("claims: [clm-aa1111, clm-bb2222, clm-cc3333]", block)
 
-    def test_all_three_authored_shapes_read_alike(self):
-        # The reader accepts three shapes; the writer emits one. This asserts
-        # the choice is free — that the other two carry no information the
-        # canonical one loses — rather than merely declared.
-        wrapped = (
-            "<!-- kb-frontmatter\nkind: leaf\nclaims: [clm-aa1111,\n         clm-bb2222,\n         clm-cc3333]\n-->"
-        )
-        yaml_bullets = "<!-- kb-frontmatter\nkind: leaf\nclaims:\n  - clm-aa1111\n  - clm-bb2222\n  - clm-cc3333\n-->"
+    def test_both_authored_list_shapes_read_alike(self):
+        # The reader accepts a block list too; the writer emits the inline one.
+        # This asserts the choice is free — that the block list carries no
+        # information the canonical one loses — rather than merely declared.
+        bullets = "---\nkind: leaf\nclaims:\n  - clm-aa1111\n  - clm-bb2222\n  - clm-cc3333\n---\n"
         block = render.render_frontmatter_block(
             render.FrontmatterValues(kind="leaf", claims=("clm-aa1111", "clm-bb2222", "clm-cc3333"))
         )
         canonical = kb_index_lib.parse_frontmatter(block)
-        self.assertEqual(canonical, kb_index_lib.parse_frontmatter(wrapped))
-        self.assertEqual(canonical, kb_index_lib.parse_frontmatter(yaml_bullets))
+        self.assertEqual(canonical, kb_index_lib.parse_frontmatter(bullets))
         self.assertEqual(canonical["claims"], ["clm-aa1111", "clm-bb2222", "clm-cc3333"])
 
     def test_no_claim_reason_round_trips_quoted(self):
@@ -713,6 +726,11 @@ class TestFrontmatterBlock(unittest.TestCase):
             f"  - clm-aa1111: {render.PENDING_LITERAL}",
         )
 
+    def test_a_frontmatter_pair_quotes_the_pending_literal_and_writes_a_number_as_its_repr(self):
+        self.assertEqual(render.render_frontmatter_pair("clm-aa1111", None), f'clm-aa1111: "{render.PENDING_LITERAL}"')
+        self.assertEqual(render.render_frontmatter_pair("clm-aa1111", 1e-05), "clm-aa1111: 1e-05")
+        self.assertEqual(render.render_frontmatter_pair("clm-aa1111", 1.0), "clm-aa1111: 1.0")
+
     def test_path_stable_round_trips_quoted(self):
         # The reader types this field generically and strips exactly
         # one outer quote pair, so the quoted form round-trips any single-line
@@ -735,8 +753,8 @@ class TestFrontmatterBlock(unittest.TestCase):
         self.assertNotIn("path-stable", kb_index_lib.parse_frontmatter(block))
 
     def test_path_stable_survives_the_derived_field_anchor(self):
-        # `refresh` inserts `subtree-claims:` immediately after `kind:`, which
-        # lands it between `kind:` and `path-stable:`. The block is a mapping,
+        # `refresh` inserts `subtree-claims` immediately after `kind`, which
+        # lands it between `kind` and `path-stable`. The block is a mapping,
         # so the reader is indifferent — asserted rather than assumed, since
         # this is the one place the authored order is disturbed by a writer
         # this API does not control.
@@ -744,7 +762,7 @@ class TestFrontmatterBlock(unittest.TestCase):
 
         block = _frontmatter_path_stable()
         after = _store.replace_or_insert_frontmatter_field(
-            block, field="subtree-claims", ids=["clm-aa1111"], anchor_prefix="kind:"
+            block, field="subtree-claims", ids=["clm-aa1111"], anchor_key="kind"
         )
         fields = kb_index_lib.parse_frontmatter(after)
         self.assertEqual(fields["path-stable"], "regime conservation — stable reference label")

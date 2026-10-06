@@ -190,7 +190,8 @@ def _mode_run(args: argparse.Namespace, ctx: baton.BatonContext) -> tuple[int, b
     # here — the resume line is rendered from that same value.
     parent = cfg.log.run_dir
     run_id = runlog.new_run_id()
-    lock = nullcontext() if repo_root is None else runlog.run_lock(runlog.repo_lock_path(repo_root), run_id=run_id)
+    state_dir = runlog.RunPaths(parent=parent, run_id=run_id).run_dir.resolve()
+    lock = nullcontext() if repo_root is None else runlog.run_lock(repo_root, state_dir=state_dir)
     with lock:
         paths = runlog.prepare(parent, run_id)
         runlog.configure(run_log=paths.run_log, level=cfg.log.level)

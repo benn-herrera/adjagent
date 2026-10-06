@@ -74,6 +74,10 @@ calls, use Transferable/SharedArrayBuffer. MIME type must be `application/wasm`.
 - Prefer small-footprint npm packages; mention if no dependency needed
 - CSS over JS when possible, TypeScript strict mode, explicit error handling, teardown cleanup
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent="package.json, tsconfig.json, vite/webpack config, service worker manifests"!@
@@ -101,6 +105,8 @@ Test on mobile viewport sizes. @!integration-logging-signal sink="the test outpu
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

@@ -16,6 +16,7 @@ import pytest
 from kb_tools import kb_index_lib, kb_schema
 from kb_tools.kb_claimgraph import assemble, conform, endcap, identify, inventory, tree, write
 from kb_tools.kb_write import ops, render
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 # ---------------------------------------------------------------------------
 # A minimal conforming tree, and the mutations that break one point each
@@ -38,7 +39,7 @@ def _write(root, files):
 
 @pytest.fixture
 def conforming(tmp_path):
-    return _write(
+    return write_stamped_kb(
         tmp_path / "kb-root",
         {"entry-point.md": _ENTRY_POINT, "vol/index.md": _VOLUME_INDEX, "vol/leaf.md": _LEAF},
     )
@@ -69,7 +70,7 @@ def test_a_conforming_tree_passes_the_gate(conforming):
                 "vol/sub.md": "[↑ Leaf](leaf.md)\n\n# Sub\n",
             },
         ),
-        (14, {"vol/leaf.md": f"{_UPLINK}\n\n<!-- kb-frontmatter\nkind: leaf\n-->\n\n# Leaf\n"}),
+        (14, {"vol/leaf.md": f"---\nkind: leaf\n---\n{_UPLINK}\n\n# Leaf\n"}),
     ],
 )
 def test_the_gate_refuses_each_violated_point(conforming, point, files):
@@ -79,13 +80,60 @@ def test_the_gate_refuses_each_violated_point(conforming, point, files):
     assert refusal.value.check == f"point-{point}"
 
 
+#: The conforming tree after a pass has given every document a YAML frontmatter
+#: block, the up-link moving to the first line after its closing fence.
+_YAML_TREE = {
+    "entry-point.md": '---\nkind: entry-point\nkb-format: "1.0.0"\n---\n\n' + _ENTRY_POINT,
+    "vol/index.md": "---\nkind: index\n---\n" + _VOLUME_INDEX,
+    "vol/leaf.md": "---\nkind: leaf\nclaims: [clm-aaaaaa]\n---\n" + _LEAF,
+}
+
+
+def test_a_tree_in_yaml_frontmatter_form_passes_the_structural_gate(tmp_path):
+    read = tree.read(write_stamped_kb(tmp_path / "kb-root", _YAML_TREE))
+
+    state = conform.pass_two_gate(read)
+
+    assert read.parents == {"vol/index.md": "entry-point.md", "vol/leaf.md": "vol/index.md"}
+    assert state.hosting == ("vol/leaf.md",)
+
+
+def test_an_up_link_not_on_the_line_after_the_yaml_block_is_refused(tmp_path):
+    files = dict(_YAML_TREE, **{"vol/leaf.md": "---\nkind: leaf\n---\n\n" + _LEAF})
+
+    with pytest.raises(conform.ConformanceError) as refusal:
+        conform.pass_two_gate(tree.read(write_stamped_kb(tmp_path / "kb-root", files)))
+    assert refusal.value.check == "point-3"
+
+
 def test_the_cleanliness_check_is_the_double_run_guard(conforming):
     """Every artifact this stage writes trips point 14 on a second run."""
-    for artifact in conform.POINT_14_ARTIFACTS:
+    for artifact in tree.MARKER_OPENERS:
         _write(conforming, {"vol/leaf.md": f"{_UPLINK}\n\n{artifact} something -->\n\n# Leaf\n"})
         with pytest.raises(conform.ConformanceError) as refusal:
             conform.gate(tree.read(conforming))
         assert refusal.value.check == "point-14"
+
+
+@pytest.mark.parametrize(
+    "path, text",
+    [
+        ("vol/leaf.md", f"---\nkind: leaf\n---\n{_UPLINK}\n\n# Leaf\n"),
+        ("entry-point.md", '---\nkind: entry-point\nkb-format: "1.0.0"\n---\n\n# KB\n\n- [Vol](vol/index.md)\n'),
+    ],
+)
+def test_frontmatter_trips_point_14(conforming, path, text):
+    _write(conforming, {path: text})
+    with pytest.raises(conform.ConformanceError) as refusal:
+        conform.gate(tree.read(conforming))
+    assert refusal.value.check == "point-14"
+
+
+def test_the_entry_points_stamp_only_block_passes_point_14(conforming):
+    """The block ``graph-init``'s refresh writes onto the entry point is the KB's format, not metadata."""
+    entry_point = conforming / "entry-point.md"
+    entry_point.write_text('---\nkb-format: "1.0.0"\n---\n' + entry_point.read_text(encoding="utf-8"), encoding="utf-8")
+    conform.gate(tree.read(conforming))
 
 
 # ---------------------------------------------------------------------------
@@ -878,7 +926,7 @@ _QUOTE_CLOSING_TITLE = "Terminological flexibility in the application of the wor
 
 
 def test_prose_closing_on_a_quote_reaches_the_register_byte_exact(tmp_path):
-    kb_root = _write(tmp_path / "kb-root", {"vol/index.md": _VOLUME_INDEX})
+    kb_root = write_stamped_kb(tmp_path / "kb-root", {"vol/index.md": _VOLUME_INDEX})
     values = tmp_path / "values.toml"
     values.write_text(
         write._compose(
@@ -925,7 +973,7 @@ def _register_link_findings(kb_root):
 
 def test_a_prose_claim_s_relative_link_resolves_from_its_register(tmp_path):
     """The paragraph's link was written for the leaf; the register sits a directory up."""
-    kb_root = _write(
+    kb_root = write_stamped_kb(
         tmp_path / "kb-root",
         {**_NESTED_TREE, "vol/sec/leaf.md": f"[↑ Sec](index.md)\n\n# Leaf\n\n{_FIGURE_LINE}\n"},
     )
@@ -954,7 +1002,7 @@ def test_a_block_claim_s_relative_link_resolves_from_its_register_and_still_bind
     """The declared pass's titles take the same rule, and the read-back join meets them there."""
     from kb_tools.kb_claimgraph import graph
 
-    kb_root = _write(
+    kb_root = write_stamped_kb(
         tmp_path / "kb-root",
         {
             **_NESTED_TREE,

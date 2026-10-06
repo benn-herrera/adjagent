@@ -1,0 +1,4 @@
+{"claim_id": "clm-alp011", "item_idx": 0, "text": "Derive the settled-round premise from the schedule rules.", "mentioned_ids": []}
+{"claim_id": "clm-bet021", "item_idx": 0, "text": "Bound the number of rounds to closure using the rate of clm-drf025.", "mentioned_ids": ["clm-drf025"]}
+{"claim_id": "clm-drf024", "item_idx": 0, "text": "None — the bound is locally complete; no open work item at the claim level.", "mentioned_ids": []}
+{"claim_id": "clm-drf025", "item_idx": 0, "text": "Derive the rate constant rather than quoting it; shares the band argument of clm-drf024.", "mentioned_ids": ["clm-drf024"]}

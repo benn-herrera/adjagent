@@ -17,7 +17,7 @@ import pytest
 
 from gen_defs import agents_file, banners, discovery, markers, rendering
 from gen_defs.errors import InputError
-from gen_defs.model_tuning import DEFAULT_PIN_MAP
+from gen_defs.harness import load_harness
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -97,14 +97,18 @@ def test_opencode_renders_agents_md_into_dir(tmp_path):
     assert "~/.config/opencode/AGENTS.md" in text
 
 
-def test_every_tier_token_renders_its_default_pin(tmp_path):
+#: The shipped claude family's [tiers], stated here rather than read from it.
+CLAUDE_TIERS = {"highest": "fable", "high": "opus", "medium": "sonnet", "low": "haiku", "lowest": "haiku"}
+
+
+def test_every_tier_token_renders_the_default_familys_member(tmp_path):
     template = _plant_template(
         tmp_path / "t.tmpl.md",
         DIR_FILE,
-        body=_agents_file_body(" ".join(f"{tier}=@!dyn.tier-{tier}!@" for tier in DEFAULT_PIN_MAP)),
+        body=_agents_file_body(" ".join(f"{tier}=@!dyn.tier-{tier}!@" for tier in CLAUDE_TIERS)),
     )
     text = agents_file.render_agents_file_text("claude", tmp_path, template=template)
-    expected = " ".join(f"{tier}={pin}" for tier, pin in DEFAULT_PIN_MAP.items())
+    expected = " ".join(f"{tier}={member}" for tier, member in CLAUDE_TIERS.items())
     assert text == _rendered_body(expected, scope=tmp_path.name)
 
 
@@ -142,7 +146,7 @@ def test_a_harness_missing_a_key_the_template_reads_is_an_error(tmp_path):
 def test_harness_schema_errors(tmp_path, text, message):
     harness_dir = _plant_harness(tmp_path / "harness", text)
     with pytest.raises(InputError, match=message):
-        agents_file.load_harness("x", harness_dir)
+        load_harness("x", harness_dir)
 
 
 def test_a_resolve_entry_outside_dir_is_an_error(tmp_path):
@@ -192,12 +196,12 @@ def test_split_outputs_refuses_a_non_table_output(tmp_path):
 CLAUDE_PATH = re.compile(r"\.claude/|~/\.claude|CLAUDE\.md|\.claude-temp")
 
 
-def _claude_path_lines(tmp_path: Path, harness: str) -> list[str]:
+def _claude_path_lines(tmp_path: Path, harness: str, *tuning: str) -> list[str]:
     """Every body line, below the banner block, of a full render under
-    `harness` that names a claude path."""
+    `harness` and the `tuning` flags that names a claude path."""
     out = tmp_path / harness
     out.mkdir()
-    result = _cli("generate", str(out), "--harness", harness, cwd=tmp_path)
+    result = _cli("generate", str(out), "--harness", harness, *tuning, cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     return [
         f"{path.relative_to(out)}: {line}"
@@ -211,7 +215,9 @@ def test_a_non_claude_render_writes_no_claude_path_into_any_body(tmp_path):
     # Every path in a definition body is written against the installing
     # harness's directories. The claude render is the control: the pattern
     # has to find something there, or its silence under opencode means nothing.
-    assert _claude_path_lines(tmp_path, "opencode") == []
+    # opencode refuses the default family's claude aliases, so its tiers are
+    # mapped onto one provider-qualified model.
+    assert _claude_path_lines(tmp_path, "opencode", "--model-tier-map", "all=omlx/X") == []
     assert _claude_path_lines(tmp_path, "claude")
 
 

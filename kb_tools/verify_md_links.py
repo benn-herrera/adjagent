@@ -7,7 +7,7 @@ outside `kb-root/` is crawled), extracts Markdown links `[text](target)`, and
 reports broken file targets, resolved against the repo root. Also folds in a
 consumer-side id-validity check: hashed claim/experiment/support ids
 (`clm-`/`exp-`/`sup-` + 6 [a-z0-9]) cited in prose must resolve to a node
-in the KB's `claims.jsonl` (located via `kb_util`).
+in the KB's `claims` index stream (read through `kb_load`).
 
 Pure standard library.
 
@@ -41,7 +41,6 @@ False-positive avoidance:
 """
 
 import argparse
-import json
 import logging
 import re
 import sys
@@ -49,7 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Route KB path construction through the kb_util module.
-from kb_tools import __version__, kb_links, kb_schema, kb_util
+from kb_tools import __version__, kb_links, kb_load, kb_schema, kb_util
 
 # Markdown scanning primitives are single-sourced in kb_links (shared with the
 # kb_cmd reverse-find). Re-exported here so existing references and tests that
@@ -57,6 +56,9 @@ from kb_tools import __version__, kb_links, kb_schema, kb_util
 from kb_tools.kb_links import iter_markdown_files, strip_code, strip_target
 
 logger = logging.getLogger("verify-md-links")
+
+# The index stream the id-validity check reads its known ids from.
+CLAIMS_INDEX = "claims"
 
 # Top-level entries that constitute "inside the repo" for the intra/inter
 # split. A resolved path that is not under the repo root is inter-repo by
@@ -119,30 +121,22 @@ def is_error_source(md_file: Path, repo_root: Path) -> bool:
 
 
 def load_known_ids(repo_root: Path) -> set[str] | None:
-    """Load the set of node ids from `.index/claims.jsonl`, or None if absent.
+    """Load the set of node ids from the `claims` index stream, or None if absent.
 
     None signals the id-validity check should be skipped (e.g. the generated
-    index is not present on this branch/worktree).
+    index is not present on this branch/worktree). An older KB's stream is read
+    converted; a KB this toolchain cannot read raises `kb_load.FormatRefusal`.
     """
-    index_path = kb_util.claims_jsonl(repo_root)
-    if not index_path.is_file():
-        logger.info("id-validity check skipped: %s not present", index_path)
+    kb = kb_util.kb_root(repo_root)
+    try:
+        nodes, problems = kb_load.read_index(kb, CLAIMS_INDEX)
+    except FileNotFoundError:
+        logger.info("id-validity check skipped: no %s index under %s", CLAIMS_INDEX, kb)
         return None
-    ids: set[str] = set()
-    with index_path.open(encoding="utf-8") as handle:
-        for lineno, raw in enumerate(handle, 1):
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                node = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.warning("%s:%d unparseable JSON line, skipping", index_path, lineno)
-                continue
-            node_id = node.get("id")
-            if isinstance(node_id, str):
-                ids.add(node_id)
-    logger.info("loaded %d node ids from %s", len(ids), index_path)
+    for problem in problems:
+        logger.warning("%s index line %d: %s, skipping", CLAIMS_INDEX, problem.line, problem.detail)
+    ids = {node["id"] for node in nodes if isinstance(node.get("id"), str)}
+    logger.info("loaded %d node ids from the %s index", len(ids), CLAIMS_INDEX)
     return ids
 
 
@@ -327,7 +321,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     logger.info("scanning repo root: %s", repo_root)
 
-    findings = scan(repo_root, check_ids_enabled=not args.no_id_check)
+    try:
+        findings = scan(repo_root, check_ids_enabled=not args.no_id_check)
+    except kb_load.FormatRefusal as refusal:
+        print(f"FAIL: {refusal}", file=sys.stderr)
+        return 2
 
     if args.inter_repo == "dont-check":
         findings = [f for f in findings if f.kind != "broken inter"]

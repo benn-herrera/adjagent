@@ -11,9 +11,11 @@ Two graphs over one tree of Markdown files, beside which sit the images leaves e
 indexes, subtopic indexes, leaves. The **claim graph** is a graph over results, of node kinds
 {node-kinds}, registered in `claim-quality.md` files — the framework kinds in `invariants.md`
 instead (below) — and materialized under `.index/`. Its `depends` and `supports` edges close no
-cycle: solidity is undefined on one, and `kb-verify` fails it. `references` edges carry no solidity
-and may cycle. A leaf is a container — its position label says where it sits in the hierarchy and
-nothing about what it hosts.
+cycle: solidity is undefined on one, and `kb-verify` fails it. `references` and `demoted` edges
+carry no solidity and may cycle. A `demoted` edge is a dependency the build cut to break a circle:
+`kb-verify` lists each one as a finding, not a failure, and the `resolve-demoted` op removes one or
+restores it to `depends`. A leaf is a container — its
+position label says where it sits in the hierarchy and nothing about what it hosts.
 
 Corpus invariants — notation and cross-cutting definitions — belong in `invariants.md`, which is
 also the file the toolchain parses for framework nodes, so a line in it shaped like a declaration
@@ -49,8 +51,8 @@ pictures (`claim-graph*.svg` at the KB root and in volume directories) are deriv
 Authored does not mean typed. Everything authored except leaf prose is metadata, and metadata is
 written only by the `kb_util` write ops: you supply values, the op composes the format, proves what
 it wrote by reading it back, and refuses rather than writing what it cannot prove. It mints an
-entry's id itself and prints it, so no id is ever chosen. The op surface, its invocation, and the
-three outcomes are in the CLI itself:
+entry's id itself and prints it, so no id is ever chosen. The op surface, its invocation, and its
+outcomes are in the CLI itself:
 `PYTHONPATH=<project-root>/{agents-dir} python3 -m kb_tools.kb_util --help` lists every op with the
 exit codes it reports, and `--help` on one op adds that op's own options and its closed set of value
 keys. `kb_util` and the `kb-*` targets are standard-library only and run under the `python3` first
@@ -65,7 +67,10 @@ the question.
 `kb-refresh` regenerates derived state; `kb-verify` is the read-only gate. Refresh before verify,
 always, and leave the gate green. Run both through this project's runner rather than invoking the
 tools directly. A failure marked refresh-fixable means run refresh; anything else is a real defect
-in what was authored, and re-running will not clear it.
+in what was authored, and re-running will not clear it. On a KB in an older metadata format,
+`kb-verify` reports it stale and checks nothing else, and every write op refuses, until `kb-refresh`
+migrates it. A write op or `kb-refresh` that finds another writer holding the KB's write lock exits
+8 having read and written nothing; run it again unchanged.
 
 ## Where things may be written
 

@@ -1,0 +1,4 @@
+{"source": "clm-alp011", "target": "clm-drf024", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.9, "strength": null, "context": "monotonicity needs the drift kept inside the band", "fraction": null}
+{"source": "clm-bet021", "target": "clm-alp011", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.8, "strength": null, "context": "\"once the ledger is monotone\"", "fraction": null}
+{"source": "clm-bet021", "target": "clm-drf025", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.7, "strength": null, "context": "\"its drift decays\"", "fraction": null}
+{"source": "clm-drf025", "target": "clm-drf024", "relation": "depends", "target_kind": "claim", "target_solidity_recorded": 0.9, "strength": null, "context": "\"the rate is read off the band of Proposition 2.4\"", "fraction": null}

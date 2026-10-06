@@ -18,6 +18,8 @@ clever solution and when the boring one is better — and you choose boring more
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -150,6 +152,10 @@ over list comprehensions when you only need to iterate once.
 - `asyncio.create_task` requires a running event loop — don't call from sync context.
 - `dict` is ordered in Python 3.7+ but that's an implementation detail for `dict`, not a guarantee
   you should rely on for semantics.
+
+## When Reviewing
+
+@!test-review!@
 
 ## Parallel Execution
 

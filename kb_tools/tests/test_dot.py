@@ -10,11 +10,6 @@ import pytest
 
 from kb_tools import dot
 
-MISSING_MESSAGE = (
-    "Graphviz `dot` is not on PATH. This toolchain draws the claim-graph sheets by invoking it and does not "
-    "install or vendor it — install Graphviz (https://graphviz.org/download/) and re-run."
-)
-
 
 def _answering(monkeypatch: pytest.MonkeyPatch, *, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
     """The binary found on PATH, and ``subprocess.run`` answering for it."""
@@ -26,30 +21,22 @@ def _answering(monkeypatch: pytest.MonkeyPatch, *, returncode: int = 0, stdout: 
     monkeypatch.setattr(dot.subprocess, "run", run)
 
 
-@pytest.mark.parametrize("call", [dot.version, lambda: dot.to_svg("digraph {}")], ids=["version", "to_svg"])
-def test_a_missing_binary_is_named_with_its_install_page(monkeypatch: pytest.MonkeyPatch, call) -> None:
+@pytest.mark.parametrize("route", ["lookup", "spawn"])
+def test_a_missing_binary_is_named_with_its_install_page(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
+    """Absent by lookup, or removed between the lookup and the spawn."""
     monkeypatch.setattr(dot, "BINARY", "kb-tools-no-such-graphviz-binary")
+    if route == "spawn":
 
-    with pytest.raises(dot.DotMissingError) as raised:
-        call()
+        def absent(*_args, **_kwargs):
+            raise FileNotFoundError(dot.BINARY)
 
-    assert str(raised.value) == MISSING_MESSAGE.replace("`dot`", "`kb-tools-no-such-graphviz-binary`")
-
-
-def test_the_message_names_dot_when_dot_is_the_binary(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exact text a report relays, with the real binary name in it."""
-
-    def absent(*_args, **_kwargs):
-        raise FileNotFoundError(dot.BINARY)
-
-    monkeypatch.setattr(dot, "BINARY", "dot")
-    monkeypatch.setattr(dot.shutil, "which", lambda name: f"/graphviz/bin/{name}")
-    monkeypatch.setattr(dot.subprocess, "run", absent)
+        monkeypatch.setattr(dot.shutil, "which", lambda name: f"/graphviz/bin/{name}")
+        monkeypatch.setattr(dot.subprocess, "run", absent)
 
     with pytest.raises(dot.DotMissingError) as raised:
         dot.version()
 
-    assert str(raised.value) == MISSING_MESSAGE
+    assert dot.BINARY in str(raised.value) and dot.INSTALL_URL in str(raised.value)
 
 
 def test_the_version_is_read_off_the_banner_on_stderr(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -123,9 +123,10 @@ _installed-harness-value repo key:
 # run there would have been launched against, so that copy is asked, not this
 # repository's own.
 #
-# Liveness has one definition and it lives in `kb_driver.runlog` — this
-# recipe reads `kb_util show-run-lock`'s report of it and judges no pid
-# itself; the answer rides that command's stdout, not its exit status.
+# Whether a build holds the run lock is `kb_util show-run-lock`'s answer — this
+# recipe reads its report and judges nothing itself; the answer rides that
+# command's stdout, not its exit status. An installed toolchain from before the
+# kernel lock reports a live pid-file holder as `live`, refused like `held`.
 #
 # Two cases below both proceed as one: a `dir` with no toolchain installed
 # yet, and one whose installed toolchain's argparse rejects `show-run-lock`
@@ -141,7 +142,7 @@ _installed-harness-value repo key:
 # 2, so the main call's status cannot carry the distinction, and its text
 # cannot either: Python 3.14+ argparse colours `usage:` under FORCE_COLOR.
 [private]
-[doc("refuse if a live driver run holds dir's run lock, naming the holder, or if dir holds toolchains under more than one harness; silent no-op on a stale or absent lock, on a dir with no toolchain installed yet, or on a toolchain too old to recognise show-run-lock")]
+[doc("refuse if a build holds dir's run lock, naming its report, or if dir holds toolchains under more than one harness; silent no-op on an absent lock, on a dir with no toolchain installed yet, or on a toolchain too old to recognise show-run-lock")]
 guard-run-lock dir: _venv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -168,22 +169,14 @@ guard-run-lock dir: _venv
         exit 1
     fi
     state=""
-    pid=""
-    run_id=""
-    started=""
-    lock=""
     while IFS='=' read -r key value; do
-        case "${key}" in
-            state) state="${value}" ;;
-            pid) pid="${value}" ;;
-            run_id) run_id="${value}" ;;
-            started) started="${value}" ;;
-            lock) lock="${value}" ;;
-        esac
+        if [[ "${key}" == "state" ]]; then
+            state="${value}"
+        fi
     done <<< "${output}"
-    if [[ "${state}" == "live" ]]; then
-        printf 'error: a driver run is live in %s (pid %s, run_id %s, started %s; lock: %s) — wait for it to finish or stop it before staging.\n' \
-            "${dir}" "${pid}" "${run_id}" "${started}" "${lock}" >&2
+    if [[ "${state}" == "held" || "${state}" == "live" ]]; then
+        printf 'error: a build holds the run lock in %s — wait for it to finish or stop it before staging. show-run-lock reports:\n%s\n' \
+            "${dir}" "${output}" >&2
         exit 1
     fi
 

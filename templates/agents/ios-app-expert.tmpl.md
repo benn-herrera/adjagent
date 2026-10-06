@@ -63,6 +63,10 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 - For C integration: provide complete module map and Package.swift
 - Verify thread safety (queue/actor), memory management (weak/unowned), Sendable conformance
 
+## When Reviewing
+
+@!test-review!@
+
 ## Parallel Execution
 
 @!parallel-execution variant="platform" adjacent="Info.plist, entitlements, Package.swift, Xcode project settings"!@
@@ -91,6 +95,8 @@ memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lif
 @!incumbent-search!@
 
 @!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
 
 @!separation-of-concerns!@
 

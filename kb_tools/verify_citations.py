@@ -49,13 +49,12 @@ Stdlib only.
 """
 
 import argparse
-import json
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from kb_tools import __version__, kb_index_lib, kb_links, kb_schema, kb_util
+from kb_tools import __version__, kb_index_lib, kb_links, kb_load, kb_schema, kb_util
 
 # A markdown link, text and target both captured — the citation form needs
 # them together, where the shared LINK_RE primitive needs only the target. The
@@ -88,7 +87,6 @@ ENTRY_MARKER_RE = re.compile(rf"<!--\s*id:\s*({kb_schema.id_body()})")
 FIELD_BULLET_RE = re.compile(r"^-\s+[a-z][a-z-]*:")
 FIELD_CONTINUATION_RE = re.compile(r"^\s+\S")
 NO_EDGE_RE = re.compile(r"^\s*-\s+no-edge:\s*(\S.*)$")
-FRONTMATTER_RE = re.compile(r"<!--\s*kb-frontmatter\b.*?-->", re.DOTALL)
 
 # An excerpt is a minimal quotation, not a pasted section: one line, and short
 # enough that quoting a whole paragraph is a failure rather than a habit.
@@ -119,20 +117,6 @@ def _blank_all(text: str, pattern: re.Pattern[str]) -> str:
     return text
 
 
-def frontmatter_span(text: str) -> tuple[int, int] | None:
-    match = FRONTMATTER_RE.search(text)
-    return match.span() if match else None
-
-
-def leaf_kind(text: str) -> str | None:
-    """The ``kind:`` a file's kb-frontmatter declares, or None."""
-    match = FRONTMATTER_RE.search(text)
-    if match is None:
-        return None
-    kind = re.search(r"^kind:\s*(\S+)", match.group(0), re.MULTILINE)
-    return kind.group(1) if kind else None
-
-
 def in_scope_text(text: str) -> str:
     """The part of a file the checks read, everything else blanked.
 
@@ -145,9 +129,10 @@ def in_scope_text(text: str) -> str:
     not a citation.
     """
     text = kb_links.strip_code(text)
-    if leaf_kind(text) not in LEAF_KINDS:
+    block = kb_index_lib.find_frontmatter(text)
+    if block is None or (kb_index_lib.parse_frontmatter(text) or {}).get("kind") not in LEAF_KINDS:
         return text
-    keep = [span for span in (frontmatter_span(text),) if span is not None]
+    keep = [(block.start, block.end)]
     keep += [m.span() for m in TIER2_MARKER_RE.finditer(text)]
     blanked = re.sub(r"[^\n]", " ", text)
     return "".join(text[i] if any(start <= i < end for start, end in keep) else blanked[i] for i in range(len(text)))
@@ -161,7 +146,9 @@ def sanctioned_channels_blanked(text: str, *, declaration_sections: bool) -> str
     body of each ``### INVARIANT-*`` section, which is the framework source's
     own declaration space: an invariant's section may name its siblings.
     """
-    text = _blank_all(text, FRONTMATTER_RE)
+    block = kb_index_lib.find_frontmatter(text)
+    if block is not None:
+        text = _blank(text, (block.start, block.end))
     text = _blank_all(text, TIER2_MARKER_RE)
     text = _blank_all(text, CITATION_LINK_RE)
     lines = text.split("\n")
@@ -321,40 +308,31 @@ def check_citations(path: str, text: str, kb_root: Path, source: Path) -> list[F
     return findings
 
 
-def load_node_domains(index_dir: Path) -> dict[str, str]:
+def _index_records(kb_root: Path, name: str) -> list[dict]:
+    """The index stream ``name``'s records, ``[]`` where it is missing; a line that is no record is dropped."""
+    try:
+        records, _ = kb_load.read_index(kb_root, name)
+    except FileNotFoundError:
+        return []
+    return records
+
+
+def load_node_domains(kb_root: Path) -> dict[str, str]:
     """id -> domain, from the derived node register."""
-    claims = index_dir / kb_util.CLAIMS_FILENAME
-    if not claims.is_file():
-        return {}
-    domains = {}
-    for raw in claims.read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
-            continue
-        try:
-            record = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if "id" in record and "canonical_path" in record:
-            domains[record["id"]] = kb_index_lib.node_domain(record["canonical_path"])
-    return domains
+    return {
+        record["id"]: kb_index_lib.node_domain(record["canonical_path"])
+        for record in _index_records(kb_root, "claims")
+        if "id" in record and "canonical_path" in record
+    }
 
 
-def load_edges(index_dir: Path) -> set[tuple[str, str]]:
+def load_edges(kb_root: Path) -> set[tuple[str, str]]:
     """(source, target) pairs from the depends-on edge register."""
-    path = index_dir / "depends-on.jsonl"
-    if not path.is_file():
-        return set()
-    edges = set()
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
-            continue
-        try:
-            record = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if "source" in record and "target" in record:
-            edges.add((record["source"], record["target"]))
-    return edges
+    return {
+        (record["source"], record["target"])
+        for record in _index_records(kb_root, "depends-on")
+        if "source" in record and "target" in record
+    }
 
 
 def check_foreign_domain_edges(
@@ -414,10 +392,10 @@ def authored_files(kb_root: Path) -> list[Path]:
     return sorted(kb_links.iter_markdown_files(kb_root))
 
 
-def scan(kb_root: Path, index_dir: Path) -> list[Finding]:
+def scan(kb_root: Path) -> list[Finding]:
     framework = kb_index_lib.framework_source(kb_root)
-    domains = load_node_domains(index_dir)
-    edges = load_edges(index_dir)
+    domains = load_node_domains(kb_root)
+    edges = load_edges(kb_root)
     findings: list[Finding] = []
     for source in authored_files(kb_root):
         raw = source.read_text(encoding="utf-8")
@@ -448,8 +426,13 @@ def main(argv: list[str] | None = None) -> int:
     if not kb_root.is_dir():
         print(f"FAIL: KB directory {kb_root} not found.", file=sys.stderr)
         return 2
+    try:
+        kb_load.require_current(kb_root)
+    except kb_load.FormatRefusal as refusal:
+        print(f"FAIL: {refusal}", file=sys.stderr)
+        return 2
 
-    findings = scan(kb_root, kb_root / kb_util.INDEX_DIRNAME)
+    findings = scan(kb_root)
     files = authored_files(kb_root)
     print(
         f"[citations] Scanned {len(files)} authored file(s) under {kb_root} "

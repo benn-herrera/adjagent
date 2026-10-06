@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from .. import __version__, kb_schema
+from .. import __version__, kb_load, kb_schema
 from .index import BUILD_BANDS, CitationEdge, Claim, DependsOnEdge, GraphNode, Index, WeakPoint, load
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ def _add_global_flags(p: argparse.ArgumentParser) -> None:
         "--index-dir",
         type=Path,
         default=None,
-        help="Override the default .index directory.",
+        help="Override the default .index directory (a KB's <kb-root>/.index; its KB's format is read first).",
     )
 
 
@@ -63,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_deps = sub.add_parser(
         "deps",
-        help="Forward dependency edges of a claim — relation, target, and a rests-on pairing's applicability.",
+        help="Forward dependency edges of a claim — relation, target, a rests-on pairing's applicability, context.",
     )
     _add_global_flags(p_deps)
     p_deps.add_argument("claim_id")
@@ -149,23 +149,27 @@ def _citation_to_dict(e: CitationEdge) -> dict:
 
 
 def _dep_to_dict(e: DependsOnEdge) -> dict:
-    """The three fields a reader tracing a dependency chain needs from one edge.
+    """The four fields a reader tracing a dependency chain needs from one edge.
 
     ``applicability`` is a ``rests-on`` pairing's ``fraction`` and that class's
     alone: it decides whether the cited work's own ``strength`` joins the
     source's gate at all, and it is reachable through no other query. A
     ``supports`` edge's ``fraction`` is the on-point fraction — a different
-    quantity — so it is not reported under this name.
+    quantity — so it is not reported under this name. ``context`` is the edge
+    row's own string, ``None`` where its bullet carries none.
     """
     applicability = e.fraction if e.relation == RESTS_ON else None
-    return {"relation": e.relation, "target": e.target, "applicability": applicability}
+    return {"relation": e.relation, "target": e.target, "applicability": applicability, "context": e.context}
 
 
 def _dep_line(e: DependsOnEdge) -> str:
-    """``relation<TAB>target``, gaining the applicability column on a ``rests-on``."""
-    if e.relation != RESTS_ON:
-        return f"{e.relation}\t{e.target}"
-    return f"{e.relation}\t{e.target}\tapplicability {e.fraction}"
+    """``relation<TAB>target``, gaining an applicability column on a ``rests-on`` and a context column where set."""
+    line = f"{e.relation}\t{e.target}"
+    if e.relation == RESTS_ON:
+        line += f"\tapplicability {e.fraction}"
+    if e.context is not None:
+        line += f"\tcontext {e.context}"
+    return line
 
 
 def _weak_point_to_dict(wp: WeakPoint) -> dict:
@@ -179,16 +183,42 @@ def _weak_point_to_dict(wp: WeakPoint) -> dict:
     }
 
 
-def _format_show_text(node: GraphNode) -> str:
-    """One ``field: value`` line per field the node's own record carries.
+def _show_record(node: GraphNode, idx: Index) -> dict:
+    """The node's own record, a claim's carrying ``strengthen_by`` right after ``strengthen_by_count``.
 
-    The field list is the dataclass's, so a node of any kind prints exactly what
-    it holds and no record type's shape is stated twice — a hand-kept second
-    list silently drops a support's scoring fields.
+    The field list is the dataclass's, so a node of any kind reports exactly
+    what it holds and no record type's shape is stated twice — a hand-kept
+    second list silently drops a support's scoring fields. ``strengthen_by`` is
+    the claim's items in ``item_idx`` order, each with the ids it mentions.
     """
-    return "\n".join(
-        f"{f.name}: {'' if (value := getattr(node, f.name)) is None else value}" for f in dataclasses.fields(node)
-    )
+    record = dataclasses.asdict(node)
+    if not isinstance(node, Claim):
+        return record
+    items = [
+        {"item_idx": item.item_idx, "text": item.text, "mentioned_ids": list(item.mentioned_ids)}
+        for item in idx.strengthen_by(node.id)
+    ]
+    shown = {}
+    for key, value in record.items():
+        shown[key] = value
+        if key == "strengthen_by_count":
+            shown["strengthen_by"] = items
+    return shown
+
+
+def _format_show_text(record: dict) -> str:
+    """One ``field: value`` line per field, a list of item records as an indented block beneath its field."""
+    lines = []
+    for key, value in record.items():
+        if not isinstance(value, list):
+            lines.append(f"{key}: {'' if value is None else value}")
+            continue
+        lines.append(f"{key}:" if value else f"{key}: []")
+        for item in value:
+            for position, (field, field_value) in enumerate(item.items()):
+                shown = f"[{', '.join(field_value)}]" if isinstance(field_value, list) else field_value
+                lines.append(f"  {'- ' if position == 0 else '  '}{field}: {shown}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -284,10 +314,11 @@ def _dispatch(args: argparse.Namespace, idx: Index, out, err) -> int:
         if node is None:
             print(f"error: unknown node id: {args.claim_id}", file=err)
             return EXIT_USER_ERROR
+        record = _show_record(node, idx)
         if emit_json:
-            _emit(dataclasses.asdict(node), emit_json=True, out=out)
+            _emit(record, emit_json=True, out=out)
         else:
-            print(_format_show_text(node), file=out)
+            print(_format_show_text(record), file=out)
         return EXIT_OK
 
     if cmd == "weak-points":
@@ -363,10 +394,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         idx = load(args.index_dir)
-    except FileNotFoundError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return EXIT_SYSTEM_ERROR
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError, kb_load.FormatRefusal) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_SYSTEM_ERROR
 

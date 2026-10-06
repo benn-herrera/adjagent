@@ -4,7 +4,7 @@
 checks against: it must see every authored ``clm-`` / ``exp-`` / ``sup-`` id
 using the authored Markdown alone, and must be unaffected by the state of the
 derived ``.index/``. The fixture below reproduces the state that motivated it —
-registers populated with dozens of authored ids while every ``.index/*.jsonl``
+registers populated with dozens of authored ids while every ``.index/`` stream
 sits at zero bytes — where an inventory read from ``.index/`` would conclude
 "no existing ids" and mint a second, colliding set.
 
@@ -23,7 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_schema
+from kb_tools import kb_index_lib, kb_load, kb_schema
+from kb_tools.tests._stamped_kb import write_index
 
 # The full inventory the fixture below must yield: id -> (kind, register, leaf).
 # Every asymmetry in it is deliberate and named in `_write_run3_shaped_kb`.
@@ -35,15 +36,6 @@ EXPECTED_INVENTORY = {
     "exp-ff2222": ("exp", None, "domain/bench.md"),
     "sup-ss1111": ("sup", "claim-quality.md", "domain/warrant.md"),
 }
-
-_INDEX_FILES = (
-    "claims.jsonl",
-    "depends-on.jsonl",
-    "strengthen-by.jsonl",
-    "cites.jsonl",
-    "supported-by.jsonl",
-    "subtree-aggregates.jsonl",
-)
 
 
 def _write(path: Path, text: str) -> None:
@@ -68,10 +60,8 @@ def _write_run3_shaped_kb(kb_root: Path) -> None:
     * a fenced example marker in a register, and a derived ``subtree-claims:``
       naming a stale id — neither may enter the inventory.
     """
-    index_dir = kb_root / ".index"
-    index_dir.mkdir(parents=True, exist_ok=True)
-    for name in _INDEX_FILES:
-        (index_dir / name).write_text("", encoding="utf-8")
+    for name in kb_index_lib.INDEX_FILES:
+        write_index(kb_root, name, [])
 
     _write(
         kb_root / "claim-quality.md",
@@ -123,82 +113,72 @@ def _write_run3_shaped_kb(kb_root: Path) -> None:
 
     _write(
         kb_root / "index.md",
-        "[↑ Entry](entry-point.md)\n"
-        "\n"
-        "<!-- kb-frontmatter\n"
+        "---\n"
         "kind: index\n"
         "subtree-claims: [clm-aa1111, clm-zz9999]\n"
-        "-->\n"
+        "---\n"
+        "[↑ Entry](entry-point.md)\n"
         "\n"
         "## Domain Index\n",
     )
 
     _write(
         kb_root / "domain" / "aa-cites-bench.md",
-        "[↑ Domain](index.md)\n"
-        "\n"
-        "<!-- kb-frontmatter\n"
+        "---\n"
         "kind: leaf\n"
         "no-claim: narrative bridge\n"
         "experiments: [exp-ee1111]\n"
-        "-->\n"
+        "---\n"
+        "[↑ Domain](index.md)\n"
         "\n"
         "## Reader Pointing At The Bench\n",
     )
 
     _write(
         kb_root / "domain" / "aa-first.md",
-        "[↑ Domain](index.md)\n"
-        "\n"
-        "<!-- kb-frontmatter\n"
-        "kind: leaf\n"
-        "claims: [clm-aa1111]\n"
-        "-->\n"
-        "\n"
-        "## Foundation A\n",
+        "---\n" "kind: leaf\n" "claims: [clm-aa1111]\n" "---\n" "[↑ Domain](index.md)\n" "\n" "## Foundation A\n",
     )
 
     _write(
         kb_root / "domain" / "bb-second.md",
-        "[↑ Domain](index.md)\n"
-        "\n"
-        "<!-- kb-frontmatter\n"
+        "---\n"
         "kind: leaf\n"
         "claims: [clm-aa1111, clm-bb2222]\n"
-        "-->\n"
+        "---\n"
+        "[↑ Domain](index.md)\n"
         "\n"
         "## Derived B, Restating A\n",
     )
 
     _write(
         kb_root / "domain" / "bench.md",
-        "[↑ Domain](index.md)\n"
-        "\n"
-        "<!-- kb-frontmatter\n"
+        "---\n"
         "kind: leaf\n"
-        "exp-id: exp-ee1111\n"
-        "status: run\n"
-        "strengthens:\n"
-        "  - clm-bb2222: 0.90\n"
-        "exp-id: exp-ff2222\n"
-        "status: pending\n"
-        "strengthens:\n"
-        "  - clm-aa1111: 0.40\n"
-        "-->\n"
+        "experiment-nodes:\n"
+        "  - exp-id: exp-ee1111\n"
+        "    status: run\n"
+        "    strengthens:\n"
+        "      - clm-bb2222: 0.90\n"
+        "  - exp-id: exp-ff2222\n"
+        "    status: pending\n"
+        "    strengthens:\n"
+        "      - clm-aa1111: 0.40\n"
+        "---\n"
+        "[↑ Domain](index.md)\n"
         "\n"
         "## Two Bench Experiments\n",
     )
 
     _write(
         kb_root / "domain" / "warrant.md",
-        "[↑ Domain](index.md)\n"
-        "\n"
-        "<!-- kb-frontmatter\n"
+        "---\n"
         "kind: leaf\n"
-        "sup-id: sup-ss1111\n"
-        "supports:\n"
-        "  - clm-aa1111: 0.50\n"
-        "-->\n"
+        "support-nodes:\n"
+        "  - sup-id: sup-ss1111\n"
+        "    supports:\n"
+        "      - clm-aa1111: 0.50\n"
+        "---\n"
+        "[↑ Domain](index.md)\n"
         "\n"
         "## Analytical Warrant\n",
     )
@@ -221,7 +201,8 @@ def run3_shaped_repo(tmp_path: Path) -> Path:
 def test_index_is_empty_in_the_fixture(run3_shaped_repo: Path) -> None:
     """Guards the premise: every derived index file is present and zero-byte."""
     index_dir = run3_shaped_repo / "kb-root" / ".index"
-    assert sorted(p.name for p in index_dir.iterdir()) == sorted(_INDEX_FILES)
+    expected = sorted(kb_load.index_path(run3_shaped_repo / "kb-root", name).name for name in kb_index_lib.INDEX_FILES)
+    assert sorted(p.name for p in index_dir.iterdir()) == expected
     assert all(p.stat().st_size == 0 for p in index_dir.iterdir())
 
 

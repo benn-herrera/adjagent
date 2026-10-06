@@ -21,11 +21,12 @@ whole-tree refusal on "any frontmatter at all" would forbid them entirely.
 by :func:`determination` for the report. What keeps the node pass from
 re-minting is not here: it is the node-pass record's read state.
 
-**The forbidden artifacts are read off the module that composes them**
-(:data:`tree.METADATA_OPENERS`, itself read off :mod:`kb_tools.kb_write.render`)
-rather than re-typed here. A cleanliness check carrying its own copy of the
-spellings would pass a tree holding an artifact whose spelling had since moved,
-which is the silent-clean failure this gate exists to prevent.
+**The forbidden artifacts are read off the modules that own them** — the
+markers' openers off :mod:`kb_tools.kb_write.render` (:data:`tree.MARKER_OPENERS`),
+frontmatter by :func:`kb_index_lib.find_frontmatter` — rather than re-typed
+here. A cleanliness check carrying its own copy of the spellings would pass a
+tree holding an artifact whose spelling had since moved, which is the
+silent-clean failure this gate exists to prevent.
 
 **One clause of point 14 is not checked, and that is a ruling rather than an
 omission.** Point 14 also forbids a ``.index/`` directory, and what it describes
@@ -42,18 +43,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from .. import kb_index_lib, kb_util, verify_md_links
+from .. import kb_index_lib, kb_schema, kb_util, verify_md_links
 from .report import ClaimGraphError
-from .tree import ANCHOR_RE, DECLARING_KINDS, METADATA_OPENERS, Tree, document_kind, resolve, strip_markers, unquote
-
-#: The authored artifacts point 14 forbids: exactly the line-shaped metadata the
-#: write API inserts, which :data:`tree.METADATA_OPENERS` already spells off the
-#: module that composes them. Point 14's fourth item — a ``claims:`` key — is a
-#: *field of* the frontmatter block and cannot exist outside one, so the block's
-#: absence is what checks it. A bare substring test would instead read an
-#: author's own sentence about a framework's core claims as a metadata key,
-#: which is a gate refusing a conforming tree.
-POINT_14_ARTIFACTS: tuple[str, ...] = METADATA_OPENERS
+from .tree import ANCHOR_RE, DECLARING_KINDS, MARKER_OPENERS, Tree, document_kind, resolve, strip_markers, unquote
 
 
 class ConformanceError(ClaimGraphError):
@@ -82,13 +74,17 @@ def _entry_point(tree: Tree) -> None:
 
 
 def _uplinks(tree: Tree) -> None:
-    """Points 3 and 4 — line 1 is an up-link, and the parent names it back."""
+    """Points 3 and 4 — the up-link's line (``kb_index_lib.uplink_index``) holds one, and the parent names it back."""
     for path in sorted(tree.documents):
         if path == kb_index_lib.ENTRY_POINT_FILENAME:
             continue
         parent = tree.parents.get(path)
         if parent is None:
-            raise _refuse(3, f"{path} does not open with an up-link carrying {kb_index_lib.UPLINK_MARKER!r}")
+            raise _refuse(
+                3,
+                f"{path} has no up-link carrying {kb_index_lib.UPLINK_MARKER!r} on its first line, or on the "
+                f"first line after its frontmatter's closing fence",
+            )
         if parent not in tree.documents:
             raise _refuse(3, f"{path}'s up-link names {parent}, which is not a document of this tree")
         if path not in tree.children[parent]:
@@ -169,21 +165,45 @@ def _anchors(tree: Tree) -> None:
                 raise _refuse(7, f"{path}: cross-reference anchor {match.group(1)!r} lands on no document")
 
 
+def _carries_frontmatter(relative: Path, text: str) -> bool:
+    """Whether ``text`` carries frontmatter point 14 forbids.
+
+    Point 14's ``claims:`` key is a *field of* the frontmatter and cannot exist
+    outside it, so the block's absence is what checks it — a bare substring test
+    would read an author's own sentence about a framework's core claims as a
+    metadata key. The one block allowed is the entry point's holding the format
+    stamp alone, which ``graph-init``'s refresh writes before this gate runs: a
+    property of the KB, not claim-graph metadata.
+    """
+    if kb_index_lib.find_frontmatter(text) is None:
+        return False
+    if relative.as_posix() != kb_index_lib.ENTRY_POINT_FILENAME:
+        return True
+    return set(kb_index_lib.parse_frontmatter(text) or {}) != {kb_schema.FORMAT_KEY}
+
+
 def _cleanliness(tree: Tree) -> None:
-    """Point 14 — and the double-run guard, over every file the tree holds."""
+    """Point 14 — and the double-run guard, over every file the tree holds.
+
+    The markers are found by their openers anywhere in a document; frontmatter
+    by the locator.
+    """
     for path in sorted(tree.root.rglob("*.md")):
         relative = path.relative_to(tree.root)
         if set(relative.parts[:-1]) & kb_index_lib.EXCLUDE_DIRS:
             continue
         text = path.read_text(encoding="utf-8")
-        for artifact in POINT_14_ARTIFACTS:
-            if artifact in text:
-                raise _refuse(
-                    14,
-                    f"{relative.as_posix()} already carries {artifact!r}. This is not a tree the front end "
-                    f"just wrote: this stage mints ids, so a second run over its own output would mint a "
-                    f"second set and double the graph. Rebuild the tree from the corpus and run once",
-                )
+        if _carries_frontmatter(relative, text):
+            artifact = "frontmatter"
+        else:
+            artifact = next((opener for opener in MARKER_OPENERS if opener in text), None)
+        if artifact is not None:
+            raise _refuse(
+                14,
+                f"{relative.as_posix()} already carries {artifact!r}. This is not a tree the front end "
+                f"just wrote: this stage mints ids, so a second run over its own output would mint a "
+                f"second set and double the graph. Rebuild the tree from the corpus and run once",
+            )
 
 
 #: The structural half of the gate, ordered by what each check's own subject

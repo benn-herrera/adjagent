@@ -101,10 +101,10 @@ own text. A family file can never replace, suppress, or modify base text — it 
 Tuned sets are rendered to order, typically out of repo:
 `python3 -m gen_defs generate <root> --family NAME`, where `NAME` selects `templates/family/<NAME>.toml`
 — a bare model name is not a family name. Two independent flags carry the tuning further:
-`--model-tier-map` overrides which family member each tier is tuned against, `--model-pin-map`
-overrides that tier's rendered `model:` value; narrowed to a subset of definitions by
+`--model-tier-map` overrides which family member each tier is tuned against, and the optional
+`--model-pin-tier-alias-map` renders an alias in place of each tier's member; narrowed to a subset of definitions by
 `--agent-glob`/`--command-glob` when the whole set is not wanted.
-`just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-map=SPEC] [--harness=NAME]`
+`just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]`
 applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to
 `gen_defs`.
 

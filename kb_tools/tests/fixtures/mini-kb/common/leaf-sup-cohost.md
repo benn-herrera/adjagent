@@ -1,12 +1,13 @@
-[↑ Mini-KB Common](index.md)
-
-<!-- kb-frontmatter
+---
 kind: leaf
 claims: [clm-sb5555]
-sup-id: sup-coh001
-supports:
-  - clm-sb5555: 1.0
--->
+support-nodes:
+  - sup-id: sup-coh001
+    supports:
+      - clm-sb5555: 1.0
+---
+[↑ Mini-KB Common](index.md)
+
 
 ## Co-Hosted Claim And Its Analytical Support
 

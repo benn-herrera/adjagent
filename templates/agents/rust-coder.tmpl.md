@@ -19,6 +19,8 @@ than a borrow-checker problem.
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -160,6 +162,10 @@ lines. @!logs-not-stdout!@
   returns); if a trait won't be `dyn`-compatible, that's a design signal, not a bug to force around.
 - `#[derive(...)]` adds bounds you may not want (`#[derive(Clone)]` on a generic struct requires
   `T: Clone`). Implement manually when the derived bound is wrong.
+
+## When Reviewing
+
+@!test-review!@
 
 ## Parallel Execution
 

@@ -71,25 +71,25 @@ def test_the_assembled_document_is_the_template_with_no_slot_left() -> None:
 # The excerpts the passage is written from
 # ---------------------------------------------------------------------------
 
-#: A two-volume tree in the shape the document graph writes it: the entry point
-#: and each index under a metadata block, every non-root document opening with
-#: its up-link. The first volume has its own opening prose; the second has none,
+#: A two-volume tree in the shape a build leaves it: the entry point and each
+#: index under a frontmatter block, every non-root document's up-link on the line
+#: after it, or on line 1 where it has none. The first volume has its own opening prose; the second has none,
 #: and links a document titled otherwise, which the excerpts must not read.
 TREE = {
     "entry-point.md": (
-        "<!-- kb-frontmatter\nkind: entry-point\nsubtree-claims: [clm-aaaaaa]\n-->\n\n# Knowledge Base\n\n"
+        "---\nkind: entry-point\nsubtree-claims: [clm-aaaaaa]\n---\n\n# Knowledge Base\n\n"
         "- [First Volume](first-volume/index.md)\n- [Second Volume](second-volume/index.md)\n"
     ),
     "first-volume/index.md": (
-        "[↑ Knowledge Base](../entry-point.md)\n\n<!-- kb-frontmatter\nkind: index\n-->\n\n# First Volume\n\n"
+        "---\nkind: index\n---\n[↑ Knowledge Base](../entry-point.md)\n\n# First Volume\n\n"
         "- [Overview](overview.md)\n- [Part I](part-i/index.md)\n"
     ),
     "first-volume/overview.md": (
-        "[↑ First Volume](index.md)\n\n<!-- kb-frontmatter\nkind: leaf\nclaims: []\n-->\n\n# Overview\n\n"
+        "---\nkind: leaf\nclaims: []\n---\n[↑ First Volume](index.md)\n\n# Overview\n\n"
         "The volume argues one thing, building on [Part I](part-i/index.md).\n\nIt leaves *another* aside.\n"
     ),
     "second-volume/index.md": (
-        "[↑ Knowledge Base](../entry-point.md)\n\n<!-- kb-frontmatter\nkind: index\n-->\n\n# Second Volume\n\n"
+        "---\nkind: index\n---\n[↑ Knowledge Base](../entry-point.md)\n\n# Second Volume\n\n"
         "- [Introduction](introduction.md)\n"
     ),
     "second-volume/introduction.md": "[↑ Second Volume](index.md)\n\n# Introduction\n\nNot an excerpt.\n",

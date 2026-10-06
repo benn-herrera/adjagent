@@ -7,42 +7,55 @@ markers in the `dyn.` namespace — the invocation's own parameters:
     model: @!dyn.tier-highest!@ | @!dyn.tier-high!@ | @!dyn.tier-medium!@ |
            @!dyn.tier-low!@     | @!dyn.tier-lowest!@
 
-They are bound at load time to `pin_map[<tier>]`, in a dynamic table that
-reaches every span through the routing table, so they expand wherever a marker
-does — template bodies, chunk bodies, variants, defaults, and overlay text
-alike. A pin is operator-suppliable text (--model-pin-map), so it is bound
-verbatim: spliced in as itself and never expanded. Nothing is
-reserved against the chunk table for them: a [chunks.tier-low] table is an
-ordinary chunk, reachable as the bare @!tier-low!@, because the namespace is
-what separates the two.
+They are bound at load time to the tier's RENDERED MODEL TEXT (below), in a
+dynamic table that reaches every span through the routing table, so they
+expand wherever a marker does — template bodies, chunk bodies, variants,
+defaults, and overlay text alike. That text is operator-suppliable
+(--model-tier-map, --model-pin-tier-alias-map), so it is bound verbatim:
+spliced in as itself and never expanded. Nothing is reserved against the chunk
+table for them: a [chunks.tier-low] table is an ordinary chunk, reachable as
+the bare @!tier-low!@, because the namespace is what separates the two.
 
-Two independent maps, each TOTAL over the five tiers on every render:
+One model source on every harness, and one optional overlay on its text:
 
-    tier map   tier -> FAMILY MEMBER. Declared by the family file's required
-               [tiers] table; --model-tier-map masks the tiers it names. It
-               selects whose [family.*.models.<member>] overrides a definition
-               is tuned against, and never reaches rendered text.
-    pin map    tier -> RENDERED PIN TEXT, always a claude-legal model name.
-               Defaults to DEFAULT_PIN_MAP below; --model-pin-map masks the
-               tiers it names. It is the SOLE source of the @!dyn.tier-*!@
-               tokens.
+    tier map       tier -> FAMILY MEMBER. Declared by the family file's
+                   required [tiers] table, or replaced whole by
+                   --model-tier-map. It selects whose
+                   [family.*.models.<member>] overrides a definition is tuned
+                   against, and its member is the text the tier renders.
+    alias map   tier -> ALIAS, optional, with no default:
+                   --model-pin-tier-alias-map. Where it is set, every tier
+                   renders its alias in place of its member, and nothing but
+                   that rendered text reads it — the tier map, and so tuning,
+                   is untouched.
+                   It exists for a harness that resolves aliases through
+                   environment remapping (Claude Code's ANTHROPIC_* model
+                   variables), and any harness may use it.
 
-The two are independent on purpose: what a definition is TUNED for and what it
-DISPATCHES on are separately chosen, so their divergence is disclosed rather
+What a definition is TUNED for and what it DISPATCHES on therefore coincide
+unless the alias map rewrites a tier, and that rewrite is disclosed rather
 than prevented. A tier-map value is NOT validated against the family's overlay
 tables — naming a member the family declares no override for is the legal
-STOCK state below, never an error. A pin-map value is not validated at all:
-nothing in this repository owns the set of legal claude aliases, so the report
-echo and the banner are the whole safety story there. That is an accepted risk,
-stated so it does not get "fixed" into a gate.
+STOCK state below, never an error. Each tier's rendered text is validated
+against the shape the harness's [harness.model] pattern declares (`harness`
+module docstring) before anything is written, and a miss names the tier, the
+value, and the flag or family file that supplied it. The pattern is a shape,
+not a list: nothing in this repository owns the set of models a harness can
+resolve, so a well-shaped name it cannot is the report echo's and the banner's
+to disclose. That is an accepted risk, stated so it does not get "fixed" into
+a gate.
 
-Merge semantics, identical for both flags: start from the defaults; `all=V`
-overwrites all five; then each named tier is applied. So `all=haiku,high=opus`
-is haiku everywhere but high, whichever order the two appear in, and a named
-tier masks ONLY itself — unnamed tiers keep their default. A key that is
-neither one of the five tiers nor `all`, a duplicate key, and a malformed pair
-are each hard errors. Both merged maps are total by construction: a tier
-holding no member, or no pin, is unrepresentable rather than an error branch.
+`inherit` is the operator's word for the harness's own default model, legal
+wherever the harness's pattern accepts it; a tier rendering it renders the
+harness's inherit-text instead, where the harness declares one.
+
+Spec syntax, identical for both flags: comma-separated `tier=value` pairs,
+TOTAL — every tier named, or `all=V` naming all five, after which each named
+tier is applied. So `all=haiku,high=opus` is haiku everywhere but high,
+whichever order the two appear in. A spec leaving a tier unnamed is a hard
+error listing the missing tiers: there is no per-tier fallback to the family
+file or to anything else. A key that is neither one of the five tiers nor
+`all`, a duplicate key, and a malformed pair are each hard errors too.
 
 Per-output tier discovery renders a template's body TWICE. The first pass binds
 the tier tokens to a marker-free sentinel (`tier:high`), so reading the pin out
@@ -112,7 +125,7 @@ not a family name, and there is no third resolution step behind it.
 
 The [tiers] table is REQUIRED and TOTAL. A family file that omits it, drops a
 tier, or names a key outside the five fails to LOAD rather than falling back to
-a partial map, to another family's members, or to the pin map: there is no
+a partial map or to another family's members: there is no
 fallback anywhere in this resolution, and the default FAMILY is a selection,
 not a fallback value. A family file may still carry zero [family.*] tables — a
 family name is reservable before an observed failure motivates an entry — but
@@ -140,15 +153,16 @@ what lets a table be authored for a member reachable only via
 Family scope is unchanged by any of that: a loaded family file's family-wide
 text fills its anchors render-wide, for outputs with a tier and outputs with no
 pin site alike. Only MODEL-scoped entries require a tier. The banner records
-the invocation's whole triple and its harness, and a render is a deterministic
+the invocation's whole tuning and its harness, and a render is a deterministic
 function of those and the templates, so a re-render under them reproduces the
 same bytes exactly.
 
 A filled anchor renders its family text VERBATIM in place — no lead-in, no
 wrapper, no marker of its own around it, so a family file can restore a passage
 of contract prose as readily as it can add a corrective note; an author wanting
-a lead-in writes one into their text. Neither the family nor the member name
-appears in rendered output — the family file is the provenance record. The
+a lead-in writes one into their text. A filled anchor adds neither the family
+nor the member name to rendered output — the family file is the provenance
+record. The
 filled text is itself marker-expanded, so a typo'd chunk reference inside it
 fails loudly. A family-file entry naming an anchor that exists in no template
 or chunk is a hard error, and a family declaring anchors reports which of them
@@ -172,6 +186,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .errors import InputError
+from .frontmatter import FrontmatterRules
 from .markers import FAMILY_NAMESPACE, IDENTIFIER, DynamicMap, Verbatim
 from .paths import FAMILY_DIR, FAMILY_SUFFIX, rel
 
@@ -199,13 +214,13 @@ TIER_TOKEN_PREFIX = "tier-"
 # What the discovery pass binds the tier tokens to. Marker-free and
 # whitespace-free, so FRONTMATTER_PIN reads `model: tier:high` unchanged.
 TIER_SENTINEL = "tier:"
-# Tier -> rendered pin text. This default lives here and is changed only by
-# --model-pin-map; no family owns it, and it is always claude-legal names.
-# Deliberately NOT injective — low and lowest both ship haiku — which is why a
-# definition's own tier is recorded in its banner rather than derived.
-DEFAULT_PIN_MAP = {"highest": "fable", "high": "opus", "medium": "sonnet", "low": "haiku", "lowest": "haiku"}
-# Tier -> family member, or tier -> rendered pin text. Total over TIERS in
-# every instance the render path ever sees (see effective_map).
+# The operator-facing model word for "the harness's own default model", on
+# every harness; what a tier token renders for it is the harness's inherit-text.
+INHERIT_MODEL = "inherit"
+TIER_MAP_FLAG = "--model-tier-map"
+ALIAS_MAP_FLAG = "--model-pin-tier-alias-map"
+# Tier -> family member, alias, or rendered model text. Total over TIERS except
+# for the alias map, which holds only the tiers its flag names.
 TierMap = dict[str, str]
 # Marker spelling (fam.<key>) -> (overlay text, the scope it resolved from:
 # "family"/"model").
@@ -220,35 +235,53 @@ class TierBinding(NamedTuple):
 
     `chunks` is what a bare marker resolves from. `real` and `probe` are the
     two dynamic tables the @!dyn.…!@ namespace resolves from, differing in
-    exactly the five tier entries: `real` binds them to the effective pin map's
-    text — what ships — and `probe` to a marker-free sentinel the discovery
+    exactly the five tier entries: `real` binds them to each tier's rendered
+    model text — what ships — and `probe` to a marker-free sentinel the discovery
     pass reads an output's own tier back out of. `harness` is the loaded
     harness file @!hrn.…!@ resolves from, or None for a render that routes no
-    `hrn`. Threaded as one parameter so no call site can pair a stale table
-    with a fresh one.
+    `hrn`. `frontmatter` is that harness's agent frontmatter rules, or None
+    where no harness entries apply and authored frontmatter renders as written.
+    Threaded as one parameter so no call site can pair a stale table with a
+    fresh one.
     """
 
     chunks: dict[str, dict]
     real: DynamicMap
     probe: DynamicMap
     harness: DynamicMap | None = None
+    frontmatter: FrontmatterRules | None = None
 
 
-def tier_binding(chunks: dict[str, dict], *, pin_map: TierMap, harness: DynamicMap | None = None) -> TierBinding:
-    """Bind the five tier tokens as dynamic parameters, twice over.
+def tier_binding(
+    chunks: dict[str, dict],
+    *,
+    models: TierMap,
+    harness: DynamicMap | None = None,
+    frontmatter: FrontmatterRules | None = None,
+    inherit_text: str | None = None,
+) -> TierBinding:
+    """Bind the five tier tokens as dynamic parameters, twice over: `real` to
+    `models`, each tier's rendered model text (Tuning.models).
 
     A dynamic table rather than the chunk table or an argument: the tokens are
     the invocation's parameters, not shared text and not arguments anything
     bound at a call site, and the table reaches every span through the routing
     table — so a token expands in template bodies, chunk bodies, variants,
-    defaults, and overlay text alike. A real pin is Verbatim, being operator
-    text; the probe sentinel is authored.
+    defaults, and overlay text alike. A real model is Verbatim, being operator
+    text; the probe sentinel is authored. A tier whose model is `inherit` binds
+    to `inherit_text` instead, where one is given.
     """
     return TierBinding(
         chunks=chunks,
-        real={f"{TIER_TOKEN_PREFIX}{tier}": Verbatim(pin_map[tier]) for tier in TIERS},
+        real={
+            f"{TIER_TOKEN_PREFIX}{tier}": Verbatim(
+                inherit_text if models[tier] == INHERIT_MODEL and inherit_text is not None else models[tier]
+            )
+            for tier in TIERS
+        },
         probe={f"{TIER_TOKEN_PREFIX}{tier}": f"{TIER_SENTINEL}{tier}" for tier in TIERS},
         harness=harness,
+        frontmatter=frontmatter,
     )
 
 
@@ -276,9 +309,9 @@ def load_family(path: Path) -> Family:
     replacing, suppressing, or modifying base text.
 
     [tiers] is required and TOTAL. A missing table, a missing tier, or a key
-    outside the five is a hard error rather than a fallback to a partial map,
-    to another family's members, or to the pin map: there is no fallback
-    anywhere in this resolution. A family may still declare zero [family.*]
+    outside the five is a hard error rather than a fallback to a partial map
+    or to another family's members: there is no fallback anywhere in this
+    resolution. A family may still declare zero [family.*]
     tables — a name is reservable before an observed failure motivates an entry
     — but it needs its five-line [tiers] table to do so.
     """
@@ -321,14 +354,14 @@ def load_family(path: Path) -> Family:
 
 def load_tiers(data: dict, path: Path) -> TierMap:
     """Validate and return a family file's required [tiers] table."""
-    where = f"{rel(path)}: [{TIERS_TABLE}]"
-    listed = ", ".join(TIERS)
     if TIERS_TABLE not in data:
         raise InputError(
             f"{rel(path)}: no [{TIERS_TABLE}] table — every family file names "
-            f"the member staffing each of {listed}. There is no fallback: an "
+            f"the member staffing each of {', '.join(TIERS)}. There is no fallback: an "
             f"incomplete family file does not load."
         )
+    where = f"{rel(path)}: [{TIERS_TABLE}]"
+    listed = ", ".join(TIERS)
     tiers = data[TIERS_TABLE]
     if not isinstance(tiers, dict) or set(tiers) != set(TIERS):
         raise InputError(
@@ -477,44 +510,47 @@ def as_resolver(overlays: OverlaySource) -> Callable[[str | None], OverlayMap | 
 
 @dataclass(frozen=True)
 class Tuning:
-    """The effective (family, tier map, pin map) triple one render runs under,
-    and the harness whose values fill its @!hrn.<key>!@ markers.
+    """The effective tuning one render runs under — the family, its tier map,
+    and the alias map where one is set — and the harness whose values fill
+    its @!hrn.<key>!@ markers.
 
-    Both maps are post-merge and total. `stock` is derived from the family and
-    the tier map together (stock_tiers) and `is_default` says the whole triple
-    is the default one, under the default harness — claude with neither map
-    changed BY VALUE, so `--family claude` and a no-op override are the default
-    triple too. Only
-    `is_default` is provenance rather than substance, and it exists for one
-    caller: an install's summary line, where a default render is the non-event
+    `tier_map` is total; `alias_map` is total or None. `stock` is derived from
+    the family and the tier map together (stock_tiers) and `is_default` says
+    the whole tuning is the default one, under the default harness — claude,
+    its tier map unchanged BY VALUE and no alias map, so `--family claude`
+    and a no-op tier map are the default tuning too. Only `is_default` is
+    provenance rather than substance, and it exists for one caller: an
+    install's summary line, where a default render is the non-event
     report-by-exception is built around.
     """
 
     family: Path
     tier_map: TierMap
-    pin_map: TierMap
+    alias_map: TierMap | None = None
     harness: str = DEFAULT_HARNESS
     stock: tuple[str, ...] = ()
     is_default: bool = False
 
+    @property
+    def models(self) -> TierMap:
+        """Tier -> the model text the tier renders: its alias where the
+        alias map is set, else its member."""
+        return dict(self.tier_map if self.alias_map is None else self.alias_map)
 
-def effective_map(defaults: TierMap, spec: str | None, *, flag: str) -> TierMap:
-    """Merge one map flag's `tier=value` pairs over `defaults`.
 
-    Positional-independent: `all=V` overwrites all five wherever it sits in the
-    string, and each named tier is applied after it — so `all=haiku,high=opus`
-    and `high=opus,all=haiku` both mean haiku everywhere but high. A named tier
-    masks ONLY itself; unnamed tiers keep their default, which is what makes a
-    partial override partial. Defaults are total and a merge only overwrites,
-    so the result is total too.
+def parse_tier_map(spec: str, *, flag: str) -> TierMap:
+    """One map flag's value as a total tier map.
+
+    The flag names every tier or uses `all=V`; there is no per-tier fallback to
+    the family file or to anything else. `all=V` names all five wherever it
+    sits in the string and each named tier is applied after it, so
+    `all=haiku,high=opus` and `high=opus,all=haiku` both mean haiku everywhere
+    but high.
 
     Values are not validated here, by design: a tier-map value naming a member
-    the family declares no override for is the legal Stock state, and nothing
-    in this repository owns the set of legal claude aliases a pin-map value is
-    drawn from (see the module docstring — accepted risk, not an oversight).
+    the family declares no override for is the legal Stock state, and the
+    harness's shape check runs on the rendered text (effective_tuning).
     """
-    if spec is None:
-        return dict(defaults)
     named: TierMap = {}
     for pair in spec.split(","):
         entry = pair.strip()
@@ -529,9 +565,16 @@ def effective_map(defaults: TierMap, spec: str | None, *, flag: str) -> TierMap:
         if key in named:
             raise InputError(f"{flag}: duplicate key '{key}' — a map is 1:1.")
         named[key] = value
-    merged = {tier: named[MAP_ALL] for tier in TIERS} if MAP_ALL in named else dict(defaults)
+    merged = dict.fromkeys(TIERS, named[MAP_ALL]) if MAP_ALL in named else {}
     merged.update({tier: value for tier, value in named.items() if tier != MAP_ALL})
-    return merged
+    missing = [tier for tier in TIERS if tier not in merged]
+    if missing:
+        raise InputError(
+            f"{flag}: names no value for {', '.join(missing)} — a map names every tier "
+            f"({flag}={','.join(f'{tier}=<value>' for tier in TIERS)}) or all of them at once "
+            f"({flag}={MAP_ALL}=<value>)"
+        )
+    return {tier: merged[tier] for tier in TIERS}
 
 
 def effective_tuning(
@@ -539,34 +582,68 @@ def effective_tuning(
     family: Family,
     *,
     tier_spec: str | None = None,
-    pin_spec: str | None = None,
+    alias_spec: str | None = None,
     harness: str = DEFAULT_HARNESS,
+    model_pattern: re.Pattern[str] | None = None,
+    model_shape: str | None = None,
     family_dir: Path = FAMILY_DIR,
 ) -> Tuning:
-    """Build the run's triple from the loaded family and the two map flags,
-    under `harness`."""
-    tier_map = effective_map(family.tiers, tier_spec, flag="--model-tier-map")
-    pin_map = effective_map(DEFAULT_PIN_MAP, pin_spec, flag="--model-pin-map")
-    default_family = family_dir / f"{DEFAULT_FAMILY}{FAMILY_SUFFIX}"
-    return Tuning(
+    """Build the run's tuning from the loaded family and the two map flags,
+    under `harness`.
+
+    Every tier's rendered text must fullmatch `model_pattern` where the
+    harness declares one; a miss names the tier, the value, what supplied it —
+    the alias flag, the tier-map flag, or the family file — and `model_shape`,
+    the harness's own words for what a model value looks like.
+    """
+    tier_map = dict(family.tiers) if tier_spec is None else parse_tier_map(tier_spec, flag=TIER_MAP_FLAG)
+    alias_map = None if alias_spec is None else parse_tier_map(alias_spec, flag=ALIAS_MAP_FLAG)
+    tuning = Tuning(
         family=path,
         tier_map=tier_map,
-        pin_map=pin_map,
+        alias_map=alias_map,
         harness=harness,
         stock=stock_tiers(family.entries, tier_map),
         is_default=(
-            path.resolve() == default_family.resolve()
+            path.resolve() == (family_dir / f"{DEFAULT_FAMILY}{FAMILY_SUFFIX}").resolve()
             and tier_map == family.tiers
-            and pin_map == DEFAULT_PIN_MAP
+            and alias_map is None
             and harness == DEFAULT_HARNESS
         ),
     )
+    if alias_map is not None:
+        supplier = ALIAS_MAP_FLAG
+    elif tier_spec is not None:
+        supplier = TIER_MAP_FLAG
+    else:
+        supplier = f"the family file {rel(path)} [{TIERS_TABLE}] (--family)"
+    for tier, model in tuning.models.items():
+        if model_pattern is not None and model_pattern.fullmatch(model) is None:
+            raise InputError(
+                f"harness '{harness}' does not accept model '{model}' at tier {tier}, supplied by {supplier} — "
+                f"a model for this harness is {model_shape}"
+            )
+    return tuning
 
 
 def map_spec(mapping: TierMap) -> str:
     """A map as the banner records it: TIERS order, never sorted — deterministic
     by construction, and readable highest-to-lowest."""
     return ",".join(f"{tier}={mapping[tier]}" for tier in TIERS)
+
+
+def display_maps(tuning: Tuning) -> str:
+    """The tuning's maps as a run report shows them: `tier[...]`, then
+    `alias[...]` only where the alias map is set.
+
+    A DISPLAY serialization, deliberately not the banner's: the banner is a
+    machine claim, read back field for field and stable across versions, while
+    this brackets each map for a human scanning a terminal and is free to
+    change. One shared serializer would couple a display choice to a parsed
+    contract — every banner in the tree reading differently for an added space.
+    """
+    aliases = "" if tuning.alias_map is None else f" alias[{map_spec(tuning.alias_map)}]"
+    return f"tier[{map_spec(tuning.tier_map)}]{aliases}"
 
 
 def report_overlays(entries: dict[str, dict], overlays: OverlayMap, tuning: Tuning) -> None:
@@ -585,39 +662,25 @@ def report_overlays(entries: dict[str, dict], overlays: OverlayMap, tuning: Tuni
 
 
 def report_tuning(tuning: Tuning) -> None:
-    """The run's triple and harness, echoed once in generate and install alike.
+    """The run's tuning and harness, echoed once in generate and install alike."""
+    print(f"tuning: family={rel(tuning.family)} {display_maps(tuning)} harness={tuning.harness}")
 
-    A DISPLAY serialization, deliberately not the banner's: the banner is a
-    machine claim, read back field for field and stable across versions, while
-    this brackets each map for a human scanning a terminal and is free to
-    change. One shared serializer would couple a display choice to a parsed
-    contract — every banner in the tree reading differently for an added space.
+
+def report_aliases(tuning: Tuning) -> None:
+    """Notice — never a gate, never an exit status — naming the tiers the
+    alias map rewrites: those whose alias differs from their member.
+
+    Silent without an alias map. With one, a rewrite is a deliberate act
+    worth naming: tuning against one member's overrides while dispatching on
+    another model is the isolation the map exists to allow.
     """
-    print(
-        f"tuning: family={rel(tuning.family)} "
-        f"tier[{map_spec(tuning.tier_map)}] pin[{map_spec(tuning.pin_map)}] harness={tuning.harness}"
-    )
-
-
-def report_divergence(tuning: Tuning, *, family_dir: Path = FAMILY_DIR) -> None:
-    """Notice — never a gate, never an exit status — when the two maps disagree
-    within the claude family.
-
-    Gated on the effective family file BEING claude.toml, however it was
-    reached. For any other family the two maps diverge at every tier by
-    construction — the tier map holds family members and the pin map holds
-    claude aliases — so the notice would fire five times a run carrying no
-    information. Within claude the namespaces coincide, so a divergence is a
-    deliberate act worth naming: tuning against one member's overrides while
-    shipping another's capacity is the isolation this feature exists to allow.
-    """
-    if tuning.family.resolve() != (family_dir / f"{DEFAULT_FAMILY}{FAMILY_SUFFIX}").resolve():
+    if tuning.alias_map is None:
         return
-    diverging = [tier for tier in TIERS if tuning.tier_map[tier] != tuning.pin_map[tier]]
-    if not diverging:
+    rewritten = [tier for tier in TIERS if tuning.alias_map[tier] != tuning.tier_map[tier]]
+    if not rewritten:
         return
-    where = ", ".join(f"{tier} (tier={tuning.tier_map[tier]}, pin={tuning.pin_map[tier]})" for tier in diverging)
-    print(f"notice: tier map and pin map diverge at {where} — tuning/capacity isolation, not an error")
+    where = ", ".join(f"{tier} (member={tuning.tier_map[tier]}, alias={tuning.alias_map[tier]})" for tier in rewritten)
+    print(f"notice: the alias map rewrites {where} — tuning/dispatch isolation, not an error")
 
 
 def report_tuned(tuning: Tuning) -> None:

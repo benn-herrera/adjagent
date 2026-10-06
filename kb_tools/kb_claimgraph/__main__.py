@@ -16,7 +16,7 @@ import argparse
 import sys
 from functools import partial
 
-from .. import __version__, inference, kb_pipeline, kb_util
+from .. import __version__, inference, kb_load, kb_pipeline, kb_util
 from . import ask, conform, depends, discover, equations, unmarked
 from .build import build
 
@@ -133,6 +133,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_NO_SPINE
+
+    # After the spine check, so an unseeded tree is sent to graph-init, whose
+    # refresh stamps it, rather than to a refresh of its own.
+    try:
+        kb_load.require_current(kb_root)
+    except kb_load.FormatRefusal as refusal:
+        print(str(refusal), file=sys.stderr)
+        return EXIT_USAGE
 
     # Which stage this invocation is, resolved in the table the build's driver
     # composed the same flags from. A pass number branches nothing here: the

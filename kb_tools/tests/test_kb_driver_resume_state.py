@@ -66,8 +66,10 @@ class Calls:
         self.graph_init_runners.append(runner)
         return ledger.Outcome(baton.EXIT_OK)
 
-    def _advance(self, *, stage: str, note: str = "", no_inference: bool = False) -> ledger.Outcome:
-        del note, no_inference
+    def _advance(
+        self, *, stage: str, inputs: kb_pipeline.BuildInputs, note: str = "", no_inference: bool = False
+    ) -> ledger.Outcome:
+        del inputs, note, no_inference
         self.recorded.append(stage)
         return ledger.Outcome(baton.EXIT_OK)
 
@@ -77,7 +79,7 @@ class Calls:
             graph_init=self._graph_init,
             document_graph=lambda *, sources, bibliographies, kb_root: ledger.Outcome(baton.EXIT_OK),
             claim_graph=lambda *, flags: ledger.Outcome(baton.EXIT_OK),
-            start_build=lambda *, charter: ledger.Outcome(baton.EXIT_OK),
+            start_build=lambda *, charter, inputs: ledger.Outcome(baton.EXIT_OK),
             advance_step=self._advance,
             show_status=lambda *, relay: ledger.Outcome(baton.EXIT_OK, stdout=_render(self.recorded)),
             refresh=lambda: ledger.Outcome(baton.EXIT_OK),
@@ -86,16 +88,13 @@ class Calls:
 
 
 def _repo(tmp_path: Path, *, runner_file: str | None) -> Path:
-    """A repo root carrying one runner file, or neither, with the run lock held."""
+    """A repo root carrying one runner file, or neither."""
     root = tmp_path / "repo"
     root.mkdir()
     if runner_file is not None:
         (root / runner_file).write_text("default:\n", encoding="utf-8")
     assert (kb_util.detected_runner(root) is not None) == (runner_file is not None)
 
-    lock = runlog.repo_lock_path(root)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps({"pid": 1, "run_id": "resume-suite"}), encoding="utf-8")
     return root
 
 

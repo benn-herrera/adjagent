@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 
 from kb_tools import kb_index_lib as lib
-from kb_tools import kb_util
+from kb_tools import kb_schema, kb_util
 from kb_tools.kb_cmd import index as kb_cmd_index
 from kb_tools.kb_schema import (
     BUILD_BAND_LADDER,
@@ -307,11 +307,11 @@ class TestIdGrammarSingleSourced(unittest.TestCase):
         self.assertEqual(lib._EXP_ID_RE.pattern, r"\b(exp-[a-z0-9]{6})\b")
         self.assertEqual(lib._SUP_ID_RE.pattern, r"\b(sup-[a-z0-9]{6})\b")
 
-    def test_the_eight_collapsed_sites_compose_their_pre_refactor_spelling(self):
+    def test_the_collapsed_sites_compose_their_pre_refactor_spelling(self):
         """The behavior-identical claim, site by site, against the retired literal.
 
-        Seven of the eight recompose byte-for-byte. The eighth
-        (``verify_citations.NODE_ID_RE``) cannot: it spelled its alternation
+        Every site recomposes byte-for-byte but one
+        (``verify_citations.NODE_ID_RE``), which cannot: it spelled its alternation
         ``clm|sup|exp`` while ``kb_schema.ID_KINDS`` orders them ``clm|exp|sup``,
         and ``id_body`` normalizes to that order regardless of argument order.
         Byte-equality is the wrong assertion for it — see
@@ -320,10 +320,9 @@ class TestIdGrammarSingleSourced(unittest.TestCase):
         from kb_tools import refresh_kb_metadata, verify_citations, verify_kb_metadata
 
         cases = (
-            (lib._STRENGTHENS_PAIR_RE, r"^\s*(?:-\s*)?(clm-[a-z0-9]{6})\s*:\s*(-?\d+(?:\.\d+)?)\s*$"),
             (
                 lib._SUPPORTS_PAIR_RE,
-                r"^\s*(?:-\s*)?(clm-[a-z0-9]{6})\s*:\s*(-?\d+(?:\.\d+)?|\*pending\*)\s*$",
+                r"^\s*(?:-\s*)?(clm-[a-z0-9]{6})\s*:\s*(" + kb_schema.NUMBER_TOKEN_RE + r"|\*pending\*)\s*$",
             ),
             (verify_kb_metadata.CANONICAL_ID, r"<!-- id: (clm-[a-z0-9]{6}) -->"),
             # CANONICAL_ANY_ID has since gained the external-work alternative,
@@ -439,6 +438,55 @@ class TestNodeKindVocabularySingleSourced(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             node_kind_plural("conjecture")
+
+
+#: The layout names ``kb_schema`` defines, in the quoted form a re-spelling would take in another module.
+_LAYOUT_LITERALS = (kb_schema.KB_DIRNAME, kb_schema.INDEX_DIRNAME, kb_schema.ENTRY_POINT_FILENAME)
+_LAYOUT_LITERAL_RE = re.compile("[\"'](" + "|".join(re.escape(v) for v in _LAYOUT_LITERALS) + ")[\"']")
+
+#: Modules that carry a layout literal as a label rather than as the layout, keyed by path relative to
+#: ``kb_tools/`` and then by line text, with the reason.
+LAYOUT_LITERAL_ALLOWLIST = {
+    "kb_load.py": ('CHECK_KB_ROOT = "kb-root"', "the refusal class's label: it names a check, not the directory"),
+    "kb_util.py": ('PreflightItem(FACT, "kb-root"', "a preflight item's user-facing label"),
+}
+
+
+def scan_layout_literals(root: Path) -> list[str]:
+    """``<path>:<line>`` for every layout literal outside ``kb_schema`` and the allowlist, tests excluded."""
+    findings: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        if _SWEEP_SKIP_DIRS & set(relative.parts) or "tests" in relative.parts:
+            continue
+        if relative.as_posix() == _ID_GRAMMAR_SOURCE:
+            continue
+        allowed = LAYOUT_LITERAL_ALLOWLIST.get(relative.as_posix())
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if _LAYOUT_LITERAL_RE.search(line) and not (allowed and allowed[0] in line):
+                findings.append(f"{relative.as_posix()}:{number}")
+    return findings
+
+
+class TestLayoutNamesSingleSourced(unittest.TestCase):
+    """``kb_schema`` is the only module that spells the KB directory, the index directory and the entry point."""
+
+    def test_no_module_outside_kb_schema_spells_a_layout_name(self):
+        self.assertEqual(scan_layout_literals(_KB_TOOLS), [])
+
+    def test_a_planted_literal_is_caught_and_an_allowlisted_line_is_not(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "plain.py").write_text('DIR = ".index"\nNAME = \'entry-point.md\'\n', encoding="utf-8")
+            (root / "kb_load.py").write_text('CHECK_KB_ROOT = "kb-root"\nOTHER = "kb-root"\n', encoding="utf-8")
+            self.assertEqual(scan_layout_literals(root), ["kb_load.py:2", "plain.py:1", "plain.py:2"])
+
+    def test_every_allowlisted_line_still_exists(self):
+        stale = []
+        for relative, (line, reason) in LAYOUT_LITERAL_ALLOWLIST.items():
+            if line not in (_KB_TOOLS / relative).read_text(encoding="utf-8"):
+                stale.append(f"{relative}: {reason}")
+        self.assertEqual(stale, [])
 
 
 if __name__ == "__main__":

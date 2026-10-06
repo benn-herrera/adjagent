@@ -53,8 +53,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, verify_citations
+from kb_tools import kb_index_lib, kb_lock, kb_pipeline, kb_schema, kb_util, verify_citations
 from kb_tools.kb_write import ops, render, store, values
+from kb_tools.tests import _lock_holder
+from kb_tools.tests._in_process import run_main
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _REGRESSION = _FIXTURES / "writeapi-regression"
@@ -81,7 +84,7 @@ def _register(*entries: str) -> str:
 
 
 def _document(fm: render.FrontmatterValues, body: str = _BODY) -> str:
-    return f"[↑ Up](index.md)\n\n{render.render_frontmatter_block(fm)}\n\n{body}"
+    return f"{render.render_frontmatter_block(fm)}\n[↑ Up](index.md)\n\n{body}"
 
 
 def _pandoc_blocks(markdown: str) -> list[dict]:
@@ -123,7 +126,7 @@ class _KbCase(unittest.TestCase):
         # Resolved: a system temp directory is a symlink on macOS, and an
         # unresolved root makes every containment assertion vacuous.
         self.work = Path(self._tmp.name).resolve()
-        self.kb_root = self.work / "kb-root"
+        self.kb_root = write_stamped_kb(self.work / "kb-root")
         (self.kb_root / "part1").mkdir(parents=True)
 
         self.rel = "part1/claim-quality.md"
@@ -184,6 +187,16 @@ class _KbCase(unittest.TestCase):
         (self.kb_root / "part1/orphan.md").write_text(
             _document(render.FrontmatterValues(kind="leaf", claims=("clm-dd4444",))), encoding="utf-8"
         )
+        # One cut edge, landed the one way a cut lands — the build's own op —
+        # so `resolve-demoted` has something to resolve.
+        seeded = ops.BUILD_OPS["add-build-edges"].run(
+            kb_root=self.kb_root,
+            values_file=self.values_file(
+                '[[entry]]\nid = "clm-ee5555"\n  [[entry.demoted]]\n  id = "clm-aa1111"\n  origin = "cited"\n',
+                name="seed.toml",
+            ),
+        )
+        assert seeded.ok, seeded.lines()
 
     # -- harness ----------------------------------------------------------
 
@@ -277,6 +290,12 @@ class _KbCase(unittest.TestCase):
                 id = "sup-cc3333"
                 claim = "clm-bb2222"
                 fraction = 0.25
+                """,
+            "resolve-demoted": """
+                [[entry]]
+                id = "clm-ee5555"
+                target = "clm-aa1111"
+                action = "restore"
                 """,
         }[op]
 
@@ -572,6 +591,136 @@ class TestEveryOpWrites(_KbCase):
         # refusal of an unresolvable exp-id is correct behaviour rather than a
         # hole in the surface.
         self.assertIn(exp_id, kb_index_lib.scan_authored_ids(self.kb_root))
+
+
+# ---------------------------------------------------------------------------
+# Demoted edges: the build's cut lands, and resolve-demoted resolves it
+#
+# The fixture carries one cut, clm-ee5555 → clm-aa1111 (origin cited); clm-bb2222
+# depends on clm-aa1111.
+# ---------------------------------------------------------------------------
+
+
+class TestDemotedEdges(_KbCase):
+    """``add-build-edges`` lands the three lists; ``resolve-demoted`` removes, restores and refuses."""
+
+    def record(self, node_id: str) -> kb_index_lib.ClaimEntry:
+        return next(e for e in kb_index_lib.parse_claim_quality_file(self.register, self.kb_root) if e.id == node_id)
+
+    def tree(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in sorted(self.kb_root.rglob("*")) if path.is_file()}
+
+    def build_edges(self, text: str) -> ops.Result:
+        return ops.BUILD_OPS["add-build-edges"].run(kb_root=self.kb_root, values_file=self.values_file(text))
+
+    def resolve(self, *pairs: tuple[str, str, str]) -> ops.Result:
+        text = "".join(f'[[entry]]\nid = "{s}"\ntarget = "{t}"\naction = "{a}"\n\n' for s, t, a in pairs)
+        return self.run_op("resolve-demoted", text)
+
+    def assert_reissue_is_unchanged(self, *pairs: tuple[str, str, str]) -> None:
+        before = self.tree()
+        again = self.resolve(*pairs)
+        self.assertEqual(again.exit_code, ops.ExitCode.WRITTEN, again.lines())
+        self.assertEqual((again.written, again.resolved), ((), ()))
+        self.assertEqual(self.tree(), before)
+
+    def test_the_build_op_lands_depends_references_and_demoted_in_one_batch(self):
+        result = self.build_edges(
+            '[[entry]]\nid = "clm-ee5555"\n'
+            '  [[entry.depends-on]]\n  id = "INVARIANT-S2"\n'
+            '  [[entry.references]]\n  id = "clm-bb2222"\n'
+            '  [[entry.demoted]]\n  id = "clm-bb2222"\n  origin = "inferred"\n'
+        )
+        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
+        self.assertEqual(result.written, (self.rel,))
+        record = self.record("clm-ee5555")
+        self.assertEqual([e.target for e in record.depends_on], ["work-nobody2026", "INVARIANT-S2"])
+        self.assertEqual([e.target for e in record.references], ["clm-bb2222"])
+        self.assertEqual(
+            [(e.target, e.origin) for e in record.demoted], [("clm-aa1111", "cited"), ("clm-bb2222", "inferred")]
+        )
+        text = self.register.read_text(encoding="utf-8")
+        self.assertIn(
+            "- demoted:\n  - clm-aa1111 — Anchor Claim (origin cited)\n  - clm-bb2222 — Second Claim (origin inferred)\n",
+            text,
+        )
+        block = text[text.index("<!-- id: clm-ee5555 -->") :]
+        self.assertLess(block.index("- depends-on:"), block.index("- references:"))
+        self.assertLess(block.index("- references:"), block.index("- demoted:"))
+        self.assertLess(block.index("- demoted:"), block.index("- solidity:"))
+
+    def test_a_cut_already_held_is_written_once(self):
+        seed = '[[entry]]\nid = "clm-ee5555"\n  [[entry.demoted]]\n  id = "clm-aa1111"\n  origin = "cited"\n'
+        self.assertEqual(self.build_edges(seed).exit_code, ops.ExitCode.WRITTEN)
+        self.assertEqual([e.target for e in self.record("clm-ee5555").demoted], ["clm-aa1111"])
+
+    def test_remove_deletes_the_bullet_and_its_emptied_header(self):
+        result = self.resolve(("clm-ee5555", "clm-aa1111", "remove"))
+        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
+        self.assertEqual(result.resolved, (ops.DemotedResolution("clm-ee5555", "clm-aa1111", "removed"),))
+        self.assertEqual(self.record("clm-ee5555").demoted, ())
+        self.assertNotIn("- demoted:", self.register.read_text(encoding="utf-8"))
+        self.assert_reissue_is_unchanged(("clm-ee5555", "clm-aa1111", "remove"))
+
+    def test_remove_keeps_the_header_while_a_bullet_is_left(self):
+        self.build_edges(
+            '[[entry]]\nid = "clm-ee5555"\n  [[entry.demoted]]\n  id = "clm-bb2222"\n  origin = "inferred"\n'
+        )
+        self.resolve(("clm-ee5555", "clm-aa1111", "remove"))
+        self.assertEqual([e.target for e in self.record("clm-ee5555").demoted], ["clm-bb2222"])
+        self.assertIn(
+            "- demoted:\n  - clm-bb2222 — Second Claim (origin inferred)\n", self.register.read_text(encoding="utf-8")
+        )
+
+    def test_restore_rewrites_the_cut_as_a_depends_on_bullet(self):
+        result = self.resolve(("clm-ee5555", "clm-aa1111", "restore"))
+        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
+        self.assertEqual(result.resolved, (ops.DemotedResolution("clm-ee5555", "clm-aa1111", "restored"),))
+        record = self.record("clm-ee5555")
+        self.assertEqual(record.demoted, ())
+        self.assertEqual(
+            [(e.target, e.relation) for e in record.depends_on if e.target_kind == "claim"], [("clm-aa1111", "depends")]
+        )
+        self.assertIn(
+            f"  - clm-aa1111 — Anchor Claim {render.SOLIDITY_ANNOTATION_PENDING}\n",
+            self.register.read_text(encoding="utf-8"),
+        )
+        self.assert_reissue_is_unchanged(("clm-ee5555", "clm-aa1111", "restore"))
+
+    def test_a_restore_closing_a_cycle_is_refused_naming_the_path(self):
+        # clm-bb2222 depends on clm-aa1111, so restoring clm-aa1111 → clm-bb2222 closes the ring.
+        self.build_edges('[[entry]]\nid = "clm-aa1111"\n  [[entry.demoted]]\n  id = "clm-bb2222"\n  origin = "cited"\n')
+        before = self.tree()
+        result = self.resolve(("clm-aa1111", "clm-bb2222", "restore"))
+        self.assert_refused(result, "dependency-cycle")
+        self.assertIn("clm-bb2222 → clm-aa1111 → clm-bb2222", result.report[0].detail)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_restore_closing_a_cycle_with_the_batchs_earlier_restore_is_refused(self):
+        self.build_edges(
+            '[[entry]]\nid = "clm-aa1111"\n  [[entry.demoted]]\n  id = "clm-ee5555"\n  origin = "inferred"\n'
+        )
+        before = self.tree()
+        result = self.resolve(("clm-ee5555", "clm-aa1111", "restore"), ("clm-aa1111", "clm-ee5555", "restore"))
+        self.assert_refused(result, "dependency-cycle")
+        self.assertIn("clm-ee5555 → clm-aa1111 → clm-ee5555", result.report[0].detail)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_pair_with_neither_edge_is_refused_on_restore_and_left_on_remove(self):
+        before = self.tree()
+        self.assert_refused(self.resolve(("clm-aa1111", "clm-ee5555", "restore")), "target=clm-ee5555")
+        self.assertEqual(self.tree(), before)
+        self.assert_reissue_is_unchanged(("clm-aa1111", "clm-ee5555", "remove"))
+
+    def test_restoring_a_pair_already_a_depends_edge_is_unchanged(self):
+        self.assert_reissue_is_unchanged(("clm-bb2222", "clm-aa1111", "restore"))
+
+    def test_a_batch_naming_one_pair_twice_is_refused_at_the_second(self):
+        before = self.tree()
+        result = self.resolve(("clm-ee5555", "clm-aa1111", "remove"), ("clm-ee5555", "clm-aa1111", "restore"))
+        self.assert_refused(result, "entry[2].target")
+        self.assertIn("entry 1", result.report[0].detail)
+        self.assertEqual(self.tree(), before)
 
 
 # ---------------------------------------------------------------------------
@@ -1434,10 +1583,10 @@ class TestDerivedRollUpsSurviveTheReplace(_KbCase):
     def _stamp(self, doc: Path, *, claims: tuple[str, ...], experiments: tuple[str, ...]) -> None:
         text = doc.read_text(encoding="utf-8")
         text = store.replace_or_insert_frontmatter_field(
-            text, field="subtree-claims", ids=list(claims), anchor_prefix="kind:"
+            text, field="subtree-claims", ids=list(claims), anchor_key="kind"
         )
         text = store.replace_or_insert_frontmatter_field(
-            text, field="subtree-experiments", ids=list(experiments), anchor_prefix="subtree-claims:"
+            text, field="subtree-experiments", ids=list(experiments), anchor_key="subtree-claims"
         )
         doc.write_text(text, encoding="utf-8")
 
@@ -1454,6 +1603,61 @@ class TestDerivedRollUpsSurviveTheReplace(_KbCase):
                 fields = kb_index_lib.parse_frontmatter(doc.read_text(encoding="utf-8"))
                 self.assertEqual(fields["subtree-claims"], list(claims))
                 self.assertEqual(fields["subtree-experiments"], list(experiments))
+
+    def test_the_format_stamp_is_carried_over_and_stays_last(self):
+        doc = self.kb_root / "part1/plain.md"
+        self._stamp(doc, claims=("clm-aa1111",), experiments=())
+        text = doc.read_text(encoding="utf-8")
+        doc.write_text(text.replace("\n---\n", '\nkb-format: "1.0.3"\n---\n', 1), encoding="utf-8")
+
+        result = self.run_op("set-frontmatter", self.valid_values("set-frontmatter"))
+        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
+
+        fields = kb_index_lib.parse_frontmatter(doc.read_text(encoding="utf-8"))
+        self.assertEqual(list(fields)[-1], kb_schema.FORMAT_KEY)
+        self.assertEqual(fields[kb_schema.FORMAT_KEY], "1.0.3")
+        self.assertEqual(fields["subtree-claims"], ["clm-aa1111"])
+
+
+_FORMAT_GOLDEN_ROOT = _FIXTURES / "format-1.0.0" / "1.0.0" / "kb-root"
+
+
+class TestFrontmatterRenderedAsTheGoldens(unittest.TestCase):
+    """Each 1.0.0 golden document, written back by set-frontmatter's splice, is byte-identical.
+
+    Its frontmatter is read by the production readers and handed to the
+    splice as the values to write — so the writer and the migration that made
+    the golden write one frontmatter.
+    """
+
+    def test_each_golden_document_is_written_back_unchanged(self):
+        for rel in ("a.md", "b/c.md", "entry-point.md"):
+            with self.subTest(rel=rel):
+                path = _FORMAT_GOLDEN_ROOT / rel
+                text = path.read_text(encoding="utf-8")
+                intended = ops._observed_frontmatter(path, _FORMAT_GOLDEN_ROOT)
+                self.assertIsNotNone(intended)
+                fields = kb_index_lib.parse_frontmatter(text)
+                redeclared = kb_index_lib._declared_node_ids(fields)
+                self.assertEqual(ops._replace_block(intended, rel=rel, redeclared=redeclared)(text), text)
+
+
+class TestACommentBlockIsNotFrontmatter(_KbCase):
+    """A 0.9.0 comment block in a current KB is body text: no write converts it, and none writes into it.
+
+    Converting is the migration's, over a whole KB at refresh; ``kb-verify``
+    names such a document as one missing frontmatter. The document is a 0.9.0
+    golden leaf, as a copy carried over from an unmigrated KB would be.
+    """
+
+    def test_a_declaration_into_it_is_refused_and_writes_nothing(self):
+        carried = (_FORMAT_GOLDEN_ROOT.parent.parent / "0.9.0" / "kb-root" / "a.md").read_text(encoding="utf-8")
+        doc = self.kb_root / "part1/leaf.md"
+        doc.write_text(carried, encoding="utf-8")
+        result = self.run_op("insert-experiment-entry", '[[entry]]\ndocument = "part1/leaf.md"\nstatus = "run"\n')
+        self.assertEqual(result.exit_code, ops.ExitCode.REFUSED, result.lines())
+        self.assertIn("no frontmatter to declare a node in", "\n".join(result.lines()))
+        self.assertEqual(doc.read_text(encoding="utf-8"), carried)
 
 
 class TestEveryLeafWriteIsProven(_KbCase):
@@ -1593,7 +1797,7 @@ class TestAnUndecodableKbFileIsEnvironmentUnfit(_KbCase):
     def test_a_leaf_the_inventory_scan_cannot_decode_is_named_too(self):
         # The second of the two scans: the register walk passes this file by,
         # and `scan_authored_ids` reads every leaf.
-        (self.kb_root / "part1/bad.md").write_bytes(b"<!-- kb-frontmatter\nkind: leaf\n-->\n\n" + self._LATIN1)
+        (self.kb_root / "part1/bad.md").write_bytes(b"---\nkind: leaf\n---\n\n" + self._LATIN1)
         result = self.run_op("insert-claim-entry", self.valid_values("insert-claim-entry"))
         self.assertEqual(result.exit_code, ops.ExitCode.ENVIRONMENT, result.lines())
         self.assertEqual([item.name for item in result.report], ["part1/bad.md"])
@@ -2118,7 +2322,9 @@ class TestASpliceKeepsTheBytesItDidNotName(_KbCase):
         self.assert_terminators_survive(leaf, before)
         self.assertIn("clm-aa1111", kb_index_lib.parse_leaf(leaf, self.kb_root).tier2_marked)
 
-    def test_a_first_frontmatter_block_leaves_the_bodys_own_breaks_alone(self):
+    def test_a_first_frontmatter_block_opens_the_document_and_leaves_every_byte_of_it(self):
+        # The block goes on top and the document follows it whole, its own
+        # line breaks included: `block + "\n" + document`, as kbase writes it.
         bare = self.kb_root / "part1/bare.md"
         bare.write_text(f"[Up](index.md)\n\n{_BODY}", encoding="utf-8")
         self.crlf(bare)
@@ -2128,35 +2334,9 @@ class TestASpliceKeepsTheBytesItDidNotName(_KbCase):
             '[[entry]]\ndocument = "part1/bare.md"\nkind = "leaf"\nclaims = ["clm-aa1111"]\n',
         )
         self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
-        self.assert_terminators_survive(bare, before)
-
-
-class TestAFirstBlockDoesNotDoubleTheBlankLine(_KbCase):
-    """A first inserted block must not double the blank line around it.
-
-    An unconditional separator on each side of the block would double the
-    blank line in the ordinary leaf shape — an up-link, a blank line, then the
-    body — harmless to every reader but still a body edit by an op that owns
-    only the metadata.
-    """
-
-    def test_the_ordinary_leaf_shape_gains_exactly_one_blank_line(self):
-        bare = self.kb_root / "part1/bare.md"
-        bare.write_text(f"[Up](index.md)\n\n{_BODY}", encoding="utf-8")
-        result = self.run_op(
-            "set-frontmatter",
-            '[[entry]]\ndocument = "part1/bare.md"\nkind = "leaf"\nclaims = ["clm-aa1111"]\n',
-        )
-        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
-
-        lines = bare.read_text(encoding="utf-8").splitlines()
-        closer = max(i for i, line in enumerate(lines) if line.strip() == "-->")
-        self.assertEqual(lines[closer + 1], "")
-        self.assertNotEqual(lines[closer + 2], "", "the block's separator was emitted twice")
-        # The up-link's own separator is not doubled on the other side either.
-        self.assertEqual(lines[0], "[Up](index.md)")
-        self.assertEqual(lines[1], "")
-        self.assertTrue(lines[2].startswith("<!--"), lines[:4])
+        after = bare.read_bytes()
+        self.assertTrue(after.startswith(b"---\nkind: leaf\nclaims: [clm-aa1111]\n---\n"), after[:60])
+        self.assertEqual(after.removeprefix(b"---\nkind: leaf\nclaims: [clm-aa1111]\n---\n"), before)
 
 
 # ---------------------------------------------------------------------------
@@ -2522,6 +2702,51 @@ class TestOutcomesMapToCodes(_KbCase):
         self.assertTrue(store.take_census(self.register, self.kb_root).consistent)
 
 
+class TestTheWriteLockAndARunningBuild(_KbCase):
+    """A second writer and a running build, each held by another process: a flock belongs to an open file description."""
+
+    def setUp(self) -> None:
+        if kb_lock.fcntl is None:
+            self.skipTest("no advisory lock without fcntl (Windows)")
+        super().setUp()
+
+    def tree(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in sorted(self.kb_root.rglob("*")) if path.is_file()}
+
+    def test_an_op_under_a_held_write_lock_is_8_naming_the_lock_and_writes_nothing(self):
+        before = self.tree()
+        with mock.patch.object(kb_lock, "WRITE_LOCK_WAIT", 0.2), _lock_holder.held(self.work):
+            result = self.run_op("insert-claim-entry", self.valid_values("insert-claim-entry"))
+
+        self.assertEqual(result.exit_code, ops.EXIT_FOR_STATUS[store.Status.RETRY], result.lines())
+        [item] = result.report
+        self.assertEqual((item.status, item.name), (kb_util.FAIL, ops.LOCK_ITEM))
+        self.assertIn(str(self.work), item.detail)
+        self.assertEqual((result.minted, result.written), ((), ()))
+        self.assertEqual(self.tree(), before)
+
+    def test_a_running_build_refuses_the_command_and_not_the_builds_own_call(self):
+        (self.work / ".git").mkdir()
+        values = self.values_file(self.valid_values("insert-claim-entry"))
+        before = self.tree()
+        with _lock_holder.held(kb_lock.run_lock_path(self.work), content="/state/of/the/build"):
+            refused = run_main(kb_util.main, ["insert-claim-entry", "--values", str(values)], cwd=self.work)
+            self.assertEqual(self.tree(), before)
+            direct = ops.OPS["insert-claim-entry"].run(kb_root=self.kb_root, values_file=values)
+
+        self.assertEqual(refused.returncode, ops.ExitCode.REFUSED, refused.stdout)
+        self.assertIn(f"{ops.LOCK_ITEM} ", refused.stdout)
+        self.assertIn("/state/of/the/build", refused.stdout)
+        self.assertEqual(direct.exit_code, ops.ExitCode.WRITTEN, direct.lines())
+
+    def test_a_run_lock_held_but_recording_no_build_lets_the_command_write(self):
+        (self.work / ".git").mkdir()
+        values = self.values_file(self.valid_values("insert-claim-entry"))
+        with _lock_holder.held(kb_lock.run_lock_path(self.work), content=""):
+            result = run_main(kb_util.main, ["insert-claim-entry", "--values", str(values)], cwd=self.work)
+        self.assertEqual(result.returncode, ops.ExitCode.WRITTEN, result.stdout)
+
+
 # ---------------------------------------------------------------------------
 # Surface independence, asserted structurally
 # ---------------------------------------------------------------------------
@@ -2598,15 +2823,12 @@ class TestOpsAreSurfaceIndependent(unittest.TestCase):
         # The two tables are the surface an agent writes against and the
         # surface this package checks; a row in one and not the other is drift
         # between them.
-        self.assertLessEqual(set(ops.OPS), set(values.OP_FIELDS))
-        # `render-citation` is the only vocabulary row with no op here: it is
-        # read-only.
-        self.assertLessEqual(set(ops.READ_OPS), set(values.OP_FIELDS))
-        # The two registries partition the vocabulary: a values row with no op
+        # The three registries partition the vocabulary: a values row with no op
         # is a surface an agent can write against and nothing can run, and an
         # op with no row is an op with no checked inputs.
-        self.assertEqual(set(ops.OPS) | set(ops.READ_OPS), set(values.OP_FIELDS))
-        self.assertEqual(set(ops.OPS) & set(ops.READ_OPS), set())
+        registries = (set(ops.OPS), set(ops.READ_OPS), set(ops.BUILD_OPS))
+        self.assertEqual(set.union(*registries), set(values.OP_FIELDS))
+        self.assertEqual(sum(map(len, registries)), len(set.union(*registries)))
 
     def test_the_read_registry_holds_no_writing_or_minting_op(self):
         # `READ_OPS` is what a surface binds when it wants an op that reads.
@@ -2635,9 +2857,9 @@ class TestOpsAreSurfaceIndependent(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 _CITED_DOC = """\
-<!-- kb-frontmatter
+---
 kind: index
--->
+---
 
 # Part 1 Claim Quality
 
@@ -2670,7 +2892,7 @@ class TestRenderCitation(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.work = Path(self._tmp.name).resolve()
-        self.kb_root = self.work / "kb-root"
+        self.kb_root = write_stamped_kb(self.work / "kb-root")
         (self.kb_root / "part1" / "sub").mkdir(parents=True)
         (self.kb_root / "part1" / "claim-quality.md").write_text(_CITED_DOC, encoding="utf-8")
         (self.kb_root / "index.md").write_text(_document(render.FrontmatterValues(kind="index")), encoding="utf-8")
@@ -2737,14 +2959,14 @@ class TestRenderCitation(unittest.TestCase):
         Named specifically, as ``cited-document``, rather than the whole KB
         root."""
         cited = self.kb_root / "part1" / "claim-quality.md"
-        real = Path.read_text
+        real = Path.open
 
         def refuse(path, *args, **kwargs):
             if path == cited:
                 raise PermissionError(13, "Permission denied")
             return real(path, *args, **kwargs)
 
-        with mock.patch.object(Path, "read_text", refuse):
+        with mock.patch.object(Path, "open", refuse):
             result = self.run_op()
 
         self.assertEqual(result.exit_code, ops.ExitCode.ENVIRONMENT, result.lines())

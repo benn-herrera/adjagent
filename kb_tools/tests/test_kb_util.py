@@ -20,7 +20,6 @@ kb_tools.kb_util`` — still spawn one.
 
 import argparse
 import importlib
-import json
 import os
 import re
 import shutil
@@ -35,6 +34,8 @@ import pytest
 from kb_tools import (
     dot,
     install_location,
+    kb_load,
+    kb_lock,
     kb_pipeline,
     kb_schema,
     kb_util,
@@ -42,12 +43,14 @@ from kb_tools import (
     refresh_kb_metadata,
     verify_citations,
 )
-from kb_tools.kb_driver import baton, runlog
+from kb_tools.kb_driver import baton
 from kb_tools.kb_survey import manifest as survey_manifest
 from kb_tools.kb_survey import skeleton as survey_skeleton
+from kb_tools.tests import _lock_holder
 from kb_tools.tests._in_process import run_main
 from kb_tools.tests._manifests import surveyed_manifest
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
+from kb_tools.tests._stamped_kb import stamped
 
 _THIS_DIR = Path(__file__).resolve().parent
 # The directory containing the ``kb_tools`` package — used only to point the
@@ -159,7 +162,6 @@ def test_path_helpers_accept_explicit_root(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path / "consumer")
     assert kb_util.kb_root(repo) == repo / "kb-root"
     assert kb_util.index_dir(repo) == repo / "kb-root" / ".index"
-    assert kb_util.claims_jsonl(repo) == repo / "kb-root" / ".index" / "claims.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +255,7 @@ def test_refresh_and_verify_discover_root_from_nested_cwd(tmp_path: Path) -> Non
         check=False,
     )
     assert refresh.returncode == 0, f"stdout={refresh.stdout}\nstderr={refresh.stderr}"
-    assert (repo / "kb-root" / ".index" / "claims.jsonl").is_file()
+    assert kb_load.index_path(repo / "kb-root", "claims").is_file()
 
     verify = subprocess.run(
         [sys.executable, "-m", "kb_tools.verify_kb_metadata"],
@@ -463,17 +465,20 @@ def _git_repo(
 #: fixture with no tree in it exercises only the refusal — this is what the
 #: green paths need in ``kb-root/`` before the verb will do anything.
 _DOCUMENT_TREE: dict[str, str] = {
-    "kb-root/entry-point.md": (
-        "<!-- kb-frontmatter\nkind: entry-point\n-->\n\n# Entry Point\n\n- [Volume](vol/index.md)\n"
-    ),
+    "kb-root/entry-point.md": "---\nkind: entry-point\n---\n\n# Entry Point\n\n- [Volume](vol/index.md)\n",
     "kb-root/vol/index.md": (
-        "[↑ Entry Point](../entry-point.md)\n\n<!-- kb-frontmatter\nkind: index\n-->\n\n"
-        "# Volume\n\n- [Leaf](leaf.md)\n"
+        "---\nkind: index\n---\n[↑ Entry Point](../entry-point.md)\n\n# Volume\n\n- [Leaf](leaf.md)\n"
     ),
     "kb-root/vol/leaf.md": (
-        '[↑ Volume](index.md)\n\n<!-- kb-frontmatter\nkind: leaf\nno-claim: "fixture leaf; it states '
-        'no result"\n-->\n\n# Leaf\n\nBody text.\n'
+        '---\nkind: leaf\nno-claim: "fixture leaf; it states no result"\n---\n'
+        "[↑ Volume](index.md)\n\n# Leaf\n\nBody text.\n"
     ),
+}
+
+#: The same tree as the seed leaves it: the entry point stamped.
+_SEEDED_TREE: dict[str, str] = {
+    **_DOCUMENT_TREE,
+    "kb-root/entry-point.md": stamped(_DOCUMENT_TREE["kb-root/entry-point.md"]),
 }
 
 
@@ -503,7 +508,7 @@ def _tree_snapshot(root: Path) -> dict[str, bytes]:
 def _seeded_paths(repo: Path) -> tuple[Path, Path]:
     """(index dir, claims register) under an initialised ``repo``."""
     index = repo / "kb-root" / ".index"
-    return index, index / "claims.jsonl"
+    return index, kb_load.index_path(repo / "kb-root", "claims")
 
 
 # ---------------------------------------------------------------------------
@@ -516,9 +521,9 @@ _CITATION_SHAPED_PROSE = "\nThis follows per design-doc Invariant 3.\n"
 
 
 def _refreshed_repo(root: Path, **extra: str) -> Path:
-    """``_DOCUMENT_TREE`` (plus ``extra``, kb-root-relative appends) under a repo root, refreshed."""
+    """``_SEEDED_TREE`` (plus ``extra``, kb-root-relative appends) under a repo root, refreshed."""
     repo = _make_repo(root, kb=False)
-    for relpath, content in _DOCUMENT_TREE.items():
+    for relpath, content in _SEEDED_TREE.items():
         target = repo / relpath
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content + extra.get(relpath, ""), encoding="utf-8")
@@ -587,6 +592,33 @@ def test_graph_init_initialises_over_a_document_tree(tmp_path: Path) -> None:
     assert claims.is_file()
     assert not (index / "SCHEMA.md").exists(), "the seed wrote a local schema copy"
     assert kb_util.install_line("just") in (repo / "justfile").read_text(encoding="utf-8").splitlines()
+
+
+#: The tree the document-graph front end writes: no frontmatter anywhere, so no stamp.
+_FRESH_TREE: dict[str, str] = {
+    "kb-root/entry-point.md": "# Entry Point\n\n- [Volume](vol/index.md)\n",
+    "kb-root/vol/index.md": "[↑ Entry Point](../entry-point.md)\n\n# Volume\n\n- [Leaf](leaf.md)\n",
+    "kb-root/vol/leaf.md": "[↑ Volume](index.md)\n\n# Leaf\n\nBody text.\n",
+}
+
+
+def test_graph_init_stamps_a_fresh_tree_and_pass_one_accepts_it(tmp_path: Path) -> None:
+    """The seed leaves the KB in the current format, and the stamp is no metadata pass 1 refuses."""
+    from kb_tools import kb_yaml
+    from kb_tools.kb_claimgraph import conform, tree
+
+    repo = _git_repo(tmp_path / "consumer", files={**_FRESH_TREE, "justfile": _JUSTFILE_BODY})
+
+    result = _run_installer(repo, "graph-init")
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    entry = (repo / "kb-root" / "entry-point.md").read_text(encoding="utf-8")
+    span = kb_yaml.find_frontmatter(entry)
+    assert span is not None
+    fields = kb_yaml.parse(entry[span.body_start : span.body_end])
+    assert list(fields)[-1] == kb_schema.FORMAT_KEY and fields[kb_schema.FORMAT_KEY] == kb_schema.FORMAT_VERSION
+    assert kb_load.open_kb(repo / "kb-root").current
+    conform.gate(tree.read(repo / "kb-root"))
 
 
 def test_graph_init_is_idempotent(tmp_path: Path) -> None:
@@ -744,7 +776,7 @@ def test_graph_init_refuses_a_kb_root_holding_no_document_tree(
     # built. The pre-existing `.index/` of the second case is the caller's, and
     # the snapshot above is what says nothing was added to it.
     assert (repo / "justfile").read_text(encoding="utf-8") == _JUSTFILE_BODY
-    assert not (repo / "kb-root" / ".index" / "claims.jsonl").exists()
+    assert not kb_load.index_path(repo / "kb-root", "claims").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -989,7 +1021,7 @@ def _pipeline_repo(root: Path) -> Path:
     head's product exactly as it stands in for the tree.
     """
     justfile = f"{_JUSTFILE_BODY}\n{kb_util.install_line('just')}\n"
-    return _git_repo(root, files=_with_tree(**{"justfile": justfile, "kb-root/.index/.keep": ""}))
+    return _git_repo(root, files={**_SEEDED_TREE, "justfile": justfile, "kb-root/.index/.keep": ""})
 
 
 def _op(cwd: Path, op: str, *args: str) -> subprocess.CompletedProcess:
@@ -1061,7 +1093,7 @@ def _declared_documents(manifest: survey_manifest.Manifest) -> dict[str, str]:
     checks this list against the derivation any more.
     """
     return {
-        node.path: f"<!-- kb-frontmatter\n{_FRONTMATTER[node.kind]}\n-->\n\n# {node.title}\n\nContent.\n"
+        node.path: f"---\n{_FRONTMATTER[node.kind]}\n---\n\n# {node.title}\n\nContent.\n"
         for node in survey_skeleton.derive(manifest).nodes
     }
 
@@ -1179,7 +1211,7 @@ def test_start_build_sweeps_the_uncommitted_seed_into_the_first_commit(tmp_path:
     repo = _pipeline_repo(tmp_path / "consumer")
     # Stand in for what init leaves uncommitted: the seed belongs to the
     # build's first commit, so `git add -A` must pick it up.
-    (repo / "kb-root" / ".index" / "claims.jsonl").write_text("", encoding="utf-8")
+    kb_load.index_path(repo / "kb-root", "claims").write_text("", encoding="utf-8")
     (repo / "docs").mkdir()
     (repo / "docs" / "charter.md").write_text("# Charter\n", encoding="utf-8")
 
@@ -1261,7 +1293,7 @@ def test_advance_step_commits_even_when_nothing_changed(branch_at: Callable[[str
 def test_advance_step_sweeps_worktree_changes_into_the_boundary(branch_at: Callable[[str], Path]) -> None:
     repo = branch_at("phase-3a")
     (repo / "kb-root" / "extra-note.md").write_text(
-        f"<!-- kb-frontmatter\n{_FRONTMATTER[survey_skeleton.NodeKind.LEAF]}\n-->\n\n# Extra\n\nContent.\n",
+        f"---\n{_FRONTMATTER[survey_skeleton.NodeKind.LEAF]}\n---\n\n# Extra\n\nContent.\n",
         encoding="utf-8",
     )
     # Scratch is gitignored and must stay out of the commit.
@@ -2230,27 +2262,11 @@ def test_the_read_outside_a_git_repo_exits_two(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # The run lock, read from outside the driver (show-run-lock)
 #
-# The question is `kb_driver.runlog`'s and so is the answer; what is asserted
-# here is that a caller that is not the driver can ask it — the three states told
-# apart in the output rather than in the exit status, the lock file untouched by
-# the asking, and the liveness judgement reaching the output from `runlog` rather
-# than from a second test on this side.
+# The answer is `kb_lock`'s; what is asserted here is that a caller that is not
+# the driver can ask it — the two states told apart in the output rather than in
+# the exit status, and the lock untouched by the asking. The holder is a second
+# process, because a flock is held by an open file description.
 # ---------------------------------------------------------------------------
-
-
-def _lock_repo(root: Path, *, payload: str | None) -> Path:
-    """A repo carrying a ``.git`` entry and, where ``payload`` is given, a run lock holding it.
-
-    Deliberately no ``kb-root/``: the op anchors on the git root alone, which is
-    what lets the caller that is about to remove the KB tree — or that has just
-    removed it — still ask whether a build is running.
-    """
-    repo = _make_repo(root, kb=False)
-    if payload is not None:
-        lock = runlog.repo_lock_path(repo)
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.write_text(payload, encoding="utf-8")
-    return repo
 
 
 def _reported(stdout: str) -> dict[str, str]:
@@ -2258,94 +2274,40 @@ def _reported(stdout: str) -> dict[str, str]:
     return dict(line.split("=", 1) for line in stdout.splitlines())
 
 
-def test_show_run_lock_reports_a_live_holder_and_names_it(tmp_path: Path) -> None:
-    """A lock naming a pid that is alive — this test process — reads live, holder and all.
+def test_show_run_lock_reports_a_held_lock_and_the_state_dir_it_records(tmp_path: Path) -> None:
+    """Deliberately no ``kb-root/``: a caller about to remove the KB tree can still ask."""
+    repo = _make_repo(tmp_path / "held", kb=False)
+    lock = kb_lock.run_lock_path(repo)
 
-    The holder fields travel with the verdict because a caller refusing to wipe a
-    workspace has to say whose run it refused for, and the pid and the run id are
-    what it says it with.
-    """
-    started = "2026-09-12T00:00:00+00:00"
-    payload = json.dumps({"pid": os.getpid(), "run_id": "run-alive", "token": "t", "started": started})
-    repo = _lock_repo(tmp_path / "live", payload=payload)
+    with _lock_holder.held(lock, content="/state/of/the/build"):
+        result = _op(repo, "show-run-lock")
+        assert lock.read_text(encoding="utf-8") == "/state/of/the/build"
+
+    assert result.returncode == 0, result.stderr
+    reported = _reported(result.stdout)
+    assert list(reported) == list(kb_util.RUN_LOCK_KEYS)
+    assert reported["state"] == kb_util.RUN_LOCK_HELD
+    assert reported["state_dir"] == "/state/of/the/build"
+    assert reported["lock"] == str(kb_lock.run_lock_path(repo.resolve()))
+
+
+@pytest.mark.parametrize("left", ["no-file", "file-of-a-dead-holder"])
+def test_show_run_lock_reports_an_absent_lock_in_the_same_shape(tmp_path: Path, left: str) -> None:
+    """A file nobody holds is no build: the lock went with its holder however it ended."""
+    repo = _make_repo(tmp_path / left, kb=False)
+    lock = kb_lock.run_lock_path(repo)
+    if left == "file-of-a-dead-holder":
+        lock.write_text("/state/of/a/dead/build", encoding="utf-8")
 
     result = _op(repo, "show-run-lock")
 
     assert result.returncode == 0, result.stderr
     reported = _reported(result.stdout)
     assert list(reported) == list(kb_util.RUN_LOCK_KEYS)
-    assert reported["state"] == runlog.LOCK_LIVE
-    assert reported["pid"] == str(os.getpid())
-    assert reported["run_id"] == "run-alive"
-    assert reported["started"] == started
-    assert reported["lock"] == str(runlog.repo_lock_path(repo.resolve()))
-
-
-@pytest.mark.parametrize("flavour", ["reaped-holder", "unparseable"])
-def test_show_run_lock_reports_a_stale_lock_and_clears_nothing(tmp_path: Path, flavour: str) -> None:
-    """Stale is an answer, not an act: the lock is still there afterwards, byte for byte.
-
-    Two flavours, because ``runlog`` judges both alike: a lock naming a pid that
-    has been reaped, and one whose payload will not parse — which is a lock no
-    holder can be read out of rather than a lock with none, so it names nobody
-    and is stale all the same.
-    """
-    if flavour == "reaped-holder":
-        reaped = subprocess.Popen([sys.executable, "-c", "pass"])
-        reaped.wait()
-        payload = json.dumps({"pid": reaped.pid, "run_id": "run-gone", "token": "t"})
-        expected_pid = str(reaped.pid)
-    else:
-        payload = "not json at all"
-        expected_pid = ""
-    repo = _lock_repo(tmp_path / flavour, payload=payload)
-
-    result = _op(repo, "show-run-lock")
-
-    assert result.returncode == 0, result.stderr
-    reported = _reported(result.stdout)
-    assert reported["state"] == runlog.LOCK_STALE
-    assert reported["pid"] == expected_pid
-    assert runlog.repo_lock_path(repo).read_text(encoding="utf-8") == payload
-
-
-def test_show_run_lock_reports_an_absent_lock_in_the_same_shape(tmp_path: Path) -> None:
-    """No lock file is the third answer, and it arrives shaped like the other two.
-
-    The key set is closed and total, so a shell branches on the value of
-    ``state`` and never on which keys turned up.
-    """
-    repo = _lock_repo(tmp_path / "absent", payload=None)
-
-    result = _op(repo, "show-run-lock")
-
-    assert result.returncode == 0, result.stderr
-    reported = _reported(result.stdout)
-    assert list(reported) == list(kb_util.RUN_LOCK_KEYS)
-    assert reported["state"] == runlog.LOCK_ABSENT
-    assert [reported[key] for key in ("pid", "run_id", "started")] == ["", "", ""]
-    assert reported["lock"] == str(runlog.repo_lock_path(repo.resolve()))
-    assert not runlog.repo_lock_path(repo).exists()
-
-
-def test_show_run_lock_takes_its_liveness_from_runlog_rather_than_re_deriving_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The op reports ``runlog``'s judgement, so moving that judgement moves the answer.
-
-    Driven in-process because that is what lets the judgement be moved under it:
-    with ``runlog``'s pid probe answering *gone*, a lock naming this very
-    process — alive by construction — must read stale. An op carrying an
-    ``os.kill`` test of its own would go on saying live, which is the duplication
-    this asserts the absence of.
-    """
-    repo = _lock_repo(tmp_path / "routed", payload=json.dumps({"pid": os.getpid(), "run_id": "run-x"}))
-    monkeypatch.chdir(repo)
-    monkeypatch.setattr(runlog, "_pid_alive", lambda pid: False)
-
-    assert kb_util.main(["show-run-lock"]) == 0
-
-    assert _reported(capsys.readouterr().out)["state"] == runlog.LOCK_STALE
+    assert reported["state"] == kb_util.RUN_LOCK_ABSENT
+    assert reported["state_dir"] == ""
+    assert reported["lock"] == str(kb_lock.run_lock_path(repo.resolve()))
+    assert lock.exists() == (left == "file-of-a-dead-holder")
 
 
 # ---------------------------------------------------------------------------
@@ -2403,15 +2365,22 @@ def test_the_read_op_constant_keys_the_sibling_registry_and_joins_no_write_set()
     The consequence is what this pins. ``WRITE_OPS`` is what the driver's
     ledger admits as a spawnable write and what carries the write ops'
     four-code exit vocabulary; an op that writes nothing and that no brief
-    invokes belongs to neither. The two registries are disjoint and together
-    are exactly the closed values vocabulary.
+    invokes belongs to neither.
     """
     from kb_tools.kb_write import ops as write_ops
-    from kb_tools.kb_write import values as write_values
 
     assert set(kb_util.READ_OPS) == set(write_ops.READ_OPS) == {kb_util.OP_RENDER_CITATION}
     assert set(kb_util.WRITE_OPS).isdisjoint(kb_util.READ_OPS)
-    assert set(write_ops.OPS) | set(write_ops.READ_OPS) == set(write_values.OP_FIELDS)
+
+
+def test_no_subcommand_reaches_a_build_op() -> None:
+    """A ``demoted`` edge is the build's alone to create, so no surface binds the op that writes one."""
+    from kb_tools.kb_write import ops as write_ops
+
+    subcommands = set(_write_handlers())
+    assert write_ops.BUILD_OPS
+    assert subcommands.isdisjoint(write_ops.BUILD_OPS)
+    assert set(kb_util.WRITE_OPS).isdisjoint(write_ops.BUILD_OPS)
 
 
 def test_the_read_op_binds_to_its_own_adapter_and_takes_no_create() -> None:
@@ -2661,9 +2630,9 @@ def test_a_contended_write_exits_eight_out_of_a_real_process(tmp_path: Path) -> 
 # reimplementation of the gate satisfies nothing.
 
 _CITED = """\
-<!-- kb-frontmatter
+---
 kind: index
--->
+---
 
 # Part 3 Claim Quality
 
@@ -2673,9 +2642,9 @@ The load-bearing clause lives here, stated plainly.
 """
 
 _CITING = """\
-<!-- kb-frontmatter
+---
 kind: index
--->
+---
 
 # Part 3
 

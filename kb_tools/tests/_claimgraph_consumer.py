@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from kb_tools import kb_util
+from kb_tools.tests._stamped_kb import write_stamped_kb
 
 _PACKAGE_ROOT = Path(kb_util.__file__).resolve().parent
 
@@ -20,12 +21,10 @@ def install_claimgraph_consumer(repo: Path, tree: Mapping[str, str]) -> Path:
 
     The tools resolve the repository root the way every tool in this toolchain
     does — a ``.git`` beside a ``kb-root/`` — so the marker is what makes this a
-    repository to them, not a convenience of the fixture.
+    repository to them, not a convenience of the fixture. The KB is stamped, as
+    the seed that precedes every claim-graph stage leaves it.
     """
-    for relative, text in tree.items():
-        target = repo / "kb-root" / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+    write_stamped_kb(repo / "kb-root", tree)
     (repo / ".git").mkdir()
     (repo / "justfile").write_text("default:\n    @true\n", encoding="utf-8")
     installed = repo / ".claude" / "agents"

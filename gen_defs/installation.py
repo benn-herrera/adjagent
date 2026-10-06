@@ -2,7 +2,7 @@
 Full-product install — `install ROOT`:
 
     python3 -m gen_defs install <project>/.claude [--family NAME]
-        [--model-tier-map SPEC] [--model-pin-map SPEC]
+        [--model-tier-map SPEC] [--model-pin-tier-alias-map SPEC]
 
 An install delivers the whole deployed product in two halves. The shipped
 packages (kb_tools/, liaison_tools/) are a REMOVE-AND-RECURSIVE-COPY
@@ -13,7 +13,7 @@ documentation, which is code's provenance rather than part of it. There is no
 inclusion list and no complement computation: a new tool file ships with no
 enrollment step. The definitions are RENDERED into ROOT's two surfaces by the
 ordinary generation pass — there is no checked-in render to copy, so the copy
-half never had them to deliver, and the (family, tier-map, pin-map) triple an
+half never had them to deliver, and the (family, tier-map, alias-map) triple an
 install was given is just the triple that render runs under. `install` declares
 neither `--surfaces` nor the selection globs, which would narrow the product to
 a partial install.
@@ -126,7 +126,7 @@ from .banners import banner_claim, stamp_installed
 from .discovery import COMMAND_SURFACE
 from .errors import InputError
 from .generation import generate
-from .model_tuning import OverlaySource, TierBinding, Tuning, map_spec
+from .model_tuning import OverlaySource, TierBinding, Tuning, display_maps
 from .paths import REPO_ROOT, TEMPLATE_SUFFIX, rel
 from .product import assert_install_root, package_pairs, replace_package_destinations
 from .pruning import prune_stale
@@ -271,7 +271,7 @@ def install(
     under `root`.
 
     The definitions are rendered, never copied: this repository keeps no
-    checked-in render for a copy to read. The (family, tier-map, pin-map)
+    checked-in render for a copy to read. The (family, tier-map, alias-map)
     triple the install was given is simply the triple that render runs under,
     which is why a default install and a tuned one are one code path rather
     than a copy and a special case. Every target the pass meets is absent or
@@ -390,7 +390,7 @@ def install(
         # install — nothing an operator needs, and a description of nothing.
         tuned = (
             f"; {rendered} rendered under family {rel(tuning.family)}, "
-            f"tier[{map_spec(tuning.tier_map)}] pin[{map_spec(tuning.pin_map)}] harness {tuning.harness}"
+            f"{display_maps(tuning)} harness {tuning.harness}"
         )
     # On the summary line rather than in a block of its own: a package
     # directory is replaced whole on EVERY install that finds one, so it is the

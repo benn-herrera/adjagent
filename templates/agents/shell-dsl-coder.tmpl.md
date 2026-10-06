@@ -22,6 +22,8 @@ instead of crashing. Boring constructs, the fewest that fully achieve the behavi
 
 @!machine-guarantees-coder!@
 
+@!tests-not-runtime-checks!@
+
 @!separation-of-concerns!@
 
 @!names-read-without-the-task!@
@@ -101,6 +103,8 @@ silent `if` failure branches; (2) quoting and word-splitting on every expansion;
 model — state assumed to persist, `cd` leaking; (4) portability vs the project's declared targets;
 (5) idempotence — second run fails or silently skips; (6) does a failing step fail the recipe, and
 does log capture survive the failure path?
+
+@!test-review!@
 
 ## Parallel Execution
 

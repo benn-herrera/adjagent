@@ -5,29 +5,24 @@ fixture is shaped for the index/graph tests and is deliberately NOT a
 citation-grammar conformant corpus, so it is never used here.
 """
 
-import json
 from pathlib import Path
 
 import pytest
 
 from kb_tools import kb_links
 from kb_tools import verify_citations as vc
+from kb_tools.tests._stamped_kb import write_index, write_stamped_kb
 
-_FRONTMATTER = "<!-- kb-frontmatter\nkind: {kind}\n-->\n\n"
+#: A document's frontmatter, a `kind` alone.
+_FRONTMATTER = "---\nkind: {kind}\n---\n\n"
 
 
 def _kb(tmp_path: Path, files: dict[str, str]) -> Path:
-    root = tmp_path / "kb-root"
-    for relpath, content in files.items():
-        target = root / relpath
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return write_stamped_kb(tmp_path / "kb-root", files)
 
 
 def _scan(root: Path) -> list[vc.Finding]:
-    return vc.scan(root, root / ".index")
+    return vc.scan(root)
 
 
 def _checks(findings: list[vc.Finding]) -> set[str]:
@@ -83,6 +78,13 @@ def test_leaf_bodies_are_exempt_but_frontmatter_is_not(tmp_path: Path) -> None:
     root = _kb(tmp_path, {"leaf.md": leaf, "index.md": index})
     findings = _scan(root)
     assert {f.path for f in findings} == {"index.md"}
+
+
+def test_an_id_in_the_frontmatter_is_a_sanctioned_channel(tmp_path: Path) -> None:
+    """Blanked as a channel, not read as prose, in a file scanned whole."""
+    index = _FRONTMATTER.format(kind="index\nclaims: [clm-aa1111]") + "Nothing citation-shaped here.\n"
+    root = _kb(tmp_path, {"index.md": index})
+    assert _scan(root) == []
 
 
 def test_invariant_section_may_name_its_siblings(tmp_path: Path) -> None:
@@ -285,14 +287,8 @@ def test_external_links_are_not_citations(tmp_path: Path) -> None:
 
 
 def _indexed(root: Path, nodes: dict[str, str], edges: list[tuple[str, str]]) -> None:
-    index = root / ".index"
-    index.mkdir(parents=True, exist_ok=True)
-    (index / "claims.jsonl").write_text(
-        "".join(json.dumps({"id": i, "canonical_path": p}) + "\n" for i, p in nodes.items()), encoding="utf-8"
-    )
-    (index / "depends-on.jsonl").write_text(
-        "".join(json.dumps({"source": s, "target": t}) + "\n" for s, t in edges), encoding="utf-8"
-    )
+    write_index(root, "claims", ({"id": i, "canonical_path": p} for i, p in nodes.items()))
+    write_index(root, "depends-on", ({"source": s, "target": t} for s, t in edges))
 
 
 _REGISTER = "## Entry\n" "<!-- id: clm-aa1111 -->\n\n" "Rationale prose naming clm-bb2222 from the other domain.\n"

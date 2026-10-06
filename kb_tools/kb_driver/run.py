@@ -83,7 +83,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
-from .. import inference, kb_pipeline, kb_readme, kb_util
+from .. import inference, kb_lock, kb_pipeline, kb_readme, kb_util
 from . import barriers, baton, call, checklist, ledger, runlog, steps
 from .config import NO_INFERENCE_FLAG, THROUGH_FLAG, Decision, DriverConfig
 
@@ -193,6 +193,7 @@ class LedgerOps:
     # the adapter states nothing.
     document_graph: Callable[..., ledger.Outcome]
     claim_graph: Callable[..., ledger.Outcome]
+    # Both record ops take `inputs`, the build's inputs every boundary body ends with.
     start_build: Callable[..., ledger.Outcome]
     # `note` is the boundary commit's body — empty for most rows, and words
     # for a stage whose rows this build dropped. `no_inference` is not the same
@@ -217,9 +218,16 @@ def ledger_ops_for(repo_root: Path) -> LedgerOps:
             repo_root, sources=sources, bibliographies=bibliographies, kb_root=kb_root
         ),
         claim_graph=lambda *, flags: ledger.claim_graph(repo_root, flags=flags),
-        start_build=lambda *, charter: ledger.record_start(repo_root, charter=charter),
-        advance_step=lambda *, stage, note="", no_inference=False: ledger.record_stage(
-            repo_root, stage=stage, note=note, no_inference=no_inference
+        start_build=lambda *, charter, inputs: ledger.record_start(
+            repo_root, charter=charter, volume_roots=inputs.volume_roots, bibliographies=inputs.bibliographies
+        ),
+        advance_step=lambda *, stage, inputs, note="", no_inference=False: ledger.record_stage(
+            repo_root,
+            stage=stage,
+            note=note,
+            no_inference=no_inference,
+            volume_roots=inputs.volume_roots,
+            bibliographies=inputs.bibliographies,
         ),
         show_status=lambda *, relay: ledger.show_status(repo_root, relay=relay),
         refresh=lambda: ledger.refresh(repo_root),
@@ -383,6 +391,7 @@ class Runner:
         runlog.require(not missing, f"step table rows with no handler: {', '.join(missing)}")
 
         self._recorded = self._recorded_stages()
+        self._require_recorded_inputs()
         self._require_server()
         for stage in self.stages:
             if stage in self._recorded:
@@ -443,6 +452,28 @@ class Runner:
                 "the ledger is resumable: re-run without the bound to continue from here",
             ),
         )
+
+    def _inputs(self) -> kb_pipeline.BuildInputs:
+        """This run's inputs as a boundary records them: every source, then the bibliography ``[run]`` names.
+
+        The ``.bib`` files gathered beside the sources where none is named are
+        not inputs: the same sources find the same files again.
+        """
+        named = self.config.run.bibliography
+        return kb_pipeline.BuildInputs.given(
+            self.repo_root, volume_roots=self.config.run.sources, bibliographies=(named,) if named else ()
+        )
+
+    def _require_recorded_inputs(self) -> None:
+        """Refuse a resume given other inputs than the newest boundary records, before anything is written.
+
+        A build resumed over other sources would carry the first sources' tree
+        into a ledger that then names the second, so it is exit 14, one line
+        per differing input. A trail recording no inputs is not compared.
+        """
+        refusal = kb_pipeline.inputs_refusal(self.repo_root, self._inputs())
+        if refusal:
+            self._halt(baton.EXIT_ENVIRONMENT, *refusal)
 
     def _require_server(self) -> None:
         """Refuse, before the walk, a run that will call a model with no server named to call.
@@ -619,14 +650,20 @@ class Runner:
     # --- pre-stage rows ------------------------------------------------------
 
     def _pre_lock(self, step: steps.Step) -> None:
-        """``pre.lock``: the lock is taken by ``cli`` around the whole run; assert it is held.
+        """``pre.lock``: the lock is taken by ``cli`` around the whole run; assert it records this run.
 
-        The lock is the repository's, not the run directory's, so this
-        asks the repo root about it rather than ``paths``.
+        The lock is the repository's, not the run directory's, so it is found
+        from the repo root and its record compared with ``paths``.
         """
         del step
-        lock = runlog.repo_lock_path(self.repo_root)
-        runlog.require(lock.is_file(), "the run lock is not held", lock=str(lock))
+        lock = kb_lock.run_lock_path(self.repo_root)
+        recorded = lock.read_text(encoding="utf-8") if lock.is_file() else ""
+        runlog.require(
+            bool(recorded) and Path(recorded).resolve() == self.paths.run_dir.resolve(),
+            "the run lock does not record this run",
+            lock=str(lock),
+            recorded=recorded,
+        )
 
     def _pre_preflight(self, step: steps.Step) -> None:
         """``pre.preflight``: the mechanical environment report; any failure is exit 14.
@@ -710,7 +747,7 @@ class Runner:
         charter where there is one to name, and states the absence where there is
         not (``kb_pipeline.NO_CHARTER_BODY``).
         """
-        self._halt_unless(self.ops.start_build(charter=self._charter() or ""))
+        self._halt_unless(self.ops.start_build(charter=self._charter() or "", inputs=self._inputs()))
         self._stage_recorded(step.stage)
 
     # --- the head: the build's own production --------------------------------
@@ -853,6 +890,7 @@ class Runner:
         self._halt_unless(
             self.ops.advance_step(
                 stage=step.stage,
+                inputs=self._inputs(),
                 note=self._stage_note(step.stage),
                 no_inference=self.config.run.no_inference,
             )

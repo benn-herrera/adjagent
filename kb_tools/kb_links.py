@@ -21,13 +21,15 @@ import re
 from pathlib import Path
 from urllib.parse import unquote
 
+from kb_tools import kb_schema
+
 # Directories never crawled, matched as a single path segment at any depth.
-#   - `.index` holds generated jsonl + format-spec docs.
+#   - `.index` holds the generated index streams.
 #   - `.agents` is gitignored ephemeral scratch — must never be linted.
 #   - `_archive` (at any depth) is a frozen archive — content is intentionally
 #     stale and must not gate or warn (e.g. research/_archive/,
 #     _orchestration/_archive/).
-SKIP_DIRS = {".venv", "venv", ".git", "build", "node_modules", ".index", ".agents", "_archive"}
+SKIP_DIRS = {".venv", "venv", ".git", "build", "node_modules", kb_schema.INDEX_DIRNAME, ".agents", "_archive"}
 
 # Consecutive path-segment sequences that exclude a file from the crawl,
 # matched anywhere in the file's relative path.
