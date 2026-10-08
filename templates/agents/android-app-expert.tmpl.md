@@ -90,17 +90,7 @@ OEM skins. @!integration-logging-signal sink="logcat"!@
 
 @!verification-evidence!@
 
-@!code-principles variant="platform"!@
-
-@!build-system direct="`./gradlew`"!@
-
-@!new-project-setup!@
-
-@!project-docs-setup!@
-
-@!data-formats!@
-
-@!dependencies-lead variant="packages"!@ Prefer packages from Maven Central. @!stdlib-first-always!@
+@!code-principles variant="platform" direct="`./gradlew`"!@ Prefer packages from Maven Central. @!stdlib-first-always!@
 
 @!dependency-vetting!@
 

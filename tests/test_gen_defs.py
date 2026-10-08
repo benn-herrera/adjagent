@@ -758,6 +758,26 @@ class TestExpander(unittest.TestCase):
         out = markers.expand('@!arg.x!@ @!c x="inner"!@', routes, args={"x": "outer"})
         self.assertEqual(out.text, "outer inner fam:inner")
 
+    def test_a_chunk_body_forwards_its_own_argument_to_an_inner_call(self):
+        routes = self._routes(
+            {
+                "inner": {"text": "INNER(@!arg.key!@)"},
+                "outer": {"text": 'OUTER[@!inner key="@!arg.key!@"!@]', "defaults": {"key": "DEFAULT"}},
+            }
+        )
+        self.assertEqual(markers.expand('@!outer key="VALUE"!@', routes, args={}).text, "OUTER[INNER(VALUE)]")
+        self.assertEqual(markers.expand("@!outer!@", routes, args={}).text, "OUTER[INNER(DEFAULT)]")
+
+    def test_an_argument_value_expands_before_it_is_bound(self):
+        routes = self._routes({"c": {"text": "k=@!arg.k!@"}}, dynamic={"d": "D"})
+        self.assertEqual(markers.expand('@!c k="<@!dyn.d!@>"!@', routes, args={}).text, "k=<D>")
+
+    def test_an_argument_value_refuses_a_verbatim_value(self):
+        routes = self._routes({"c": {"text": "k=@!arg.k!@"}}, dynamic={"v": markers.Verbatim("operator text")})
+        marker = '@!c k="@!dyn.v!@"!@'
+        with self.assertRaisesRegex(errors.InputError, re.escape(marker)):
+            markers.expand(marker, routes, args={})
+
     def test_an_authored_value_is_expanded(self):
         routes = self._routes({"c": {"text": "C"}}, dynamic={"d": "<@!c!@>"}, harness={"h": "[@!c!@]"})
         self.assertEqual(markers.expand("@!dyn.d!@ @!hrn.h!@", routes, args={}).text, "<C> [C]")

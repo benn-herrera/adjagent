@@ -88,17 +88,7 @@ Test on mobile viewport sizes. @!integration-logging-signal sink="the test outpu
 
 @!verification-evidence!@
 
-@!code-principles variant="platform"!@
-
-@!build-system direct="`npm`, `vite`, `vitest`, or `playwright`"!@
-
-@!new-project-setup!@
-
-@!project-docs-setup!@
-
-@!data-formats!@
-
-@!dependencies-lead variant="packages"!@ @!manual-over-large-dependency!@
+@!code-principles variant="platform" direct="`npm`, `vite`, `vitest`, or `playwright`"!@ @!manual-over-large-dependency!@
 
 @!dependency-vetting registry="npm weekly downloads"!@
 

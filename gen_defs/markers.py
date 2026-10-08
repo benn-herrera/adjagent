@@ -53,7 +53,9 @@ THREE VALUE KINDS. A source returns one of:
 
 `arg` IS LEXICAL. Inside a chunk body, @!arg.x!@ is that chunk call's `x`; an
 authored value spliced into a span reads that span's arguments. The top-level
-span binds the `args` the caller passes.
+span binds the `args` the caller passes. A call's argument values are authored
+text of the span the call sits in, so they expand there before they are bound,
+which is how a body forwards its own argument: @!inner key="@!arg.key!@"!@.
 
 DEPTH COUNTS NESTING. A span entered at depth d runs pass k at depth d+k, and a
 Span found in a pass at depth p is entered at p+1. Finding a marker at a depth
@@ -286,7 +288,11 @@ def _substitute(match: re.Match[str], routes: Routes, arg: ArgSource, *, depth: 
     namespace, name, arg_text = match.groups()
     call_args = dict(ARG.findall(arg_text))
     if namespace is None:
-        value = routes[CHUNK_ROUTE](name, call_args)
+        bound = {
+            key: _expand_argument(text, routes, arg, depth=depth, marker=match.group(0))
+            for key, text in call_args.items()
+        }
+        value = routes[CHUNK_ROUTE](name, bound)
     else:
         marker = f"@!{namespace}.{name}!@"
         assert_namespace(namespace, name, where=marker)
@@ -309,6 +315,15 @@ def _substitute(match: re.Match[str], routes: Routes, arg: ArgSource, *, depth: 
             raise InputError(f"{match.group(0)}: wrap= cannot apply to text holding a verbatim value")
         return [value.finish("".join(inner))]
     return [value]
+
+
+def _expand_argument(text: str, routes: Routes, arg: ArgSource, *, depth: int, marker: str) -> str:
+    """One argument value expanded in the span its call sits in. Bound, it
+    becomes authored text of the callee, which verbatim text must never do."""
+    segments = _expand_span(text, routes, arg, depth=depth + 1)
+    if any(isinstance(segment, _Final) for segment in segments):
+        raise InputError(f"{marker}: an argument value cannot hold a verbatim value")
+    return "".join(segments)
 
 
 def _merged(segments: list[_Segment]) -> list[_Segment]:

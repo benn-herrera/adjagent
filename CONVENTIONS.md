@@ -45,6 +45,14 @@ live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl
     class.
 - **Never comment in a rendered body.** A template or chunk body becomes an agent's system prompt;
   maintainer commentary there ships into every dispatch and is read by every seat.
+- **An untracked file under `.claude/`, `.opencode/` or `rendered/` is render or install output.**
+  Its source is a template under `templates/` or a module at the repository root (`liaison_tools/`,
+  `kb_tools/`), and the next install overwrites the copy. Before an edit brief names a path,
+  `git ls-files <path>` settles which it is, and the brief names the source. Running definitions
+  point at the copy, which is how a brief comes to name it.
+- **A dispatch names its seats before the tool call.** The acting message states the agent count
+  and model. More than one seat at the family's highest tier waits for a go that names the count: a
+  fan-out's cost shows only as the plan's usage moving, and by then it is spent.
 - **The harness agents file changes by explicit act, in either direction.** Publish by hand: edit
   `templates/harness/AGENTS.tmpl.md`, then commit. Adopt with
   `just install-agents-file <dir> [harness]`, which replaces only the block between the `adjagent`

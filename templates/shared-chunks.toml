@@ -71,9 +71,9 @@ text = '''**You never modify files.** If asked to fix an issue or modify any fil
 #   Code Quality Standards.
 # - shell-dsl-coder lists the run by hand: its own paragraph glossing
 #   key-guideline sits inside the run, and its "this" binds to that rule.
-# - The platform Code Standards continues in each template from
-#   build-system direct=: a chunk call inside a chunk body cannot bind the
-#   enclosing call's argument, so no section chunk can carry that marker.
+# - direct= is read by the platform variant only, and has no default. The
+#   variant ends at dependencies-lead; each template continues that line with
+#   its own text.
 [chunks.code-principles]
 defaults.heading = '''Core Principles'''
 variants.coder = '''
@@ -111,6 +111,16 @@ variants.platform = '''
 @!names-read-without-the-task!@
 
 @!project-conventions-outrank!@
+
+@!build-system direct="@!arg.direct!@"!@
+
+@!new-project-setup!@
+
+@!project-docs-setup!@
+
+@!data-formats!@
+
+@!dependencies-lead variant="packages"!@
 '''
 
 # ─── Testing ─────────────────────────────────────────────────────────────────

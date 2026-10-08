@@ -10,7 +10,8 @@ bare marker resolves from.
 
 "variant" and "wrap" are reserved argument keys; any other key binds a value
 the chunk body reads as @!arg.<key>!@, defaulting to [chunks.<name>.defaults]
-when the marker omits it. Argument values cannot contain a double quote. Only
+when the marker omits it. Argument values cannot contain a double quote; a
+marker inside one expands in the calling span before the value is bound. Only
 a bare marker takes arguments at all.
 
 The chunk source returns a call as a `markers.Span`; the expander expands its

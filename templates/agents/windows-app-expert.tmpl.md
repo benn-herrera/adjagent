@@ -64,17 +64,7 @@ or UI Automation. Test across privilege levels (standard user, UAC prompt, admin
 
 @!verification-evidence!@
 
-@!code-principles variant="platform"!@
-
-@!build-system direct="`msbuild`, `dotnet build`, or `dotnet test`"!@
-
-@!new-project-setup!@
-
-@!project-docs-setup!@
-
-@!data-formats!@
-
-@!dependencies-lead variant="packages"!@ @!stdlib-first-always!@
+@!code-principles variant="platform" direct="`msbuild`, `dotnet build`, or `dotnet test`"!@ @!stdlib-first-always!@
 
 @!dependency-vetting!@
 

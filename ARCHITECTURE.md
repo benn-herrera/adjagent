@@ -139,7 +139,9 @@ maps them); this section does not restate it and is a map into them.
   - `@!name!@` — expand chunk `name`
   - `@!name variant="x"!@` — expand a specific variant of a multi-variant chunk
   - `@!name key="value"!@` — bind a value the chunk body reads as `@!arg.key!@` (any key other than
-    the reserved `variant`/`wrap`); falls back to `[chunks.name.defaults]` when the marker omits it
+    the reserved `variant`/`wrap`); falls back to `[chunks.name.defaults]` when the marker omits it.
+    A value is authored text of the enclosing span, its markers expanding there before it is bound,
+    so a chunk body forwards its own argument with `@!inner key="@!arg.key!@"!@`
   - `@!name wrap="70"!@` — greedy-wrap the expansion to 70 columns
   - `@!arg.<key>!@` — inside a chunk body or a multi-output template body: the value its call site
     bound, or the `[chunks.<name>.defaults]` entry. Only a bare (chunk) marker takes arguments;

@@ -78,17 +78,7 @@ memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lif
 
 @!verification-evidence!@
 
-@!code-principles variant="platform"!@
-
-@!build-system direct="`xcodebuild`, `swift build`, or `swift test`"!@
-
-@!new-project-setup!@
-
-@!project-docs-setup!@
-
-@!data-formats!@
-
-@!dependencies-lead variant="packages"!@ @!stdlib-first-always!@
+@!code-principles variant="platform" direct="`xcodebuild`, `swift build`, or `swift test`"!@ @!stdlib-first-always!@
 
 @!dependency-vetting!@
 

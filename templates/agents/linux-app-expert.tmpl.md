@@ -75,17 +75,7 @@ Wayland where relevant. Test with AppArmor/SELinux confined execution.
 
 @!verification-evidence!@
 
-@!code-principles variant="platform"!@
-
-@!build-system direct="`cmake`, `meson`, `ninja`, or test runners"!@
-
-@!new-project-setup!@
-
-@!project-docs-setup!@
-
-@!data-formats!@
-
-@!dependencies-lead variant="packages"!@ Prefer packages available in major distro repos. @!stdlib-first-always!@
+@!code-principles variant="platform" direct="`cmake`, `meson`, `ninja`, or test runners"!@ Prefer packages available in major distro repos. @!stdlib-first-always!@
 
 @!dependency-vetting!@
 

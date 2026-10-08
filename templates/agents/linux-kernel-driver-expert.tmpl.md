@@ -136,17 +136,7 @@ to the kernel goes. @!integration-logging-signal sink="the kernel log"!@
 
 @!verification-evidence!@
 
-@!code-principles variant="platform"!@
-
-@!build-system direct="`make`, `kbuild`, or test runners"!@
-
-@!new-project-setup!@
-
-@!project-docs-setup!@
-
-@!data-formats!@
-
-@!dependencies-lead variant="packages"!@ In-kernel code depends on kernel subsystems, not on libraries — reach for the existing subsystem (regmap, IIO, the GPIO and clock frameworks) before writing register access by hand. @!stdlib-first-always!@
+@!code-principles variant="platform" direct="`make`, `kbuild`, or test runners"!@ In-kernel code depends on kernel subsystems, not on libraries — reach for the existing subsystem (regmap, IIO, the GPIO and clock frameworks) before writing register access by hand. @!stdlib-first-always!@
 
 @!dependency-vetting!@
 

@@ -142,6 +142,10 @@ blocker needing user intervention during planning, never as a mid-run discovery.
   file-writing tool — formatter, renderer, build — is exempt.
   - These tools write JSON escapes for U+2028/U+2029 as raw characters; spell those code points
     another way.
+- **The shell tool carries the operator's interactive aliases.** Its shell is non-interactive, yet
+  an alias like `rm -i` still fires there and blocks on a prompt nobody answers. Tool commands and
+  dispatched instructions call `command rm`, `command cp`, `command mv` and `command ls`. Scripts on
+  disk run under their own shebang and are unaffected.
 
 ## Acting on the user's words
 **No quotable go, no action.**
