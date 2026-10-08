@@ -61,8 +61,6 @@ rules.
   factors
 - Permissions are UX flow: rationale dialogs, graceful degradation, settings deep-links
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - Complete, compilable Kotlin (or C/C++ for NDK) with imports
@@ -74,23 +72,15 @@ rules.
 - Security: EncryptedSharedPreferences for sensitive data, Play Integrity for attestation, no
   secrets in code/assets
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent="AndroidManifest.xml, build.gradle, ProGuard rules, CMakeLists.txt"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="at WARN/ERROR level with structured tags"!@ @!boundary-check-consumers sink="logcat"!@
+@!platform-testing-lead level="at WARN/ERROR level with structured tags" sink="logcat"!@
 
 *Unit tests*: JUnit with `@ParameterizedTest` for table-driven cases; `runTest` +
 `TestCoroutineScheduler` for coroutines. @!unit-test-scope artifact="UI state"!@
-@!mocking-threshold variant="platform-long"!@
+@!mocking-threshold variant="platform"!@
 
 *Integration tests*: Espresso for View-based UI, Compose UI testing APIs for Compose. Always test
 with "Don't keep activities" enabled for process death. Test across API levels and representative
@@ -100,21 +90,7 @@ OEM skins. @!integration-logging-signal sink="logcat"!@
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`./gradlew`"!@
 

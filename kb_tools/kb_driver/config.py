@@ -70,9 +70,12 @@ from .. import kb_pipeline, kb_util
 
 # The two flags that specify a run, named here rather than in ``cli`` because
 # this module both validates what they carry and renders them back into the
-# resume line every relay card prints. One spelling, two readers.
+# resume line every relay card prints. One spelling, two readers. The source
+# flag is spelled in `kb_util` for `RUN_DIR_FLAG`'s reason, below: the resume
+# line a card offers through the runner's target carries the sources as that
+# target's own arguments, so its renderer picks them out of this line by it.
 CONFIG_FLAG = "--config"
-SOURCE_FLAG = "--source"
+SOURCE_FLAG = kb_util.SOURCE_FLAG
 
 # The mode flag. It specifies what the run is made of rather than how far it
 # goes, so it is rendered back into the resume line (:func:`invocation`).

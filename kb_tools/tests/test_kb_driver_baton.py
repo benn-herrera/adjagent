@@ -13,12 +13,13 @@ git repo, the way ``test_kb_driver_ledger.py`` does.
 """
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from kb_tools import kb_pipeline, kb_util
-from kb_tools.kb_driver import baton, ledger
+from kb_tools.kb_driver import baton, config, ledger
 
 # A table transcribed from the design rather than from the code under test —
 # the point of the guard is that the two agree.
@@ -123,6 +124,85 @@ def test_a_stage_that_failed_mechanically_is_not_rendered_as_an_ask(code: int) -
     assert "--decide" not in block
     assert "THEN RUN, WITH THE ANSWER SUBSTITUTED:" not in block
     assert "kb_claimgraph --pass 1 --scope block-hosted exited 1" in _asks(block)
+
+
+@pytest.fixture
+def target_launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[str | None], str]:
+    """The invocation of a run the ``kb-build`` target launched, in a repository carrying ``runner``'s file."""
+
+    def launched(runner: str | None) -> str:
+        repo = tmp_path / "consumer"
+        (repo / ".git").mkdir(parents=True)
+        if runner is not None:
+            (repo / kb_util.runner_filename(runner)).write_text("", encoding="utf-8")
+        monkeypatch.chdir(repo)
+        runs = kb_util.build_live_dir() / kb_util.BUILD_RUNS_DIRNAME
+        return config.load(None, run_overrides={"sources": ("a.tex", "b.tex")}, run_dir=runs).invocation
+
+    return launched
+
+
+@pytest.mark.parametrize(
+    ("runner", "resume", "decide"),
+    [
+        (
+            "just",
+            "just kb-build a.tex b.tex",
+            "just kb-build a.tex b.tex --decide spine-seed.runner-choice=<answer>",
+        ),
+        (
+            "make",
+            'make kb-build SOURCES="a.tex b.tex"',
+            'make kb-build SOURCES="a.tex b.tex" DRIVER_FLAGS="--decide spine-seed.runner-choice=<answer>"',
+        ),
+    ],
+)
+def test_a_run_the_target_launched_is_resumed_through_the_target(
+    target_launched: Callable[[str | None], str], runner: str, resume: str, decide: str
+) -> None:
+    """The target supplies its own ``--run-dir``, so the line hands it the sources and nothing else."""
+    invocation = target_launched(runner)
+
+    resumed = baton.render(baton.EXIT_TRANSPORT, baton.BatonContext(invocation=invocation))
+    answered = baton.render(
+        baton.EXIT_BARRIER, baton.BatonContext(invocation=invocation, pair="spine-seed.runner-choice", question="q?")
+    )
+
+    assert _then_run(resumed).splitlines()[0] == f"{baton.PREFIX}   {resume}"
+    assert _then_run(answered).splitlines() == [f"{baton.PREFIX}   {decide}"]
+
+
+def test_a_flag_beside_the_sources_rides_the_target_line(target_launched: Callable[[str | None], str]) -> None:
+    invocation = target_launched("just")
+
+    card = baton.render(baton.EXIT_TRANSPORT, baton.BatonContext(invocation=f"{invocation} --no-inference"))
+
+    assert f"{baton.PREFIX}   just kb-build a.tex b.tex --no-inference" in card.splitlines()
+
+
+def test_a_repository_with_no_runner_file_is_handed_the_driver_line(
+    target_launched: Callable[[str | None], str],
+) -> None:
+    """No target to name, so the line keeps every flag, the run directory included."""
+    invocation = target_launched(None)
+
+    card = baton.render(baton.EXIT_TRANSPORT, baton.BatonContext(invocation=invocation))
+
+    assert f"{kb_util.driver_invocation()} run {invocation}" in _then_run(card)
+
+
+def test_a_run_launched_elsewhere_is_handed_the_driver_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The target would file the resumed run's evidence under its own directory, not this run's."""
+    repo = tmp_path / "consumer"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "justfile").write_text("", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    invocation = config.load(None, run_overrides={"sources": ("a.tex",)}, run_dir=tmp_path / "runs").invocation
+
+    card = baton.render(baton.EXIT_TRANSPORT, baton.BatonContext(invocation=invocation))
+
+    assert f"{kb_util.driver_invocation()} run {invocation}" in _then_run(card)
+    assert kb_util.TARGET_BUILD not in card
 
 
 def test_detail_lines_ride_the_ask() -> None:

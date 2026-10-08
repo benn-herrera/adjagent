@@ -387,6 +387,7 @@ def post_chat_streaming(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     enable_thinking: bool | None,
     temperature: float,
+    top_p: float = 1.0,
     include_usage: bool = False,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     debug_post: bool = False,
@@ -397,7 +398,8 @@ def post_chat_streaming(
     No tools are offered. ``enable_thinking``, where not None, is sent as
     ``chat_template_kwargs.enable_thinking``. ``include_usage`` asks for the
     usage chunk (``stream_options``), which an OpenAI-compatible server sends
-    only when asked.
+    only when asked. ``top_p`` is sent as given; the default 1.0 leaves the
+    distribution untruncated.
 
     Returns (chunks, chunk_payloads, raw_text, status), status one of
     :data:`STREAM_CLEAN`, :data:`STREAM_FAILED`, :data:`STREAM_ERROR_EVENT`,
@@ -407,7 +409,7 @@ def post_chat_streaming(
     payload = {
         "model": model,
         "max_tokens": max_tokens,
-        "top_p": 1.0,
+        "top_p": top_p,
         "temperature": temperature,
         "stream": True,
         "messages": messages,

@@ -62,6 +62,10 @@ _SUBJECT_RE = re.compile(rf"^{re.escape(LEDGER_PREFIX)} ([^\s|]+) \| ")
 # confused by a parser or by a reader.
 _TAG = f"[{LEDGER_PREFIX[:-1]}]"
 
+#: What every status line opens with — the first line of a status card, which
+#: is how a reader of a console the card was relayed into finds one.
+STATUS_PREFIX = f"{_TAG} status:"
+
 
 def scratch_relroot() -> str:
     """The build's scratch layout root, repo-root-relative.
@@ -1424,7 +1428,7 @@ def status_line(recorded: set[str]) -> str:
         state = "complete"
     else:
         state = "in progress"
-    return f"{_TAG} status: {state} ({len(recorded)} of {len(STAGES)} stages recorded)"
+    return f"{STATUS_PREFIX} {state} ({len(recorded)} of {len(STAGES)} stages recorded)"
 
 
 def _print_report(

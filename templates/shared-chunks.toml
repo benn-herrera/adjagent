@@ -63,6 +63,56 @@ text = '''If you believe a directive would produce technically incorrect output,
 [chunks.never-modify-files]
 text = '''**You never modify files.** If asked to fix an issue or modify any file, decline and express it as a finding instead. Do not use Edit, Write, or Bash to change file contents.'''
 
+# The rule run that opens the coders' Core Principles and the platform experts'
+# Code Standards, heading included; each template's own prose follows it.
+# - platform lacks machine-guarantees-coder. Adding it is a change to seven
+#   definitions, not a sync repair.
+# - heading= is read by the coder variant only: generalist-coder's section is
+#   Code Quality Standards.
+# - shell-dsl-coder lists the run by hand: its own paragraph glossing
+#   key-guideline sits inside the run, and its "this" binds to that rule.
+# - The platform Code Standards continues in each template from
+#   build-system direct=: a chunk call inside a chunk body cannot bind the
+#   enclosing call's argument, so no section chunk can carry that marker.
+[chunks.code-principles]
+defaults.heading = '''Core Principles'''
+variants.coder = '''
+## @!arg.heading!@
+
+@!key-guideline!@
+
+@!incumbent-search!@
+
+@!prove-replacement-first variant="change"!@
+
+@!machine-guarantees-coder!@
+
+@!tests-not-runtime-checks!@
+
+@!separation-of-concerns!@
+
+@!names-read-without-the-task!@
+
+@!project-conventions-outrank!@
+'''
+variants.platform = '''
+## Code Standards
+
+@!key-guideline!@
+
+@!incumbent-search!@
+
+@!prove-replacement-first variant="change"!@
+
+@!tests-not-runtime-checks!@
+
+@!separation-of-concerns!@
+
+@!names-read-without-the-task!@
+
+@!project-conventions-outrank!@
+'''
+
 # ─── Testing ─────────────────────────────────────────────────────────────────
 
 # architect.tmpl.md's `Runtime boundary validation` invariant states this whole
@@ -76,11 +126,20 @@ text = '''*Runtime boundary checks*: at significant system boundaries — @!arg.
 [chunks.cheap-over-thorough]
 text = '''Cheap is more important than thorough — a check that always runs beats one that gets disabled.'''
 
-[chunks.boundary-check-routing]
-text = '''Route violations through the logging system @!arg.level!@.'''
+# The platform experts' Testing section up to the per-seat unit-test prose,
+# which stays in each template: android's carries double quotes, which no
+# argument can hold. The routing and consumer sentences are spelled here rather
+# than as chunks of their own because a chunk call inside a chunk body cannot
+# bind this call's level= and sink= — the inner span reads only its own
+# arguments.
+[chunks.platform-testing-lead]
+text = '''
+## Testing
 
-[chunks.boundary-check-consumers]
-text = '''These serve production forensics (@!arg.sink!@), development diagnostics, and integration test signal simultaneously.'''
+Three layers with distinct purposes:
+
+@!boundary-checks-lead!@ Route violations through the logging system @!arg.level!@. These serve production forensics (@!arg.sink!@), development diagnostics, and integration test signal simultaneously.
+'''
 
 # routing= carries each seat's negative example inside the noun phrase rather
 # than as a trailing argument, so no call site binds a value whose leading
@@ -90,7 +149,7 @@ defaults.expectation = '''state/thread/context'''
 defaults.routing = '''the logging system'''
 text = '''Contract checks: are these inputs valid for this boundary? Expectation checks: is the system in the expected @!arg.expectation!@? @!cheap-over-thorough!@ Route violations through @!arg.routing!@.'''
 
-# A second home for the consumer triple, deliberately: boundary-check-consumers
+# A second home for the consumer triple, deliberately: platform-testing-lead
 # above leads with the sink, for a seat whose logger is already chosen; this one
 # leads with the count, which is what stops a coder seat building three
 # diagnostic paths. Merging them is a wording ruling, not an extraction.
@@ -124,8 +183,7 @@ text = '''- Signed overflow is undefined; unsigned wraps. Check before the opera
 # there.
 [chunks.mocking-threshold]
 variants.general = '''If you need to mock five dependencies to test one function, fix the design first.'''
-variants.platform = '''Avoid mocking more than two dependencies per test; fix the design if you need more — native platform APIs have non-mockable runtime behavior.'''
-variants.platform-long = '''If mocking more than two dependencies is required to test one function, fix the design first — native platform APIs have non-mockable runtime behavior, and a design requiring many mocks is usually poorly factored for platform constraints.'''
+variants.platform = '''If mocking more than two dependencies is required to test one function, fix the design first — native platform APIs have non-mockable runtime behavior, and a design requiring many mocks is usually poorly factored for platform constraints.'''
 
 [chunks.unit-test-scope]
 text = '''Target logic and algorithms where the correct answer is independently verifiable. Do NOT write tests for exact @!arg.artifact!@, log messages, or call sequences — these break on refactor with no safety return.'''
@@ -149,6 +207,18 @@ text = '''Coverage percentage is the wrong metric.'''
 # typing this instruction into review briefs by hand across several sprints.
 [chunks.test-review]
 text = '''**Reviewing tests, name what to cut.** *Duplicate coverage*: a test pinning a behaviour another already pins through the same path, a unit re-proving a golden-file or parametrised case included — merge or delete, naming the survivor. *Performative units*: a test no logic error could fail — a constant compared to itself, a mock confirmed called with nothing checked of what it was given, a file confirmed to load with no further claim — delete. Propose a new test only for a stated invariant or acceptance criterion that no test exercises.'''
+
+# The coders' and platform experts' When Reviewing section. body is its content
+# without the heading, for a seat that reviews under a section of its own
+# (shell-dsl-coder's Review Function); section expands body, so a rule added
+# there reaches both.
+[chunks.when-reviewing]
+variants.section = '''
+## When Reviewing
+
+@!when-reviewing variant="body"!@
+'''
+variants.body = '''@!test-review!@'''
 
 [chunks.integration-logging-signal]
 defaults.level = '''logging'''
@@ -346,6 +416,8 @@ text = '''- **Read a gate against your own scope**: run the narrowest runner tar
 
 [chunks.parallel-execution]
 variants.general = '''
+## Parallel Execution
+
 @!pe-preamble!@
 
 @!pe-read-bullet!@
@@ -358,6 +430,8 @@ variants.general = '''
 @!pe-scope-creep-bullet!@
 '''
 variants.platform = '''
+## Parallel Execution
+
 @!pe-preamble!@
 
 @!pe-read-bullet!@
@@ -373,7 +447,11 @@ variants.platform = '''
 # ─── Report formats ──────────────────────────────────────────────────────────
 
 [chunks.authoring-standards-lead]
-text = '''These govern the content of the code and explanations you produce, not the shape of your reply — the reply contract is **Output Format**, below, in every case.'''
+text = '''
+## Code Authoring Standards
+
+These govern the content of the code and explanations you produce, not the shape of your reply — the reply contract is **Output Format**, below, in every case.
+'''
 
 # This chunk and done-format below are reached only through coder-output-format;
 # no template expands either marker directly, so a grep for consumers returns
@@ -618,7 +696,7 @@ You communicate with the external model using the script:
 - `API_KEY_FILE` — path to the file containing only the API key; the script reads the key directly so it is not exposed through argv or environment values
 - `MODEL` — model identifier (exact or unambiguous substring; the script will resolve and warn if a substring match is used)
 
-**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `@!hrn.project-harness-dir!@/agents/liaison_tools/post-openai.py`.
+**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `TOP_P`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `@!hrn.project-harness-dir!@/agents/liaison_tools/post-openai.py`.
 '''
 
 [chunks.liaison-tool-tail]

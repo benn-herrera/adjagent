@@ -30,6 +30,11 @@ with one of them is the defect.
 - **Per-node only.** Solidity and confidence exist per claim. No aggregate, no corpus-level score,
   no single number that could stand in for reading the map.
 
+- **The installed agent set needs no setup after `install`.** KB building and navigation reach the
+  toolchain through the in-agent descriptions and the runner targets, with nothing to register in
+  the harness. The MCP surface over a KB is kbase's server, which a project registers in its
+  harness by hand where it wants one; this repository ships no MCP server of its own.
+
 ## Items
 
 1. **Full-vs-incremental refresh** — revisit only if rebuild time becomes the constraint. Why

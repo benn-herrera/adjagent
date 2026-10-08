@@ -47,8 +47,6 @@ library flags — not hardcoded paths.
 - systemd: proper journal log levels
 - Absolute paths break across distros — use XDG directories, check /etc/os-release
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - Complete code with includes, link flags (-lgtk-4, -lQt6Core), pkg-config usage
@@ -60,22 +58,14 @@ library flags — not hardcoded paths.
   protocol support
 - Security: avoid setuid (use polkit/D-Bus), credentials via libsecret, validate input
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent=".desktop files, systemd units, CMakeLists.txt, meson.build, packaging manifests"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="at WARNING/CRITICAL level"!@ @!boundary-check-consumers sink="journald"!@
+@!platform-testing-lead level="at WARNING/CRITICAL level" sink="journald"!@
 
 *Unit tests*: GTest or GLib Testing Framework (GTK); Qt Test (Qt).
-@!unit-test-scope artifact="widget state"!@ @!mocking-threshold variant="platform-long"!@
+@!unit-test-scope artifact="widget state"!@ @!mocking-threshold variant="platform"!@
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. Test on both X11 and
 Wayland where relevant. Test with AppArmor/SELinux confined execution.
@@ -85,21 +75,7 @@ Wayland where relevant. Test with AppArmor/SELinux confined execution.
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`cmake`, `meson`, `ninja`, or test runners"!@
 

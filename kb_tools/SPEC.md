@@ -1075,6 +1075,22 @@ has not yet waited out the writers. The build's own writes take no run-lock chec
 advisory lock: a running build is not observable there, and one build at a time is the operator's
 to keep.
 
+**A build can run detached, and a session waits on it rather than holding it.** The runner's
+`kb-build` target launches the driver over the sources it is given (`just kb-build a.tex b.tex`,
+`make kb-build SOURCES="a.tex b.tex"`) as a background process and returns. Its pid is in
+`<project>/<harness-dir>-temp/kb-driver-live/driver.pid`, its stdout and stderr in `console.log`
+beside it, and its run directories under `runs/`. `kb-build-await` (`kb_util await-build`) blocks,
+with no timeout, until the newest status card in that log changes or the driver exits. The first
+line it prints is its answer, because `make` reports every failed recipe as exit 2: `await-build:
+changed` with the new card, while the build runs (exit 0); `await-build: exited` with the console text
+from the last card through the relay card that ended the run (exit 3); `await-build: nothing-to-await` where no build was
+launched (exit 2). A session runs it in the background, relays each changed card to the user and
+awaits again. On an exit it acts on the relay card as on a foreground run's: it places the card in
+its message body, asks what the card asks, and runs what it says to run. A run the target launched
+is resumed through the target — the card's THEN RUN line names `kb-build` with the run's sources
+and flags, a `--decide` answer among them. The session sequences nothing and decides nothing; the
+driver is still the one process directing the build.
+
 Exit codes are one ladder, enumerated in `baton.RUN_MODE_EXIT_CODES`. Every terminating invocation
 prints a relay card naming what to ask and what to run next, and an unrecognized code prints the
 fallback card rather than being interpreted.
@@ -1253,11 +1269,10 @@ populated already, the stamp cannot change that answer, and every stage after th
 a KB that carries its pin.
 
 The run is the shell-resident driver process a person starts in a terminal, and it is the only
-session there is. `/kb-build` prints the command line that starts one and stops; it holds nothing
-and writes nothing. An earlier revision of this section assigned the pin to "the session holding
-`/kb-build`", which named a session that does not exist — the equivalent of a voicemail greeting
-giving another number. Agent-assisted launch and management of a run is later work, and the
-straightforward case has to work first: the primary process in a user's terminal.
+session there is. `/kb-build` launches the build through the project's runner target in the
+background, relays each status change to the user, and consumes the driver's relay card when the
+driver stops (The Driver's Contract, above); it holds no part of the run and writes nothing: the
+driver process is the session the build has.
 
 **One file arrives once, carrying both halves.** `kb_tools/installed/AGENTS.tmpl.md` holds the KB's
 standing orientation and a slot for the pin, and the stamp fills the slot as it writes the file — so

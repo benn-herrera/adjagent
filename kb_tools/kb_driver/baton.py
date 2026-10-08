@@ -18,8 +18,11 @@ its bytes, exactly as ``BatonContext`` is constructed elsewhere and rendered
 here. The record body and the baton are printed as two calls and stored as one
 file, so the bytes at stdout and the bytes on disk cannot diverge.
 
-Stateless leaf: no state, no I/O, and no import of another driver module. This
-module renders text; the caller prints it (through ``runlog.relay``).
+Stateless leaf: no state, no I/O of its own, and no import of another driver
+module. This module renders text; the caller prints it (through
+``runlog.relay``). Which command a resume line names — the runner's target or
+the driver's own line — is ``kb_util.build_cmd``'s answer, read off the
+repository the card is rendered in.
 """
 
 import json
@@ -86,6 +89,11 @@ PREFIX = "[relay]"
 
 _RULE = "-" * 63
 
+#: The line that opens and closes every card, as rendered — which is how a
+#: reader of a console the card was printed into tells a whole card from one
+#: still being written.
+RULE_LINE = f"{PREFIX} {_RULE}"
+
 # Rendered in place of an ASK the caller failed to supply. A blank ask is a
 # driver defect; it must look like one rather than like "nothing to ask".
 _MISSING_ASK = "(missing — read the barrier record and report it verbatim)"
@@ -119,10 +127,11 @@ class BatonSpec:
 
 # The resume names the directory this run's evidence is in, through the
 # invocation it was launched with (`config.invocation` renders `--run-dir`
-# wherever it is not the default). `{driver}` is `kb_util.driver_invocation()`,
-# filled at render.
-_RESUME = "{driver} run {invocation}"
-_DECIDE = (f"{_RESUME} \\", "    --decide {pair}=<answer>")
+# wherever it is not the default). Both lines are `kb_util.build_cmd`'s, filled
+# at render: the runner's `kb-build` target for a run that target launched,
+# the driver's own command line for any other.
+_RESUME = "{resume}"
+_DECIDE = ("{resume_decide}",)
 
 _BATONS: dict[int, BatonSpec] = {
     EXIT_OK: BatonSpec(
@@ -228,10 +237,11 @@ def render(exit_code: int, context: BatonContext | None = None) -> str:
     spec = _BATONS.get(exit_code, _FALLBACK)
     if spec.substitutes_answer and not ctx.pair:
         spec = _NO_BARRIER
+    invocation = ctx.invocation or "<the flags this run was launched with>"
+    pair = ctx.pair or "<stage>.<kind>"
     fields = {
-        "driver": kb_util.driver_invocation(),
-        "invocation": ctx.invocation or "<the flags this run was launched with>",
-        "pair": ctx.pair or "<stage>.<kind>",
+        "resume": kb_util.build_cmd(invocation),
+        "resume_decide": kb_util.build_cmd(invocation, unquoted_tail=f"--decide {pair}=<answer>"),
         "question": ctx.question,
         "run_dir": ctx.run_dir or "<run-dir>",
     }

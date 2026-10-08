@@ -105,8 +105,6 @@ and scripts, never into a command line the reply asks someone to paste.
 - A lock also taken in a hardirq handler is taken with `spin_lock_irqsave` everywhere else, or the
   handler deadlocks on it — lockdep reports this before the field does
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - Complete code with the headers it needs and the Kbuild and Kconfig entries that build it
@@ -120,23 +118,15 @@ and scripts, never into a command line the reply asks someone to paste.
 - Security: validate everything crossing from userspace, zero what you copy back, and treat a
   capability check as part of the interface
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent="Kconfig, Kbuild and Makefile entries, device tree bindings and sources, UAPI headers, DKMS configuration"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="at `KERN_WARNING` or above"!@ @!boundary-check-consumers sink="the kernel log"!@
+@!platform-testing-lead level="at `KERN_WARNING` or above" sink="the kernel log"!@
 
 *Unit tests*: KUnit for logic that can be exercised without hardware.
 @!unit-test-scope artifact="parsing, state machines and register-level computation"!@
-@!mocking-threshold variant="platform-long"!@
+@!mocking-threshold variant="platform"!@
 
 *Integration tests*: boot the module in a virtual machine against the debugging configuration, and
 exercise it through the interface a consumer actually uses. `kselftest` is where a test that belongs
@@ -146,21 +136,7 @@ to the kernel goes. @!integration-logging-signal sink="the kernel log"!@
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`make`, `kbuild`, or test runners"!@
 

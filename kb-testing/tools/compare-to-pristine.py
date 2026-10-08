@@ -3,17 +3,26 @@
 Invoked through `just measure-kb-roots` (kb-testing/justfile), which hands every
 staged kb-root as a leading positional argument. The reference is the kb-root
 under ``ModernCorpPristine/``, ours the one under ``ModernCorp/``; the rest are
-ignored. Trailing ``--threshold <cosine>`` overrides the match threshold.
+ignored. Trailing ``--threshold <cosine>`` overrides the match threshold;
+trailing ``--verdicts <tsv>`` joins rulings onto found-not-authored.tsv. The
+verdict file is tab-separated with a header naming at least ``citing_leaf``,
+``citing_register_anchor``, ``cited_leaf``, ``cited_register_anchor`` and
+``verdict``; a row is keyed on the first four, and a later row wins.
 
 Produces, under ``.claude-temp/pristine-compare/`` at the repository root:
-  claim-matches.tsv  every reference claim, its matched nodes of ours, score, both titles
-  candidates.tsv     each reference claim's five best-scoring nodes of ours, matched or not
-  edges.tsv          every reference `depends` edge, its recall class and, for a miss, the mark test
-  summary.md         the headline figures
+  claim-matches.tsv       every reference claim, its matched nodes of ours, score, both titles
+  candidates.tsv          each reference claim's five best-scoring nodes of ours, matched or not
+  ours-nodes.tsv          every claim node of ours, its kind, host document, spans and token count
+  edges.tsv               every reference `depends` edge, its recall class and, for a miss, the mark test
+  found-not-authored.tsv  every claim-to-claim `depends` edge of ours that no recalled reference edge
+                          accounts for, with both ends' hosting leaf, register anchor, title and the
+                          edge's locality; with --verdicts, a final `verdict` column
+  summary.md              the headline figures
 
 Writes nothing else.
 """
 
+import csv
 import math
 import re
 import sys
@@ -123,7 +132,11 @@ def read_reference(kb_root: Path) -> tuple[dict[str, Claim], list[tuple[str, str
 # --- our KB ----------------------------------------------------------------------
 
 
-def read_ours(kb_root: Path) -> tuple[dict[str, Claim], set[tuple[str, str]], set[tuple[str, str]], list[inventory.Anchor]]:
+def read_ours(
+    kb_root: Path,
+) -> tuple[
+    dict[str, Claim], set[tuple[str, str]], set[tuple[str, str]], list[inventory.Anchor], dict[str, kb_index_lib.ClaimEntry]
+]:
     documents = tree.read(kb_root)
     sites = inventory.scan(documents)
     authored = graph.read(documents, sites)
@@ -174,7 +187,8 @@ def read_ours(kb_root: Path) -> tuple[dict[str, Claim], set[tuple[str, str]], se
         if edge.relation == "depends" and edge.target_kind == "claim"
     }
     references = {(edge.source, edge.target) for entry in state.claim_entries for edge in entry.references}
-    return claims, depends, references, list(sites.anchors)
+    entries = {entry.id: entry for entry in state.claim_entries}
+    return claims, depends, references, list(sites.anchors), entries
 
 
 # --- matching -----------------------------------------------------------------------
@@ -332,6 +346,72 @@ def paper_scope(a: set[str], b: set[str], ours: dict[str, Claim]) -> str:
     return "same paper" if papers else "cross paper"
 
 
+# --- found, not authored ----------------------------------------------------------------
+
+RECALLED = ("depends", "depends reversed", "depends path", "depends path reversed")
+LEAF_RE = re.compile(r"(?:[\w.-]+/)+[\w.-]+\.md")
+FOUND_HEADER = (
+    "citing_id", "citing_paper", "citing_leaf", "citing_register_anchor", "citing_title",
+    "cited_id", "cited_paper", "cited_leaf", "cited_register_anchor", "cited_title", "locality",
+)
+VERDICT_KEY = ("citing_leaf", "citing_register_anchor", "cited_leaf", "cited_register_anchor")
+
+
+def hosting_leaf(entry: kb_index_lib.ClaimEntry) -> str:
+    """The document hosting a claim's text.
+
+    A prose claim's ``canonical_path`` is its paper's ``claim-quality.md`` register; the leaf
+    is the first document path the register entry's rationale names, else the register itself.
+    """
+    found = LEAF_RE.search(entry.rationale)
+    return found.group() if found else entry.canonical_path
+
+
+def locality(citing_leaf: str, cited_leaf: str) -> str:
+    if citing_leaf == cited_leaf:
+        return "same document"
+    if citing_leaf.split("/")[0] == cited_leaf.split("/")[0]:
+        return "same paper"
+    return "cross paper"
+
+
+def authored_pairs(edge_rows: list[tuple[str, ...]], mapped: dict[str, set[str]]) -> set[tuple[str, str]]:
+    """Every (our source, our target) pair a recalled reference edge's endpoints map to."""
+    return {(x, y) for row in edge_rows if row[4] in RECALLED for x in mapped[row[0]] for y in mapped[row[2]]}
+
+
+def found_not_authored(
+    *, depends: set[tuple[str, str]], authored: set[tuple[str, str]], entries: dict[str, kb_index_lib.ClaimEntry]
+) -> list[tuple[str, ...]]:
+    """Our depends edges outside ``authored``, one ``FOUND_HEADER`` row each, by citing paper, citing leaf, cited leaf."""
+    rows = []
+    for source, target in depends - authored:
+        citing, cited = entries[source], entries[target]
+        citing_leaf, cited_leaf = hosting_leaf(citing), hosting_leaf(cited)
+        rows.append(
+            (
+                citing.id, citing_leaf.split("/")[0], citing_leaf, citing.canonical_anchor, citing.title,
+                cited.id, cited_leaf.split("/")[0], cited_leaf, cited.canonical_anchor, cited.title,
+                locality(citing_leaf, cited_leaf),
+            )
+        )
+    return sorted(rows, key=lambda row: (row[1], row[2], row[7], row[0], row[5]))
+
+
+def read_verdicts(path: Path) -> dict[tuple[str, ...], str]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t", quoting=csv.QUOTE_NONE)
+        missing = {*VERDICT_KEY, "verdict"} - set(reader.fieldnames or ())
+        if missing:
+            raise SystemExit(f"{path}: no column(s) {', '.join(sorted(missing))}")
+        return {tuple(row[column] for column in VERDICT_KEY): row["verdict"] for row in reader}
+
+
+def with_verdicts(rows: list[tuple[str, ...]], verdicts: dict[tuple[str, ...], str]) -> list[tuple[str, ...]]:
+    key = [FOUND_HEADER.index(column) for column in VERDICT_KEY]
+    return [row + (verdicts.get(tuple(row[i] for i in key), ""),) for row in rows]
+
+
 def tally(rows: list[tuple[str, ...]]) -> tuple[Counter, Counter]:
     return Counter(row[4].split(" (")[0] for row in rows), Counter(row[5] for row in rows if row[5])
 
@@ -341,19 +421,26 @@ def write_tsv(name: str, header: tuple[str, ...], rows: list[tuple[str, ...]]) -
     (OUT / name).write_text("\n".join(body) + "\n", encoding="utf-8")
 
 
+def pop_option(argv: list[str], name: str) -> tuple[str | None, list[str]]:
+    """The value following ``name`` in ``argv``, and ``argv`` without the pair."""
+    if name not in argv:
+        return None, argv
+    index = argv.index(name)
+    return argv[index + 1], argv[:index] + argv[index + 2 :]
+
+
 def main(argv: list[str]) -> int:
-    threshold = THRESHOLD
-    if "--threshold" in argv:
-        index = argv.index("--threshold")
-        threshold = float(argv[index + 1])
-        argv = argv[:index] + argv[index + 2 :]
+    raw_threshold, argv = pop_option(argv, "--threshold")
+    threshold = THRESHOLD if raw_threshold is None else float(raw_threshold)
+    verdicts_path, argv = pop_option(argv, "--verdicts")
+    verdicts = None if verdicts_path is None else read_verdicts(Path(verdicts_path))
     OUT.mkdir(parents=True, exist_ok=True)
     roots = [Path(raw).resolve() for raw in argv]
     reference_root = next(root for root in roots if root.parent.name == "ModernCorpPristine")
     ours_root = next(root for root in roots if root.parent.name == "ModernCorp")
 
     reference, reference_edges, reference_relations = read_reference(reference_root)
-    ours, depends, references, anchors = read_ours(ours_root)
+    ours, depends, references, anchors, entries = read_ours(ours_root)
     texts = {path: document.text.splitlines() for path, document in tree.read(ours_root).documents.items()}
 
     bags = {("r", key): tokens(c.title + "\n" + c.text) for key, c in reference.items()}
@@ -412,6 +499,17 @@ def main(argv: list[str]) -> int:
         ("ref_source", "ref_source_title", "ref_target", "ref_target_title", "recall", "mark_split", "marks", "ours_sources", "ours_targets", "scope", "document_level"),
         edge_rows,
     )
+    found_rows = found_not_authored(depends=depends, authored=authored_pairs(edge_rows, mapped), entries=entries)
+    found_summary = [f"total: {len(found_rows)}", "by locality:"]
+    found_summary += [f"  {name}: {count}" for name, count in Counter(row[10] for row in found_rows).most_common()]
+    if verdicts is None:
+        write_tsv("found-not-authored.tsv", FOUND_HEADER, found_rows)
+    else:
+        ruled = with_verdicts(found_rows, verdicts)
+        write_tsv("found-not-authored.tsv", FOUND_HEADER + ("verdict",), ruled)
+        found_summary += ["by verdict:"]
+        found_summary += [f"  {name}: {count}" for name, count in Counter(row[-1] for row in ruled if row[-1]).most_common()]
+        found_summary += [f"  pending: {sum(1 for row in ruled if not row[-1])}"]
 
     matched = [rid for rid, kept in mapped.items() if kept]
     kinds = Counter(c.kind for c in ours.values())
@@ -477,6 +575,10 @@ def main(argv: list[str]) -> int:
         "",
         "misses re-read at document level (A's matches to any node hosted in a document hosting one of B's matches):",
         *[f"  {name}: {count}" for name, count in Counter(row[10] for row in edge_rows if row[5]).most_common()],
+        "",
+        "## Found-not-authored depends edges",
+        "",
+        *found_summary,
         "",
         "## Threshold sensitivity",
         "",

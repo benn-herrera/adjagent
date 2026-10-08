@@ -345,7 +345,8 @@ not.
 
 * Building/Modifying Knowledge Base
   * commands/ - custom slash commands
-    * kb-build.md (/kb-build) - prints the command line that starts a build, and stops
+    * kb-build.md (/kb-build) - launches a build in the background, relays its status changes, and
+      consumes the driver's relay card when it stops
   * kb_tools/kb_driver - the builder itself: walks a static step table, dispatches each row to the
     seat it names, and exits at a barrier rather than asking
   * kb-claim-scorer.md - grades written derivations; returns judgments and writes nothing

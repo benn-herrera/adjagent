@@ -104,9 +104,7 @@ model — state assumed to persist, `cd` leaking; (4) portability vs the project
 (5) idempotence — second run fails or silently skips; (6) does a failing step fail the recipe, and
 does log capture survive the failure path?
 
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="body"!@
 
 @!parallel-execution variant="general"!@
 

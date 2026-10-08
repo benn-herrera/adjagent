@@ -18,23 +18,7 @@ change already does.
 before proceeding. If the scope or requirements are fundamentally unclear, report as a Blocker —
 don't guess and expand.
 
-## Code Quality Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!machine-guarantees-coder!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="coder" heading="Code Quality Standards"!@
 
 **Minimal**: Make the smallest change that correctly solves the problem. Don't refactor surrounding
 code, add docstrings to things you didn't touch, or improve things that weren't broken.
@@ -82,11 +66,7 @@ Python: readable over clever. JS/TS: strict types, explicit async.
 **No over-engineering**: Three similar lines of code is better than a premature abstraction. Don't
 design for hypothetical future requirements. Don't add configurability that isn't needed now.
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="general"!@
 

@@ -33,6 +33,7 @@ env vars:
                                 chat_template_kwargs.enable_thinking
                                 (default: true)
   TEMPERATURE        (optional) float in [0.0, 2.0] (default: 1.0)
+  TOP_P              (optional) float in (0.0, 1.0] (default: 1.0)
   DEBUG_POST         (optional) "true" to dump the request payload to stderr
   DEBUG_RESPONSE     (optional) "true" to tee the raw SSE stream + reassembled output to stderr
   USAGE_STATS_FILE   (optional) path to a token-usage side-channel file. When
@@ -100,6 +101,7 @@ EXIT_EMPTY = 4
 
 _TEMPERATURE_RE = re.compile(r"^[0-9]+(\.[0-9]+)?$")
 DEFAULT_TEMPERATURE = 1.0
+DEFAULT_TOP_P = 1.0
 
 
 def _usage(msg: str = "") -> None:
@@ -113,6 +115,7 @@ def _usage(msg: str = "") -> None:
         f"optional envar param MAX_TOKENS=<max-response-token-count> " f"(default: {chat.DEFAULT_MAX_TOKENS})\n"
     )
     sys.stderr.write(f"optional envar param TEMPERATURE=<float in [0.0, 2.0]> (default: {DEFAULT_TEMPERATURE})\n")
+    sys.stderr.write(f"optional envar param TOP_P=<float in (0.0, 1.0]> (default: {DEFAULT_TOP_P})\n")
     sys.stderr.write(
         "API_KEY_FILE file format: the file contains only the API key "
         "(leading/trailing whitespace trimmed; no internal whitespace).\n"
@@ -127,6 +130,17 @@ def _parse_temperature(raw: str) -> float:
     v = float(raw)
     if v > 2.0:
         sys.stderr.write(f"error: TEMPERATURE must be in [0.0, 2.0] (got '{raw}')\n")
+        sys.exit(1)
+    return v
+
+
+def _parse_top_p(raw: str) -> float:
+    if not _TEMPERATURE_RE.match(raw):
+        sys.stderr.write(f"error: TOP_P must be a positive number (got '{raw}')\n")
+        sys.exit(1)
+    v = float(raw)
+    if v <= 0.0 or v > 1.0:
+        sys.stderr.write(f"error: TOP_P must be in (0.0, 1.0] (got '{raw}')\n")
         sys.exit(1)
     return v
 
@@ -192,6 +206,7 @@ def main() -> int:
         return 1
 
     temperature = _parse_temperature(os.environ.get("TEMPERATURE", str(DEFAULT_TEMPERATURE)))
+    top_p = _parse_top_p(os.environ.get("TOP_P", str(DEFAULT_TOP_P)))
     enable_thinking = os.environ.get("ENABLE_THINKING", "true").lower() == "true"
 
     debug_post = os.environ.get("DEBUG_POST", "false").lower() == "true"
@@ -212,6 +227,7 @@ def main() -> int:
         max_tokens=max_tokens,
         enable_thinking=enable_thinking,
         temperature=temperature,
+        top_p=top_p,
         debug_post=debug_post,
         debug_response=debug_response,
     )
@@ -231,6 +247,7 @@ def main() -> int:
             max_tokens=max_tokens,
             enable_thinking=enable_thinking,
             temperature=temperature,
+            top_p=top_p,
             debug_post=debug_post,
             debug_response=debug_response,
         )

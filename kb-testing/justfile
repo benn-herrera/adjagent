@@ -44,6 +44,14 @@ ARXIV_IDS := ARXIV_CS_GR + " " + ARXIV_CS_LG + " " + ARXIV_ECON_TH + " " + ARXIV
 # left here, since this list is thrown away rather than merged in.
 ARXIV_CANDIDATE_IDS := ""
 
+# Alias map a staging recipe adds when it forwards `--family=` without its own
+# `--model-pin-tier-alias-map`. The family's model line renders the tier member,
+# and the claude harness accepts only a Claude alias, a `claude-` id or `inherit`;
+# the env fixtures under test-data/transient/*.env remap exactly these five
+# aliases to the family's models, so under kb-testing a non-claude family always
+# wants this map.
+TIER_ALIAS_MAP := "--model-pin-tier-alias-map=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku"
+
 ARXIV_TGZ := "test-data/transient/arxiv-tgz"
 ARXIV_STAGE := "test-data/transient/arxiv"
 
@@ -116,6 +124,29 @@ _installed-harness-value repo key:
         just _harness-value "${found[0]}" "{{key}}"
     fi
 
+# The one caller of the root install recipe for staging: target is relative to the
+# repository root, every flag forwards verbatim, and TIER_ALIAS_MAP is appended
+# when `--family` is forwarded without a `--model-pin-tier-alias-map` of the caller's.
+[private]
+[doc("root `just install` for a staging recipe; appends TIER_ALIAS_MAP when --family is given and no --model-pin-tier-alias-map is")]
+_install target *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="${1}"
+    shift
+    family=""
+    have_map=""
+    for arg in "$@"; do
+        case "${arg}" in
+            --family|--family=*) family=1 ;;
+            --model-pin-tier-alias-map|--model-pin-tier-alias-map=*) have_map=1 ;;
+        esac
+    done
+    if [[ -n "${family}" && -z "${have_map}" ]]; then
+        set -- "$@" "{{TIER_ALIAS_MAP}}"
+    fi
+    cd "{{justfile_directory()}}/.." && just install "${target}" "$@"
+
 # Read-only ask, factored out of stage-arxiv-paper so any future recipe that
 # `rm -rf`s a scratch directory or `kb-root/` under a staged repository owes
 # the same check and can call this one rather than pasting it. `dir`'s own
@@ -180,7 +211,7 @@ guard-run-lock dir: _venv
         exit 1
     fi
 
-[doc("stage one arXiv paper as a throwaway consumer: git init, unpack, install the agent set, stub Makefile; every --* flag forwards verbatim to the root install recipe")]
+[doc("stage one arXiv paper as a throwaway consumer: git init, unpack, install the agent set, stub Makefile; every --* flag forwards to the root install recipe, --family gaining TIER_ALIAS_MAP unless a pin alias map is given")]
 stage-arxiv-paper id *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -227,14 +258,14 @@ stage-arxiv-paper id *args:
         git -C "${dir}" -c user.name=arxiv -c user.email=arxiv@invalid commit -qm "sources as fetched"
         git -C "${dir}" tag cleared
     fi
-    ( cd "{{justfile_directory()}}/.." && just install "kb-testing/${dir}" {{args}} )
+    just _install "kb-testing/${dir}" {{args}}
     git -C "${dir}" add -A
     git -C "${dir}" -c user.name=arxiv -c user.email=arxiv@invalid commit -qm "agent defs installed"
     git -C "${dir}" tag -d staged > /dev/null 2>&1 || true
     git -C "${dir}" tag staged
     printf 'staged %s\n' "${dir}"
 
-[doc("restage every paper in the survey corpus (stage-arxiv-paper per id) — every --* flag forwards verbatim to the root install recipe")]
+[doc("restage every paper in the survey corpus (stage-arxiv-paper per id) — every --* flag forwards to the root install recipe, --family gaining TIER_ALIAS_MAP unless a pin alias map is given")]
 stage-arxiv-corpus *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -257,7 +288,7 @@ stage-arxiv-corpus *args:
 # stage-arxiv-corpus's own parameter list, and no forwarding into a nested
 # `just` call is needed: the only nested call in its body is
 # `stage-arxiv-paper`, which never reads ARXIV_IDS itself.
-[doc("stage-arxiv-corpus over ARXIV_CANDIDATE_IDS instead of the corpus — same staged tree under ARXIV_STAGE (staging is keyed by id, so a candidate can never overwrite a corpus checkout or vice versa); every --* flag forwards verbatim to the root install recipe")]
+[doc("stage-arxiv-corpus over ARXIV_CANDIDATE_IDS instead of the corpus — same staged tree under ARXIV_STAGE (staging is keyed by id, so a candidate can never overwrite a corpus checkout or vice versa); every --* flag forwards to the root install recipe, --family gaining TIER_ALIAS_MAP unless a pin alias map is given")]
 stage-arxiv-corpus-candidates *args:
     @just --set ARXIV_IDS "{{ARXIV_CANDIDATE_IDS}}" stage-arxiv-corpus {{args}}
 
@@ -275,7 +306,7 @@ stage-arxiv-corpus-candidates *args:
 # deciding, for a repo this recipe knows nothing about, which commit counts as
 # "before the install" — that decision belongs to whoever staged the fixture
 # by hand the first time.
-[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed agent set, kb-root/, and scratch directory above that tag; dir is absolute or relative to the directory just was invoked from; every --* flag forwards verbatim to the root install recipe")]
+[doc("re-anchor a hand-staged consumer fixture (e.g. ModernCorp) to its `cleared` tag and reinstall the current agent set, so a subsequent driver build runs against current code instead of resuming a stale ledger; refuses a dir with no `cleared` tag; destroys the fixture's installed agent set, kb-root/, and scratch directory above that tag; dir is absolute or relative to the directory just was invoked from; every --* flag forwards to the root install recipe, --family gaining TIER_ALIAS_MAP unless a pin alias map is given")]
 stage-fixture dir *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -296,7 +327,7 @@ stage-fixture dir *args:
     printf 'staging %s: resetting to `cleared` (discards any kb-build ledger commits and the installed agent set, kb-root/ and scratch directory committed or left above it), then reinstalling the current agent set.\n' "${dir}" >&2
     git -C "${dir}" reset --hard cleared > /dev/null
     rm -rf ${scratch:+"${dir}/${scratch}"} "${dir}/kb-root"
-    ( cd "{{justfile_directory()}}/.." && just install "${dir}" {{args}} )
+    just _install "${dir}" {{args}}
     git -C "${dir}" add -A
     git -C "${dir}" -c user.name=kb-testing -c user.email=kb-testing@invalid commit -qm "agent defs installed"
     git -C "${dir}" tag -d staged > /dev/null 2>&1 || true

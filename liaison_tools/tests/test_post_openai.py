@@ -134,6 +134,29 @@ class TestApiKeyValidation(unittest.TestCase):
         self.assertIsNone(key)
 
 
+class TestSamplingKnobs(unittest.TestCase):
+    """_parse_top_p — the TOP_P envar's accepted range, (0.0, 1.0]."""
+
+    def _rejects(self, raw):
+        with contextlib.redirect_stderr(io.StringIO()) as captured, self.assertRaises(SystemExit):
+            post_openai._parse_top_p(raw)
+        self.assertIn("TOP_P", captured.getvalue())
+
+    def test_in_range_values_parse(self):
+        self.assertEqual(post_openai._parse_top_p("0.95"), 0.95)
+        self.assertEqual(post_openai._parse_top_p("1"), 1.0)
+
+    def test_zero_and_above_one_are_rejected(self):
+        self._rejects("0")
+        self._rejects("1.5")
+
+    def test_non_numeric_is_rejected(self):
+        self._rejects("high")
+
+    def test_default_sends_untruncated_top_p(self):
+        self.assertEqual(post_openai.DEFAULT_TOP_P, 1.0)
+
+
 class TestUsageExtraction(unittest.TestCase):
     """extract_usage / write_usage_stats — the USAGE_STATS_FILE side channel.
 
@@ -321,6 +344,7 @@ class TestEndToEndStubbedEndpoint(unittest.TestCase):
         "MAX_TOKENS",
         "ENABLE_THINKING",
         "TEMPERATURE",
+        "TOP_P",
         "DEBUG_POST",
         "DEBUG_RESPONSE",
         "USAGE_STATS_FILE",

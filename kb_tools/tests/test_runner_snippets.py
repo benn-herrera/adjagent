@@ -15,8 +15,11 @@ problem. The citation-grammar check is build-time only and is not among them.
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -113,3 +116,138 @@ def test_kb_verify_is_green_when_every_verifier_is(runner: str, green: Path) -> 
     done = _verify(runner, green)
 
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+_STUB_DRIVER = """\
+import os, sys, time
+from pathlib import Path
+run_dir = Path(sys.argv[sys.argv.index("--run-dir") + 1])
+(run_dir / "card").write_text("card\\n")
+print("stub-driver cwd=" + os.getcwd() + " argv=" + " ".join(sys.argv[1:]), flush=True)
+time.sleep(60)
+"""
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _consumer_with_snippets(root: Path) -> Path:
+    """A consumer whose installed ``agents/kb_tools/`` is a real directory holding
+    the real snippets, copied as an install copies them. The snippets set
+    PYTHONPATH to their own install location, so anything a recipe is to run
+    in place of the real tools has to live there. Returns that ``kb_tools``."""
+    kb_tools = root / ".claude" / "agents" / "kb_tools"
+    snippets = kb_tools / "runner-snippets"
+    snippets.mkdir(parents=True)
+    for name in ("kb.just", "kb.mk"):
+        shutil.copy(_AGENTS_SURFACE / "kb_tools" / "runner-snippets" / name, snippets / name)
+    (root / "justfile").write_text("import? '.claude/agents/kb_tools/runner-snippets/kb.just'\n")
+    (root / "Makefile").write_text("-include .claude/agents/kb_tools/runner-snippets/kb.mk\n")
+    return kb_tools
+
+
+@pytest.fixture
+def build_consumer(tmp_path: Path) -> Iterator[Path]:
+    """The consumer with a stub ``kb_driver`` that writes a card and sleeps."""
+    root = tmp_path / "consumer"
+    kb_tools = _consumer_with_snippets(root)
+    (kb_tools / "__init__.py").write_text("")
+    (kb_tools / "kb_driver.py").write_text(_STUB_DRIVER)
+    yield root
+    pid_file = root / ".claude-temp" / "kb-driver-live" / "driver.pid"
+    if pid_file.exists() and _alive(int(pid_file.read_text())):
+        os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+
+@pytest.fixture
+def await_consumer(tmp_path: Path) -> Path:
+    """The consumer with the real ``kb_tools`` linked beside its copied snippets
+    (``__file__`` keeps the linked path, so the tools still locate the
+    consumer's ``.claude-temp``), and a live dir holding a console log and the
+    pid of a process that has exited."""
+    root = tmp_path / "consumer"
+    kb_tools = _consumer_with_snippets(root)
+    for entry in (_AGENTS_SURFACE / "kb_tools").iterdir():
+        if entry.name != "runner-snippets":
+            (kb_tools / entry.name).symlink_to(entry)
+    live = root / ".claude-temp" / "kb-driver-live"
+    live.mkdir(parents=True)
+    (live / "console.log").write_text("no card here\n")
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    (live / "driver.pid").write_text(f"{gone.pid}\n")
+    return root
+
+
+def _build_args(runner: str, *sources: str, flags: str = "") -> list[str]:
+    if runner == "just":
+        return [runner, "kb-build", *sources, *flags.split()]
+    return [runner, "kb-build", f"SOURCES={' '.join(sources)}", *([f"DRIVER_FLAGS={flags}"] if flags else [])]
+
+
+def _run(args: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.parametrize("runner", _RUNNERS)
+def test_kb_build_launches_detached_refuses_a_second_and_kill_ends_it(runner: str, build_consumer: Path) -> None:
+    live = build_consumer / ".claude-temp" / "kb-driver-live"
+
+    launched = _run(_build_args(runner, "a.tex", "b.tex"), build_consumer)
+
+    assert launched.returncode == 0, launched.stdout + launched.stderr
+    pid = int((live / "driver.pid").read_text())
+    assert _alive(pid)
+    assert f"launched pid {pid}" in launched.stdout
+    assert str(live / "console.log") in launched.stdout
+    assert f"then: {runner} kb-build-await" in launched.stdout
+    deadline = time.monotonic() + 10
+    while "stub-driver" not in (live / "console.log").read_text() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    console = (live / "console.log").read_text()
+    assert f"cwd={build_consumer.resolve()}" in console
+    assert f"argv=run --source a.tex --source b.tex --run-dir {live}/runs" in console
+    assert (live / "runs" / "card").is_file()
+
+    second = _run(_build_args(runner, "a.tex"), build_consumer)
+
+    assert second.returncode != 0
+    assert str(pid) in second.stderr
+    assert _alive(pid)
+
+    killed = _run([runner, "kb-build-kill"], build_consumer)
+
+    assert killed.returncode == 0, killed.stdout + killed.stderr
+    assert str(pid) in killed.stdout
+    assert not _alive(pid)
+    assert (live / "driver.pid").is_file()
+
+
+@pytest.mark.parametrize("runner", _RUNNERS)
+def test_kb_build_passes_driver_flags_after_the_sources(runner: str, build_consumer: Path) -> None:
+    live = build_consumer / ".claude-temp" / "kb-driver-live"
+
+    launched = _run(_build_args(runner, "a.tex", "b.tex", flags="--no-inference --decide s.k=yes"), build_consumer)
+
+    assert launched.returncode == 0, launched.stdout + launched.stderr
+    deadline = time.monotonic() + 10
+    while "stub-driver" not in (live / "console.log").read_text() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert (
+        f"argv=run --source a.tex --source b.tex --no-inference --decide s.k=yes --run-dir {live}/runs"
+        in (live / "console.log").read_text()
+    )
+
+
+@pytest.mark.parametrize("runner", _RUNNERS)
+def test_kb_build_await_passes_the_op_output_and_exit_code_through(runner: str, await_consumer: Path) -> None:
+    """``make`` reports any failed recipe as 2, so only ``just`` can carry the op's own code."""
+    done = _run([runner, "kb-build-await"], await_consumer)
+
+    assert "await-build: exited" in done.stdout
+    assert done.returncode == (3 if runner == "just" else 2)

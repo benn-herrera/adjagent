@@ -38,8 +38,6 @@ analysis. Application Verifier to catch handle leaks and heap corruption during 
 - UAC virtualization redirects registry/file writes — test with non-admin users
 - Thread pool exhaustion from blocking Task.Run — use dedicated threads for long-running work
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - Complete C#/C++ with using statements, .csproj config when relevant (TargetFramework,
@@ -49,22 +47,14 @@ analysis. Application Verifier to catch handle leaks and heap corruption during 
 - Security: credentials via CredentialManager/DPAPI (never plaintext), UAC considerations
 - Diagnose: UAC, antivirus interference, bitness mismatches first
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent=".csproj, app manifests, WiX installer definitions, registry scripts"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="at Warning/Error level with structured context"!@ @!boundary-check-consumers sink="Event Log, ETW"!@
+@!platform-testing-lead level="at Warning/Error level with structured context" sink="Event Log, ETW"!@
 
 *Unit tests*: xUnit or MSTest. @!unit-test-scope artifact="UI state"!@
-@!mocking-threshold variant="platform-long"!@
+@!mocking-threshold variant="platform"!@
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. For UI: WinAppDriver
 or UI Automation. Test across privilege levels (standard user, UAC prompt, admin).
@@ -74,21 +64,7 @@ or UI Automation. Test across privilege levels (standard user, UAC prompt, admin
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`msbuild`, `dotnet build`, or `dotnet test`"!@
 

@@ -49,6 +49,11 @@ recipe about to wipe a workspace) can ask whether a build is running in this
 repository. It writes nothing and takes no lock: the answer is ``kb_lock``'s,
 and it rides stdout rather than the exit status.
 
+``await-build`` waits on the build the runner's ``kb-build`` target launched
+detached, in :func:`build_live_dir`, and prints where it stands; it too writes
+nothing and takes no lock. :func:`build_cmd` is the command a relay card names
+to run that build again.
+
 The metadata **write** ops — :data:`WRITE_OPS` — join the set as the front
 end of ``kb_write``. Each takes its values in a TOML
 file named by ``--values`` rather than on the command line, and the register
@@ -66,9 +71,12 @@ Stdlib only.
 
 import argparse
 import functools
+import os
 import re
+import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,6 +113,19 @@ def scratch_dirname() -> str:
 # emitted remediation hints stay single-sourced.
 TARGET_REFRESH = "kb-refresh"
 TARGET_VERIFY = "kb-verify"
+TARGET_BUILD = "kb-build"
+
+# The detached build's layout under the project's scratch directory, as the
+# `kb-build` target lays it out (`runner-snippets/kb.just`, `kb.mk`): the
+# driver's pid, its stdout and stderr, and the parent of its run directories.
+BUILD_LIVE_DIRNAME = "kb-driver-live"
+BUILD_PID_FILENAME = "driver.pid"
+BUILD_CONSOLE_FILENAME = "console.log"
+BUILD_RUNS_DIRNAME = "runs"
+
+# How `make kb-build` takes what `just kb-build` takes as arguments.
+MAKE_BUILD_SOURCES_VAR = "SOURCES"
+MAKE_BUILD_FLAGS_VAR = "DRIVER_FLAGS"
 
 # Runner files probed at the repo root, in priority order: any justfile
 # variant selects `just`, else any make variant selects `make`.
@@ -245,6 +266,11 @@ NO_INFERENCE_FLAG = "--no-inference"
 #: driver's own constant. This is the module it can read.
 RUN_DIR_FLAG = "--run-dir"
 
+#: One source a build reads — the driver's flag, spelled here for
+#: :data:`RUN_DIR_FLAG`'s reason: :func:`build_cmd` picks the sources out of a
+#: resume line by it, to hand them to the runner's target as its arguments.
+SOURCE_FLAG = "--source"
+
 # The stage-coverage read: what one stage still has to cover, asked instead of
 # reconstructed. It records nothing, so it is a reading verb over the ledger
 # rather than a fourth ledger op.
@@ -267,6 +293,25 @@ RUN_LOCK_KEYS: tuple[str, ...] = ("state", "state_dir", "lock")
 #: :data:`OP_SHOW_RUN_LOCK`'s two answers to "is a build running here?".
 RUN_LOCK_HELD = "held"
 RUN_LOCK_ABSENT = "absent"
+
+# The detached build, awaited: blocks until the build the `kb-build` target
+# launched moves on, then prints where it stands.
+OP_AWAIT_BUILD = "await-build"
+
+#: How often :data:`OP_AWAIT_BUILD` reads the console log and the pid.
+AWAIT_POLL_SECONDS = 0.5
+
+#: :data:`OP_AWAIT_BUILD`'s three answers, each printed as its output's first
+#: line after ``await-build:``. The line carries the answer as well as the exit
+#: status does, because ``make`` reports every failed recipe as 2 and so a
+#: caller under it never sees the op's own code.
+AWAIT_CHANGED = "changed"
+AWAIT_EXITED = "exited"
+AWAIT_NOTHING = "nothing-to-await"
+
+#: :data:`OP_AWAIT_BUILD`'s codes beside 0 (the card changed).
+EXIT_BUILD_EXITED = 3
+EXIT_NOTHING_TO_AWAIT = 2
 
 # The metadata write ops a surface binds. Their
 # semantics live in `kb_write.ops`, which imports this module — so the direction
@@ -437,6 +482,52 @@ def refresh_cmd(repo_root: Path | None = None) -> str:
 def verify_cmd(repo_root: Path | None = None) -> str:
     """Invocation hint for the verify action (see :func:`runner_cmd`)."""
     return runner_cmd(TARGET_VERIFY, "verify_kb_metadata", repo_root)
+
+
+def build_live_dir() -> Path:
+    """Where the ``kb-build`` target keeps a detached build: ``<scratch>/kb-driver-live``."""
+    return install_location.current().scratch_dir / BUILD_LIVE_DIRNAME
+
+
+def build_cmd(driver_flags: str, *, unquoted_tail: str = "") -> str:
+    """The command that runs a build again with ``driver_flags``, the driver's ``run`` flags as one shell string.
+
+    A run the ``kb-build`` target launched — its ``--run-dir`` is that target's
+    ``runs/`` and the repository carries a runner file — gets the target back:
+    ``just kb-build <source> ... <flags>`` or ``make kb-build SOURCES="<source> ..."
+    DRIVER_FLAGS="<flags>"``, the ``--run-dir`` left to the target, which
+    passes that same one. Any other run gets the driver's own line, flags
+    verbatim, because the target would put the resumed run's evidence in a
+    directory the first run's is not in.
+
+    ``unquoted_tail`` is appended to the flags as written, never re-quoted, so
+    a placeholder the reader substitutes (``<answer>``) reads as one.
+    """
+    raw = " ".join(part for part in (f"{driver_invocation()} run", driver_flags, unquoted_tail) if part)
+    tokens = iter(shlex.split(driver_flags))
+    sources: list[str] = []
+    rest: list[str] = []
+    run_dir: str | None = None
+    for token in tokens:
+        if token == SOURCE_FLAG:
+            sources.append(next(tokens, ""))
+        elif token == RUN_DIR_FLAG:
+            run_dir = next(tokens, "")
+        else:
+            rest.append(token)
+    if run_dir is None or Path(run_dir).resolve() != (build_live_dir() / BUILD_RUNS_DIRNAME).resolve():
+        return raw
+    try:
+        runner = detected_runner(find_git_root())
+    except RepoRootError:
+        return raw
+    flags = " ".join(part for part in (shlex.join(rest), unquoted_tail) if part)
+    if runner == "just":
+        return " ".join(part for part in ("just", TARGET_BUILD, shlex.join(sources), flags) if part)
+    if runner == "make":
+        make = f'make {TARGET_BUILD} {MAKE_BUILD_SOURCES_VAR}="{" ".join(sources)}"'
+        return f'{make} {MAKE_BUILD_FLAGS_VAR}="{flags}"' if flags else make
+    return raw
 
 
 def _find_installer_target(repo_root: Path, runner: str | None) -> tuple[str, Path] | None:
@@ -1211,6 +1302,81 @@ def _handle_show_run_lock(args: argparse.Namespace) -> int:
     return 0
 
 
+def _driver_alive(pid_file: Path) -> bool:
+    """Whether the process ``pid_file`` names is running. No file names none.
+
+    The file is the ``kb-build`` target's, so its content is checked rather
+    than trusted: anything but a positive pid is reported and read as no
+    driver — ``os.kill`` given 0 or a negative number signals a process group.
+    """
+    try:
+        text = pid_file.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return False
+    if not text.isdigit() or int(text) <= 0:
+        to_stderr(f"{OP_AWAIT_BUILD}: {pid_file} holds {text!r}, not a pid; reading it as no live driver")
+        return False
+    try:
+        os.kill(int(text), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists; another user owns it
+    return True
+
+
+def await_build(
+    live_dir: Path,
+    *,
+    alive: Callable[[Path], bool] = _driver_alive,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Block until the detached build in ``live_dir`` moves on; print where it stands.
+
+    It has moved on when the newest status card in its console log is not the
+    one there at the call, or when its driver is no longer running. Liveness is
+    read before the log on every pass, so a driver found exited has written
+    everything it ever will: its card and relay card are final.
+    """
+    from kb_tools.kb_driver import checklist
+
+    pid_file = live_dir / BUILD_PID_FILENAME
+    console = live_dir / BUILD_CONSOLE_FILENAME
+
+    def read() -> tuple[str, "checklist.ConsoleTail"]:
+        try:
+            text = console.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            text = ""
+        return text, checklist.read_console(text)
+
+    at_call = read()[1].card
+    while True:
+        running = alive(pid_file)
+        text, now = read()
+        if not running and not console.exists():
+            print(f"{OP_AWAIT_BUILD}: {AWAIT_NOTHING}")
+            print(f"no live build driver and no {BUILD_CONSOLE_FILENAME} in {live_dir}: nothing to await")
+            return EXIT_NOTHING_TO_AWAIT
+        if not running:
+            print(f"{OP_AWAIT_BUILD}: {AWAIT_EXITED}")
+            start, end = now.span
+            print(text[start:end], end="")
+            if not now.relay:
+                print(f"the driver exited without a complete relay card; its whole output is {console}")
+            return EXIT_BUILD_EXITED
+        if now.card != at_call:
+            print(f"{OP_AWAIT_BUILD}: {AWAIT_CHANGED}")
+            for line in now.card:
+                print(line)
+            return 0
+        sleep(AWAIT_POLL_SECONDS)
+
+
+def _handle_await_build(args: argparse.Namespace) -> int:
+    return await_build(build_live_dir())
+
+
 def _handle_write_op(args: argparse.Namespace) -> int:
     """One adapter for every write op — root discovery, the call, the report.
 
@@ -1531,6 +1697,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_run_lock = add_parser(OP_SHOW_RUN_LOCK, help=show_run_lock_help, description=show_run_lock_help)
     show_run_lock.set_defaults(handler=_handle_show_run_lock)
+
+    await_build_help = (
+        f"wait for the build the {TARGET_BUILD} target launched to move on, then print where it stands: "
+        f"it returns when the build's status card changes or its driver exits. It has no timeout, so run "
+        f"it in the background. Its line starting '{OP_AWAIT_BUILD}:' is the answer: "
+        f"'{OP_AWAIT_BUILD}: {AWAIT_CHANGED}' (exit 0) — the build is still running; read the status card "
+        f"below it, then run this op again. '{OP_AWAIT_BUILD}: {AWAIT_EXITED}' (exit {EXIT_BUILD_EXITED}) — "
+        f"the build has stopped; below it come the status card and the relay card that ended the run, both "
+        f"verbatim, and the relay card says what to do next. '{OP_AWAIT_BUILD}: {AWAIT_NOTHING}' "
+        f"(exit {EXIT_NOTHING_TO_AWAIT}) — no build was launched, so there is nothing to wait for. Under make, "
+        f"exit {EXIT_BUILD_EXITED} reaches you as 2, so act on that line rather than on the exit code. "
+        f"Writes nothing and takes no lock"
+    )
+    await_build_cmd = add_parser(OP_AWAIT_BUILD, help=await_build_help, description=await_build_help)
+    await_build_cmd.set_defaults(handler=_handle_await_build)
 
     validate_build_help = (
         "walk a built KB tree and check its structure — every non-root document up-linked to its own "

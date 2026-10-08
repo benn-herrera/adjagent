@@ -42,8 +42,6 @@ entitlement for JIT. Universal binaries (x86_64 + arm64) required for broad comp
 - NSOpenPanel/NSSavePanel must be on main thread
 - Menu bar apps (LSUIElement) need programmatic window display
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - Complete Swift/Objective-C with imports, framework link flags
@@ -53,19 +51,11 @@ entitlement for JIT. Universal binaries (x86_64 + arm64) required for broad comp
 - Security: sandboxing for App Store
 - Diagnose: sandboxing access, code signing, notarization issues first
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent="Info.plist, entitlements, Package.swift, Xcode project settings"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="as warnings/errors with structured metadata"!@ @!boundary-check-consumers sink="Console.app"!@
+@!platform-testing-lead level="as warnings/errors with structured metadata" sink="Console.app"!@
 
 *Unit tests*: XCTest. @!unit-test-scope artifact="UI appearance"!@
 @!mocking-threshold variant="platform"!@
@@ -78,21 +68,7 @@ macOS-version-specific behaviors. @!integration-logging-signal sink="Console.app
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`xcodebuild`, `swift build`, or `swift test`"!@
 

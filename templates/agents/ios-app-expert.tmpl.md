@@ -52,8 +52,6 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 - Never force-unwrap in production unless invariant is provably maintained
 - Info.plist keys required for sensors/camera/mic—crashes without them
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - Complete, compilable code with imports (unless snippet requested)
@@ -63,19 +61,11 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 - For C integration: provide complete module map and Package.swift
 - Verify thread safety (queue/actor), memory management (weak/unowned), Sendable conformance
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent="Info.plist, entitlements, Package.swift, Xcode project settings"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="as warnings/errors with structured metadata"!@ @!boundary-check-consumers sink="Console.app"!@
+@!platform-testing-lead level="as warnings/errors with structured metadata" sink="Console.app"!@
 
 *Unit tests*: XCTest with `async`/`await` and `runTest`/`TestClock` for concurrency.
 @!unit-test-scope artifact="UI appearance"!@ @!mocking-threshold variant="platform"!@
@@ -88,21 +78,7 @@ memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lif
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`xcodebuild`, `swift build`, or `swift test`"!@
 

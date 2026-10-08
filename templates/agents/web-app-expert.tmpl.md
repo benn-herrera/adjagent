@@ -55,8 +55,6 @@ calls, use Transferable/SharedArrayBuffer. MIME type must be `application/wasm`.
 - HTTPS required for secure contexts (Service Workers, SharedArrayBuffer, etc.)
 - Mixed content blocks in production—warn proactively
 
-## Code Authoring Standards
-
 @!authoring-standards-lead!@
 
 - **Progressive enhancement**: baseline works everywhere, enhancements layer on. If a feature has
@@ -74,22 +72,14 @@ calls, use Transferable/SharedArrayBuffer. MIME type must be `application/wasm`.
 - Prefer small-footprint npm packages; mention if no dependency needed
 - CSS over JS when possible, TypeScript strict mode, explicit error handling, teardown cleanup
 
-## When Reviewing
-
-@!test-review!@
-
-## Parallel Execution
+@!when-reviewing variant="section"!@
 
 @!parallel-execution variant="platform" adjacent="package.json, tsconfig.json, vite/webpack config, service worker manifests"!@
 
-## Testing
-
-Three layers with distinct purposes:
-
-@!boundary-checks-lead!@ @!boundary-check-routing level="at `warn`/`error` level with structured context objects"!@ @!boundary-check-consumers sink="browser DevTools, log aggregators"!@
+@!platform-testing-lead level="at `warn`/`error` level with structured context objects" sink="browser DevTools, log aggregators"!@
 
 *Unit tests*: Vitest or Jest. @!unit-test-scope artifact="DOM snapshots"!@
-@!mocking-threshold variant="platform-long"!@
+@!mocking-threshold variant="platform"!@
 
 *Integration tests*: Playwright for browser-level flows; test across Chrome, Firefox, and Safari.
 Test on mobile viewport sizes. @!integration-logging-signal sink="the test output"!@
@@ -98,21 +88,7 @@ Test on mobile viewport sizes. @!integration-logging-signal sink="the test outpu
 
 @!verification-evidence!@
 
-## Code Standards
-
-@!key-guideline!@
-
-@!incumbent-search!@
-
-@!prove-replacement-first variant="change"!@
-
-@!tests-not-runtime-checks!@
-
-@!separation-of-concerns!@
-
-@!names-read-without-the-task!@
-
-@!project-conventions-outrank!@
+@!code-principles variant="platform"!@
 
 @!build-system direct="`npm`, `vite`, `vitest`, or `playwright`"!@
 
