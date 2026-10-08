@@ -22,7 +22,8 @@ def _add_tuning_flags(verb: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """Two verbs, one required. `render --out DIR` writes every definition; `explain NAME` prints one,
-    each section headed by the class and non-default fields that produced it. Both take --harness NAME
+    each section headed by its class and fields, and each paragraph a field supplied by that field's
+    name. Both take --harness NAME
     (default claude), --family NAME (default claude), --model-tier-map SPEC and
     --model-pin-tier-alias-map SPEC. allow_abbrev=False on every parser."""
     parser = argparse.ArgumentParser(prog="python3 -m adjagent", allow_abbrev=False)
@@ -31,7 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--out", required=True, type=Path, metavar="DIR", help="an existing output root")
     _add_tuning_flags(render)
     explain = verbs.add_parser("explain", help="print one definition with each section's source", allow_abbrev=False)
-    explain.add_argument("name", help="the definition's output name")
+    explain.add_argument(
+        "name", help="the definition's output name, or its output path (agents/mad/x.md) where two share a name"
+    )
     _add_tuning_flags(explain)
     return parser
 

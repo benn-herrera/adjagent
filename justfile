@@ -267,12 +267,13 @@ render-next *args:
 # outcome of doing work, so differences exit zero. Only a comparison that could
 # not be MADE is fatal — a missing slot, or a file that cannot be read.
 #
-# Files compare by body, not by bytes: a file whose first line is `---` and whose
+# Files compare by text, not by bytes: a file whose first line is `---` and whose
 # next lines have exactly one of the two banner shapes has those lines replaced
-# by the one constant line `# !BANNER!`, and two files are the same when their
-# bodies are byte-identical (devtools/render_diff.py states the shapes). The
-# output keeps `diff -rq`'s two line forms. Files compare by text: whitespace
-# inside a paragraph outside fenced code is collapsed before the comparison.
+# by the one constant line `# !BANNER!`; then, outside fenced code, whitespace
+# inside a paragraph collapses to one space, while headings, table rows, list
+# items, fenced blocks and frontmatter stay exact (devtools/render_diff.py
+# states the rules). Two files are the same when that text is identical. The
+# output keeps `diff -rq`'s two line forms.
 [doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
 render-diff a="reference" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"

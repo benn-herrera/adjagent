@@ -1,13 +1,14 @@
-"""`Render`, the one parameter a definition function receives, and the two map
-flags that build it. Composes no text and does no I/O."""
+"""`Render`, the one parameter a section receives, and the two map flags that
+build it. Composes no text and does no I/O."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from adjagent.definition import TIERS, Anchor, Tier
 from adjagent.errors import InputError
-from adjagent.family import FAMILIES, Family
-from adjagent.harness import HARNESSES, Harness
+from adjagent.family import Family
+from adjagent.harness import Harness
+from adjagent.loading import load
+from adjagent.vocabulary import TIERS, Anchor, Tier
 
 TierMap = Mapping[Tier, str]
 MAP_ALL = "all"
@@ -58,12 +59,14 @@ def map_spec(mapping: TierMap) -> str:
 
 @dataclass(frozen=True)
 class Render:
-    """The one parameter a definition function receives: harness, family, and the invocation's two maps."""
+    """The one parameter a section receives: harness, family, the invocation's two maps, and the seat
+    of the definition being rendered."""
 
     harness: Harness
     family: Family
     tier_map: TierMap  # effective tier -> member; total
     alias_map: TierMap | None = None  # tier -> alias; total when set
+    seat: Tier | None = None  # the rendered definition's tier; render_definition binds it
 
     def __post_init__(self) -> None:
         """Refuse a non-total map, or a family member override no tier reaches (family tiers ∪ tier_map)."""
@@ -85,14 +88,14 @@ class Render:
         text = (self.tier_map if self.alias_map is None else self.alias_map)[tier]
         return self.harness.inherit_text if text == INHERIT_MODEL else text
 
-    def overlay(self, anchor: Anchor, *, tier: Tier | None) -> str:
-        """The anchor's text: tier_map[tier]'s member override, else family-wide text, else "" (tier None:
+    def overlay(self, anchor: Anchor) -> str:
+        """The anchor's text: tier_map[seat]'s member override, else family-wide text, else "" (seat None:
         family-wide only)."""
         overlay = self.family.overlays.get(anchor)
         if overlay is None:
             return ""
-        if tier is not None and self.tier_map[tier] in overlay.members:
-            return overlay.members[self.tier_map[tier]]
+        if self.seat is not None and self.tier_map[self.seat] in overlay.members:
+            return overlay.members[self.tier_map[self.seat]]
         return overlay.text or ""
 
     @property
@@ -106,14 +109,16 @@ def build_render(*, harness: str, family: str, tier_spec: str | None, alias_spec
     """The CLI's Render. Unknown harness/family names are refused, listing the names there are (a
     path-shaped --family included). Then every tier's model text is checked against
     harness.model_pattern, refusing with tier, value, supplier and model_shape."""
-    if harness not in HARNESSES:
-        raise InputError(f"unknown harness '{harness}' — harnesses are {', '.join(sorted(HARNESSES))}")
-    if family not in FAMILIES:
-        raise InputError(f"--family '{family}' names no family — families are {', '.join(sorted(FAMILIES))}")
-    loaded = FAMILIES[family]
+    harnesses = load("adjagent.harnesses", "HARNESS")
+    if harness not in harnesses:
+        raise InputError(f"unknown harness '{harness}' — harnesses are {', '.join(harnesses)}")
+    families = load("adjagent.families", "FAMILY")
+    if family not in families:
+        raise InputError(f"--family '{family}' names no family — families are {', '.join(families)}")
+    loaded = families[family]
     tier_map = dict(loaded.tiers) if tier_spec is None else parse_tier_map(tier_spec, flag=TIER_MAP_FLAG)
     alias_map = None if alias_spec is None else parse_tier_map(alias_spec, flag=ALIAS_MAP_FLAG)
-    render = Render(harness=HARNESSES[harness], family=loaded, tier_map=tier_map, alias_map=alias_map)
+    render = Render(harness=harnesses[harness], family=loaded, tier_map=tier_map, alias_map=alias_map)
     if alias_map is not None:
         supplier = ALIAS_MAP_FLAG
     elif tier_spec is not None:

@@ -7,8 +7,9 @@ its banner still differs, and a block of any other shape stays in place, so it s
 rather than hiding one. Second (`collapsed`), whitespace a model does not read is dropped: outside
 the frontmatter and fenced code, each paragraph is joined into one line with runs of spaces
 collapsed to one, each list item (a line starting `- `, `* `, `+ ` or `1. `/`1) `, plus its
-continuation lines) is likewise its own one-line unit, and each run of blank lines is kept as one
-blank line. The frontmatter (from a first line `---` to the next `---`) and every fenced block stay
+continuation lines) is likewise its own one-line unit, each ATX heading (a line matching
+` {0,3}#{1,6}` then a space or its end) and each table row (a line whose first non-space character is
+`|`) is its own unit, kept exact, and each run of blank lines is kept as one blank line. The frontmatter (from a first line `---` to the next `---`) and every fenced block stay
 byte-exact. Fences follow CommonMark: an opener is three or more backticks with an info string
 holding no backtick, or three or more tildes; the closer is the same character, at least as many,
 and nothing else.
@@ -35,6 +36,7 @@ NEW = (b"# !GENERATED! from ", b"# !TUNING! ")
 FENCE_OPEN = re.compile(rb" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 FENCE_CLOSE = re.compile(rb" {0,3}(`{3,}|~{3,})[ \t]*")
 LIST_ITEM = re.compile(rb" {0,3}(?:[-*+]|\d+[.)]) ")
+HEADING = re.compile(rb" {0,3}#{1,6}( |$)")
 
 
 def body(data: bytes) -> bytes:
@@ -69,6 +71,9 @@ def collapsed(data: bytes) -> bytes:
             flush()
             out.append(line)
             fence = opening[1] or opening[2]
+        elif HEADING.match(line) or line.lstrip().startswith(b"|"):
+            flush()
+            out.append(line)
         elif line.strip():
             if LIST_ITEM.match(line):
                 flush()
