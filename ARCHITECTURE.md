@@ -318,10 +318,11 @@ detect — staleness of a build product — a free re-render fixes.
 Three instruments cover the ground it stood on, each comparing two things that were produced
 separately:
 
-- **`just render-diff`** — `diff -rq` between two slots under `rendered/`, each produced by its own
-  `just render` invocation (its flags recorded in the slot as `RENDER-FLAGS.txt`). This is where a
-  refactor's blast radius is read, and where a definition no template declares any more shows up as
-  an `Only in` line.
+- **`just render-diff`** — a body comparison between two slots under `rendered/`, each file with its
+  banner block replaced by one constant line, each slot produced by its own `just render`
+  invocation (its flags recorded in the slot as `RENDER-FLAGS.txt`). This is where a refactor's
+  blast radius is read, and where a definition no template declares any more shows up as an
+  `Only in` line.
 - **The install's prune** (`prune_stale`, above) — an installed tree's stale definitions are
   *retired* rather than reported, by the install that owns the tree, under SPEC.md's Write Safety
   rule that a banner plus a matching body hash is what makes a file ours to remove.
@@ -357,9 +358,10 @@ and, for the harness agents file it adds to the slot, through the private
 That recipe is a stable interface rather than a convenience: its name and arguments do not change
 incompatibly, so a later revision can invoke it in a worktree of an earlier one, while the
 `dev render-agents-file` subcommand behind it may change. `just render-diff` is not one of them: it
-never invokes `gen_defs`, only `diff -rq` between two already-rendered trees under `rendered/`, so
-it compares this mechanism's output rather than driving it. No other invocation (direct `python3`
-calls, ad-hoc scripting against `shared-chunks.toml`, hand-copying a surface into a project) is
+never invokes `gen_defs`, only compares the bodies of two already-rendered trees under `rendered/`,
+each file with its banner block replaced by one constant line, so it compares this mechanism's
+output rather than driving it. No other invocation (direct `python3` calls, ad-hoc scripting
+against `shared-chunks.toml`, hand-copying a surface into a project) is
 sanctioned.
 
 ## Subsystem Map

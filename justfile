@@ -228,29 +228,53 @@ render *args:
 render-agents-file harness out:
     PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} dev render-agents-file "$1" "$2"
 
-# Reports and never gates: a difference between two slots is the expected
-# outcome of doing work, so `diff -rq`'s exit 1 is swallowed. Only a
-# comparison that could not be MADE is fatal — a missing slot, or `diff(1)`
-# itself in trouble (status 2).
-[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
-render-diff a="reference" b="latest":
+# The 1.0 generator's render, beside `render` until stage 4 folds it in. It
+# reads its arguments as `render` does: the first argument that is not a `--`
+# flag, wherever it sits, is the slug (default `next`); every other argument
+# forwards verbatim to `python3 -m adjagent render` and is recorded in the slot
+# as RENDER-FLAGS.txt. A slug starting with `reference` is refused with nothing
+# touched: those slots are the pre-1.0 oracle, and only the pre-1.0 path renders them.
+[doc("[dev] render the 1.0 generator (python3 -m adjagent render) into rendered/<slug>/ (slug defaults to next; the first non-flag argument, in any position, is the slug) — refuses a slug starting with reference; every --* flag forwards verbatim and is recorded in RENDER-FLAGS.txt")]
+render-next *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    a_dir="{{PROJECT_ROOT / RENDERED_DIR}}/{{a}}"
-    b_dir="{{PROJECT_ROOT / RENDERED_DIR}}/{{b}}"
-    if [[ ! -d "${a_dir}" ]]; then
-        printf 'error: %s does not exist — run '"'"'just render {{a}}'"'"' first\n' "${a_dir}" >&2
+    slug="next"
+    args=()
+    have_slug=""
+    for arg in "$@"; do
+        if [[ -z "${have_slug}" && "${arg}" != --* ]]; then
+            slug="${arg}"
+            have_slug=1
+        else
+            args+=("${arg}")
+        fi
+    done
+    if [[ "${slug}" == reference* ]]; then
+        printf '%s\n' "error: slot '${slug}' is protected — a slug starting with 'reference' is the pre-1.0 oracle, which render-next never renders" >&2
         exit 1
     fi
-    if [[ ! -d "${b_dir}" ]]; then
-        printf 'error: %s does not exist — run '"'"'just render {{b}}'"'"' first\n' "${b_dir}" >&2
-        exit 1
+    out="{{PROJECT_ROOT / RENDERED_DIR}}/${slug}"
+    rm -rf "${out}"
+    mkdir -p "${out}"
+    if [[ "${#args[@]}" -gt 0 ]]; then
+        printf '%s\n' "${args[@]}" > "${out}/RENDER-FLAGS.txt"
+    else
+        : > "${out}/RENDER-FLAGS.txt"
     fi
-    diff_status=0
-    diff -rq "${a_dir}" "${b_dir}" || diff_status="$?"
-    if [[ "${diff_status}" -eq 2 ]]; then
-        exit 1
-    fi
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m adjagent render --out "${out}" ${args[@]+"${args[@]}"}
+
+# Reports and never gates: a difference between two slots is the expected
+# outcome of doing work, so differences exit zero. Only a comparison that could
+# not be MADE is fatal — a missing slot, or a file that cannot be read.
+#
+# Files compare by body, not by bytes: a file whose first line is `---` and whose
+# next lines have exactly one of the two banner shapes has those lines replaced
+# by the one constant line `# !BANNER!`, and two files are the same when their
+# bodies are byte-identical (devtools/render_diff.py states the shapes). The
+# output keeps `diff -rq`'s two line forms.
+[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by body, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
+render-diff a="reference" b="latest":
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
 # The shipped packages are imported as top-level packages (`kb_tools`,
 # `liaison_tools`), and their sources sit at the repository root — so the
@@ -325,8 +349,8 @@ format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
-        black_isort_paths=(kb_tools liaison_tools tests gen_defs devtools)
-        flake8_paths=(kb_tools liaison_tools gen_defs devtools tests)
+        black_isort_paths=(kb_tools liaison_tools tests gen_defs adjagent devtools)
+        flake8_paths=(kb_tools liaison_tools gen_defs adjagent devtools tests)
     else
         black_isort_paths=("$@")
         flake8_paths=("$@")
@@ -373,6 +397,7 @@ sweep-python *args:
 # One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
 # ending in `/` matches everything under it.
 TEST_SURFACE_MAP := "
+adjagent/ gen_defs
 gen_defs/ gen_defs
 templates/ gen_defs
 tests/ gen_defs
