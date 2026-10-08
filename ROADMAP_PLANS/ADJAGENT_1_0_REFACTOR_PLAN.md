@@ -24,10 +24,12 @@ owner approves.
    tools, tier and an ordered list of sections. A shared section is a function taking keyword
    arguments and returning text. Variation is a parameter; forwarding is a call; scope is the
    language's. There is no marker grammar, no namespace vocabulary, no expander.
-2. **Consumers track rendered output.** Every consuming project commits its rendered agent set;
-   `git diff` after a render is the drift check there. This repository's own harness directory
-   stays an untracked install target (`CONVENTIONS.md`, "An untracked file under `.claude/` … is
-   render or install output").
+2. **Consumers track rendered output and do not edit it.** Every consuming project commits its
+   rendered agent set; `git diff` after a render is the drift check there. The set is not for
+   local edit: a change request comes to this project for evaluation, implementation and
+   availability to every consumer, and a consumer's own needs are met in its `CONVENTIONS.md`.
+   This repository's own harness directory stays an untracked install target (`CONVENTIONS.md`,
+   "An untracked file under `.claude/` … is render or install output").
 3. **Stdlib only, no project table beyond a name.** The generator runs as `python3 -m adjagent`
    against the system interpreter. Composition in functions needs nothing a template engine would.
 4. **Prose lives in Python.** Triple-quoted raw strings in the section module that parameterizes
@@ -43,9 +45,11 @@ owner approves.
 7. **Implementation-neutral tooling stays.** A target or test that reads rendered output or the
    consumer side keeps its code. One that reads `templates/` or imports `gen_defs` is re-pointed,
    rebuilt around its purpose, or retired with the lesson it closes (inventory below).
-8. **The banner shrinks to provenance.** A rendered file keeps a one-line generated-from banner
-   naming its definition module, and the tuning line (family, seat, tier map). The body hash goes
-   with the write-safety rows. A consumer's tracked copy still says what it is and what rendered it.
+8. **The banner shrinks to provenance and the edit rule.** A rendered file keeps a one-line
+   generated-from banner naming its definition module and stating that the file is not for local
+   edit, with change requests to this project, and the tuning line (family, seat, tier map). The
+   body hash goes with the write-safety rows. A consumer's tracked copy says what it is, what
+   rendered it, and where a change goes.
 9. **`kb_tools` and `liaison_tools` stay vendored.** The install copies both trees into the
    consumer's harness directory, as today (`gen_defs/product.py` holds the copy table,
    `installation.py` does the copy). Tracked by the consumer, that copy is a pinned, reviewable
@@ -103,7 +107,7 @@ def python_coder(ctx: Render) -> Definition:
 
 ## Acceptance
 
-The oracle is the pre-1.0 render of `main` at `ad57df2`, taken once before any port into two slots
+The oracle is the pre-1.0 render of `main` at `8fa1408`, taken once before any port into two slots
 of the `render` target: `just render reference` for claude, and `just render reference-opencode
 --harness=opencode` with the flags `install-agents-here` passes. Neither slot is re-rendered until
 stage 4 lands.
@@ -190,6 +194,10 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
    namespace rule and chunk single-sourcing, and gains the one-module-per-definition rule.
    `ROADMAP.md` items re-examined: 3 (atomic install) and 4 (unified install) close or shrink
    under tracked output; 6 (multi-harness) is the adapter; 14 (name prefix) is a render flag.
+   `README.md`'s Install section becomes the consumer instruction for the tracked shape: the
+   rendered set is committed by the consumer and not for local edit, a change request comes to
+   this project, a consumer's own needs go in its `CONVENTIONS.md`, and the hash-and-backup
+   paragraph and the symlink into this repository's project space are removed.
 
 ## Risks
 
