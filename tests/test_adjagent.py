@@ -1,15 +1,17 @@
 """The adjagent package's own logic, each case checked against values the
 renderer did not compute: the two map flags' grammar, the rendered model text,
 the CLI's Render refusals, the frontmatter of each kind against literal lines of
-the pre-1.0 render, overlay resolution and stock, Definition and Prose refusals,
-the loader's refusal, explain's format, and the package's source invariants as
-walks of its syntax trees.
+the pre-1.0 render, guest extraction leaving exactly a definition's body and every
+participant extracting to the contract, overlay resolution and stock, Definition,
+Prose and section-field refusals, the loader's refusal, explain's format, and the
+package's source invariants as walks of its syntax trees.
 
 The package is imported from the repository root, which `just test` puts on
 PYTHONPATH.
 """
 
 import ast
+import dataclasses
 import re
 import sys
 from pathlib import Path, PurePosixPath
@@ -29,8 +31,10 @@ from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.loading import load
-from adjagent.render import agent_fields, keyed_by_path, render_definition
-from adjagent.section import FamilyText, Prose
+from adjagent.render import agent_fields, definitions, keyed_by_path, render_definition
+from adjagent.section import FamilyText, OwnText, Prose, Section
+from adjagent.sections.liaison import Liaison
+from adjagent.sections.mad import ConvergenceCriteria, Mode
 from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tool
 
 _ALL_INHERIT = dict.fromkeys(("highest", "high", "medium", "low", "lowest"), "inherit")
@@ -185,38 +189,80 @@ _CONTRACT_FIRST_LINE = (
     "your only window onto their positions. You are not told how many other seats there are or which models "
     "fill them, and you do not need to know."
 )
-_CONTRACT = Definition(name="participant-contract", kind=Kind.DOCUMENT, folder="mad", sections=(Prose(_CONTRACT_FIRST_LINE),))
-_MAD_REVIEW = Definition(
-    name="mad-review",
-    kind=Kind.COMMAND,
-    sections=(Prose("@", HarnessText.PROJECT_HARNESS_DIR, "/agents/mad-review-referee.md"),),
-)
+_CONTRACT_PATH = "agents/mad/participant-contract.md"
+
+Discovered = tuple[tuple[str, Definition], ...]
+
+
+@pytest.fixture(scope="module")
+def discovered() -> Discovered:
+    """Every definition the package discovers, with its module."""
+    return definitions()
+
+
+def _found(discovered: Discovered, path: str) -> tuple[str, Definition]:
+    [found] = [(module, defn) for module, defn in discovered if defn.output_path == PurePosixPath(path)]
+    return found
 
 
 @pytest.mark.parametrize(
-    "defn, harness, path, after_banner",
+    "path, harness, after_banner",
     [
-        (_CONTRACT, CLAUDE, "agents/mad/participant-contract.md", ["---", "", _CONTRACT_FIRST_LINE]),
-        (
-            _CONTRACT,
-            OPENCODE,
-            "agents/mad/participant-contract.md",
-            ["mode: subagent", "disable: true", "---", "", _CONTRACT_FIRST_LINE],
-        ),
-        (_MAD_REVIEW, CLAUDE, "commands/mad-review.md", ["---", "@.claude/agents/mad-review-referee.md"]),
-        (_MAD_REVIEW, OPENCODE, "commands/mad-review.md", ["---", "@.opencode/agents/mad-review-referee.md"]),
+        (_CONTRACT_PATH, CLAUDE, ["---", ""]),
+        (_CONTRACT_PATH, OPENCODE, ["mode: subagent", "disable: true", "---", ""]),
+        ("commands/mad-review.md", CLAUDE, ["---", "@.claude/agents/mad-review-referee.md"]),
+        ("commands/mad-review.md", OPENCODE, ["---", "@.opencode/agents/mad-review-referee.md"]),
     ],
 )
 def test_document_and_command_shapes_match_the_pre_1_0_render(
-    defn: Definition, harness: Harness, path: str, after_banner: list[str]
+    discovered: Discovered, path: str, harness: Harness, after_banner: list[str]
 ) -> None:
+    module, defn = _found(discovered, path)
     ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
-    lines = render_definition(defn, ctx, module="adjagent.definitions.probe").split("\n")
-    assert defn.output_path == PurePosixPath(path)
+    lines = render_definition(defn, ctx, module=module).split("\n")
     assert lines[0] == "---"
-    assert lines[1].startswith("# !GENERATED! from adjagent/definitions/probe.py")
+    assert lines[1].startswith("# !GENERATED! from adjagent/definitions/")
     assert " seat=none member=none tier=" in lines[2]
-    assert lines[3:3 + len(after_banner)] == after_banner
+    assert lines[3 : 3 + len(after_banner)] == after_banner
+
+
+_HARNESS_RENDERS = [
+    Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers)),
+    Render(harness=OPENCODE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT),
+]
+
+
+def _extracted(defn: Definition, ctx: Render, *, module: str) -> str:
+    """What `sed '1,/^---$/d'` leaves of the rendered file: every line after the first `---` line past
+    line 1, without leading or trailing blank lines."""
+    lines = render_definition(defn, ctx, module=module).split("\n")
+    return "\n".join(lines[lines.index("---", 1) + 1 :]).strip("\n")
+
+
+@pytest.mark.parametrize("ctx", _HARNESS_RENDERS, ids=lambda ctx: ctx.harness.name)
+def test_guest_extraction_leaves_exactly_the_body(discovered: Discovered, ctx: Render) -> None:
+    extractable = [
+        (module, defn)
+        for module, defn in discovered
+        if (defn.kind is Kind.AGENT and defn.folder == "") or defn.output_path == PurePosixPath(_CONTRACT_PATH)
+    ]
+    assert len(extractable) > 1
+    for module, defn in extractable:
+        seated = dataclasses.replace(ctx, seat=defn.tier)
+        body = "\n\n".join(text for text in (section.render(seated) for section in defn.sections) if text)
+        assert _extracted(defn, ctx, module=module) == body, defn.output_path
+    module, contract = _found(discovered, _CONTRACT_PATH)
+    assert _extracted(contract, ctx, module=module).split("\n", 1)[0] == _CONTRACT_FIRST_LINE
+
+
+@pytest.mark.parametrize("ctx", _HARNESS_RENDERS, ids=lambda ctx: ctx.harness.name)
+def test_every_participant_extracts_to_the_contract_document(discovered: Discovered, ctx: Render) -> None:
+    module, contract = _found(discovered, _CONTRACT_PATH)
+    expected = _extracted(contract, ctx, module=module)
+    participants = [(module, defn) for module, defn in discovered if defn.name.startswith("mad-participant-")]
+    assert expected and participants
+    for module, defn in participants:
+        assert _extracted(defn, ctx, module=module) == expected, defn.name
 
 
 @pytest.mark.parametrize(
@@ -265,9 +311,7 @@ def _with_family_text(*, family: Family, tier: str, anchor: Anchor) -> str:
         (CLAUDE_FAMILY, "medium", Anchor.GAP_AVERSION, "before\n\nafter\n"),
     ],
 )
-def test_family_text_renders_the_seats_overlay_or_nothing(
-    family: Family, tier: str, anchor: Anchor, body: str
-) -> None:
+def test_family_text_renders_the_seats_overlay_or_nothing(family: Family, tier: str, anchor: Anchor, body: str) -> None:
     assert _with_family_text(family=family, tier=tier, anchor=anchor) == body
 
 
@@ -285,7 +329,10 @@ def test_stock_excludes_the_overridden_tier() -> None:
         ({"description": 'holds a "quote"'}, "description must be"),
         ({"tier": None}, "an agent requires tier"),
         ({"kind": Kind.DOCUMENT}, "a document takes no description, tools, tier"),
-        ({"kind": Kind.COMMAND, "description": None, "tools": None, "tier": None, "color": "#000000"}, "takes no color"),
+        (
+            {"kind": Kind.COMMAND, "description": None, "tools": None, "tier": None, "color": "#000000"},
+            "takes no color",
+        ),
         ({"folder": "mad/Design"}, "folder 'mad/Design'"),
     ],
 )
@@ -309,6 +356,38 @@ def test_output_paths_not_names_are_unique() -> None:
 def test_prose_refuses_empty_or_edge_newline_text(parts: tuple) -> None:
     with pytest.raises(InputError, match="prose section"):
         Prose(*parts)
+
+
+_FIX_THE_FIELD = "This check enforces the rule; fix the field it names, not the check."
+
+
+def test_own_text_has_only_lead_and_tail() -> None:
+    with pytest.raises(AttributeError, match="only lead and tail, not 'closing'") as caught:
+        OwnText.closing
+    assert str(caught.value).endswith(_FIX_THE_FIELD)
+
+
+@pytest.mark.parametrize(
+    "namespace, rule",
+    [
+        ({"__annotations__": {"tail": str | None}, "tail": OwnText.lead}, "field 'tail' is bound to OwnText.lead"),
+        ({"__annotations__": {"lead": str}}, "field 'lead' is named for own text but not declared"),
+        ({"__annotations__": {"variant": str}}, "no field is named 'variant'"),
+        ({"__annotations__": {"words": Mode}, "words": Mode.field}, "takes Mode, which a section binds only as"),
+    ],
+)
+def test_a_section_field_breaking_the_naming_rules_is_refused_at_class_definition(namespace: dict, rule: str) -> None:
+    with pytest.raises(TypeError) as caught:
+        type("Probe", (Section,), namespace)
+    assert rule in str(caught.value)
+    assert str(caught.value).endswith(_FIX_THE_FIELD)
+
+
+def test_convergence_criteria_refuses_an_item_opening_with_another_letter() -> None:
+    fields = {"converged": "- **(a)**", "result": "r", "paths": "p", "divergence": "d"}
+    ConvergenceCriteria(**fields, under_determined=("- **(c) one", "- **(d) two"))
+    with pytest.raises(InputError, match=re.escape("item 1 must open '- **(d)'")):
+        ConvergenceCriteria(**fields, under_determined=("- **(c) one", "- **(e) two"))
 
 
 def test_discovery_refuses_a_module_without_definitions() -> None:
@@ -335,7 +414,9 @@ def test_explain_heads_each_section_and_each_field_supplied_paragraph(capsys: py
 def _modules(*subpackages: str) -> list[tuple[str, ast.Module]]:
     roots = [_PACKAGE.joinpath(*sub.split("/")) for sub in subpackages] or [_PACKAGE]
     files = sorted({path for root in roots for path in root.rglob("*.py")})
-    return [(path.relative_to(_PACKAGE.parent).as_posix(), ast.parse(path.read_text(encoding="utf-8"))) for path in files]
+    return [
+        (path.relative_to(_PACKAGE.parent).as_posix(), ast.parse(path.read_text(encoding="utf-8"))) for path in files
+    ]
 
 
 def _imported(tree: ast.Module) -> list[str]:
@@ -349,6 +430,24 @@ def _imported(tree: ast.Module) -> list[str]:
     return names
 
 
+@pytest.mark.parametrize("value_type, module", [(Mode, "sections/mad.py"), (Liaison, "sections/liaison.py")])
+def test_every_value_type_term_is_read_by_two_or_more_sections(value_type: type, module: str) -> None:
+    readers: dict[str, set[str]] = {spec.name: set() for spec in dataclasses.fields(value_type)}
+    tree = ast.parse(_PACKAGE.joinpath(module).read_text(encoding="utf-8"))
+    for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+        for node in ast.walk(cls):
+            owner = node.value if isinstance(node, ast.Attribute) else None
+            if (
+                isinstance(owner, ast.Attribute)
+                and owner.attr == "mode"
+                and isinstance(owner.value, ast.Name)
+                and owner.value.id == "self"
+                and node.attr in readers
+            ):
+                readers[node.attr].add(cls.name)
+    assert {term: sorted(classes) for term, classes in readers.items() if len(classes) < 2} == {}
+
+
 def test_no_composed_text_is_rescanned() -> None:
     offenders = []
     for path, tree in _modules():
@@ -357,8 +456,10 @@ def test_no_composed_text_is_rescanned() -> None:
                 continue
             owner = node.func.value.id if isinstance(node.func.value, ast.Name) else None
             attr = node.func.attr
-            if (attr == "replace" and owner != "dataclasses") or attr in ("format", "format_map") or (
-                owner == "re" and attr in ("sub", "subn")
+            if (
+                (attr == "replace" and owner != "dataclasses")
+                or attr in ("format", "format_map")
+                or (owner == "re" and attr in ("sub", "subn"))
             ):
                 offenders.append(f"{path}:{node.lineno} .{attr}(")
     assert offenders == []
