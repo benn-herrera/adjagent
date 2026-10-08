@@ -1,5 +1,6 @@
 """The unit of composition: `Section`; `Prose` for a definition's own text, and
-`FamilyText` for the text a family fills at an anchor."""
+`FamilyText` for the text a family fills at an anchor. `OwnText` and `ValueTypeField`
+declare the two kinds of field whose name a section does not choose."""
 
 import dataclasses
 from dataclasses import dataclass
@@ -13,6 +14,10 @@ Part = tuple[str, str]
 """(label, paragraph text): label names the field(s) that supplied the paragraph, "" for shared text."""
 
 _SHOWN_WIDTH = 60
+_OWN_TEXT = "own_text"
+_VALUE_TYPE = "value_type"
+_OWN_TEXT_NAMES = ("lead", "tail")
+_FIX_THE_FIELD = "This check enforces the rule; fix the field it names, not the check."
 
 
 def _shown(value: object) -> str:
@@ -20,10 +25,60 @@ def _shown(value: object) -> str:
     return text if len(text) <= _SHOWN_WIDTH else f"{text[:_SHOWN_WIDTH - 1]}…"
 
 
+class _OwnTextNamespace:
+    """`OwnText.lead` and `OwnText.tail`, each read a fresh dataclass field defaulting to None and
+    marked as the definition's own text opening (lead) or continuing (tail) a shared paragraph. Any
+    other attribute is an AttributeError."""
+
+    def __getattr__(self, name: str) -> dataclasses.Field:
+        if name not in _OWN_TEXT_NAMES:
+            raise AttributeError(f"OwnText has only lead and tail, not {name!r}. {_FIX_THE_FIELD}")
+        return dataclasses.field(default=None, metadata={_OWN_TEXT: name})
+
+
+OwnText = _OwnTextNamespace()
+
+
+class ValueTypeField:
+    """A value type's `field` class attribute: each read is a fresh required dataclass field marked
+    with that type, which a section binds only as `mode: <Type> = <Type>.field`."""
+
+    def __get__(self, instance: object, owner: type) -> dataclasses.Field:
+        return dataclasses.field(metadata={_VALUE_TYPE: owner})
+
+
+def _field_naming_violation(name: str, declared: object) -> str | None:
+    """The rule a section field named `name` with class-body value `declared` breaks, or None."""
+    metadata = declared.metadata if isinstance(declared, dataclasses.Field) else {}
+    own = metadata.get(_OWN_TEXT)
+    if own is not None and own != name:
+        return (
+            f"field '{name}' is bound to OwnText.{own}; own text is a field named lead or tail, bound to its own marker"
+        )
+    if own is None and name in _OWN_TEXT_NAMES:
+        return f"field '{name}' is named for own text but not declared `{name}: str | None = OwnText.{name}`"
+    if name == "variant":
+        return "no field is named 'variant': variation is a field with a meaningful name, or a second class"
+    value_type = metadata.get(_VALUE_TYPE)
+    if value_type is not None and name != "mode":
+        return f"field '{name}' takes {value_type.__name__}, which a section binds only as `mode`"
+    return None
+
+
 @dataclass(frozen=True)
 class Section:
     """One section of a rendered definition. Subclasses declare fields for what varies between
     definitions and implement parts; the text they emit is their private module constants."""
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Refuse (TypeError, at class definition) a field the subclass itself declares that breaks the
+        naming rules `_field_naming_violation` states."""
+        # Enforcement of the design's deliberately limited field naming. A failure here is fixed at the field it names, never by loosening this.
+        super().__init_subclass__(**kwargs)
+        for name in cls.__dict__.get("__annotations__", {}):
+            violation = _field_naming_violation(name, cls.__dict__.get(name))
+            if violation is not None:
+                raise TypeError(f"{cls.__name__}: {violation}. {_FIX_THE_FIELD}")
 
     def parts(self, ctx: Render) -> tuple[Part, ...]:
         """The section's paragraphs in order, each labelled; a paragraph has no leading or trailing
@@ -60,6 +115,11 @@ class Prose(Section):
         first, last = parts[0], parts[-1]
         if (isinstance(first, str) and first.startswith("\n")) or (isinstance(last, str) and last.endswith("\n")):
             raise InputError(f"prose section carries an edge newline: {parts!r:.60}")
+
+    def __repr__(self) -> str:
+        """`Prose('<the parts, a harness text as its member>')`, the text cut as a header field is."""
+        text = "".join(part if isinstance(part, str) else str(part) for part in self.content)
+        return f"Prose({_shown(text)})"
 
     def parts(self, ctx: Render) -> tuple[Part, ...]:
         text = "".join(part if isinstance(part, str) else ctx.harness.text(part) for part in self.content)

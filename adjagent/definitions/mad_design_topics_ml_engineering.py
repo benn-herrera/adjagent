@@ -1,0 +1,114 @@
+"""mad/design-topics/ml-engineering: the design-debate topic for ML technique research and construction."""
+
+from adjagent.definition import Definition
+from adjagent.section import Prose
+from adjagent.sections.mad import ConditionalMarking, ConvergenceCriteria, FoundationalBasis, ReferenceValidation
+from adjagent.sections.ml import TechniqueAttacks, TechniqueDeliverable
+from adjagent.vocabulary import Kind
+
+_DOMAIN = r"""# TOPIC: ML Engineering
+
+## Domain
+
+Complex problem solving, technique research, and exploration in machine learning systems —
+particularly inference, training, sampling, attention, optimization, quantization, distillation, and
+novel inference-time mechanics. The space includes designing new techniques, adapting published ones
+to non-standard regimes, diagnosing model behavior, and exploring open questions where the answer is
+not yet known and may require empirical validation to resolve."""
+
+_INTRO = r"""The choice between viable techniques frequently depends on empirical outcomes that reasoning cannot
+predetermine. Convergence here is about whether participants agree on the proposed technique and on
+a path to validate it — or, when they do not, on a clear diagnosis of why."""
+
+_CONVERGED = r"""- **(a) Mechanism convergence**: all active participants converge on the same proposed technique,
+  the same hypothesized mechanism, the same predicted observable behavior, and the same measurement
+  plan — modulo trivial reformulation. The technique specification is the deliverable."""
+
+_EMPIRICAL = r"""- **(c) Empirical under-determination**: all active participants converge on the same
+  characterization of the candidate space — same set of viable techniques, same hypothesized
+  mechanism for each, same predicted distinguishing measurements — but cannot select among them
+  without running the experiment that distinguishes them. The candidate set, the distinguishing
+  experiment, and the decision criterion are the deliverable. **Running the experiment IS the
+  resolution** — this outcome is productive, not a failure."""
+
+_THEORETICAL = r"""- **(d) Theoretical under-determination**: all active participants converge on the same diagnosis
+  that the problem cannot be closed from the supplied context — missing baseline, missing prior
+  measurement, missing model-behavior characterization, or missing constraint. The diagnostic
+  statement is the deliverable."""
+
+_EXPERIMENT_AND_REST = r"""When the resolution path is "run the experiment," the experiment specification must be concrete
+enough that a human or downstream agent can execute it without reinterpreting the proposal: specify
+the prompt set or dataset, the baseline configuration, the metric, the threshold for
+accepting/rejecting the hypothesis, and the failure modes that would invalidate the experiment
+itself.
+
+## What This Topic Is Not
+
+- This is not architecture design.
+- This is not formal derivation.
+- This is not implementation. Findings about specific code patterns, error handling, or local DRY
+  belong in code review.
+- This is not a place to reach for novelty. If a well-established technique solves the problem, the
+  strongest proposal is "use the established technique, here is why its conditions transfer."
+  Novelty is a cost, not a virtue.
+
+## How to Report Proposals and Findings
+
+In debate rounds, the specific element an attack or defense turns on is a tensor or operation in the
+mechanism, a claim in the justification, a metric in the measurement plan, or a cost line in the
+accounting.
+
+Tradeoff and uncertainty disagreements should be framed as "this proposal optimizes for X (e.g.,
+compute) at cost to Y (e.g., flexibility); the problem prioritizes X" — not as right/wrong. When the
+disagreement reduces to "we won't know until we measure," that is the signal for empirical
+under-determination convergence, not for continued argumentation."""
+
+DEFINITIONS = (
+    Definition(
+        name="ml-engineering",
+        kind=Kind.DOCUMENT,
+        folder="mad/design-topics",
+        sections=(
+            Prose(_DOMAIN),
+            FoundationalBasis(
+                basis="the problem statement and the context supplied with it",
+                imports="Published papers, reference implementations, and established techniques",
+            ),
+            Prose("## Constructive Technique, Adversarially Defended"),
+            TechniqueDeliverable(unit="proposal"),
+            ConditionalMarking(
+                unit="step",
+                gap="an empirical outcome the proposal does not yet have data for",
+                state="empirical under-determination resolution",
+            ),
+            Prose("### Attack Surface"),
+            TechniqueAttacks(
+                lead="Identify",
+                tail=(
+                    "Defend your own proposal by sharpening the mechanism, grounding the justification more "
+                    "concretely, tightening the prediction, or proposing a more discriminating measurement."
+                ),
+            ),
+            ConvergenceCriteria(
+                intro=_INTRO,
+                converged=_CONVERGED,
+                result="technique",
+                paths=(
+                    "justification paths (different mechanism rationales, different prior-work invocations, but the "
+                    "same final specification and the same predicted observables)"
+                ),
+                under_determined=(_EMPIRICAL, _THEORETICAL),
+                divergence="distinct techniques making different mechanism-level claims",
+                record=" with their full triple (mechanism, justification, measurement)",
+            ),
+            Prose("## Empirical Validation and Reference Values"),
+            ReferenceValidation(
+                examples="a published baseline, a logprob match against a reference implementation, a benchmark score",
+                construction="proposal",
+                caveat="the reference may itself be specific to a regime that does not transfer",
+                tail="It is also admissible as evidence that the regime is comparable.",
+            ),
+            Prose(_EXPERIMENT_AND_REST),
+        ),
+    ),
+)

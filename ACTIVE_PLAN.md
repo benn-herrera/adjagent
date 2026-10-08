@@ -58,15 +58,28 @@ every difference is one this plan names or the owner approves.
    see or pin. The copy's `!INSTALLED!` banner shrinks like the definitions' and the body hash goes.
 10. **The unit of composition is the section.** A `Section` base class with `render(ctx) -> str`;
     one subclass per section family, around ten, named for what the section is; `Prose` for a
-    definition's own text. A public name under `adjagent/sections/` is a section class, never a
-    paragraph: a chunk's text is a private constant of the section that
-    emits it, and a chunk's slot is a field of that section. No associative table of named text.
+    definition's own text. A public name under `adjagent/sections/` is a section class or a value
+    type a section field is typed with, never a paragraph: a chunk's text is a private constant of
+    the section that emits it, and a chunk's slot is a field of that section. No associative table
+    of named text.
+    - **A field that carries the definition's own text joined into a shared paragraph is named
+      `lead` (own text opening the paragraph) or `tail` (own text continuing it), declared through
+      the `OwnText` namespace (`lead: str | None = OwnText.lead`), whose only attributes are those
+      two: any other spelling is an `AttributeError` at import, and `Section.__init_subclass__`
+      refuses a marker bound under another name. Every such join is then a grep, which is what
+      stage 6 removes. A naming rule agents must follow is enforced at class definition, not by
+      observation; a package-wide rule a class cannot see about itself is a test.
 11. **What varies by definition is a field of the section it lands in.** The unit-test framework,
     the build commands, the package registry, the logging baseline: each is a field of
     `Testing`, `BuildSystem`, `Dependencies` or `Logging`, named for its slot, with the common
     case as default. There is no profile: the stage 1b `Profile` held thirteen fields each read by
-    one section, five of them paragraphs, and hid the varying values from `explain`. A fact two
-    sections genuinely share, if stage 3 finds one, earns a shared constant then.
+    one section, five of them paragraphs, and hid the varying values from `explain`. A vocabulary
+    two or more section classes read is a value type the field is typed with — `Mode` for the two
+    debate referees (gate, seat, outcome, the run and file names) and the liaison pair (principal,
+    substantive) — declared `mode: Mode = Mode.field`, its instances defined in the definition
+    modules so the words stay in the definition. The admission rule that keeps it from becoming a
+    profile: a term joins only when two or more classes read it, asserted by a test. Unifying the
+    referees' vocabulary on one set of words is a content change for the post-switch list.
 12. **A definition is data.** A definition module defines `DEFINITIONS`, a tuple of `Definition`
     values whose sections are section instances; nothing in it takes `ctx`, which enters at render.
     Rendering iterates the package's modules and renders every entry. A multi-output module is a
@@ -256,6 +269,13 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
    a subject boundary — is removed on purpose, and the commit enumerates every differing file
    with its reason. Prose changes nothing it says; it changes where a boundary falls. The
    reference slots are re-rendered from this commit afterwards and become the oracle for 1.0.
+   Inventory so far, each an artefact text identity carries: every `lead`/`tail` field (own text
+   joined into a shared paragraph); the referees' "Steps 1–2 / 2–3" cross-reference computed from
+   list position; `RoundDispatch`'s two sentences run as one paragraph and its two `*_points`
+   wordings; the two `charter` fields that differ by one word; `MessageFile`'s shared sentence
+   appended to the definition's own note; the `liaison_tools` path spelled in every command
+   line rather than owned by the section. The post-switch content list, a change to what a seat
+   reads and so outside this plan: unify the two referees' vocabulary on one set of words.
 7. **Contract documents.** `SPEC.md` loses nothing it promises; `ARCHITECTURE.md`'s Template System
    section is replaced by the composition model; `CONVENTIONS.md` drops the identifier class, the
    namespace rule and chunk single-sourcing, and gains two rules: one module per definition, and a
