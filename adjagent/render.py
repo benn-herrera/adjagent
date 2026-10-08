@@ -1,6 +1,7 @@
-"""The renderer: every discovered definition to its file text, its banner, and
-the writer. Holds no prose, knows no individual definition, never searches text
-it has composed, and is the only module that writes files."""
+"""The renderer: every discovered definition to its file text, its banner, the
+author's explained view, and the writer. Holds no prose, knows no individual
+definition, never searches text it has composed, and is the only module that
+writes files."""
 
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
@@ -16,18 +17,15 @@ GENERATED_NOTICE = (
 )
 
 
-def definitions(ctx: Render) -> tuple[tuple[str, Definition], ...]:
-    """(defining module's dotted name, Definition) for every output of every discovered function,
-    sorted by name; a name produced twice is refused, naming both modules."""
+def definitions() -> tuple[tuple[str, Definition], ...]:
+    """(defining module's dotted name, Definition) for every entry of every discovered module's
+    DEFINITIONS, sorted by name; a name produced twice is refused, naming both modules."""
     produced: dict[str, tuple[str, Definition]] = {}
-    for function in discover():
-        result = function(ctx)
-        for defn in result if isinstance(result, tuple) else (result,):
+    for module, entries in discover():
+        for defn in entries:
             if defn.name in produced:
-                raise InputError(
-                    f"definition '{defn.name}' is produced by both {produced[defn.name][0]} and {function.__module__}"
-                )
-            produced[defn.name] = (function.__module__, defn)
+                raise InputError(f"definition '{defn.name}' is produced by both {produced[defn.name][0]} and {module}")
+            produced[defn.name] = (module, defn)
     return tuple(produced[name] for name in sorted(produced))
 
 
@@ -63,22 +61,35 @@ def tuning_line(ctx: Render, *, seat: Tier) -> str:
     )
 
 
-def render_definition(defn: Definition, ctx: Render, *, module: str) -> str:
-    """The file text: the opening fence, the two banner lines, the harness's field lines, the closing
-    fence, one blank line, the sections joined by a blank line, and one final newline."""
+def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
+    """The opening fence, the two banner lines, the harness's field lines, the closing fence."""
     fields = "".join(line + "\n" for line in ctx.harness.frontmatter(agent_fields(defn, ctx)))
-    return (
-        f"---\n{generated_line(module)}\n{tuning_line(ctx, seat=defn.tier)}\n{fields}---\n\n"
-        + "\n\n".join(defn.sections)
-        + "\n"
-    )
+    return f"---\n{generated_line(module)}\n{tuning_line(ctx, seat=defn.tier)}\n{fields}---\n"
+
+
+def render_definition(defn: Definition, ctx: Render, *, module: str) -> str:
+    """The file text: the frontmatter, one blank line, the sections' texts joined by a blank line,
+    and one final newline."""
+    body = "\n\n".join(section.render(ctx) for section in defn.sections)
+    return f"{_frontmatter(defn, ctx, module=module)}\n{body}\n"
+
+
+def explain_definition(name: str, ctx: Render) -> str:
+    """The named definition as render_definition gives it, with each section's text preceded by its
+    header line (`Section.header`); an unknown name is refused, listing the names there are."""
+    found = {defn.name: (module, defn) for module, defn in definitions()}
+    if name not in found:
+        raise InputError(f"no definition named '{name}'; the definitions are: {', '.join(found)}")
+    module, defn = found[name]
+    body = "\n\n".join(f"{section.header()}\n{section.render(ctx)}" for section in defn.sections)
+    return f"{_frontmatter(defn, ctx, module=module)}\n{body}\n"
 
 
 def render_all(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:
     """(PurePosixPath("agents", f"{name}.md"), text) for every definition, sorted by path."""
     rendered = (
         (PurePosixPath("agents", f"{defn.name}.md"), render_definition(defn, ctx, module=module))
-        for module, defn in definitions(ctx)
+        for module, defn in definitions()
     )
     return tuple(sorted(rendered, key=lambda item: item[0]))
 

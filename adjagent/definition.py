@@ -1,6 +1,6 @@
 """The vocabulary a definition is written in: tiers, tools, overlay anchors, and
-the `Definition` value itself. Harness-neutral: no harness spellings, no model
-names, no I/O, no rendering."""
+the `Definition` value itself, whose body is a tuple of `Section`. Harness-neutral:
+no harness spellings, no model names, no I/O, no rendering."""
 
 import re
 from dataclasses import dataclass
@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Literal
 
 from adjagent.errors import InputError
+from adjagent.section import Section
 
 IDENTIFIER = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
 """Output, family and harness names: strict kebab, as CONVENTIONS.md states the class."""
@@ -60,7 +61,7 @@ class Definition:
     description: str  # one line; emitted double-quoted; holds no '"' and no newline
     tools: Tools  # see Tools; an empty tuple and a repeated tool are refused
     tier: Tier  # the seat; the family's tier map binds the model
-    sections: tuple[str, ...]  # non-empty; each one non-empty, starting and ending with no "\n"
+    sections: tuple[Section, ...]  # non-empty; rendered in order, joined by a blank line
     color: str | None = None  # "#RRGGBB"; emitted double-quoted
 
     def __post_init__(self) -> None:
@@ -77,10 +78,10 @@ class Definition:
                 raise InputError(f"{where}: tools names a tool twice")
         if self.tier not in TIERS:
             raise InputError(f"{where}: tier '{self.tier}' is not one of {', '.join(TIERS)}")
-        if not self.sections:
-            raise InputError(f"{where}: has no sections")
+        if not isinstance(self.sections, tuple) or not self.sections:
+            raise InputError(f"{where}: sections must be a non-empty tuple")
         for index, section in enumerate(self.sections):
-            if not section or section.startswith("\n") or section.endswith("\n"):
-                raise InputError(f"{where}: section {index} is empty or carries an edge newline")
+            if not isinstance(section, Section):
+                raise InputError(f"{where}: section {index} is a {type(section).__name__}, not a Section")
         if self.color is not None and re.fullmatch(_COLOR, self.color) is None:
             raise InputError(f"{where}: color '{self.color}' is not #RRGGBB")
