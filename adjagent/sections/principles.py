@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from adjagent.context import Render
-from adjagent.section import Section
+from adjagent.section import Part, Section
 
 _KEY_GUIDELINE = r"""**KEY GUIDELINE**: Code is cost, capability is value. Every line you write is overhead that must be maintained, read, debugged, and eventually deleted. This goes double for duplicated code – follow the DRY principle. Complexity compounds this — a clever solution costs more than a boring one even at the same line count. Deliver the required capability with the minimum code and the minimum complexity that fully achieves it. When uncertain whether to add something, default to omission. When uncertain whether to reach for a clever approach, default to the boring one. Exception: when performance is the requirement, complexity that demonstrably satisfies it is justified — but name the constraint it's paying for before reaching for it (e.g., "O(N²) is unacceptable at this scale; this reduces to O(log N)")."""
 
@@ -41,26 +41,28 @@ class CorePrinciples(Section):
     baseline: str | None = None
     """The style baseline for a project that states none, continuing the last rule's paragraph."""
 
-    def render(self, ctx: Render) -> str:
-        rules = "\n\n".join(
-            (
-                "## Core Principles",
-                _KEY_GUIDELINE,
-                _INCUMBENT_SEARCH,
-                f"{_PROVE_REPLACEMENT_RULE} {_PROVE_REPLACEMENT_FOR_A_CHANGE}",
-                f"{_MACHINE_GUARANTEES} {_MACHINE_GUARANTEES_FOR_A_CODER}",
-                _TESTS_NOT_RUNTIME_CHECKS,
-                _SEPARATION_OF_CONCERNS,
-                _NAMES_READ_WITHOUT_THE_TASK,
-                _PROJECT_CONVENTIONS_OUTRANK,
-            )
+    def parts(self, ctx: Render) -> tuple[Part, ...]:
+        last = (
+            ("", _PROJECT_CONVENTIONS_OUTRANK)
+            if self.baseline is None
+            else ("baseline", f"{_PROJECT_CONVENTIONS_OUTRANK} {self.baseline}")
         )
-        return rules if self.baseline is None else f"{rules} {self.baseline}"
+        return (
+            ("", "## Core Principles"),
+            ("", _KEY_GUIDELINE),
+            ("", _INCUMBENT_SEARCH),
+            ("", f"{_PROVE_REPLACEMENT_RULE} {_PROVE_REPLACEMENT_FOR_A_CHANGE}"),
+            ("", f"{_MACHINE_GUARANTEES} {_MACHINE_GUARANTEES_FOR_A_CODER}"),
+            ("", _TESTS_NOT_RUNTIME_CHECKS),
+            ("", _SEPARATION_OF_CONCERNS),
+            ("", _NAMES_READ_WITHOUT_THE_TASK),
+            last,
+        )
 
 
 @dataclass(frozen=True)
 class Dissent(Section):
     """The closing line: state a technical objection before complying."""
 
-    def render(self, ctx: Render) -> str:
-        return _DISSENT
+    def parts(self, ctx: Render) -> tuple[Part, ...]:
+        return (("", _DISSENT),)

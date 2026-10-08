@@ -74,6 +74,16 @@ class TextTest(unittest.TestCase):
         self.assertEqual(text(b"1. one\n   two\n2) three\n"), text(b"1. one two\n2) three\n"))
         self.assertNotEqual(text(b"1. one two\n2. three\n"), text(b"1. one two 2. three\n"))
 
+    def test_a_heading_is_its_own_exact_unit(self):
+        self.assertNotEqual(text(b"## Heading\nbody text\n"), text(b"## Heading body text\n"))
+        self.assertNotEqual(text(b"## Heading\n"), text(b"##  Heading\n"))
+        self.assertEqual(text(b"#hashtag\nbody\n"), text(b"#hashtag body\n"))
+
+    def test_table_rows_are_their_own_exact_units(self):
+        self.assertNotEqual(text(b"| a | b |\n| c | d |\n"), text(b"| a | b | | c | d |\n"))
+        self.assertNotEqual(text(b"intro\n| a |\n"), text(b"intro | a |\n"))
+        self.assertNotEqual(text(b"| a |  b |\n"), text(b"| a | b |\n"))
+
     def test_frontmatter_with_a_changed_space_differs(self):
         self.assertNotEqual(text(b"---\nname: a\n---\ntext\n"), text(b"---\nname:  a\n---\ntext\n"))
 

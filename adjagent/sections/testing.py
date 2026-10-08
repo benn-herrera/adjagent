@@ -3,8 +3,7 @@
 from dataclasses import dataclass
 
 from adjagent.context import Render
-from adjagent.profile import Profile
-from adjagent.section import Section
+from adjagent.section import Part, Section
 
 _LAYERS_LEAD = r"""**Testing** — three layers, each with a distinct purpose:"""
 
@@ -31,7 +30,7 @@ _VERIFICATION_EVIDENCE = r"""**Verification evidence**: any verification a repor
 _TEST_REVIEW = r"""**Reviewing tests, name what to cut.** *Duplicate coverage*: a test pinning a behaviour another already pins through the same path, a unit re-proving a golden-file or parametrised case included — merge or delete, naming the survivor. *Performative units*: a test no logic error could fail — a constant compared to itself, a mock confirmed called with nothing checked of what it was given, a file confirmed to load with no further claim — delete. Propose a new test only for a stated invariant or acceptance criterion that no test exercises."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Testing(Section):
     """A coder's testing run: runtime boundary checks, unit tests, integration tests, the delivered
     artifact rule and verification evidence.
@@ -39,29 +38,48 @@ class Testing(Section):
     architect states the boundary-check paragraph in its own words; an edit here does not reach it.
     """
 
-    profile: Profile
+    unit_tests: str
+    """The unit-test paragraph: the framework text after `*Unit tests*: `."""
+
+    unit_tests_closing: str
+    """The unit-test paragraph: its last line, after the mocking rule."""
+
+    integration_tests: str
+    """The integration-test paragraph: the tooling text after the logging-signal sentence."""
+
+    routing: str = "the logging system"
+    """The boundary-check paragraph: `Route violations through <routing>.`"""
+
     coverage_metric: bool = False
     """Whether the unit-test paragraph states the coverage rule; a seat without it states none."""
 
-    def render(self, ctx: Render) -> str:
+    def parts(self, ctx: Render) -> tuple[Part, ...]:
         boundary = (
             f"{_BOUNDARY_CHECKS_LEAD} Contract checks: are these inputs valid for this boundary? "
             f"Expectation checks: is the system in the expected state/thread/context? {_CHEAP_OVER_THOROUGH} "
-            f"Route violations through {self.profile.violation_routing}. {_BOUNDARY_CHECK_CONSUMERS}"
+            f"Route violations through {self.routing}. {_BOUNDARY_CHECK_CONSUMERS}"
         )
         scope = " ".join(
             (_UNIT_TEST_SCOPE, _COVERAGE_METRIC, _MOCKING_THRESHOLD)
             if self.coverage_metric
             else (_UNIT_TEST_SCOPE, _MOCKING_THRESHOLD)
         )
-        unit = f"*Unit tests*: {self.profile.unit_tests}\n{scope}\n{self.profile.unit_tests_closing}"
-        integration = f"{_INTEGRATION_TESTS} {self.profile.integration_tests}"
-        return "\n\n".join((_LAYERS_LEAD, boundary, unit, integration, _INTEGRATION_ARTIFACT, _VERIFICATION_EVIDENCE))
+        return (
+            ("", _LAYERS_LEAD),
+            ("routing", boundary),
+            (
+                "unit_tests, coverage_metric, unit_tests_closing",
+                f"*Unit tests*: {self.unit_tests}\n{scope}\n{self.unit_tests_closing}",
+            ),
+            ("integration_tests", f"{_INTEGRATION_TESTS} {self.integration_tests}"),
+            ("", _INTEGRATION_ARTIFACT),
+            ("", _VERIFICATION_EVIDENCE),
+        )
 
 
 @dataclass(frozen=True)
 class WhenReviewing(Section):
     """The When Reviewing section: what to cut from a test suite under review."""
 
-    def render(self, ctx: Render) -> str:
-        return f"## When Reviewing\n\n{_TEST_REVIEW}"
+    def parts(self, ctx: Render) -> tuple[Part, ...]:
+        return (("", "## When Reviewing"), ("", _TEST_REVIEW))

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from adjagent.context import Render
-from adjagent.section import Section
+from adjagent.section import Part, Section
 
 _OUTPUT_FORMAT = r"""## Output Format
 
@@ -32,5 +32,5 @@ class OutputFormat(Section):
     quantifiers, in scope and outside; a rewording keeps both, or the two collapse.
     """
 
-    def render(self, ctx: Render) -> str:
-        return _OUTPUT_FORMAT
+    def parts(self, ctx: Render) -> tuple[Part, ...]:
+        return (("", _OUTPUT_FORMAT),)

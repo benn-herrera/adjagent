@@ -1,7 +1,8 @@
-# ADJAGENT_1_0_REFACTOR_PLAN.md — adjagent 1.0: definitions as code, output tracked downstream
+# ACTIVE_PLAN.md — adjagent 1.0: definitions as code, output tracked downstream
 
-**Status: active; executable in the order below.** The design decisions are settled and recorded
-here.
+**Status: in execution on `lessons-learned-refactor`, in the order below.** Stages 1 and 1b are
+landed (`bec0bf9`, `248b78b`); stage 1c is in flight. The design decisions are settled and
+recorded here.
 
 ## Purpose
 
@@ -57,13 +58,15 @@ every difference is one this plan names or the owner approves.
    see or pin. The copy's `!INSTALLED!` banner shrinks like the definitions' and the body hash goes.
 10. **The unit of composition is the section.** A `Section` base class with `render(ctx) -> str`;
     one subclass per section family, around ten, named for what the section is; `Prose` for a
-    definition's own text. A public name under `adjagent/sections/` is a section class or a
-    profile field, never a paragraph: a chunk's text is a private constant of the section that
+    definition's own text. A public name under `adjagent/sections/` is a section class, never a
+    paragraph: a chunk's text is a private constant of the section that
     emits it, and a chunk's slot is a field of that section. No associative table of named text.
-11. **A profile holds the facts that vary by language or platform.** The unit-test framework, the
-    build commands, the package registry, the logging baseline and their kind are fields of a
-    `Profile` dataclass, one instance per coder and per platform expert, supplied to the sections
-    once rather than repeated as arguments.
+11. **What varies by definition is a field of the section it lands in.** The unit-test framework,
+    the build commands, the package registry, the logging baseline: each is a field of
+    `Testing`, `BuildSystem`, `Dependencies` or `Logging`, named for its slot, with the common
+    case as default. There is no profile: the stage 1b `Profile` held thirteen fields each read by
+    one section, five of them paragraphs, and hid the varying values from `explain`. A fact two
+    sections genuinely share, if stage 3 finds one, earns a shared constant then.
 12. **A definition is data.** A definition module defines `DEFINITIONS`, a tuple of `Definition`
     values whose sections are section instances; nothing in it takes `ctx`, which enters at render.
     Rendering iterates the package's modules and renders every entry. A multi-output module is a
@@ -74,9 +77,26 @@ every difference is one this plan names or the owner approves.
     process is five lines in the README's Development section; if it cannot be stated that
     briefly, the shape is wrong.
 14. **Acceptance is text identity, not byte identity.** The comparison collapses whitespace inside
-    a paragraph outside fenced code; paragraph boundaries, list items, headings, fenced blocks and
-    frontmatter stay exact. Whitespace a model does not read is not pinned, which retires `wrap=`
-    reproduction, space-joins and the trailing-sentence idiom from the port.
+    a paragraph outside fenced code; paragraph boundaries, list items, headings, table rows, fenced
+    blocks and frontmatter stay exact. Whitespace a model does not read is not pinned, which
+    retires `wrap=` reproduction, space-joins and the trailing-sentence idiom from the port.
+15. **A definition has a kind and a folder.** `kind` is agent, document or command, and later
+    skill; it decides the output root, the frontmatter the harness emits (a document carries the
+    harness's document frontmatter, a command none, and no blank line after its fence), and which
+    fields are required. `folder` is the path below the root for nested outputs such as the MAD
+    reference documents. Output paths, not names, are unique.
+16. **A definition's own prose can name a harness value as typed data.** `Prose` takes parts, a
+    string or a `HarnessText` member naming one of the harness's string fields, joined at render.
+    `Render` carries the definition's seat so a section can resolve an overlay; `FamilyText(anchor)`
+    is the section that renders one, and an empty section renders nothing.
+17. **A shared sentence moved to its section's canonical order is a named difference, not a
+    bug.** Three templates place two shared sentences in swapped order; the section renders them
+    once, in one order, and the stage 3 commit names each file that changes for that reason. The
+    previous system's inability to own an order was its defect; reproducing it is not fidelity.
+18. **Harnesses and families follow the definitions' expansion pattern.** `adjagent/harnesses/`
+    and `adjagent/families/`, one module per instance, a fixed module-level name (`HARNESS`,
+    `FAMILY`) read by the same loader that reads `DEFINITIONS`. The types stay at the package root;
+    an instance module holds no class.
 
 ## The shape
 
@@ -92,8 +112,6 @@ class Definition:
     sections: tuple[Section, ...]     # rendered in order, each with render(ctx)
     color: str | None = None
 
-PYTHON = Profile(language="Python", unit_tests="`pytest` with …", registry="PyPI downloads", ...)
-
 DEFINITIONS = (
     Definition(
         name="python-coder",
@@ -104,8 +122,9 @@ DEFINITIONS = (
             Prose(_INTRO),
             CorePrinciples(kind="coder", baseline="PEP 8 is the baseline that applies …"),
             Prose(_EXPERTISE),
-            Testing(profile=PYTHON, mocking="general"),
-            BuildAndDependencies(profile=PYTHON),
+            Testing(unit_tests="`pytest` with …", routing="the logging system …"),
+            BuildSystem(direct="the interpreter, test runner, or linter"),
+            Dependencies(registry="PyPI downloads"),
             ParallelExecution(),
             OutputFormat(),
             Dissent(),
@@ -137,8 +156,9 @@ DEFINITIONS = (
 
 The oracle is the pre-1.0 render of `main` at `8fa1408`, taken once before any port into two slots
 of the `render` target: `just render reference` for claude, and `just render reference-opencode
---harness=opencode` with the flags `install-agents-here` passes. Neither slot is re-rendered until
-stage 5 lands.
+--harness=opencode` with the flags `install-agents-here` passes, and `just render reference-gemma
+--family=gemma-4 --model-pin-tier-alias-map=all=sonnet` for the overlay anchors, which only a
+non-claude family fills. No slot is re-rendered until stage 5 lands.
 
 Comparison is of text: everything below the leading `#` banner block of each rendered file, with
 whitespace inside a paragraph outside fenced code collapsed to one space (decision 14). The old
@@ -214,8 +234,8 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
    harnesses. **Pause for review** of the shape before stage 3.
 3. **Shared sections for the coders.** The chunk table ported to section classes, one per section
    family the definitions actually have (principles, testing, build and dependencies, logging,
-   parallel execution, output format, dissent, review), with a profile per coder and per
-   platform expert. A chunk used by one definition becomes that definition's own prose. Proof:
+   parallel execution, output format, dissent, review), each section's fields named for the slots
+   the coders fill. A chunk used by one definition becomes that definition's own prose. Proof:
    the seven language coders and seven platform experts render text-identical.
 4. **Definitions.** The remaining agent templates and commands, one module per template, in
    groups: the review and writing seats (architect, security-reviewer, prompt-engineer,
@@ -239,7 +259,7 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
 7. **Contract documents.** `SPEC.md` loses nothing it promises; `ARCHITECTURE.md`'s Template System
    section is replaced by the composition model; `CONVENTIONS.md` drops the identifier class, the
    namespace rule and chunk single-sourcing, and gains two rules: one module per definition, and a
-   public name under `sections/` is a section class or a profile field, never a paragraph. The
+   public name under `sections/` is a section class, never a paragraph. The
    README's Development section states the editing process in five lines: where a definition
    lives, where shared text lives, how to change text for everyone versus for one definition,
    `just render` then `just render-diff` to see what a change does, `explain` to see where a
@@ -259,7 +279,7 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
 - **Section granularity.** Porting 147 chunks one-to-one reproduces the paragraph-level design in
   a new syntax; the stage 1 port did exactly that, and decisions 10–12 are the correction. The
   check in review: a public name under `sections/` that is a paragraph rather than a section
-  class or a profile field is the regression.
+  class is the regression.
 - **Scope creep into the definitions' content.** The port changes no prose. Content changes wait
   for the first 1.0 release, so that the acceptance diff stays a statement about the generator.
 - **The banner.** It is the one line every file is allowed to differ on; the comparison must

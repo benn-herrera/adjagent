@@ -1,31 +1,17 @@
 """python-coder: the Python implementation seat."""
 
-from adjagent.definition import ALL, Definition
-from adjagent.profile import Profile
+from adjagent.definition import Definition
 from adjagent.section import Prose
 from adjagent.sections.build import BuildSystem, DataFormats, Dependencies, Logging
 from adjagent.sections.output import OutputFormat
 from adjagent.sections.parallel import ParallelExecution
 from adjagent.sections.principles import CorePrinciples, Dissent
 from adjagent.sections.testing import Testing, WhenReviewing
+from adjagent.vocabulary import ALL
 
-PYTHON = Profile(
-    language="Python",
-    build_operations="build, test, lint, and integration",
-    build_tools="the interpreter, test runner, or linter",
-    build_outputs="a designated output directory, `.gitignore`d",
-    runner_recipes="a `lint` recipe",
-    violation_routing="the logging system (`logging.warning` or `logging.error`)",
-    unit_tests="`pytest` with `pytest.mark.parametrize` for table-driven tests.",
-    unit_tests_closing="`pytest-asyncio` for async tests.",
-    integration_tests="Use `pytest` fixtures to manage test environment setup.",
-    format_libraries="`tomllib` (stdlib, 3.11+) for reading TOML.",
-    registry="PyPI downloads",
-    logging=r"""**Logging**: use `logging` from stdlib — not print statements. Configure via
+_LOGGING = r"""**Logging**: use `logging` from stdlib — not print statements. Configure via
 `logging.getLogger(__name__)` in library code; configure handlers at the application entry point
-only. Use structured logging (JSON formatter) for anything that needs to be parsed.""",
-    logging_baseline="the stdlib",
-)
+only. Use structured logging (JSON formatter) for anything that needs to be parsed."""
 
 _INTRO = r"""You are a senior Python engineer. You write idiomatic, readable Python. You know when to reach for a
 clever solution and when the boring one is better — and you choose boring more often than not."""
@@ -142,13 +128,25 @@ DEFINITIONS = (
             Prose(_INTRO),
             CorePrinciples(baseline="PEP 8 is the baseline that applies when the project states nothing."),
             Prose(_EXPERTISE),
-            Testing(profile=PYTHON, coverage_metric=True),
+            Testing(
+                routing="the logging system (`logging.warning` or `logging.error`)",
+                unit_tests="`pytest` with `pytest.mark.parametrize` for table-driven tests.",
+                unit_tests_closing="`pytest-asyncio` for async tests.",
+                integration_tests="Use `pytest` fixtures to manage test environment setup.",
+                coverage_metric=True,
+            ),
             Prose(_DATA_AND_PACKAGING),
-            BuildSystem(profile=PYTHON),
-            DataFormats(profile=PYTHON),
+            BuildSystem(
+                language="Python",
+                operations="build, test, lint, and integration",
+                direct="the interpreter, test runner, or linter",
+                outputs="a designated output directory, `.gitignore`d",
+                runner_recipes="a `lint` recipe",
+            ),
+            DataFormats(libraries="`tomllib` (stdlib, 3.11+) for reading TOML."),
             Prose(_TEXT_IO_AND_SYS_PATH),
-            Dependencies(profile=PYTHON),
-            Logging(profile=PYTHON),
+            Dependencies(registry="PyPI downloads"),
+            Logging(rule=_LOGGING, baseline="the stdlib"),
             Prose(_PERFORMANCE_AND_GOTCHAS),
             WhenReviewing(),
             ParallelExecution(),

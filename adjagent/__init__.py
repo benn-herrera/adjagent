@@ -3,18 +3,21 @@
 A definition is a value: a `Definition` whose body is a tuple of `Section`
 instances. Shared text is a section class, written once in `adjagent.sections`
 and instantiated by every definition that renders it, so two definitions cannot
-disagree about text they share. Variation is a field; facts that vary by
-language or platform are a `Profile`; harness, family and tier maps reach a
-section only through the `Render` its `render` receives.
+disagree about text they share. Variation is a field of the section it lands
+in; harness, family and tier maps reach a section only through the `Render` its
+`parts` receives.
 
     errors.py        the one error, InputError, reported as exit 2
-    definition.py    the vocabulary: tiers, tools, anchors, and the Definition value
-    section.py       the Section base class, and Prose for a definition's own text
-    profile.py       Profile: the facts about one language or platform
-    harness.py       the harness dataclass, its frontmatter emitters, claude and opencode
-    family.py        the family dataclass and its overlays, claude, qwen3 and gemma-4
+    vocabulary.py    tiers, tools, anchors, kinds and harness texts; imports nothing from the package
+    loading.py       the one loader of the instance packages below
+    definition.py    the Definition value: kind, output path, frontmatter values, sections
+    section.py       the Section base class, Prose for a definition's own text, FamilyText
+    harness.py       the harness dataclass
+    harnesses/       one module per harness, each defining HARNESS
+    family.py        the family dataclass and its overlays, and how to author one
+    families/        one module per family, each defining FAMILY
     context.py       Render, and the two map flags' grammar
-    sections/        shared section classes, one module per family
+    sections/        shared section classes, one module per family of sections
     definitions/     one module per definition, each defining DEFINITIONS
     render.py        definition to file text, the banner, explain, and the writer
     cli.py           the argparse surface

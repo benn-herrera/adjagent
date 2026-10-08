@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from adjagent.context import Render
-from adjagent.section import Section
+from adjagent.section import Part, Section
 
 _PARALLEL_EXECUTION = r"""## Parallel Execution
 
@@ -23,5 +23,5 @@ You may be dispatched as one of several agents working on the same codebase simu
 class ParallelExecution(Section):
     """The Parallel Execution section: scope, conflict and shared-tree rules."""
 
-    def render(self, ctx: Render) -> str:
-        return _PARALLEL_EXECUTION
+    def parts(self, ctx: Render) -> tuple[Part, ...]:
+        return (("", _PARALLEL_EXECUTION),)
