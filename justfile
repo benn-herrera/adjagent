@@ -271,8 +271,9 @@ render-next *args:
 # next lines have exactly one of the two banner shapes has those lines replaced
 # by the one constant line `# !BANNER!`, and two files are the same when their
 # bodies are byte-identical (devtools/render_diff.py states the shapes). The
-# output keeps `diff -rq`'s two line forms.
-[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by body, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
+# output keeps `diff -rq`'s two line forms. Files compare by text: whitespace
+# inside a paragraph outside fenced code is collapsed before the comparison.
+[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
 render-diff a="reference" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 

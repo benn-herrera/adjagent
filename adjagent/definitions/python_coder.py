@@ -1,33 +1,30 @@
 """python-coder: the Python implementation seat."""
 
-from adjagent.context import Render
 from adjagent.definition import ALL, Definition
-from adjagent.sections.output import CODER_OUTPUT_FORMAT
-from adjagent.sections.parallel import parallel_execution
-from adjagent.sections.practice import (
-    DATA_FORMATS,
-    ISSUE_TRACKER_HEALTH,
-    PROJECT_DOCS_SETUP,
-    build_system,
-    dependencies_lead,
-    dependency_vetting,
-    heavy_logging_framework,
-    manual_over_large_dependency,
-    new_project_runner_recipes,
-    new_project_setup,
-)
-from adjagent.sections.principles import DISSENT, code_principles
-from adjagent.sections.testing import (
-    BOUNDARY_CHECK_CONSUMERS_CODER,
-    COVERAGE_METRIC,
-    INTEGRATION_ARTIFACT,
-    boundary_check_coder_body,
-    boundary_checks_lead,
-    integration_tests_coder,
-    mocking_threshold,
-    unit_test_scope_coder,
-    verification_evidence,
-    when_reviewing,
+from adjagent.profile import Profile
+from adjagent.section import Prose
+from adjagent.sections.build import BuildSystem, DataFormats, Dependencies, Logging
+from adjagent.sections.output import OutputFormat
+from adjagent.sections.parallel import ParallelExecution
+from adjagent.sections.principles import CorePrinciples, Dissent
+from adjagent.sections.testing import Testing, WhenReviewing
+
+PYTHON = Profile(
+    language="Python",
+    build_operations="build, test, lint, and integration",
+    build_tools="the interpreter, test runner, or linter",
+    build_outputs="a designated output directory, `.gitignore`d",
+    runner_recipes="a `lint` recipe",
+    violation_routing="the logging system (`logging.warning` or `logging.error`)",
+    unit_tests="`pytest` with `pytest.mark.parametrize` for table-driven tests.",
+    unit_tests_closing="`pytest-asyncio` for async tests.",
+    integration_tests="Use `pytest` fixtures to manage test environment setup.",
+    format_libraries="`tomllib` (stdlib, 3.11+) for reading TOML.",
+    registry="PyPI downloads",
+    logging=r"""**Logging**: use `logging` from stdlib — not print statements. Configure via
+`logging.getLogger(__name__)` in library code; configure handlers at the application entry point
+only. Use structured logging (JSON formatter) for anything that needs to be parsed.""",
+    logging_baseline="the stdlib",
 )
 
 _INTRO = r"""You are a senior Python engineer. You write idiomatic, readable Python. You know when to reach for a
@@ -72,9 +69,7 @@ at minimum log them. Context managers (`with`) for resource cleanup, not try/fin
 **Async**: `asyncio` for I/O-bound concurrency. `async def` + `await` for coroutines.
 `asyncio.gather` for concurrent tasks. Never mix sync blocking calls into async code (use
 `asyncio.run_in_executor`). `aiohttp` / `httpx` for async HTTP. The event loop is not thread-safe —
-use `asyncio.run` at the top level, not `loop.run_until_complete` inside libraries.
-
-**Testing** — three layers, each with a distinct purpose:"""
+use `asyncio.run` at the top level, not `loop.run_until_complete` inside libraries."""
 
 _DATA_AND_PACKAGING = r"""**Data classes and models**: `dataclasses.dataclass` for plain data containers. `pydantic` for
 validation and serialization at system boundaries (external input, API responses). Avoid
@@ -104,10 +99,6 @@ resolution through `PYTHONPATH`. (The only tolerated exception is loading a scri
 not a legal module name — e.g. a hyphenated CLI script imported by path via
 `importlib.util.spec_from_file_location` — which is a path-load mechanism, not `sys.path` mutation.)"""
 
-_LOGGING = r"""**Logging**: use `logging` from stdlib — not print statements. Configure via
-`logging.getLogger(__name__)` in library code; configure handlers at the application entry point
-only. Use structured logging (JSON formatter) for anything that needs to be parsed."""
-
 _PERFORMANCE_AND_GOTCHAS = r"""**Performance**: the GIL limits CPU-bound threading — use `multiprocessing` or
 `concurrent.futures.ProcessPoolExecutor` for CPU-bound work. For numerical work, `numpy` operations
 over Python loops. Profile with `cProfile`/`line_profiler` before optimizing. Generator expressions
@@ -135,9 +126,8 @@ over list comprehensions when you only need to iterate once.
 - `dict` is ordered in Python 3.7+ but that's an implementation detail for `dict`, not a guarantee
   you should rely on for semantics."""
 
-
-def python_coder(ctx: Render) -> Definition:
-    return Definition(
+DEFINITIONS = (
+    Definition(
         name="python-coder",
         description=(
             "Python implementation specialist. Writes idiomatic, readable Python — explicit over implicit, "
@@ -149,37 +139,21 @@ def python_coder(ctx: Render) -> Definition:
         tier="high",
         color="#3776AB",
         sections=(
-            _INTRO,
-            code_principles(
-                variant="coder", tail="PEP 8 is the baseline that applies when the project states nothing."
-            ),
-            _EXPERTISE,
-            f"{boundary_checks_lead()} "
-            f"{boundary_check_coder_body(routing='the logging system (`logging.warning` or `logging.error`)')} "
-            f"{BOUNDARY_CHECK_CONSUMERS_CODER}",
-            "*Unit tests*: `pytest` with `pytest.mark.parametrize` for table-driven tests.\n"
-            f"{unit_test_scope_coder()} {COVERAGE_METRIC} {mocking_threshold(variant='general')}\n"
-            "`pytest-asyncio` for async tests.",
-            f"{integration_tests_coder()} Use `pytest` fixtures to manage test environment setup.",
-            INTEGRATION_ARTIFACT,
-            verification_evidence(),
-            _DATA_AND_PACKAGING,
-            build_system(
-                ops="build, test, lint, and integration",
-                direct="the interpreter, test runner, or linter",
-                outputs="a designated output directory, `.gitignore`d",
-            ),
-            f"{new_project_setup(ctx)} {new_project_runner_recipes(language='Python', recipes='a `lint` recipe')}",
-            PROJECT_DOCS_SETUP,
-            f"{DATA_FORMATS} `tomllib` (stdlib, 3.11+) for reading TOML.",
-            _TEXT_IO_AND_SYS_PATH,
-            f"{dependencies_lead(variant='packages')} {manual_over_large_dependency()} {ISSUE_TRACKER_HEALTH}",
-            dependency_vetting(registry="PyPI downloads"),
-            f"{_LOGGING}\n{heavy_logging_framework(baseline='the stdlib')}",
-            _PERFORMANCE_AND_GOTCHAS,
-            when_reviewing(variant="section"),
-            parallel_execution(variant="general"),
-            CODER_OUTPUT_FORMAT,
-            DISSENT,
+            Prose(_INTRO),
+            CorePrinciples(baseline="PEP 8 is the baseline that applies when the project states nothing."),
+            Prose(_EXPERTISE),
+            Testing(profile=PYTHON, coverage_metric=True),
+            Prose(_DATA_AND_PACKAGING),
+            BuildSystem(profile=PYTHON),
+            DataFormats(profile=PYTHON),
+            Prose(_TEXT_IO_AND_SYS_PATH),
+            Dependencies(profile=PYTHON),
+            Logging(profile=PYTHON),
+            Prose(_PERFORMANCE_AND_GOTCHAS),
+            WhenReviewing(),
+            ParallelExecution(),
+            OutputFormat(),
+            Dissent(),
         ),
-    )
+    ),
+)

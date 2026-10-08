@@ -1,23 +1,28 @@
 """The adjagent package's own logic, each case checked against values the
 renderer did not compute: the two map flags' grammar, the rendered model text,
 the CLI's Render refusals, the frontmatter tools path against literal lines of
-the pre-1.0 render, overlay resolution and stock, and Definition refusals.
+the pre-1.0 render, overlay resolution and stock, Definition and Prose refusals,
+discovery's refusal, and explain's section headers.
 
 The package is imported from the repository root, which `just test` puts on
 PYTHONPATH.
 """
 
 import re
+from types import ModuleType
 
 import pytest
 
 from adjagent import family as families
 from adjagent import harness as harnesses
+from adjagent.cli import main
 from adjagent.context import TIER_MAP_FLAG, Render, build_render, parse_tier_map
 from adjagent.definition import ALL, Anchor, Definition, Tool
+from adjagent.definitions import definitions_of
 from adjagent.errors import InputError
 from adjagent.family import Family, Overlay
 from adjagent.render import agent_fields
+from adjagent.section import Prose
 
 _ALL_INHERIT = dict.fromkeys(("highest", "high", "medium", "low", "lowest"), "inherit")
 
@@ -107,7 +112,7 @@ def _security_reviewer() -> Definition:
         ),
         tools=(Tool.BASH, Tool.READ, Tool.GREP, Tool.GLOB, Tool.WRITE, Tool.EDIT, Tool.WEBSEARCH, Tool.WEBFETCH),
         tier="high",
-        sections=("body",),
+        sections=(Prose("body"),),
         color="#DC2626",
     )
 
@@ -179,12 +184,30 @@ def test_stock_excludes_the_overridden_tier() -> None:
     "changes",
     [
         {"tools": ()},
-        {"sections": ("ok", "edge newline\n")},
-        {"sections": ("\nedge newline",)},
+        {"sections": ()},
+        {"sections": (Prose("ok"), "a bare string")},
         {"description": 'holds a "quote"'},
     ],
 )
 def test_definition_refusals(changes: dict) -> None:
-    fields = {"name": "probe", "description": "a probe", "tools": ALL, "tier": "high", "sections": ("ok",)}
+    fields = {"name": "probe", "description": "a probe", "tools": ALL, "tier": "high", "sections": (Prose("ok"),)}
     with pytest.raises(InputError, match="definition 'probe'"):
         Definition(**{**fields, **changes})
+
+
+@pytest.mark.parametrize("text", ["", "edge newline\n", "\nedge newline"])
+def test_prose_refuses_empty_or_edge_newline_text(text: str) -> None:
+    with pytest.raises(InputError, match="prose section"):
+        Prose(text)
+
+
+def test_discovery_refuses_a_module_without_definitions() -> None:
+    with pytest.raises(InputError, match="'adjagent.definitions.probe' defines no DEFINITIONS"):
+        definitions_of(ModuleType("adjagent.definitions.probe"))
+
+
+def test_explain_heads_a_section_with_its_class_and_non_default_fields(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["explain", "python-coder"])
+    lines = capsys.readouterr().out.splitlines()
+    assert "[Testing profile=Profile(language='Python') coverage_metric=True]" in lines
+    assert "[ParallelExecution]" in lines

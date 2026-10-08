@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from devtools.render_diff import body, walk
+from devtools.render_diff import body, text, walk
 
 OLD_BANNER = (
     b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# !BODY-SHA256! abc\n#\nname: a\n---\ntext\n"
@@ -33,6 +33,49 @@ class BodyTest(unittest.TestCase):
         for data in (b"no frontmatter\n# !GENERATED! from x\n", short_block, wrong_prefix):
             with self.subTest(data=data):
                 self.assertEqual(body(data), data)
+
+
+class TextTest(unittest.TestCase):
+    def test_a_paragraph_wrapped_two_ways_compares_equal(self):
+        self.assertEqual(text(b"one two\nthree  four\n"), text(b"one\ntwo three four\n"))
+
+    def test_a_paragraph_split_into_two_differs(self):
+        self.assertNotEqual(text(b"one two\nthree four\n"), text(b"one two\n\nthree four\n"))
+
+    def test_a_fence_with_different_indentation_differs(self):
+        self.assertNotEqual(text(b"```\nif x:\n    y\n```\n"), text(b"```\nif x:\n  y\n```\n"))
+
+    def test_inline_code_with_triple_backticks_is_not_a_fence(self):
+        self.assertEqual(
+            text(b"```def f(x: int)```\n-> int:\n"),
+            text(b"```def f(x: int)```  -> int:\n"),
+        )
+        self.assertEqual(
+            text(b"intro ```def f(x: int) -> int:```\nmore\n"),
+            text(b"intro\n```def f(x: int) -> int:``` more\n"),
+        )
+
+    def test_a_fence_with_an_info_string_stays_exact(self):
+        self.assertNotEqual(
+            text(b"```python\nif x:\n    y\n```\n"), text(b"```python\nif x:\n  y\n```\n"))
+
+    def test_a_tilde_fence_is_not_closed_by_backticks(self):
+        self.assertNotEqual(
+            text(b"~~~\n```\nif x:\n    y\n~~~\n"), text(b"~~~\n```\nif x:\n  y\n~~~\n"))
+
+    def test_list_items_wrapped_differently_compare_equal(self):
+        self.assertEqual(
+            text(b"- one two\n  three\n- four  five\n"), text(b"- one\n  two three\n- four five\n"))
+
+    def test_list_items_merged_into_one_differ(self):
+        self.assertNotEqual(text(b"- one two\n- three\n"), text(b"- one two three\n"))
+
+    def test_numbered_list_items_are_separate_units(self):
+        self.assertEqual(text(b"1. one\n   two\n2) three\n"), text(b"1. one two\n2) three\n"))
+        self.assertNotEqual(text(b"1. one two\n2. three\n"), text(b"1. one two 2. three\n"))
+
+    def test_frontmatter_with_a_changed_space_differs(self):
+        self.assertNotEqual(text(b"---\nname: a\n---\ntext\n"), text(b"---\nname:  a\n---\ntext\n"))
 
 
 class WalkTest(unittest.TestCase):
