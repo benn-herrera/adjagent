@@ -22,10 +22,15 @@ user. It's accident protection, not hack-proofing, but can prevent painful misha
 
 ### Install
 
-Requires **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with
-the standard library's `tomllib`, which first shipped in 3.11.
+Requirements:
 
-Clone this repo anywhere, then install both deployed surfaces into the consuming project — from
+- **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with
+the standard library's `tomllib`, which first shipped in 3.11. 
+  - Recommendation: use [pyenv](https://github.com/pyenv/pyenv) to manage python versions if you
+    need to do an installation. Available on macOS and Linux as package `pyenv`
+- [just](https://github.com/casey/just) - available on macOS and Linux as package `just`
+
+Clone this repo anywhere, then install the deployed surfaces into the consuming project — from
 **this** repo's root:
 
 ```sh
@@ -41,7 +46,7 @@ verbatim to `gen_defs`, so tuning the render is one more flag, not a different c
 `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family
 (see "Model Tuning" below).
 
-The installed tree is an **artifact**: this repo is the source of truth, and re-running the install
+The installed tree is an artifact, and this repo is the source of truth. Re-running the install
 overwrites it. Don't edit files under a consuming project's `.claude/agents/` — change the template
 here, then re-install. Every installed file says as much in a banner of its own, which also records
 the hash of the content below it; an edit that breaks that hash is not lost when the re-install
