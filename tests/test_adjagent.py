@@ -401,10 +401,14 @@ def test_explain_heads_each_section_and_each_field_supplied_paragraph(capsys: py
     data_formats = lines.index("[DataFormats libraries='`tomllib` (stdlib, 3.11+) for reading TOML.']")
     assert lines[data_formats + 1] == "  ‹libraries›"
     assert lines[data_formats + 2].startswith("**Data formats**: the right tool for the job decides.")
-    principles = lines.index("[CorePrinciples baseline='PEP 8 is the baseline that applies when the project states…]")
-    assert lines[principles + 1] == "## Core Principles"
-    assert lines.index("  ‹baseline›") > principles
-    parallel = lines.index("[ParallelExecution]")
+    principles = lines.index(
+        "[CorePrinciples heading='Core Principles' machine_guarantees=True "
+        "tail='PEP 8 is the baseline that applies when the project states…]"
+    )
+    assert lines[principles + 1] == "  ‹heading›"
+    assert lines[principles + 2] == "## Core Principles"
+    assert lines.index("  ‹tail›") > principles
+    parallel = lines.index("[ParallelExecution adjacent=None]")
     assert lines[parallel + 1] == "## Parallel Execution"
 
 

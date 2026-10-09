@@ -1,8 +1,8 @@
 # ACTIVE_PLAN.md — adjagent 1.0: definitions as code, output tracked downstream
 
-**Status: in execution on `lessons-learned-refactor`, in the order below.** Stages 1 and 1b are
-landed (`bec0bf9`, `248b78b`); stage 1c is in flight. The design decisions are settled and
-recorded here.
+**Status: in execution on `lessons-learned-refactor`, in the order below.** Stages 1, 1b, 1c and
+2 are landed (`bec0bf9`, `248b78b`, `ae58f11`, `d4d8c93`); stage 3 is next. The design decisions
+are settled and recorded here.
 
 ## Purpose
 

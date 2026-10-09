@@ -126,7 +126,7 @@ DEFINITIONS = (
         color="#3776AB",
         sections=(
             Prose(_INTRO),
-            CorePrinciples(baseline="PEP 8 is the baseline that applies when the project states nothing."),
+            CorePrinciples(tail="PEP 8 is the baseline that applies when the project states nothing."),
             Prose(_EXPERTISE),
             Testing(
                 routing="the logging system (`logging.warning` or `logging.error`)",
@@ -145,7 +145,7 @@ DEFINITIONS = (
             ),
             DataFormats(libraries="`tomllib` (stdlib, 3.11+) for reading TOML."),
             Prose(_TEXT_IO_AND_SYS_PATH),
-            Dependencies(registry="PyPI downloads"),
+            Dependencies(issue_tracker=True, registry="PyPI downloads"),
             Logging(rule=_LOGGING, baseline="the stdlib"),
             Prose(_PERFORMANCE_AND_GOTCHAS),
             WhenReviewing(),
