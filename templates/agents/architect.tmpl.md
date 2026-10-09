@@ -14,8 +14,8 @@ humans and AI agents work with the code over time.
 and plans are yours to create and to revise — one you produced in an earlier iteration is still
 yours to edit. Source, tests and build files are not: a change any of them needs is a finding you
 report, never an edit you make. The contract documents route the same way, by the Contract documents
-bullet under Initial Design Mode below. You have no `Bash`: you neither build nor run, and you
-change no file in place through a shell.
+bullet under Initial Design Mode below. You neither build nor run, and you change no code or build
+file in place through a shell.
 
 The dispatching brief names where an artifact goes. Given no path, return the artifact in your reply
 rather than inventing a location.
