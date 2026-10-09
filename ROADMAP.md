@@ -122,27 +122,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    relay-pattern decomposition (code owns the loop, the model gets one bounded question), not more
    prose. Input: the gemma failure catalog mined via the resume path from the current paired runs.
 
-6. **Multi-harness portability** - the `hrn.` namespace and the per-harness files
-   (`templates/harness/<name>.toml`) have landed. What remains is moving CLAUDE.md to AGENTS.md in
-   all projects and subprojects, with a redirect CLAUDE.md (just has `@AGENTS.md`, which is the
-   Anthropic-specified technique).
-
-7. **(LOW) A shipped package's contract docs stay out of the install.** Each shipped package now
-   carries the full four-document set — `SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`,
-   `ROADMAP.md`. The install copies a package recursively minus `INSTALL_EXCLUDED_DIRS` / `_NAMES` /
-   `_SUFFIX`, so all four land in a consumer's `.claude/agents/<package>/`. `CONVENTIONS.md`
-   shipping is correct — it is the package's operating contract, and a session working in an
-   installed tree is exactly its reader. `ROADMAP.md` shipping is not: this repository's own roadmap
-   is project space, deliberately outside the precedence chain and never handed to a coding
-   dispatch, and a package's copy has no better claim on a consumer's session context. `SPEC.md` and
-   `ARCHITECTURE.md` are the undecided middle — an installed consumer reading a package's observable
-   contract is defensible; reading its internal mechanism is closer to the generator internals the
-   surface boundary already keeps out. Smallest fix is a name in `INSTALL_EXCLUDED_NAMES`.
-   Templating the installed Markdown did not subsume this: that work reached `mad/` only, so
-   `kb_tools/` and `liaison_tools/` still install by the exception-driven walk, and this stays open
-   on its own.
-
-8. **One rule arriving several times in one prompt — the duplication class the sweep cannot see.**
+6. **One rule arriving several times in one prompt — the duplication class the sweep cannot see.**
    Distinct from the cross-file duplication `devtools/dupe_sweep` finds and `PROSE_DEDUPE_PLAN.md`
    cleared: a seat is told the same thing twice inside its own definition, through a chunk and an
    inline restatement, or through two different chunks that both land in it. Single-sourcing does
@@ -183,7 +163,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    repairs. First: enumerate every deviation and classify it from the chunk file's own comments
    and the line's history. Next dev branch's first task.
 
-9. **Re-examine the MAD agent set against what the harness now does.** That design predates several
+7. **Re-examine the MAD agent set against what the harness now does.** That design predates several
    harness capabilities and may be replicating orchestration the harness performs more reliably.
    **Explore at the start of the next MAD process rather than as standalone work** — the protocol is
    best examined against a live run.
@@ -212,31 +192,9 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    carried. Both candidates turn on that answer and neither has been checked against the protocol as
    written.
 
-10. **Architect probes its own design assumptions.** The architect has no shell
-    (`templates/agents/architect.tmpl.md`, `tools: read, grep, glob, write, edit`), so a design call
-    that only execution settles — an import graph, a rendered byte, a CLI's output — reaches
-    approval unverified and surfaces mid-run. It needs a way to run probes without gaining a way to
-    change code. Candidates: per-agent Bash command patterns, if the harness honours them in agent
-    frontmatter (unverified), limited to running scripts under `.claude-temp/`; or a defined handoff
-    where the architect writes probe scripts there and a coder runs them and returns the output.
+8. Add a Lua coding agent that handles Lua and LuaJIT
 
-11. **Does Claude Code honour a hex `color`?** Every agent template authors `color` as a hex value,
-    and Claude Code's subagent documentation lists eight color names. The claude render passes the
-    hex value through unchanged. Settling it wants a behavioral probe.
-
-12. **Does opencode load `agents/` recursively?** The shipped packages' markdown under
-    `agents/kb_tools/` and `agents/liaison_tools/` — READMEs and `.tmpl.md` prompt templates —
-    carries no frontmatter and sits at destinations SPEC.md freezes (Deployed Surfaces). If opencode
-    loads `agents/**/*.md`, it reads those files as agents or fails its config validation, which no
-    frontmatter rendering can fix. Settled by starting opencode in a project installed with
-    `--harness=opencode` and listing its agents.
-
-13. **The harness agents file names a Claude pin under every harness.**
-    `templates/harness/AGENTS.tmpl.md` renders "dispatch at `model: sonnet`" for opencode too,
-    because the agents-file render binds its tier tokens to the default family's members whatever
-    the harness. Rewording it changes agent-visible text, so it goes through prompt-engineer review.
-
-14. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+9. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
     installs the agent and command definitions under a prefixed namespace so the set coexists with
     an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
     packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a
