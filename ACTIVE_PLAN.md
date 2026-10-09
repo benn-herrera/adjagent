@@ -1,8 +1,9 @@
 # ACTIVE_PLAN.md — adjagent 1.0: definitions as code, output tracked downstream
 
-**Status: in execution on `heredoc-shape`, cut from `lessons-learned-refactor` at `d4d8c93`, in
-the order below.** Stage 1 is landed (`bec0bf9`); the section shape that followed it is retired
-(stage 1's note); stage 2 on the heredoc shape is in flight. The design decisions are settled and
+**Status: in execution on `heredoc-shape`, cut from `lessons-learned-refactor` at its stage 2, in
+the order below.** Stage 1 is landed; the section shape that followed it is retired (stage 1's
+note); stages 2 and 3 on the heredoc shape are landed, twenty-eight of fifty-two outputs; stage 4
+is next. The branch is rebased on `main` at `e2a8838`. The design decisions are settled and
 recorded here.
 
 ## Purpose
@@ -176,7 +177,8 @@ DEFINITIONS = (
 
 ## Acceptance
 
-The oracle is the pre-1.0 render of `main` at `8fa1408`, taken once before any port into two slots
+The oracle is the pre-1.0 render of `main` at `e2a8838`, re-taken whenever `main` changes a
+template and recorded here each time, into two slots
 of the `render` target: `just render reference` for claude, and `just render reference-opencode
 --harness=opencode` with the flags `install-agents-here` passes, and `just render reference-gemma
 --family=gemma-4 --model-pin-tier-alias-map=all=sonnet` for the overlay anchors, which only a
@@ -241,9 +243,9 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
 1. **Skeleton.** `adjagent/` with `Definition`, `Render`, the harness and family dataclasses, the
    claude and opencode adapters, the renderer with its two-line banner, and the render CLI; the
    two reference slots taken; `render-diff` extended to compare bodies. Proof: `python-coder`
-   ported by hand renders body-identical under both harnesses. Landed at `bec0bf9`.
-   1b–1c and the first stage 2 (`248b78b`, `ae58f11`, `d4d8c93`) built a section shape — one
-   class per shared section, fields for what varied — and ported `python-coder`, the MAD set and
+   ported by hand renders body-identical under both harnesses. Landed.
+   1b–1c and the first stage 2 (the history of `lessons-learned-refactor`) built a section shape,
+   one class per shared section, fields for what varied, and ported `python-coder`, the MAD set and
    thirteen coders onto it. At twenty-eight outputs it had fifty-one classes with up to eleven
    fields each and a referee call site of sixty keyword arguments: the chunk-argument problem at
    paragraph grain, unreadable at the call site. Retired; the commits stay as the record. The
