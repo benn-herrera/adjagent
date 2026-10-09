@@ -2,8 +2,8 @@
 renderer did not compute: the two map flags' grammar, the rendered model text,
 the CLI's Render refusals, the frontmatter of each kind against literal lines of
 the pre-1.0 render, guest extraction leaving exactly a definition's body and every
-participant extracting to the contract, overlay resolution and stock, Definition,
-Prose and section-field refusals, the loader's refusal, explain's format, and the
+participant extracting to the contract, placeholder filling and refusal, overlay
+resolution and stock, Definition refusals, the loader's refusal, and the
 package's source invariants as walks of its syntax trees.
 
 The package is imported from the repository root, which `just test` puts on
@@ -11,15 +11,16 @@ PYTHONPATH.
 """
 
 import ast
-import dataclasses
+import inspect
 import re
 import sys
+import types
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 import adjagent
-from adjagent.cli import main
+import adjagent.text
 from adjagent.context import TIER_MAP_FLAG, Render, build_render, parse_tier_map
 from adjagent.definition import Definition
 from adjagent.definitions import definitions_of
@@ -31,11 +32,21 @@ from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.loading import load
-from adjagent.render import agent_fields, definitions, keyed_by_path, render_definition
-from adjagent.section import FamilyText, OwnText, Prose, Section
-from adjagent.sections.liaison import Liaison
-from adjagent.sections.mad import ConvergenceCriteria, Mode
-from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tool
+from adjagent.render import agent_fields, definitions, filled_body, keyed_by_path, render_definition
+from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tool, hole
+from devtools import render_diff
+from tests._structure import (
+    ARGUMENT_RULE,
+    ASSIGNMENT_RULE,
+    BODY_RULE,
+    CALL_RULE,
+    DEFINITION_TOP_RULE,
+    FUNCTION_RULE,
+    IMPORT_RULE,
+    TEXT_TOP_RULE,
+    check_source,
+    check_structure,
+)
 
 _ALL_INHERIT = dict.fromkeys(("highest", "high", "medium", "low", "lowest"), "inherit")
 _PACKAGE = Path(adjagent.__file__).parent
@@ -138,7 +149,7 @@ def _security_reviewer() -> Definition:
         ),
         tools=(Tool.BASH, Tool.READ, Tool.GREP, Tool.GLOB, Tool.WRITE, Tool.EDIT, Tool.WEBSEARCH, Tool.WEBFETCH),
         tier="high",
-        sections=(Prose("body"),),
+        body="body",
         color="#DC2626",
     )
 
@@ -248,9 +259,7 @@ def test_guest_extraction_leaves_exactly_the_body(discovered: Discovered, ctx: R
     ]
     assert len(extractable) > 1
     for module, defn in extractable:
-        seated = dataclasses.replace(ctx, seat=defn.tier)
-        body = "\n\n".join(text for text in (section.render(seated) for section in defn.sections) if text)
-        assert _extracted(defn, ctx, module=module) == body, defn.output_path
+        assert _extracted(defn, ctx, module=module) == filled_body(defn, ctx), defn.output_path
     module, contract = _found(discovered, _CONTRACT_PATH)
     assert _extracted(contract, ctx, module=module).split("\n", 1)[0] == _CONTRACT_FIRST_LINE
 
@@ -278,9 +287,25 @@ def test_every_participant_extracts_to_the_contract_document(discovered: Discove
         (HarnessText.USER_HARNESS_DIR, OPENCODE, "~/.config/opencode"),
     ],
 )
-def test_prose_renders_a_harness_text_part(part: HarnessText, harness: Harness, expected: str) -> None:
+def test_a_harness_text_placeholder_fills_with_the_harness_string(
+    part: HarnessText, harness: Harness, expected: str
+) -> None:
+    defn = Definition(name="probe", kind=Kind.COMMAND, body=f"see {hole(part)}/x")
     ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
-    assert Prose("see ", part, "/x").render(ctx) == f"see {expected}/x"
+    assert filled_body(defn, ctx) == f"see {expected}/x"
+
+
+@pytest.mark.parametrize("placeholder", ["@!hrn.agents-file!@", "@!hrn-nonesuch!@", "@!fam-gap!@", "@!gap-aversion!@"])
+def test_an_unknown_placeholder_is_refused_at_render(placeholder: str) -> None:
+    defn = Definition(name="probe", kind=Kind.COMMAND, body=f"before {placeholder} after")
+    ctx = Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+    with pytest.raises(InputError, match=re.escape(f"definition 'probe': unknown placeholder {placeholder}")):
+        filled_body(defn, ctx)
+
+
+@pytest.mark.parametrize("part", list(HarnessText), ids=lambda part: part.name)
+def test_the_text_module_spells_each_harness_placeholder_as_the_renderer_fills_it(part: HarnessText) -> None:
+    assert getattr(adjagent.text, part.name) == hole(part)
 
 
 _TUNED = Family(
@@ -290,29 +315,33 @@ _TUNED = Family(
 )
 
 
-def _with_family_text(*, family: Family, tier: str, anchor: Anchor) -> str:
-    defn = Definition(
-        name="probe",
-        description="a probe",
-        tools=ALL,
-        tier=tier,
-        sections=(Prose("before"), FamilyText(anchor), Prose("after")),
-    )
+def _with_family_text(*, family: Family, tier: str, body: str) -> str:
+    defn = Definition(name="probe", description="a probe", tools=ALL, tier=tier, body=body)
     ctx = Render(harness=CLAUDE, family=family, tier_map=dict(family.tiers))
     return render_definition(defn, ctx, module="adjagent.definitions.probe").split("---\n\n", 1)[1]
 
 
+_GAP = hole(Anchor.GAP_AVERSION)
+_ASK = hole(Anchor.ASK_VS_STIPULATE)
+
+
 @pytest.mark.parametrize(
-    "family, tier, anchor, body",
+    "family, tier, body, rendered",
     [
-        (_TUNED, "medium", Anchor.GAP_AVERSION, "before\n\nfor mid\n\nafter\n"),
-        (_TUNED, "high", Anchor.GAP_AVERSION, "before\n\nfamily-wide\n\nafter\n"),
-        (_TUNED, "medium", Anchor.ASK_VS_STIPULATE, "before\n\nafter\n"),
-        (CLAUDE_FAMILY, "medium", Anchor.GAP_AVERSION, "before\n\nafter\n"),
+        (_TUNED, "medium", f"before\n\n{_GAP}\n\nafter", "before\n\nfor mid\n\nafter\n"),
+        (_TUNED, "high", f"before\n\n{_GAP}\n\nafter", "before\n\nfamily-wide\n\nafter\n"),
+        (_TUNED, "medium", f"before\n\n{_ASK}\n\nafter", "before\n\nafter\n"),
+        (CLAUDE_FAMILY, "medium", f"before\n\n{_GAP}\n\nafter", "before\n\nafter\n"),
+        (CLAUDE_FAMILY, "medium", f"{_GAP}\n\nafter", "after\n"),
+        (CLAUDE_FAMILY, "medium", f"before\n\n{_GAP}", "before\n"),
+        (CLAUDE_FAMILY, "medium", f"before\n\n{_GAP}\n\n{_ASK}\n\nafter", "before\n\nafter\n"),
+        (_TUNED, "medium", f"before\n\n{_GAP}\n\n{_ASK}\n\nafter", "before\n\nfor mid\n\nafter\n"),
     ],
 )
-def test_family_text_renders_the_seats_overlay_or_nothing(family: Family, tier: str, anchor: Anchor, body: str) -> None:
-    assert _with_family_text(family=family, tier=tier, anchor=anchor) == body
+def test_family_text_renders_the_seats_overlay_or_leaves_no_empty_paragraph(
+    family: Family, tier: str, body: str, rendered: str
+) -> None:
+    assert _with_family_text(family=family, tier=tier, body=body) == rendered
 
 
 def test_stock_excludes_the_overridden_tier() -> None:
@@ -324,8 +353,8 @@ def test_stock_excludes_the_overridden_tier() -> None:
     "changes, message",
     [
         ({"tools": ()}, "tools must be ALL"),
-        ({"sections": ()}, "sections must be"),
-        ({"sections": (Prose("ok"), "a bare string")}, "section 1 is a str"),
+        ({"body": ""}, "body must be"),
+        ({"body": "edge newline\n"}, "body must be"),
         ({"description": 'holds a "quote"'}, "description must be"),
         ({"tier": None}, "an agent requires tier"),
         ({"kind": Kind.DOCUMENT}, "a document takes no description, tools, tier"),
@@ -337,57 +366,19 @@ def test_stock_excludes_the_overridden_tier() -> None:
     ],
 )
 def test_definition_refusals(changes: dict, message: str) -> None:
-    fields = {"name": "probe", "description": "a probe", "tools": ALL, "tier": "high", "sections": (Prose("ok"),)}
+    fields = {"name": "probe", "description": "a probe", "tools": ALL, "tier": "high", "body": "ok"}
     with pytest.raises(InputError, match="definition 'probe'") as caught:
         Definition(**{**fields, **changes})
     assert message in str(caught.value)
 
 
 def test_output_paths_not_names_are_unique() -> None:
-    command = Definition(name="probe", kind=Kind.COMMAND, sections=(Prose("x"),))
-    document = Definition(name="probe", kind=Kind.DOCUMENT, folder="nested", sections=(Prose("x"),))
+    command = Definition(name="probe", kind=Kind.COMMAND, body="x")
+    document = Definition(name="probe", kind=Kind.DOCUMENT, folder="nested", body="x")
     paths = [defn.output_path for _, defn in keyed_by_path([("m.a", (command,)), ("m.b", (document,))])]
     assert paths == [PurePosixPath("agents/nested/probe.md"), PurePosixPath("commands/probe.md")]
     with pytest.raises(InputError, match=re.escape("'commands/probe.md' is produced by both m.a and m.b")):
         keyed_by_path([("m.a", (command,)), ("m.b", (command,))])
-
-
-@pytest.mark.parametrize("parts", [(), ("",), ("edge newline\n",), ("\nedge newline",), (b"bytes",)])
-def test_prose_refuses_empty_or_edge_newline_text(parts: tuple) -> None:
-    with pytest.raises(InputError, match="prose section"):
-        Prose(*parts)
-
-
-_FIX_THE_FIELD = "This check enforces the rule; fix the field it names, not the check."
-
-
-def test_own_text_has_only_lead_and_tail() -> None:
-    with pytest.raises(AttributeError, match="only lead and tail, not 'closing'") as caught:
-        OwnText.closing
-    assert str(caught.value).endswith(_FIX_THE_FIELD)
-
-
-@pytest.mark.parametrize(
-    "namespace, rule",
-    [
-        ({"__annotations__": {"tail": str | None}, "tail": OwnText.lead}, "field 'tail' is bound to OwnText.lead"),
-        ({"__annotations__": {"lead": str}}, "field 'lead' is named for own text but not declared"),
-        ({"__annotations__": {"variant": str}}, "no field is named 'variant'"),
-        ({"__annotations__": {"words": Mode}, "words": Mode.field}, "takes Mode, which a section binds only as"),
-    ],
-)
-def test_a_section_field_breaking_the_naming_rules_is_refused_at_class_definition(namespace: dict, rule: str) -> None:
-    with pytest.raises(TypeError) as caught:
-        type("Probe", (Section,), namespace)
-    assert rule in str(caught.value)
-    assert str(caught.value).endswith(_FIX_THE_FIELD)
-
-
-def test_convergence_criteria_refuses_an_item_opening_with_another_letter() -> None:
-    fields = {"converged": "- **(a)**", "result": "r", "paths": "p", "divergence": "d"}
-    ConvergenceCriteria(**fields, under_determined=("- **(c) one", "- **(d) two"))
-    with pytest.raises(InputError, match=re.escape("item 1 must open '- **(d)'")):
-        ConvergenceCriteria(**fields, under_determined=("- **(c) one", "- **(e) two"))
 
 
 def test_discovery_refuses_a_module_without_definitions() -> None:
@@ -395,80 +386,59 @@ def test_discovery_refuses_a_module_without_definitions() -> None:
         definitions_of("adjagent.definitions.probe", None)
 
 
-def test_explain_heads_each_section_and_each_field_supplied_paragraph(capsys: pytest.CaptureFixture[str]) -> None:
-    main(["explain", "python-coder"])
-    lines = capsys.readouterr().out.splitlines()
-    data_formats = lines.index("[DataFormats libraries='`tomllib` (stdlib, 3.11+) for reading TOML.']")
-    assert lines[data_formats + 1] == "  ‹libraries›"
-    assert lines[data_formats + 2].startswith("**Data formats**: the right tool for the job decides.")
-    principles = lines.index("[CorePrinciples baseline='PEP 8 is the baseline that applies when the project states…]")
-    assert lines[principles + 1] == "## Core Principles"
-    assert lines.index("  ‹baseline›") > principles
-    parallel = lines.index("[ParallelExecution]")
-    assert lines[parallel + 1] == "## Parallel Execution"
-
-
 # Source invariants, over every module of the package.
 
 
-def _modules(*subpackages: str) -> list[tuple[str, ast.Module]]:
-    roots = [_PACKAGE.joinpath(*sub.split("/")) for sub in subpackages] or [_PACKAGE]
-    files = sorted({path for root in roots for path in root.rglob("*.py")})
+def _modules(*subpaths: str) -> list[tuple[str, ast.Module]]:
+    """Every module under each subpath of the package (a directory or one file), or the whole package."""
+    roots = [_PACKAGE.joinpath(*sub.split("/")) for sub in subpaths] or [_PACKAGE]
+    files = sorted({path for root in roots for path in ([root] if root.is_file() else root.rglob("*.py"))})
     return [
         (path.relative_to(_PACKAGE.parent).as_posix(), ast.parse(path.read_text(encoding="utf-8"))) for path in files
     ]
 
 
 def _imported(tree: ast.Module) -> list[str]:
-    """Every module an import statement names, a relative import as under adjagent."""
+    """Every module an import statement names, a relative import as under adjagent, and each name a
+    from-import takes as a possible submodule (`from adjagent import text` names `adjagent.text`)."""
     names = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names += [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
-            names.append(f"adjagent.{node.module}" if node.level else node.module)
+            module = f"adjagent.{node.module}" if node.level else node.module
+            names += [module, *(f"{module}.{alias.name}" for alias in node.names)]
     return names
 
 
-@pytest.mark.parametrize("value_type, module", [(Mode, "sections/mad.py"), (Liaison, "sections/liaison.py")])
-def test_every_value_type_term_is_read_by_two_or_more_sections(value_type: type, module: str) -> None:
-    readers: dict[str, set[str]] = {spec.name: set() for spec in dataclasses.fields(value_type)}
-    tree = ast.parse(_PACKAGE.joinpath(module).read_text(encoding="utf-8"))
-    for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
-        for node in ast.walk(cls):
-            owner = node.value if isinstance(node, ast.Attribute) else None
-            if (
-                isinstance(owner, ast.Attribute)
-                and owner.attr == "mode"
-                and isinstance(owner.value, ast.Name)
-                and owner.value.id == "self"
-                and node.attr in readers
-            ):
-                readers[node.attr].add(cls.name)
-    assert {term: sorted(classes) for term, classes in readers.items() if len(classes) < 2} == {}
-
-
 def test_no_composed_text_is_rescanned() -> None:
+    """No text is re-formatted or re-substituted, and the one pattern substitution is the body fill.
+    A definition module's `.format` is outside this walk: check_structure admits it only on one of
+    that module's string literals, which holds no composed text."""
     offenders = []
+    substitutions = []
     for path, tree in _modules():
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-                continue
-            owner = node.func.value.id if isinstance(node.func.value, ast.Name) else None
-            attr = node.func.attr
-            if (
-                (attr == "replace" and owner != "dataclasses")
-                or attr in ("format", "format_map")
-                or (owner == "re" and attr in ("sub", "subn"))
-            ):
-                offenders.append(f"{path}:{node.lineno} .{attr}(")
+        if path.startswith("adjagent/definitions/"):
+            continue
+        for top in tree.body:
+            scope = getattr(top, "name", "<module>")
+            for node in ast.walk(top):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                    continue
+                owner = node.func.value.id if isinstance(node.func.value, ast.Name) else None
+                attr = node.func.attr
+                if (attr == "replace" and owner != "dataclasses") or attr in ("format", "format_map"):
+                    offenders.append(f"{path}:{node.lineno} .{attr}(")
+                elif attr in ("sub", "subn"):
+                    substitutions.append(f"{path}:{scope} .{attr}(")
     assert offenders == []
+    assert substitutions == ["adjagent/render.py:filled_body .sub("]
 
 
-def test_sections_and_definitions_reach_nothing_outside_their_arguments() -> None:
+def test_definitions_and_text_reach_nothing_outside_their_arguments() -> None:
     banned = {"os", "sys", "subprocess", "time", "random"}
     offenders = []
-    for path, tree in _modules("sections", "definitions"):
+    for path, tree in _modules("definitions", "text.py"):
         offenders += [f"{path} imports {name}" for name in _imported(tree) if name.split(".")[0] in banned]
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -496,6 +466,190 @@ def test_every_import_is_stdlib_or_the_package() -> None:
         if name.split(".")[0] not in sys.stdlib_module_names and name.split(".")[0] != "adjagent"
     ]
     assert offenders == []
+
+
+_DEFINITION_PATHS = sorted(path for path in (_PACKAGE / "definitions").glob("*.py") if not path.stem.startswith("_"))
+
+
+def test_the_definition_modules_and_the_text_module_hold_their_structure() -> None:
+    violations = check_structure([*_DEFINITION_PATHS, _PACKAGE / "text.py"])
+    assert violations == [], "\n".join(violations)
+
+
+_DEFINITION_HEAD = "from adjagent import text as t\nfrom adjagent.definition import Definition\n"
+
+
+def _definitions_of_body(body: str, *, head: str = "") -> str:
+    """A definition-module source whose one Definition has `body` as its body= source text."""
+    return f'{_DEFINITION_HEAD}{head}DEFINITIONS = (Definition(name="p", kind=Kind.COMMAND, body={body}),)\n'
+
+
+@pytest.mark.parametrize(
+    "source, line, rule",
+    [
+        (f'{_DEFINITION_HEAD}_N = len("x")\n', 3, ASSIGNMENT_RULE),
+        (f'{_DEFINITION_HEAD}_D = {{"a": "b"}}\n', 3, ASSIGNMENT_RULE),
+        (f'{_DEFINITION_HEAD}_T = ("a", _X)\n', 3, ASSIGNMENT_RULE),
+        (f'{_DEFINITION_HEAD}_C = "".join(x for x in "ab")\n', 3, ASSIGNMENT_RULE),
+        (f'{_DEFINITION_HEAD}_F = f"{{t.DISSENT}}"\n', 3, ASSIGNMENT_RULE),
+        (_definitions_of_body('f"{t.dissent(x=t.other())}"'), 3, ARGUMENT_RULE),
+        (_definitions_of_body('f"{_S.format(x=_V)}"', head='_S = "{x}"\n_V = f"{_S}"\n'), 5, ""),
+        (_definitions_of_body("f\"{_F.format(x='a')}\"", head='_A = "a"\n_F = f"{_A} {{x}}"\n'), 5, CALL_RULE),
+        (_definitions_of_body('f"{len(_S)}"', head='_S = "s"\n'), 4, CALL_RULE),
+        (_definitions_of_body('f"{_S.upper()}"', head='_S = "s"\n'), 4, CALL_RULE),
+        (_definitions_of_body('f"{t.x(**_K)}"'), 3, ARGUMENT_RULE),
+        (_definitions_of_body('f"{_S if _S else _S}"', head='_S = "s"\n'), 4, BODY_RULE),
+        (
+            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=t.f(), body="b"),)\n',
+            3,
+            CALL_RULE,
+        ),
+        (f"{_DEFINITION_HEAD}def helper():\n    pass\n", 3, DEFINITION_TOP_RULE),
+        (f"{_DEFINITION_HEAD}DEFINITIONS = (_ONE,)\n", 3, DEFINITION_TOP_RULE),
+        ("from adjagent.text import X\n", 1, IMPORT_RULE),
+        ("from adjagent import text\n", 1, IMPORT_RULE),
+        ("import adjagent.text\n", 1, IMPORT_RULE),
+    ],
+)
+def test_check_structure_refuses_a_definition_module_off_its_rules(source: str, line: int, rule: str) -> None:
+    expected = [f"m.py:{line}: {rule}"] if rule else []
+    assert check_source(source, where="m.py", text_module=False) == expected
+
+
+@pytest.mark.parametrize(
+    "source, rule",
+    [
+        ('_X = "a"\nY = f"{_X}"\ndef f(*, a, b="x", c=_X) -> str:\n    """doc"""\n    return f"{a}{b}{c}{Y}"\n', ""),
+        ("from adjagent.vocabulary import hole\n", TEXT_TOP_RULE),
+        ("class C:\n    pass\n", TEXT_TOP_RULE),
+        ('X = hole("a")\n', ASSIGNMENT_RULE),
+        ('X = f"{g()}"\n', ASSIGNMENT_RULE),
+        ('X = Y\nY = "y"\n', ASSIGNMENT_RULE),
+        ('def f(a):\n    return f"{a}"\n', FUNCTION_RULE),
+        ('def f(*, a, b, c, d):\n    return f"{a}{b}{c}{d}"\n', FUNCTION_RULE),
+        ('def f(*args):\n    return "x"\n', FUNCTION_RULE),
+        ("def f(*, a):\n    return g(a=a)\n", FUNCTION_RULE),
+        ('def f(*, a):\n    return f"{g(a=a)}"\n', FUNCTION_RULE),
+        ('def f(*, a):\n    b = a\n    return f"{b}"\n', FUNCTION_RULE),
+        ('def f(*, a=g()):\n    return f"{a}"\n', FUNCTION_RULE),
+        ('def f(*, a):\n    return f"{a!r}"\n', FUNCTION_RULE),
+    ],
+)
+def test_check_structure_refuses_a_text_module_off_its_rules(source: str, rule: str) -> None:
+    expected = [f"text.py:1: {rule}"] if rule else []
+    assert check_source(source, where="text.py", text_module=True) == expected
+
+
+# Shared text has one source: a paragraph two outputs carry is not written out in either.
+
+_CLAUDE_RENDER = Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+
+
+def _credited_text() -> types.SimpleNamespace:
+    """The text module with every constant and function standing as a sentinel naming it; a constant
+    that is a bare placeholder keeps its value, so prose around it is not credited to it."""
+    standing: dict[str, object] = {}
+    for name, value in vars(adjagent.text).items():
+        if isinstance(value, str) and not re.fullmatch(r"@![a-z0-9-]+!@", value):
+            standing[name] = f"<<adjagent.text.{name}>>"
+        elif isinstance(value, str):
+            standing[name] = value
+        elif inspect.isfunction(value) and value.__module__ == adjagent.text.__name__:
+            standing[name] = lambda _sentinel=f"<<adjagent.text.{name}()>>", **_: _sentinel
+    return types.SimpleNamespace(**standing)
+
+
+def _source_definitions(source: str, *, module: str, credited: bool) -> tuple[Definition, ...]:
+    """DEFINITIONS as the module's source builds them; credited, with each of the module's string
+    constants and everything it reaches through `t` standing as a sentinel naming it."""
+    tree = ast.parse(source)
+    namespace: dict[str, object] = {"__name__": module}
+    if credited:
+        namespace["t"] = _credited_text()
+        body = []
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and any(alias.name == "text" for alias in node.names):
+                continue
+            target = node.targets[0].id if isinstance(node, ast.Assign) else ""
+            if target and target != "DEFINITIONS":
+                node = ast.copy_location(ast.Assign(targets=node.targets, value=ast.Constant(f"<<{target}>>")), node)
+            body.append(node)
+        tree.body = body
+        ast.fix_missing_locations(tree)
+    exec(compile(tree, module, "exec"), namespace)
+    return namespace["DEFINITIONS"]
+
+
+def _prose_units(body: str) -> set[bytes]:
+    """The paragraphs and list items of a body, each as devtools.render_diff collapses it; a heading,
+    a table row and a line of a fenced block are not prose."""
+    units: set[bytes] = set()
+    fence: bytes | None = None
+    for line in render_diff.collapsed(body.encode("utf-8")).split(b"\n"):
+        if fence is not None:
+            closing = render_diff.FENCE_CLOSE.fullmatch(line)
+            if closing and closing[1][:1] == fence[:1] and len(closing[1]) >= len(fence):
+                fence = None
+        elif opening := render_diff.FENCE_OPEN.fullmatch(line):
+            fence = opening[1] or opening[2]
+        elif line.strip() and not render_diff.HEADING.match(line) and not line.lstrip().startswith(b"|"):
+            units.add(line)
+    return units
+
+
+def _uncredited_shared_paragraphs(sources: dict[str, str]) -> list[str]:
+    """Every prose unit two or more outputs write out rather than take from a constant, a slot constant
+    or a text function: the unit survives each one's credited render unchanged."""
+    written: dict[bytes, list[str]] = {}
+    for module, source in sources.items():
+        rendered = _source_definitions(source, module=module, credited=False)
+        credited = _source_definitions(source, module=module, credited=True)
+        for defn, sentinel in zip(rendered, credited, strict=True):
+            literal = _prose_units(filled_body(defn, _CLAUDE_RENDER)) & _prose_units(
+                filled_body(sentinel, _CLAUDE_RENDER)
+            )
+            for unit in literal:
+                written.setdefault(unit, []).append(str(defn.output_path))
+    return [
+        f"written out in {', '.join(written[unit])}: {unit.decode()[:120]}"
+        for unit in sorted(written)
+        if len(written[unit]) > 1
+    ]
+
+
+def test_a_paragraph_two_outputs_carry_has_one_source() -> None:
+    sources = {f"adjagent.definitions.{path.stem}": path.read_text(encoding="utf-8") for path in _DEFINITION_PATHS}
+    found = _uncredited_shared_paragraphs(sources)
+    assert found == [], "\n".join(found)
+
+
+_FIXTURE_HEAD = (
+    "from adjagent import text as t\nfrom adjagent.definition import Definition\nfrom adjagent.vocabulary import Kind\n"
+)
+
+
+def _fixture_module(*bodies: tuple[str, str], head: str = "") -> str:
+    """A definition-module source of one command per (name, body source text)."""
+    entries = "".join(f'Definition(name="{name}", kind=Kind.COMMAND, body={body}),' for name, body in bodies)
+    return f"{_FIXTURE_HEAD}{head}DEFINITIONS = ({entries})\n"
+
+
+def test_a_paragraph_written_out_in_two_outputs_is_found_and_a_constant_is_not() -> None:
+    sources = {
+        "fixture.a": _fixture_module(("a", 'f"Own a.\\n\\nWritten out twice.\\n\\n{t.DISSENT}"')),
+        "fixture.b": _fixture_module(("b", 'f"Written out twice.\\n\\n{t.DISSENT}\\n\\nOwn b."')),
+        "fixture.group": _fixture_module(
+            ("c", "f\"{_SHARED}\\n\\n{_SLOT.format(word='one')}\""),
+            ("d", "f\"{_SLOT.format(word='one')}\\n\\n{_SHARED}\""),
+            ("e", '"Written out in one module twice."'),
+            ("f", '"Written out in one module twice."'),
+            head='_SHARED = "Shared through a constant."\n_SLOT = "A slot holding {word}."\n',
+        ),
+    }
+    assert _uncredited_shared_paragraphs(sources) == [
+        "written out in commands/e.md, commands/f.md: Written out in one module twice.",
+        "written out in commands/a.md, commands/b.md: Written out twice.",
+    ]
 
 
 def test_the_import_graph_is_acyclic() -> None:

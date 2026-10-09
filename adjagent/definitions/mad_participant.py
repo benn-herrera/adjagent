@@ -4,9 +4,9 @@ They are separate definitions because the referee dispatches by `subagent_type`,
 its own file presenting the identical contract.
 """
 
+from adjagent import text as t
 from adjagent.definition import Definition
-from adjagent.sections.mad import ParticipantContract
-from adjagent.vocabulary import ALL, Tier
+from adjagent.vocabulary import ALL
 
 _DESCRIPTION = (
     "Independent technical participant for multi-model debate process. Produces structured initial "
@@ -14,21 +14,37 @@ _DESCRIPTION = (
     "Alignment Assessor's structured map, never another participant's full output."
 )
 
-
-def _participant(*, seat: str, tier: Tier, color: str) -> Definition:
-    return Definition(
-        name=f"mad-participant-{seat}",
+DEFINITIONS = (
+    Definition(
+        name="mad-participant-fable",
         description=_DESCRIPTION,
         tools=ALL,
-        tier=tier,
-        color=color,
-        sections=(ParticipantContract(),),
-    )
-
-
-DEFINITIONS = (
-    _participant(seat="fable", tier="highest", color="#7C3AED"),
-    _participant(seat="opus", tier="high", color="#6D28D9"),
-    _participant(seat="sonnet", tier="medium", color="#5B21B6"),
-    _participant(seat="haiku", tier="low", color="#4C1D95"),
+        tier="highest",
+        color="#7C3AED",
+        body=t.MAD_PARTICIPANT_CONTRACT,
+    ),
+    Definition(
+        name="mad-participant-opus",
+        description=_DESCRIPTION,
+        tools=ALL,
+        tier="high",
+        color="#6D28D9",
+        body=t.MAD_PARTICIPANT_CONTRACT,
+    ),
+    Definition(
+        name="mad-participant-sonnet",
+        description=_DESCRIPTION,
+        tools=ALL,
+        tier="medium",
+        color="#5B21B6",
+        body=t.MAD_PARTICIPANT_CONTRACT,
+    ),
+    Definition(
+        name="mad-participant-haiku",
+        description=_DESCRIPTION,
+        tools=ALL,
+        tier="low",
+        color="#4C1D95",
+        body=t.MAD_PARTICIPANT_CONTRACT,
+    ),
 )

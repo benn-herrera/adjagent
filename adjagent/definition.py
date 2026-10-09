@@ -1,13 +1,12 @@
 """The `Definition` value: what a definition renders as, where its file goes, its
-frontmatter values, and its body, a tuple of `Section`. Harness-neutral: no
-harness spellings, no model names, no I/O, no rendering."""
+frontmatter values, and its body text. Harness-neutral: no harness spellings,
+no model names, no I/O, no rendering."""
 
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from adjagent.errors import InputError
-from adjagent.section import Section
 from adjagent.vocabulary import ALL, IDENTIFIER, TIERS, Kind, Tier, Tool, Tools
 
 _COLOR = r"#[0-9A-Fa-f]{6}"
@@ -16,13 +15,13 @@ _ROOTS = {Kind.AGENT: "agents", Kind.DOCUMENT: "agents", Kind.COMMAND: "commands
 
 @dataclass(frozen=True, kw_only=True)
 class Definition:
-    """One rendered file: its kind and place, frontmatter values, and body sections, in order.
+    """One rendered file: its kind and place, frontmatter values, and body text.
 
     description, tools and tier are an agent's, required for one and refused for any other kind; so
     is color."""
 
     name: str  # output name, IDENTIFIER
-    sections: tuple[Section, ...]  # non-empty; rendered in order, joined by a blank line
+    body: str  # non-empty, no edge newline; its only holes are `vocabulary.hole` placeholders
     kind: Kind = Kind.AGENT
     folder: str = ""  # the path below the output root: IDENTIFIER parts joined by "/", or ""
     description: str | None = None  # one line; emitted double-quoted; holds no '"' and no newline
@@ -47,11 +46,8 @@ class Definition:
             given = [field for field, value in {**agent_fields, "color": self.color}.items() if value is not None]
             if given:
                 raise InputError(f"{where}: a {self.kind.value} takes no {', '.join(given)}")
-        if not isinstance(self.sections, tuple) or not self.sections:
-            raise InputError(f"{where}: sections must be a non-empty tuple")
-        for index, section in enumerate(self.sections):
-            if not isinstance(section, Section):
-                raise InputError(f"{where}: section {index} is a {type(section).__name__}, not a Section")
+        if not isinstance(self.body, str) or not self.body.strip() or self.body != self.body.strip("\n"):
+            raise InputError(f"{where}: body must be non-empty text with no leading or trailing newline")
 
     def _check_agent_fields(self, where: str) -> None:
         if not self.description or '"' in self.description or "\n" in self.description:

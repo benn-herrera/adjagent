@@ -1,4 +1,4 @@
-"""`python3 -m adjagent render` and `explain`: the argparse surface and dispatch.
+"""`python3 -m adjagent render`: the argparse surface and dispatch.
 
 The report is `print`: a short-lived CLI whose exit code is its contract, where
 a logging setup would be a second reporting regime.
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from adjagent.context import ALIAS_MAP_FLAG, TIER_MAP_FLAG, build_render, map_spec
 from adjagent.errors import InputError
-from adjagent.render import explain_definition, render_all, write_renders
+from adjagent.render import render_all, write_renders
 
 
 def _add_tuning_flags(verb: argparse.ArgumentParser) -> None:
@@ -21,9 +21,7 @@ def _add_tuning_flags(verb: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Two verbs, one required. `render --out DIR` writes every definition; `explain NAME` prints one,
-    each section headed by its class and fields, and each paragraph a field supplied by that field's
-    name. Both take --harness NAME
+    """One verb, required. `render --out DIR` writes every definition. It takes --harness NAME
     (default claude), --family NAME (default claude), --model-tier-map SPEC and
     --model-pin-tier-alias-map SPEC. allow_abbrev=False on every parser."""
     parser = argparse.ArgumentParser(prog="python3 -m adjagent", allow_abbrev=False)
@@ -31,25 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
     render = verbs.add_parser("render", help="render every definition into DIR", allow_abbrev=False)
     render.add_argument("--out", required=True, type=Path, metavar="DIR", help="an existing output root")
     _add_tuning_flags(render)
-    explain = verbs.add_parser("explain", help="print one definition with each section's source", allow_abbrev=False)
-    explain.add_argument(
-        "name", help="the definition's output name, or its output path (agents/mad/x.md) where two share a name"
-    )
-    _add_tuning_flags(explain)
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run the verb. render reports the tuning and each file written; explain prints the definition.
-    An InputError prints `error: <msg>` on stderr and exits 2."""
+    """Run the verb: report the tuning and each file written. An InputError prints `error: <msg>` on
+    stderr and exits 2."""
     args = build_parser().parse_args(argv)
     try:
         ctx = build_render(
             harness=args.harness, family=args.family, tier_spec=args.tier_spec, alias_spec=args.alias_spec
         )
-        if args.verb == "explain":
-            print(explain_definition(args.name, ctx), end="")
-            return
         renders = render_all(ctx)
         aliases = "" if ctx.alias_map is None else f" alias[{map_spec(ctx.alias_map)}]"
         print(f"tuning: family={ctx.family.name} tier[{map_spec(ctx.tier_map)}]{aliases} harness={ctx.harness.name}")

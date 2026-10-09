@@ -1,10 +1,10 @@
 """mad/participant-contract: the participant contract as a document, extracted and relayed as a guest
 model's system prompt."""
 
+from adjagent import text as t
 from adjagent.definition import Definition
-from adjagent.sections.mad import ParticipantContract
 from adjagent.vocabulary import Kind
 
 DEFINITIONS = (
-    Definition(name="participant-contract", kind=Kind.DOCUMENT, folder="mad", sections=(ParticipantContract(),)),
+    Definition(name="participant-contract", kind=Kind.DOCUMENT, folder="mad", body=t.MAD_PARTICIPANT_CONTRACT),
 )

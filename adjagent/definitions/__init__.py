@@ -1,21 +1,31 @@
-"""One module per definition template, registered by existing.
+"""One module per definition, or per set of definitions that share text and ship
+together, registered by existing.
 
-A definition module defines `DEFINITIONS`, a non-empty tuple of `Definition`
-values. Nothing in it takes the `Render`, which enters when a section renders;
-it may hold private builder functions that take no `ctx`, called to build its
-values. A module with several outputs has a longer tuple. There is no list to
-join. Its other module-level names are private (`_UPPER`, `_lower`). Text shared
-with any other definition lives in `adjagent.sections`. Nothing imports a
-definition module by name.
+A definition module is its rendered text with holes, read top to bottom. It
+holds imports, string constants and `DEFINITIONS`, a non-empty tuple of
+`Definition` values whose `body` is a string, usually an f-string over
+`adjagent.text` (imported as `from adjagent import text as t`, written
+`{t.NAME}`) and the module's own constants; its only render-time holes are the
+`vocabulary.hole` placeholders, which the renderer fills. A module with several
+outputs has a longer tuple. There is no list to join. Its own constants are
+private (`_UPPER`): text its definitions share is one of them, and text they
+word differently in a few places is a slot constant, a string literal with
+`{name}` holes filled where each uses it (`{_NAME.format(name="...")}`). Text
+shared with a definition in another module lives in `adjagent.text`. Nothing
+imports a definition module by name.
 
 A module is named from its output path below `agents/` or `commands/`, the
-folder as a prefix and each "/" and "-" read as "_":
-`mad_design_topics_architecture.py` for `agents/mad/design-topics/architecture.md`.
+folder as a prefix and each "/" and "-" read as "_": `python_coder.py` for
+`agents/python-coder.md`. A module of a set is named for the set:
+`mad_design_topics.py` for `agents/mad/design-topics/*.md`, `mad_referees.py`
+for the two `agents/mad-*-referee.md`.
 """
+
+import importlib
+import pkgutil
 
 from adjagent.definition import Definition
 from adjagent.errors import InputError
-from adjagent.loading import load
 
 
 def definitions_of(module: str, found: object) -> tuple[Definition, ...]:
@@ -30,7 +40,9 @@ def discover() -> tuple[tuple[str, tuple[Definition, ...]], ...]:
     """(dotted module name, its DEFINITIONS) for every module in this package not starting with "_",
     in name order."""
     discovered = []
-    for key, found in load(__name__, "DEFINITIONS").items():
-        module = f"{__name__}.{'_'.join(key.split('-'))}"
+    names = sorted(info.name for info in pkgutil.iter_modules(__path__) if not info.name.startswith("_"))
+    for name in names:
+        module = f"{__name__}.{name}"
+        found = getattr(importlib.import_module(module), "DEFINITIONS", None)
         discovered.append((module, definitions_of(module, found)))
     return tuple(discovered)

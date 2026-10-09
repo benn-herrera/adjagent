@@ -1,4 +1,4 @@
-"""`Render`, the one parameter a section receives, and the two map flags that
+"""`Render`, the one parameter a render receives, and the two map flags that
 build it. Composes no text and does no I/O."""
 
 from collections.abc import Mapping
@@ -59,7 +59,7 @@ def map_spec(mapping: TierMap) -> str:
 
 @dataclass(frozen=True)
 class Render:
-    """The one parameter a section receives: harness, family, the invocation's two maps, and the seat
+    """The one parameter a render receives: harness, family, the invocation's two maps, and the seat
     of the definition being rendered."""
 
     harness: Harness

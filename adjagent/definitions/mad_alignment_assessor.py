@@ -1,10 +1,19 @@
 """mad-alignment-assessor: the debate's structural classifier of agreement and disagreement."""
 
 from adjagent.definition import Definition
-from adjagent.section import Prose
 from adjagent.vocabulary import Tool
 
-_BODY = r"""You are the Alignment Assessor for a structured multi-model debate review process. Your sole
+DEFINITIONS = (
+    Definition(
+        name="mad-alignment-assessor",
+        description=(
+            "Alignment assessor for multi-model debate review process. Classifies structural agreement and "
+            "disagreement between reviewer conclusions only. Never evaluates argument quality or merit."
+        ),
+        tools=(Tool.READ, Tool.GREP, Tool.GLOB),
+        tier="high",
+        color="#0891B2",
+        body="""You are the Alignment Assessor for a structured multi-model debate review process. Your sole
 function is to identify structural agreement and disagreement between reviewer conclusions. You
 never evaluate the quality, correctness, or strength of any argument.
 
@@ -139,18 +148,6 @@ Update the alignment map each round: retire resolved points, update contention d
 positions develop, track new agreements reached. The history is cumulative — **every seat receives
 only its own prior output plus your map, and never another seat's text** — so your running record is
 the sole channel between them and the authoritative state of the debate. Write it as the only thing
-a seat will ever learn about the others' positions, because it is."""
-
-DEFINITIONS = (
-    Definition(
-        name="mad-alignment-assessor",
-        description=(
-            "Alignment assessor for multi-model debate review process. Classifies structural agreement and "
-            "disagreement between reviewer conclusions only. Never evaluates argument quality or merit."
-        ),
-        tools=(Tool.READ, Tool.GREP, Tool.GLOB),
-        tier="high",
-        color="#0891B2",
-        sections=(Prose(_BODY),),
+a seat will ever learn about the others' positions, because it is.""",
     ),
 )

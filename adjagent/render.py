@@ -1,9 +1,10 @@
-"""The renderer: every discovered definition to its file text, its banner, the
-author's explained view, and the writer. Holds no prose, knows no individual
-definition, never searches text it has composed, and is the only module that
-writes files."""
+"""The renderer: every discovered definition to its file text, its banner, and
+the writer. Holds no prose, knows no individual definition, fills a body's
+placeholders in one pass and never rescans what it filled, and is the only
+module that writes files."""
 
 import dataclasses
+import re
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
@@ -12,12 +13,12 @@ from adjagent.definition import Definition
 from adjagent.definitions import discover
 from adjagent.errors import InputError
 from adjagent.harness import AgentFields
-from adjagent.section import Section
-from adjagent.vocabulary import ALL, Kind, Tier
+from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tier, hole
 
 GENERATED_NOTICE = (
     "do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md."
 )
+_PLACEHOLDER = re.compile(r"@![a-z0-9.-]+!@")
 
 
 def keyed_by_path(
@@ -89,36 +90,29 @@ def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
     return f"---\n{generated_line(module)}\n{tuning_line(ctx, seat=defn.tier)}\n{fields}---\n{gap}"
 
 
+def filled_body(defn: Definition, ctx: Render) -> str:
+    """The body with every placeholder filled in one pass: a harness text from ctx.harness, an anchor
+    from ctx.overlay for the definition's seat ("" where the family fills none). A paragraph that fills
+    to nothing is dropped with its blank line, so an unfilled anchor standing as its own paragraph
+    leaves no empty one. A placeholder-shaped span naming no key is refused, naming the definition and
+    the span. Filled text is not rescanned."""
+    seated = dataclasses.replace(ctx, seat=defn.tier)
+    values = {hole(part): ctx.harness.text(part) for part in HarnessText}
+    values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
+
+    def value(match: re.Match[str]) -> str:
+        if match[0] not in values:
+            raise InputError(f"definition '{defn.name}': unknown placeholder {match[0]}")
+        return values[match[0]]
+
+    paragraphs = defn.body.split("\n\n")
+    filled = [_PLACEHOLDER.sub(value, paragraph) for paragraph in paragraphs]
+    return "\n\n".join(text for text, source in zip(filled, paragraphs) if text or not source)
+
+
 def render_definition(defn: Definition, ctx: Render, *, module: str) -> str:
-    """The file text: the frontmatter, the sections' texts joined by a blank line with an empty one
-    skipped, and one final newline. Sections render with ctx's seat bound to the definition's tier."""
-    seated = dataclasses.replace(ctx, seat=defn.tier)
-    body = "\n\n".join(text for text in (section.render(seated) for section in defn.sections) if text)
-    return f"{_frontmatter(defn, ctx, module=module)}{body}\n"
-
-
-def _explained(section: Section, ctx: Render) -> str:
-    """The section's header line, then its paragraphs joined by a blank line, each a field supplied
-    preceded by a `  ‹field›` line."""
-    paragraphs = "\n\n".join(f"  ‹{label}›\n{text}" if label else text for label, text in section.parts(ctx))
-    return f"{section.header()}\n{paragraphs}" if paragraphs else section.header()
-
-
-def explain_definition(name: str, ctx: Render) -> str:
-    """The definition named by output name or output path, as render_definition gives it, with each
-    section, empty ones included, explained (`_explained`). An unknown name is refused listing the
-    names there are; a name two outputs share is refused listing their paths."""
-    found = definitions()
-    matches = [(module, defn) for module, defn in found if name in (defn.name, str(defn.output_path))]
-    if not matches:
-        raise InputError(f"no definition named '{name}'; the definitions are: {', '.join(d.name for _, d in found)}")
-    if len(matches) > 1:
-        paths = ", ".join(str(defn.output_path) for _, defn in matches)
-        raise InputError(f"'{name}' names more than one output; give one of: {paths}")
-    module, defn = matches[0]
-    seated = dataclasses.replace(ctx, seat=defn.tier)
-    body = "\n\n".join(_explained(section, seated) for section in defn.sections)
-    return f"{_frontmatter(defn, ctx, module=module)}{body}\n"
+    """The file text: the frontmatter, the filled body, and one final newline."""
+    return f"{_frontmatter(defn, ctx, module=module)}{filled_body(defn, ctx)}\n"
 
 
 def render_all(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:

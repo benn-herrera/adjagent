@@ -1,6 +1,7 @@
 """The vocabulary every other module is written in: identifiers, tiers, tools,
-overlay anchors, definition kinds, and the harness text a definition's prose may
-name. Imports nothing from the package, so every module may import it."""
+overlay anchors, definition kinds, the harness text a definition's prose may
+name, and the placeholder spelling for both. Imports nothing from the package,
+so every module may import it."""
 
 from enum import Enum
 from typing import Literal
@@ -63,3 +64,10 @@ class HarnessText(Enum):
     PROJECT_HARNESS_DIR = "project_harness_dir"
     PROJECT_TEMP_DIR = "project_temp_dir"
     USER_HARNESS_DIR = "user_harness_dir"
+
+
+def hole(name: HarnessText | Anchor) -> str:
+    """The placeholder a definition body carries for a render-time value: `@!hrn-<key>!@` for a harness
+    text, `@!fam-<key>!@` for an overlay anchor, key in kebab. No rendered prose spells `@!`."""
+    namespace = "hrn" if isinstance(name, HarnessText) else "fam"
+    return f"@!{namespace}-{'-'.join(name.value.split('_'))}!@"
