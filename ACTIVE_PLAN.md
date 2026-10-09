@@ -107,9 +107,10 @@ every difference is one this plan names or the owner approves.
     the pre-commit gate; `render` runs neither, since a syntax-tree analysis has no business on a
     consumer's machine of unknown Python.
 17. **A shared sentence moved to its constant's canonical order is a named difference, not a
-    bug.** Three templates place two shared sentences in swapped order; the constant holds them
-    once, in one order, and the stage commit names each file that changes for that reason. The
-    previous system's inability to own an order was its defect; reproducing it is not fidelity.
+    bug.** Where two templates place two shared sentences in swapped order, a constant holding
+    both would fix one order and the stage commit would name each file that changes for that
+    reason. The previous system's inability to own an order was its defect; reproducing it is not
+    fidelity. In the event the swapped sentences were already separate units, so no file differed.
 18. **Harnesses and families follow the definitions' expansion pattern.** `adjagent/harnesses/`
     and `adjagent/families/`, one module per instance, a fixed module-level name (`HARNESS`,
     `FAMILY`) read by the same loader that reads `DEFINITIONS`. The types stay at the package root;
@@ -257,7 +258,7 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
 3. **The coders.** Six language coders and seven platform experts, one module each; the chunks
    they reach become constants and slot functions in the text module; text two of them share
    byte for byte (the C and C++ coders' data-race and sanitizer paragraphs) is a constant. Proof:
-   all thirteen render text-identical, but for decision 17's named differences.
+   all thirteen render text-identical, with no named difference needed.
 4. **Definitions.** The remaining agent templates and commands, one module per template, in
    groups: the review and writing seats (architect, security-reviewer, prompt-engineer,
    tech-writer, tech-writer-reviewer, prose-architect); the domain seats (applied-mathematician,

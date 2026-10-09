@@ -68,7 +68,7 @@ at minimum log them. Context managers (`with`) for resource cleanup, not try/fin
 `asyncio.run_in_executor`). `aiohttp` / `httpx` for async HTTP. The event loop is not thread-safe —
 use `asyncio.run` at the top level, not `loop.run_until_complete` inside libraries.
 
-**Testing** — three layers, each with a distinct purpose:
+{t.TESTING_LAYERS_CODER}
 
 {t.boundary_checks_lead()} {t.boundary_check_coder_body(routing="the logging system (`logging.warning` or `logging.error`)")} {t.BOUNDARY_CHECK_CONSUMERS_CODER}
 

@@ -104,6 +104,13 @@ def boundary_check_coder_body(*, expectation: str = "state/thread/context", rout
 
 BOUNDARY_CHECK_CONSUMERS_CODER = """One implementation serves three consumers: production forensics, development diagnostics, and integration test signal."""
 
+# The line that opens a language coder's Testing paragraphs, ahead of boundary_checks_lead().
+TESTING_LAYERS_CODER = """**Testing** — three layers, each with a distinct purpose:"""
+
+ASSERT_UNDER_NDEBUG = """`assert` disappears under `NDEBUG`, so it is for invariants that hold by construction and never carries a side effect."""
+
+SANITIZER_SUITE = """Run the suite under ASan and UBSan; a suite that passes only without sanitizers has not passed."""
+
 MOCKING_THRESHOLD_GENERAL = """If you need to mock five dependencies to test one function, fix the design first."""
 
 MOCKING_THRESHOLD_PLATFORM = """If mocking more than two dependencies is required to test one function, fix the design first — native platform APIs have non-mockable runtime behavior, and a design requiring many mocks is usually poorly factored for platform constraints."""
@@ -156,6 +163,33 @@ def build_system(
     return f"""**Build system**: if the project has a Makefile or justfile, use its targets/recipes (whichever runner the project has chosen) for all {ops} operations — never invoke {direct} directly when a target covers it. Build outputs belong in {outputs}, not scattered in the source tree."""
 
 
+# The same rule as build_system(), stated from the operations' side; the C family, Go and Rust open
+# their build paragraph with it and run on into their own material.
+def build_system_lead(*, direct: str, ops: str = "build, test, lint and format") -> str:
+    return f"""**Build system**: all {ops} operations go through the project's Makefile or justfile targets — never invoke {direct} directly when a Makefile or justfile is present."""
+
+
+def warnings_as_defects(*, enable: str, warnings: str = "warnings", suppression: str = "a suppression") -> str:
+    return f"""{enable} and treat {warnings} as defects; {suppression} carries a comment saying why."""
+
+
+FULL_WARNING_SET = (
+    """Turn the compiler's full warning set on — `-Wall -Wextra` on GCC and Clang, `/W4 /permissive-` on MSVC"""
+)
+
+SANITIZER_BUILD_TARGET = """A sanitizer build is a target of its own, not a flag someone remembers. Build outputs stay in a build directory and never scatter into the source tree."""
+
+
+def data_race_frame(*, atomics: str, race_note: str = ".") -> str:
+    """Opens mid-sentence, after the caller's `**Concurrency**:`."""
+    return f"""a data race is undefined behaviour{race_note} {atomics} for flags and counters; a mutex for anything compound."""
+
+
+TSAN_VISIBILITY = """ThreadSanitizer is how this class becomes visible."""
+
+SHELL_HOUSE_STYLE = """`#!/usr/bin/env bash` shebang, 2-space indent. Always brace variables — `${VAR}` not `$VAR`, including inside array indices (`arr[${i}]`) and positional params (`"${1}"`). Use the `function name() {` form, not bare `name() {`. Tests are `[[ ]]` not `[ ]`; string equality is `==` not `=`."""
+
+
 NEW_PROJECT_SETUP = f"""**New project setup**: creating a project from scratch means creating its task-runner entry point WITH the first code, never retrofitting it later. A `justfile` by default; a `Makefile` only where the top-level utility commands genuinely need dependency management — file targets with staleness rules, generated content that must rebuild when its sources change, recursive sub-builds (`$(MAKE) -C`). Aliasing commands is never reason enough to choose Make over just. Standard targets: `build`/`rebuild`, `test`, an integration-test target, and `generate`/`regenerate` wherever generation is a distinct step the build does not own — CMake project generation in the C++/CMake family, `go generate` codegen in Go, code/data generation in Python (Rust and Zig typically need none: `build.rs`/`build.zig` own generation). Omit a target only where the task genuinely does not exist for the project — never because wiring it up is effort. No project may ever require the agent or the developer to execute a major project-iteration task from a naked command line with correctly-recalled values: the target is the memory. Also created at project birth: `{PROJECT_TEMP_DIR}/`, with a `{PROJECT_TEMP_DIR}/` entry in the root `.gitignore` — the project's scratch space (throwaway builds, probe harnesses, captured output), pre-made so the scratch-space rule never stalls on a missing directory. It lives beside `{PROJECT_HARNESS_DIR}/`, never inside it — writes under `{PROJECT_HARNESS_DIR}/` trip the permission system's own-settings protections."""
 
 
@@ -172,6 +206,8 @@ DATA_FORMATS = f"""**Data formats**: the right tool for the job decides. Absent 
 COMMERCIAL_APPROVAL_CLAUSE = """unless explicitly approved by the coordinator/user"""
 
 DEPENDENCIES_LEAD_PACKAGES = f"""**Dependencies**: every dependency is a permanent maintenance obligation — justify it before adding. No paid or commercial packages {COMMERCIAL_APPROVAL_CLAUSE} — report as a Blocker if a task requires a commercial dependency."""
+
+DEPENDENCIES_LEAD_CRATES = f"""**Dependencies**: every crate is a permanent maintenance obligation and a compile-time and supply-chain cost — justify it before adding. No paid or commercial crates {COMMERCIAL_APPROVAL_CLAUSE} — report as a Blocker if a task requires one."""
 
 # Ends at DEPENDENCIES_LEAD_PACKAGES; each platform expert continues that paragraph with its own text.
 PROJECT_SETUP_PLATFORM = f"""{NEW_PROJECT_SETUP}
@@ -225,6 +261,22 @@ def logging_backend_seam(*, backend: str) -> str:
 # Each Apple-platform expert continues the paragraph with logging_backend_seam(backend="OSLog") and
 # "This " + LOGGING_ABSTRACTION_NOTE.
 OSLOG_LOGGING_LEAD = """**Logging**: use `os.Logger` (OSLog) for structured logging — not print() or NSLog(). Log levels are runtime-configurable via Console.app."""
+
+LOGS_NOT_STDOUT = """Never write logs to stdout when stdout carries data — stderr or a file."""
+
+# What the two Apple-platform experts pass to the platform slot functions alike.
+APPLE_PROJECT_FILES = """Info.plist, entitlements, Package.swift, Xcode project settings"""
+APPLE_BUILD_TOOLS = """`xcodebuild`, `swift build`, or `swift test`"""
+APPLE_VIOLATION_LEVEL = """as warnings/errors with structured metadata"""
+
+# ─── Critical gotchas ────────────────────────────────────────────────────────
+
+# Hazards of C and C++ as the language defines them, for seats building against a libc — not for
+# kernel work, where kbuild's -fno-strict-aliasing and -fno-strict-overflow make the first two
+# correct idioms. Each compiles clean, reads as correct, passes at -O0 and breaks under optimisation.
+USERSPACE_C_HAZARDS = """- Signed overflow is undefined; unsigned wraps. Check before the operation, not after — the check you wrote after it may be optimised away
+- Strict aliasing: reading one type through a pointer to another is undefined; `memcpy` is the portable way and compiles away
+- Composing a wide value from bytes promotes to `int` first: `buf[0] << 24` on an 8-bit operand lands bit 31 in the sign bit, and widening that to a 64-bit type sign-extends it. Cast each operand to the target width before shifting"""
 
 # ─── Parallel execution ──────────────────────────────────────────────────────
 

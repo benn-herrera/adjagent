@@ -74,14 +74,14 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 {t.WHEN_REVIEWING_SECTION}
 
 {t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent="Info.plist, entitlements, Package.swift, Xcode project settings")}
+{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent=t.APPLE_PROJECT_FILES)}
 {t.PE_SHARED_BULLETS}
 {t.pe_scope_creep_bullet()}
 {t.PE_EXPANSION_BULLET}
 
 {t.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level="as warnings/errors with structured metadata", sink="Console.app")}
+{t.boundary_checks_lead()} {t.platform_boundary_routing(level=t.APPLE_VIOLATION_LEVEL, sink="Console.app")}
 
 *Unit tests*: XCTest with `async`/`await` and `runTest`/`TestClock` for concurrency.
 {t.unit_test_scope(artifact="UI appearance")} {t.MOCKING_THRESHOLD_PLATFORM}
@@ -102,7 +102,7 @@ memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lif
 
 {t.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct="`xcodebuild`, `swift build`, or `swift test`")}
+{t.build_system(direct=t.APPLE_BUILD_TOOLS)}
 
 {t.PROJECT_SETUP_PLATFORM} {t.STDLIB_FIRST_ALWAYS}
 
