@@ -158,8 +158,6 @@ GUEST_FRAMING_FILE=$(mktemp "${{TMPDIR}}/framing.XXXXXX")
   > **Caller-authored text reaches the messages file ONLY by `msg-util.py init`/`append` of the author's own file path, or by `cat`-ing that file. Never a heredoc (`cat << EOF`), never a command-line argument.** Caller-authored text contains markdown, backticks, `$`, and other shell-significant characters that silently corrupt or empty a heredoc; argv has size limits that truncate silently. This is a known failure mode that has produced empty instruction files and sent the guest a context-less prompt. You never reproduce, retype, or embed the text yourself — the Referee authored it once to a file; you pass that file by path. **You are a relay, not a participant** — do not summarize, reword, or alter the Referee's file in any way.
 
 {t.LIAISON_TOOL_LEAD}
-
-**Invocation:**
 ```bash
 API_BASE_URL=<url> API_KEY_FILE=<path-to-api-key-file> MODEL=<model> \
   {t.PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py <messages.json>

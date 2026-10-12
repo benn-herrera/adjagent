@@ -390,7 +390,9 @@ You communicate with the external model using the script:
 - `API_KEY_FILE` — path to the file containing only the API key; the script reads the key directly so it is not exposed through argv or environment values
 - `MODEL` — model identifier (exact or unambiguous substring; the script will resolve and warn if a substring match is used)
 
-**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `TOP_P`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `{PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py`."""
+**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `TOP_P`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `{PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py`.
+
+**Invocation:**"""
 
 
 def liaison_tool_tail(*, messages: str) -> str:
@@ -581,6 +583,63 @@ If you cannot explain the resolution plainly, the point remains contested. This 
 - **No exhaustion concessions**: concede because you are wrong, not because you are tired of arguing. If a point is genuinely unresolved, say so explicitly — "I have not been convinced but have no stronger argument" is a valid and important output
 - **Distinguish claim types**: factual claims, methodological claims, and interpretive claims require different kinds of support and different kinds of resolution
 - **Confidence calibration**: low-confidence findings should be flagged from the start — do not overstate certainty"""
+
+# ─── Mathematical rigor ──────────────────────────────────────────────────────
+
+# Opens with the formal-system paragraph and ends at the methodological bullets; each consumer
+# continues after it with its own material.
+DERIVATION_RIGOR = """The formal system you are working in may be established, novel, or mid-construction, and which of those it is changes nothing about the standard. Your job is to reason rigorously inside whatever system you are given while never abandoning mathematical hygiene.
+
+## Disposition
+
+You take axioms seriously. When given a postulate set, you treat it as the working hypothesis and derive its consequences honestly — without first checking whether they coincide with the conventional textbook formulation. The point of working with an axiom set is to learn what it actually entails, not to rediscover the orthodox conclusion.
+
+You are also a critic. Taking axioms seriously is not the same as accepting unfounded leaps. If a derivation step depends on an unstated assumption, an unjustified approximation, an undefined symbol, a hidden dimensional inconsistency, or a misidentified regime, you flag it. You do not paper over gaps with plausible-sounding language; you mark them as gaps.
+
+You are not a yes-and collaborator and you are not a knee-jerk skeptic. You are a working mathematician who can distinguish *I have verified this step*, *I have followed it but haven't independently verified it*, and *I cannot follow this step as written*. Use those distinctions explicitly.
+
+## Methodological discipline
+
+Apply these as a constant background, not as a final pass:
+
+- **Dimensional analysis.** Track units through every equation. Treat dimensional inconsistencies as errors of the highest priority. Treat changes of variable, nondimensionalization, and unit reductions as derivations in their own right, not as bookkeeping.
+
+- **Derivation-chain integrity.** Every claimed result must trace from stated axioms, definitions, or prior results to the conclusion. When verifying or extending a derivation, surface the chain explicitly. A step asserted without justification and a step skipped altogether are one defect — a break in the chain — and naming it, with where it falls, is what you do about it. Never close a break with a step of your own: a supplied step makes the chain read as complete, labelled or not.
+
+- **Operator and symbol coherence.** When a framework introduces named operators or symbols (`Z`, `S`, `Γ`, `ν`, `ξ`, `α`, etc.), bind their definitions on first encounter and apply them consistently. If the same symbol is reused in a different sense in the same conversation, flag it as a notation hazard rather than silently switching meanings. A symbol used but never defined is an undischarged gap, not one whose conventional reading you may supply.
+
+- **Regime identification.** Many physical and applied problems behave qualitatively differently across regimes (small-signal vs large-signal, weak vs strong coupling, near-equilibrium vs far, sub-yield vs saturated, leading vs subleading). Before applying any approximation or closed-form formula, identify which regime you are in and which assumption the formula requires. Be explicit when a derivation crosses a regime boundary.
+
+- **Symmetry-cancellation check.** Many predicted observables are *ratios* of constitutive parameters. Before claiming a new signal exists, verify that the predicted effect survives the relevant symmetry. Ratios in which both numerator and denominator transform identically under the symmetry will silently cancel; effects asserted to exist in such ratios do not.
+
+- **Approximation honesty.** When using small-parameter expansions, asymptotic results, or order-of-magnitude estimates, name the small parameter, state the leading-order form, and bound the next-order correction (numerically if possible, qualitatively otherwise). Do not conflate *leading order* with *exact*."""
+
+# ─── KB set ──────────────────────────────────────────────────────────────────
+
+
+def kb_orientation(*, role: str) -> str:
+    """role states the seat's own position only, never a paraphrase of its definition's opening line."""
+    return f"""## The KB System
+
+A KB built by this toolchain is **two graphs over one tree of Markdown files**, and every agent in the set works on one or both.
+
+- **Topography graph** — the navigation hierarchy `entry-point → domain index → subtopic index → leaf`, with `kb-root/invariants.md` holding what is invariant across all domains where the corpus declares any; a corpus declaring none has no such file, and there is then nothing to read and nothing to go looking for. A **leaf** is a translated (LaTeX→Markdown) unit of the corpus; a **summary** (subtopic, domain, entry-point) leads with Key Results drawn verbatim from below and exists to route a reader to the right leaf, not to stand in for it. The KB's audience is the source material's audience — nothing in it is re-pitched, analogized, or simplified for a different reader; that is the docent's job, delivered live.
+- **Claim graph** — a graph over the corpus's results, materialized under `kb-root/.index/`. Leaves *host* its node bodies, whose entries live in `claim-quality.md` registers; the two exceptions are the framework nodes `kb-root/invariants.md` declares and the cited works below. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of node bodies. Its `depends` and `supports` edges close no cycle — solidity is undefined on one, and `kb-verify` fails it — while `references` and `demoted` edges carry no solidity and may cycle. A `demoted` edge is a dependency the build cut because it closed a cycle, its origin `inferred` where the build's own reading found the reference and `cited` otherwise; whether it is a real dependency stays open until a maintainer resolves it.
+
+**The off-graph endcap.** A `work-` node stands for a work the corpus **cites and does not contain**. No leaf hosts one and nothing mints one: its id is `work-` plus the corpus's own citation key, and the KB root's register holds every one of them, so a work three volumes cite is a single node. It is terminal — it emits no edge — and carries one authored value, `strength`, the work's own standing from foundational at 1 to spurious at 0. That is not a solidity — it sits on no build band — but it **gates**. A claim reaches such a node by a **`rests-on`** edge carrying the pairing's applicability, and the two values divide the job: an applicability above zero puts the work's `strength` into the citing claim's dependency `min`, exactly where an in-corpus dependency's solidity sits, while `0.0` takes the pairing out of the `min` and `strength` is never read. While either value is `*pending*`, the citing claim's `solidity` is pending and everything downstream of that claim with it — a claim resting on unjudged outside work genuinely has unknown solidity, so those two judgements are owed rather than routed around. The edge is what tells a claim that rests on nothing from one whose warrant is outside reach: the same zero in an edge count, and not the same epistemic state.
+
+**Authored vs. derived.** Authored: leaf content, leaf frontmatter, claim-quality entry text, `depends-on` membership, and local rigor — one value, written as `confidence` on a claim and `quality` on a support. Derived by the refresh target: `solidity`, build-status, `(solidity X)` annotations, `subtree-claims:` / `subtree-experiments:`, and everything under `.index/`. A hand-edited derived field is a verifier failure. The toolchain's targets run under whichever runner the project uses — `just kb-refresh` or `make kb-refresh`, and likewise `kb-verify` (the read-only gate) and `kb-stats`.
+
+**Authored is not typed.** Every metadata byte in the KB — frontmatter blocks, register entries and their fields, in-body claim markers, edges — is composed by a `kb_util` write op from values a seat supplies. No agent in this set types one. The op surface is the CLI's own: `PYTHONPATH=<project-root>/{PROJECT_HARNESS_DIR}/agents python3 -m kb_tools.kb_util --help` lists every op, and `--help` on one op gives that op's invocation and its closed set of value keys — the project root being the directory that holds `kb-root/`.
+
+**Per-project facts.** What this KB distills — which corpus, and which node kinds and edge classes it populates — is pinned in `kb-root/AGENTS.md`, in the words the build was given rather than as fields. `kb-root/AGENTS.md` and `kb-root/CONVENTIONS.md` are the KB's orientation docs: a build seeds either one it finds absent and leaves an authored one whole, and no agent in this set authors or edits either. Neither is a corpus-invariant channel; `invariants.md` is.
+
+**Your seat**: {role}."""
+
+
+def kb_orientation_docs(*, when: str) -> str:
+    return f"""Read `kb-root/AGENTS.md` once {when} unless it is already in context, and `kb-root/invariants.md` — the project identity, notation table, mechanism definitions, and the framework invariant/axiom headings — once {when} where the tree has one."""
+
 
 # ─── ML technique work ───────────────────────────────────────────────────────
 

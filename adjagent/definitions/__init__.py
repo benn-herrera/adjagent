@@ -11,8 +11,10 @@ outputs has a longer tuple. There is no list to join. Its own constants are
 private (`_UPPER`): text its definitions share is one of them, and text they
 word differently in a few places is a slot constant, a string literal with
 `{name}` holes filled where each uses it (`{_NAME.format(name="...")}`). Text
-shared with a definition in another module lives in `adjagent.text`. Nothing
-imports a definition module by name.
+shared with a definition in another module lives in `adjagent.text`. A private
+constant cannot name `t.*`: where shared text holds a harness string, give it a
+`{harness_dir}` hole filled at the call site. Nothing imports a definition module
+by name.
 
 A module is named from its output path below `agents/` or `commands/`, the
 folder as a prefix and each "/" and "-" read as "_": `python_coder.py` for

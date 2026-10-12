@@ -2,8 +2,9 @@
 
 **Status: in execution on `heredoc-shape`, cut from `lessons-learned-refactor` at its stage 2, in
 the order below.** Stage 1 is landed; the section shape that followed it is retired (stage 1's
-note); stages 2 and 3 on the heredoc shape are landed, twenty-eight of fifty-two outputs; stage 4
-is next. The branch is rebased on `main` at `e2a8838`. The design decisions are settled and
+note); stages 2, 3 and 4 on the heredoc shape are landed: all fifty-two outputs render
+text-identical to the three oracle slots; stage 5, the agents file and the switch, is next. The
+branch is kept rebased on `main`. The design decisions are settled and
 recorded here.
 
 ## Purpose
@@ -177,8 +178,8 @@ DEFINITIONS = (
 
 ## Acceptance
 
-The oracle is the pre-1.0 render of `main` at `e2a8838`, re-taken whenever `main` changes a
-template and recorded here each time, into two slots
+The oracle is the pre-1.0 render of the current `main`, re-taken whenever `main` changes a
+template (each slot's `RENDER-FLAGS.txt` records its flags), into three slots
 of the `render` target: `just render reference` for claude, and `just render reference-opencode
 --harness=opencode` with the flags `install-agents-here` passes, and `just render reference-gemma
 --family=gemma-4 --model-pin-tier-alias-map=all=sonnet` for the overlay anchors, which only a
@@ -227,7 +228,7 @@ stage 5 unchanged and is listed with what stage 5 does to it.
 | `templates/harness/*.toml`, `templates/family/*.toml`, `templates/family/README.md` | — | port to dataclass instances and a module docstring | — |
 | `templates/harness/AGENTS.tmpl.md` | — | port to a definition; its prose unchanged | — |
 | `tests/test_gen_defs.py` (incl. the 500-line cap, `TestRenderedDefinitionSize`), `test_gen_defs_structure.py`, `test_harness_frontmatter.py`, `test_agents_file_render.py`, `test_agents_file_install.py` | generator | rewrite against the new modules; every case that pins rendered behaviour carries over, the cap included | — |
-| `tests/test_write_op_contract_sources.py` | parses the `kb-metadata-write` chunk from the toml | rewrite to read the text-module constant that replaces the chunk | — |
+| `tests/test_write_op_contract_sources.py` | parses the `kb-metadata-write` chunk from the toml | rewrite to read the kb-maintainer module, whose own text now holds what the chunk held | — |
 | `tests/test_metadata_marker_sweep.py` | `kb_tools` and `templates/` | keep; re-point its template root to the definition package | — |
 | `tests/test_manifest_views_in_definitions.py`, `test_retired_cli_tokens.py`, `test_orphan_name_sweep.py` | `templates/` as source | keep; re-point to the definition package (source, not the gitignored render) | — |
 | `tests/test_traversal_sweep.py` | inline fixtures | keep | — |
