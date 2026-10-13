@@ -18,7 +18,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    generations: apply strip-first-observe-patch (README.md, "Variants and platform compatibility")
    on a cadence, using behavioral probe sets as the instrument. Byte-level instruments exist today —
    `just render-diff` between two render slots, and the render-property assertions in
-   `tests/test_gen_defs.py` (ARCHITECTURE.md, Verification, and Why There Is No Verification Verb);
+   `tests/test_adjagent.py` (ARCHITECTURE.md, Verification, and Why There Is No Verification Verb);
    behavioral ones do not yet.
 
 2. **Claude Code release reconciliation.** The generator authors agent definitions and slash
@@ -53,7 +53,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
     **The method that settled them, which is reusable against any future release**: grep the installed binary for the key name *alongside positive controls*. At `2.1.272`, `stripParentContext` returns 0 while `permissionMode` returns 157, `disallowedTools` 59, `maxTurns` 42 and `omitClaudeMd` 15. The controls are what make a zero mean absent rather than unsearchable, and this reads what is actually running rather than what is documented.
 
-    **The one open question: `permissionMode`.** The key exists. What it defaults to when absent is not documented, and `templates/` states it nowhere — so that default is this repository's behavior on every dispatch, unexamined. Settling it wants a behavioral probe rather than a search.
+    **The one open question: `permissionMode`.** The key exists. What it defaults to when absent is not documented, and no definition states it — so that default is this repository's behavior on every dispatch, unexamined. Settling it wants a behavioral probe rather than a search.
 
     **Fields available and not used**, each an adopt-or-decline decision rather than a repair: `disallowedTools`, `maxTurns`, `skills`, `memory`, `background`, `effort`, `isolation`, `mcpServers`, `hooks`, `experimental`.
 
@@ -61,32 +61,15 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
     **The pins were verified honored, at the output side.** `runs/<id>/<ts>/calls/*.stream.jsonl` carries the model id per session, and a floor-tuned run (every tier tuned for and pinned to haiku) reported `claude-haiku-4-5-20251001` throughout. That is the direct check: the definition states the pin, and the stream says what served the call. Neither `/usage` nor the console log breaks usage down by model, so this is the only instrument for it.
 
-3. **Atomic install** (dry-run-then-live, git-style): the install first runs a full dry pass and
-   halts before writing anything if any target would be a collision — where collision = target
-   exists, differs from the bytes this run would write, and is not provably this generator's output
-   (the differs clause covers the unbannerable `.tmpl` and `.tmpl.md` payload files). Reports all
-   collisions at once; only a clean dry pass proceeds to the live run. Doing the work twice is
-   trivial against the whole-install runtime. **What is left here is the dry pass alone.** Pruning
-   landed outside this item and without its gate: a deployed surface is swept per file against the
-   banner, and a shipped package's destination is replaced whole (SPEC.md, Write Safety). Neither
-   needs a dry run, so the collision pass is the remainder rather than the prerequisite it was
-   written as.
+3. **Unified install with owner-safe config integration.** `just install <project>` gains a binary
+   flag that runs the agents-file install at *project* scope in the same invocation.
+   `install-agents-file`'s DIR already reaches a project root; what remains is the flag. The
+   target project's `CLAUDE.md` is never touched by default: config integration happens only via
+   that flag or via `just install-agents-file <dir> [harness]`, whose directory target is required
+   and may be `~/.claude` or a project root. The agents-file install keeps its own refusals (no
+   ordered marker pair, uncommitted sources) and they abort the whole invocation unwritten.
 
-4. **Unified install with owner-safe config integration.** `just install <project>` gains a binary
-   flag that runs the agents-file install at *project* scope, inside the atomic dry run.
-   `install-agents-file`'s DIR already reaches a project root; what remains is the flag and its
-   place in the dry run.
-
-   - README documents the integration target as the *project* `CLAUDE.md` primarily, `~/.claude/`
-     optionally.
-   - Policy: the target project's `CLAUDE.md` is NEVER touched by default. Config integration
-     happens only via the binary flag on `just install`, or via
-     `just install-agents-file <harness> <dir>` whose directory target is required and may be `~/.claude`
-     or a project root.
-   - Atomicity covers config integration: when specified, the agents-file install participates in
-     the dry-run pass, and its refusal aborts the entire installation with nothing changed.
-
-5. **Family-skeleton inversion — the kb agent set becomes small-model-followable** The common
+4. **Family-skeleton inversion — the kb agent set becomes small-model-followable** The common
    template skeleton becomes the imperative core a small local model can follow — short
    declaratives, one instruction per sentence, explicit sequencing, no conditionals beyond stop
    rules — and the Claude-grade prose (interference armor, nuanced conditionals, long contracts)
@@ -115,26 +98,27 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    the long system-prompt contract but followed a short absolute one perfectly (the BANANA probe:
    the cheap instruction-following differential, seconds per hypothesis); stalled waiting at the
    confirmation barrier; then narrated "I will now continue" and ended its turn instead of acting.
-   Each failure class names skeleton text needing demotion to a claude-chunk. The binding principle
+   Each failure class names skeleton text needing demotion to an overlay. The binding principle
    (owner): **the imperative core must stay sufficient, not just simple** — the week's mechanization
    is what makes this winnable, since format/exhaustiveness direction left the prose for tools and
    only judgment direction remains; where prose sufficiency still runs out for a seat, the answer is
    relay-pattern decomposition (code owns the loop, the model gets one bounded question), not more
    prose. Input: the gemma failure catalog mined via the resume path from the current paired runs.
 
-6. **One rule arriving several times in one prompt — the duplication class the sweep cannot see.**
-   Distinct from the cross-file duplication `devtools/dupe_sweep` finds and `PROSE_DEDUPE_PLAN.md`
-   cleared: a seat is told the same thing twice inside its own definition, through a chunk and an
-   inline restatement, or through two different chunks that both land in it. Single-sourcing does
-   not prevent it — a chunk guarantees one *definition*, not one *delivery*. **Roughly 60 instances
-   across 24 files, found by reading; about 22 resolved.** The residue splits by cost: where one
-   statement is a clean superset of the other the fix is a deletion, and where neither is, it needs
-   a composition ruling per pair — which chunk a template stops expanding.
+5. **One rule arriving several times in one prompt — the duplication class no instrument sees.**
+   Distinct from the cross-output duplication the suite's identical-paragraph test refuses: a seat
+   is told the same thing twice inside its own definition, through a clause and an inline
+   restatement, or through two clauses that both land in it. Single-sourcing does not prevent it —
+   a clause guarantees one *definition*, not one *delivery*. **Roughly 60 instances across 24
+   files, found by reading; about 22 resolved.** The residue splits by cost: where one statement
+   is a clean superset of the other the fix is a deletion, and where neither is, it needs a
+   composition ruling per pair — which clause a definition stops carrying.
 
-   **The instrument's limits are measured rather than assumed.** `devtools/dupe_sweep`'s prose pass
-   finds exact runs of eight or more shared words across texts (guaranteed at fifteen), whatever the
-   sentence boundaries, so a paragraph duplicated verbatim is reported even when its sentences are
-   short. It still cannot see a rule restated in different words, inside one file or across two: a
+   **The instrument's limits are measured rather than assumed.** The retired prose sweep found
+   exact runs of eight or more shared words across texts (guaranteed at fifteen), whatever the
+   sentence boundaries, so a paragraph duplicated verbatim was reported even when its sentences
+   were short; the identical-paragraph test that replaced it compares whole paragraphs across
+   outputs. Neither sees a rule restated in different words, inside one file or across two: a
    lexical intra-file detector over all 46 templates at a 7-token floor recovered **zero** of the
    findings above, because they are semantic paraphrases — a rule stated once where it is *defined*
    and again where it is *applied*, drifting apart in wording as it goes. Reading finds them; a
@@ -143,27 +127,23 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    may refer to.
 
     **A command's prompt is a union, and no file-unit instrument sees it.** Four of the seven
-    `templates/commands/*.tmpl.md` open with `@`-loads: `/mad-review` assembles a command body plus
+    command definitions open with `@`-loads: `/mad-review` assembles a command body plus
     three full definitions, `/guest-start` a command body plus the liaison. Roughly half the
     intra-prompt findings live only in that union — invisible to any per-file tool and to reading
     either file alone. Two are outright **conflicts** rather than duplication: the command telling a
-    referee the charter `MUST` be passed verbatim to every seat where the chunk beside it forbids
+    referee the charter `MUST` be passed verbatim to every seat where the clause beside it forbids
     pasting the charter inline, and the guest commands telling the session to decide
     resume-versus-new by inspecting `messages.json` where the liaison says to decide it with
     `validate` and never by inspecting the file.
 
-   **Sections meant to stay in sync are held in sync by nobody.** A template section that is the
-   same across a family — a heading and a sequence of chunk markers — is copied per template, so
-   the sequence drifts: among the seven language coders, Core Principles' marker block is
-   identical in four and Parallel Execution's in five; among the seven platform experts, Code
-   Standards' is identical in two and Testing's in one. Some deviations are deliberate (go and
-   rust carry no coverage rule by design), and nothing distinguishes those from drift. The fix
-   is one nested chunk per family per sync-intended section, heading included, with a template
-   argument where a value legitimately differs; `render-diff` then shows exactly the drift
-   repairs. First: enumerate every deviation and classify it from the chunk file's own comments
-   and the line's history. Next dev branch's first task.
+   **Sections meant to stay in sync are held in sync by nobody.** A section that is the same
+   across a family is a run of clauses each definition lists in its own body, so the run drifts:
+   go and rust carry no coverage rule by design, and nothing distinguishes a deliberate omission
+   from a forgotten one. The 1.0 shape makes the run visible in each body and `render-diff` shows
+   a repair exactly; what it does not do is name which omissions are deliberate. First: enumerate
+   every deviation across the coders and platform experts and classify it.
 
-7. **Re-examine the MAD agent set against what the harness now does.** That design predates several
+6. **Re-examine the MAD agent set against what the harness now does.** That design predates several
    harness capabilities and may be replicating orchestration the harness performs more reliably.
    **Explore at the start of the next MAD process rather than as standalone work** — the protocol is
    best examined against a live run.
@@ -192,19 +172,23 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    carried. Both candidates turn on that answer and neither has been checked against the protocol as
    written.
 
-8. Add a Lua coding agent that handles Lua and LuaJIT
+7. **The content pass the 1.0 port deferred.** The port changed no prose; these change what a
+   seat reads and each is a `render-diff` the owner reads before `retake-reference`. Unify the two
+   debate referees' vocabulary on one set of words (gate, seat, outcome, the run and file names),
+   after which their slot constants lose their holes and the two bodies converge. Drop the
+   referees' "in Steps … above" cross-reference, which the sentence already names. Give the two
+   liaison definitions one spelling of the `liaison_tools` path instead of one per command line.
+   The 74 sites where a clause and a definition's own sentence share a paragraph: each a judgment
+   whether the sentence is its own paragraph, to be read site by site, not swept.
 
-9. Get rid of the tech-writer-reviewer - fold review into tech writer role the same way review
-   functions are included in coders and architect.
-
-10. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
-    installs the agent and command definitions under a prefixed namespace so the set coexists with
-    an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
-    packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a
-    template pass tokenizing every cross-reference site (dispatch names, slash-command names in
-    prose, the MAD roster) with a lint against bare fleet names, and a decision on how the prefix
-    reaches runtime callers that name agents from code (the driver's `--agent <seat>` invocations):
-    driver-config key vs. install-time stamp into the installed `kb_tools`. The harness agents file
-    (`templates/harness/AGENTS.tmpl.md`) is in the prefix substitution set, so agent references
-    inside it — the prompt-engineer review rule, any seat named by the working preferences — render
-    with the prefix applied at install.
+8. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+   installs the agent and command definitions under a prefixed namespace so the set coexists with
+   an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
+   packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a
+   render pass substituting every cross-reference site (dispatch names, slash-command names in
+   prose, the MAD roster) with a lint against bare fleet names, and a decision on how the prefix
+   reaches runtime callers that name agents from code (the driver's `--agent <seat>` invocations):
+   driver-config key vs. install-time stamp into the installed `kb_tools`. The harness agents file
+   (`adjagent/definitions/harness_agents_file.py`) is in the prefix substitution set, so agent
+   references inside it — the prompt-engineer review rule, any seat named by the working
+   preferences — render with the prefix applied at install.

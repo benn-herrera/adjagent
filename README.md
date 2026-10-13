@@ -107,10 +107,12 @@ Authoring a Family.
 * architect.md - architecture review and design
 * security-reviewer.md - security-specific reviewer
 * generalist-coder.md
-* tech-writer.md
-* tech-writer-reviewer.md
+* tech-writer.md - technical documentation author and review seat
 * language-specific coders
+  * c-coder.md
+  * cpp-coder.md
   * go-coder.md
+  * lua-coder.md
   * python-coder.md
   * rust-coder.md
   * shell-dsl-coder.md
@@ -271,7 +273,7 @@ Everything else is collected interactively after the command starts:
   `.claude/agents/` whose body (frontmatter stripped) is sent verbatim as the guest model's system
   prompt, or, if you decline to pick one, the literal default `You are a helpful assistant.` The
   agent body is not a Claude-only artifact — any agent body that reads as a coherent instruction set
-  works (e.g. `applied-mathematician`, `architect`, `tech-writer-reviewer`).
+  works (e.g. `applied-mathematician`, `architect`, `tech-writer`).
 * **Initial message** *(new session only)* — the first prompt sent to the guest model.
 
 The collected connection parameters are persisted to `guest-session/<topic>/params.env` so `/guest`

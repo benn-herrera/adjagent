@@ -709,8 +709,7 @@ the background, relays each status change, and consumes the driver's relay card 
 records or stops, because what each of them faults is mechanically-produced content a mechanism
 already checks. **The build dispatches no agent.** Its one model call of its own is the passage
 `README.md` is assembled around, at `overview-drafted`: a tool-less request under the
-`overview-system` fragment. `tech-writer` and `tech-writer-reviewer` stay in the agent set for the
-protocols that use them, and the build names neither.
+`overview-system` fragment. `tech-writer` stays in the agent set, and the build does not name it.
 
 Nothing in the build reviews KB content. Adversarial review of leaf fidelity and of navigability was
 a hedge against agent-authored leaves; the head is mechanical end to end, so its output is checked
