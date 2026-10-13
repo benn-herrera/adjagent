@@ -177,38 +177,62 @@ render *args:
     #!/usr/bin/env bash
     set -euo pipefail
     slug="latest"
-    harness="claude"
     args=()
-    recorded=()
     have_slug=""
     for arg in "$@"; do
         if [[ -z "${have_slug}" && "${arg}" != --* ]]; then
             slug="${arg}"
             have_slug=1
-        elif [[ "${arg}" == --harness=* ]]; then
-            harness="${arg#--harness=}"
-            args+=("${arg}")
-            recorded+=("${arg}")
         else
             args+=("${arg}")
-            recorded+=("${arg}")
         fi
     done
     if [[ "${slug}" == reference* ]]; then
         printf '%s\n' "error: slot '${slug}' is protected — a slug starting with 'reference' is the pre-1.0 oracle, which render never renders" >&2
         exit 1
     fi
+    "{{just_executable()}}" --justfile "{{justfile()}}" _render-slot "${slug}" ${args[@]+"${args[@]}"}
+
+# Everything `render` does once the slug is accepted: the slot is removed and
+# rebuilt from the flags given, which are recorded in it. `--harness=NAME` is
+# read here as well as forwarded.
+[private]
+_render-slot slug *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slug="${1}"
+    shift
+    harness="claude"
+    for arg in "$@"; do
+        if [[ "${arg}" == --harness=* ]]; then
+            harness="${arg#--harness=}"
+        fi
+    done
     agents_file="$("{{just_executable()}}" --justfile "{{justfile()}}" _harness-value "${harness}" agents-file)"
     out="{{PROJECT_ROOT / RENDERED_DIR}}/${slug}"
     rm -rf "${out}"
     mkdir -p "${out}/harness/${harness}"
-    if [[ "${#recorded[@]}" -gt 0 ]]; then
-        printf '%s\n' "${recorded[@]}" > "${out}/RENDER-FLAGS.txt"
+    if [[ "$#" -gt 0 ]]; then
+        printf '%s\n' "$@" > "${out}/RENDER-FLAGS.txt"
     else
         : > "${out}/RENDER-FLAGS.txt"
     fi
     "{{just_executable()}}" --justfile "{{justfile()}}" render-agents-file "${harness}" "${out}/harness/${harness}/${agents_file}"
-    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${args[@]+"${args[@]}"}
+    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${@+"${@}"}
+
+# The three `reference*` slots are the oracle `render-diff` reads. `render`
+# refuses their names so a render never overwrites the oracle by accident; this
+# recipe is the one deliberate way to re-take them, run after a change to what
+# the definitions say has been reviewed and accepted, so that the next
+# `render-diff` measures the next change and not that one.
+[doc("[dev] re-take the three oracle slots rendered/reference, reference-opencode and reference-gemma from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
+retake-reference:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    render_slot=("{{just_executable()}}" --justfile "{{justfile()}}" _render-slot)
+    "${render_slot[@]}" reference
+    "${render_slot[@]}" reference-opencode --harness=opencode --model-tier-map=all=inherit
+    "${render_slot[@]}" reference-gemma --family=gemma-4 --model-pin-tier-alias-map=all=sonnet
 
 # A stable interface, not a convenience: a later revision of this repository
 # invokes it inside a worktree of an earlier one to render that revision's

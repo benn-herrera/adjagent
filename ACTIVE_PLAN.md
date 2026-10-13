@@ -197,7 +197,8 @@ template (each slot's `RENDER-FLAGS.txt` records its flags), into three slots
 of the `render` target: `just render reference` for claude, and `just render reference-opencode
 --harness=opencode` with the flags `install-agents-here` passes, and `just render reference-gemma
 --family=gemma-4 --model-pin-tier-alias-map=all=sonnet` for the overlay anchors, which only a
-non-claude family fills. No slot is re-rendered until stage 5 lands.
+non-claude family fills. Since stage 6 the slots are the 1.0 generator's own output, re-taken only
+by `just retake-reference` after a content change is accepted; `render` refuses their names.
 
 Comparison is of text: everything below the leading `#` banner block of each rendered file, with
 whitespace inside a paragraph outside fenced code collapsed to one space (decision 14). The old
@@ -290,19 +291,20 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
    `{t.NAME}` rewritten `{clauses.NAME}` (decision 11); the full `render-diff` against all three
    reference slots clean but for the banner; then `gen_defs/`, `templates/` and the retired tests
    deleted in the same commit (`CONVENTIONS.md`, "Obviated code is deleted, not parked").
-6. **Artefact removal.** The one stage whose render-diff is expected to differ: every artefact of
-   the retired grammar that text identity still carried — a sentence appended to a shared
-   paragraph because a chunk could not own it, a paragraph split at a marker boundary rather than
-   a subject boundary — is removed on purpose, and the commit enumerates every differing file
-   with its reason. Prose changes nothing it says; it changes where a boundary falls. The
-   reference slots are re-rendered from this commit afterwards and become the oracle for 1.0.
-   Inventory so far, each an artefact text identity carries: a shared sentence appended to a
-   definition's own paragraph where the chunk could not own it; the referees' "Steps 1–2 / 2–3"
-   cross-reference, numbered by list position; two referee sentences run as one paragraph in one
-   referee and two in the other; the `liaison_tools` path spelled in every command line of the
-   liaison definitions. The post-switch content list, a change to what a seat reads and so
-   outside this plan: unify the two referees' vocabulary on one set of words, after which their
-   bodies converge to constants.
+6. **The oracle becomes the 1.0 render.** Read against the code after the switch, the artefact
+   inventory this stage was to remove turned out to be prose: under the heredoc shape a glued
+   sentence, the referees' step numbering and the liaison path are literal text, and changing
+   them changes what a seat reads, which is the content pass, not this plan. Below the banner,
+   the 1.0 render differs from the pre-1.0 oracle in eight re-wrapped paragraphs and two blank
+   lines around the agents-file markers, none of which reaches a seat. So the stage's work is the
+   re-take: a `retake-reference` recipe renders the three slots with their fixed flags, run
+   deliberately and never by `render`, which keeps refusing their names. After it, every
+   `render-diff` is a statement about a change rather than about the port.
+   The post-switch content list, each a change to what a seat reads: unify the two referees'
+   vocabulary on one set of words, after which their slot constants lose their holes; drop the
+   referees' "in Steps … above" cross-reference; give the liaison definitions one spelling of
+   the `liaison_tools` path; and the 74 sites where a clause and a definition's own sentence
+   share a paragraph, each a judgment whether the sentence is its own paragraph.
 7. **Contract documents.** `SPEC.md` loses nothing it promises; `ARCHITECTURE.md`'s Template System
    section is replaced by the composition model; `CONVENTIONS.md` drops the identifier class, the
    namespace rule and chunk single-sourcing, and gains two rules: one module per definition
