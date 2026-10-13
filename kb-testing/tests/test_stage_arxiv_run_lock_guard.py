@@ -25,17 +25,16 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
 
+from adjagent.loading import load
 from kb_tools import install_location, kb_lock, kb_util
 from kb_tools.tests import _lock_holder
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KB_TESTING = _REPO_ROOT / "kb-testing"
-_HARNESS_FILES = _REPO_ROOT / "templates" / "harness"
 
 #: This suite's own scratch, wiped and rebuilt every run — never
 #: `tmp_path`/`tmp_path_factory`, which pytest anchors under the system temp
@@ -56,9 +55,8 @@ def _git(root: Path, *args: str) -> None:
 
 
 def _harness_dir(harness: str) -> str:
-    """The project harness directory ``harness`` installs into, from the file the recipes read it from."""
-    text = (_HARNESS_FILES / f"{harness}.toml").read_text(encoding="utf-8")
-    return tomllib.loads(text)["harness"]["project-harness-dir"]["text"]
+    """The project harness directory ``harness`` installs into, from the module the recipes read it from."""
+    return load("adjagent.harnesses", "HARNESS")[harness].project_harness_dir
 
 
 def _make_consumer(root: Path, *, harness: str) -> Path:
@@ -78,7 +76,7 @@ def _make_consumer(root: Path, *, harness: str) -> Path:
         _git(root, "config", key, value)
     harness_root = root / _harness_dir(harness)
     harness_root.mkdir()
-    install_argv = [sys.executable, "-m", "gen_defs", "install", str(harness_root), "--harness", harness]
+    install_argv = [sys.executable, "-m", "adjagent", "install", str(harness_root), "--harness", harness]
     if harness == "opencode":
         # opencode accepts only `provider/model` or `inherit` for `model:`, so the claude family's tier names need mapping to inherit.
         install_argv.append("--model-tier-map=all=inherit")

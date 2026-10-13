@@ -66,7 +66,10 @@ every difference is one this plan names or the owner approves.
     multi-output module is a longer tuple. The module reads top to bottom as the file it renders:
     the property the template system had and the section shape of stages 1b–3 lost, which is why
     that shape was retired at three ported definitions.
-11. **Shared text is a flat module of named string constants.** `adjagent/text.py` holds the
+11. **Shared text is a flat module of named string constants.** `adjagent/clauses.py` (today
+    `text.py`; renamed in stage 5, imported as `from adjagent import clauses` with no alias, so a
+    body reads `{clauses.DISSENT}`: a clause is a provision of an agent's contract incorporated by
+    reference, which is what the module holds and what `text` did not say) holds the
     chunk table as Python constants named as the chunks were, in UPPER_SNAKE; a chunk with slots
     is a small function there taking keyword arguments; a chunk with variants is one constant per
     variant. A per-definition sentence interleaved with shared text is written inline in the
@@ -91,11 +94,22 @@ every difference is one this plan names or the owner approves.
     a paragraph outside fenced code; paragraph boundaries, list items, headings, table rows, fenced
     blocks and frontmatter stay exact. Whitespace a model does not read is not pinned, which
     retires `wrap=` reproduction, space-joins and the trailing-sentence idiom from the port.
-15. **A definition has a kind and a folder.** `kind` is agent, document or command, and later
-    skill; it decides the output root, the frontmatter the harness emits (a document carries the
-    harness's document frontmatter, a command none, and no blank line after its fence), and which
-    fields are required. `folder` is the path below the root for nested outputs such as the MAD
-    reference documents. Output paths, not names, are unique.
+15. **A definition has a kind and a folder.** `kind` is agent, document, command or agents file,
+    and later skill; it decides the output root, the frontmatter the harness emits (a document
+    carries the harness's document frontmatter, a command none, and no blank line after its
+    fence), and which fields are required. `folder` is the path below the root for nested outputs
+    such as the MAD reference documents. Output paths, not names, are unique.
+    - **The agents file is a definition of its own kind, wrapped by an installer.** Its body is
+      `templates/harness/AGENTS.tmpl.md`'s prose unchanged, with the harness holes it already
+      spells and two holes of its own, the scope name and the one model name the coder-dispatch
+      rule cites (the medium tier of the default family, rendered through the harness's model
+      text); it renders to a block, not a file. `install-agents-file <dir> [harness]` reads the
+      live `CLAUDE.md` or `AGENTS.md` the harness record names, keeps every byte outside the
+      `adjagent` marker pair, replaces what is inside with the rendered block, and writes with
+      the rolling backup; a file whose markers are missing or malformed is refused unwritten. The
+      operator's text is therefore never a hole and never rescanned; it is what the installer
+      wraps around the block. A project root and a user directory differ only in the scope name
+      and the file name, both supplied by the harness record and the install argument.
 16. **A rule agents must follow is enforced, not observed.** One structural test over the syntax
     trees of the definition modules and the text module is the whole enforcement, and it fixes
     substitution depth at one by leaving no syntactic position for a second level: a module-level
@@ -169,9 +183,9 @@ DEFINITIONS = (
 - A definition module defines `DEFINITIONS`, a tuple: the four MAD participants and the two MAD
   commands are one module each with a longer tuple, as their templates declare several outputs
   today.
-- The harness agents file is a definition whose two operator-text parameters are passed in as
-  strings the renderer never rescans. There is no rescanning anywhere, so verbatim needs no kind
-  of its own.
+- The harness agents file is a definition of the agents-file kind that renders to a block; the
+  installer wraps the operator's text around it (decision 15). There is no rescanning anywhere,
+  so verbatim needs no kind of its own.
 - `python3 -m adjagent render --harness NAME --family NAME --out DIR` renders; the runner targets
   keep their names and flag grammar (`--model-tier-map`, `--model-pin-tier-alias-map`,
   `--harness`, `--family`).
@@ -226,7 +240,7 @@ stage 5 unchanged and is listed with what stage 5 does to it.
 | `templates/shared-chunks.toml` (147 chunks) | — | port to constants and slot functions in the text module; a chunk one definition uses becomes that definition's own text | — |
 | `templates/agents/*.tmpl.md` (40 templates, 43 outputs: 39 subagents and 4 MAD reference documents), `templates/commands/*.tmpl.md` (8 templates, 9 outputs) | — | port to definition modules, one per template; a multi-output template's module returns a tuple | — |
 | `templates/harness/*.toml`, `templates/family/*.toml`, `templates/family/README.md` | — | port to dataclass instances and a module docstring | — |
-| `templates/harness/AGENTS.tmpl.md` | — | port to a definition; its prose unchanged | — |
+| `templates/harness/AGENTS.tmpl.md` | — | port to a definition of the agents-file kind (decision 15); its prose unchanged; the oracle is each reference slot's `harness/<name>/` file | — |
 | `tests/test_gen_defs.py` (incl. the 500-line cap, `TestRenderedDefinitionSize`), `test_gen_defs_structure.py`, `test_harness_frontmatter.py`, `test_agents_file_render.py`, `test_agents_file_install.py` | generator | rewrite against the new modules; every case that pins rendered behaviour carries over, the cap included | — |
 | `tests/test_write_op_contract_sources.py` | parses the `kb-metadata-write` chunk from the toml | rewrite to read the kb-maintainer module, whose own text now holds what the chunk held | — |
 | `tests/test_metadata_marker_sweep.py` | `kb_tools` and `templates/` | keep; re-point its template root to the definition package | — |
@@ -272,9 +286,10 @@ difference. The old generator keeps rendering, and stays the oracle, until stage
    rebuilt as render, package copy and overwrite; every re-point in the inventory landed
    (`sweep-python`, `format-python`, `_harness-value` and `render-agents-file`, the
    `TEST_SURFACE_MAP` rows, the five kept tests, the marker sweep, `kb-testing/justfile`,
-   `test_kb_driver_head.py`, `devtools/tests`); the full `render-diff` against both reference
-   slots clean but for the banner; then `gen_defs/`, `templates/` and the retired tests deleted in
-   the same commit (`CONVENTIONS.md`, "Obviated code is deleted, not parked").
+   `test_kb_driver_head.py`, `devtools/tests`); `text.py` renamed `clauses.py` and every
+   `{t.NAME}` rewritten `{clauses.NAME}` (decision 11); the full `render-diff` against all three
+   reference slots clean but for the banner; then `gen_defs/`, `templates/` and the retired tests
+   deleted in the same commit (`CONVENTIONS.md`, "Obviated code is deleted, not parked").
 6. **Artefact removal.** The one stage whose render-diff is expected to differ: every artefact of
    the retired grammar that text identity still carried — a sentence appended to a shared
    paragraph because a chunk could not own it, a paragraph split at a marker boundary rather than

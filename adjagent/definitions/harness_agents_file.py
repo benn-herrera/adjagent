@@ -1,21 +1,22 @@
-+++
-# not installed per project with other content. 
-# installed via specific command to specified dir with harness-specific file name.
-# _resolve is a metakey meaning the key 'text' has a value to be resolved via chunk substitution.
-# because you can have multiple outputs needing resolution it is a list of elements
-[[outputs._resolve]]
-text = "@!dyn.agents-file-install-dir-arg!@/@!hrn.agents-file!@"
-+++
-# @!dyn.agents-file-scope-name!@ info and directives
+"""The harness agents file: the operator rules the main session reads, published as one block that
+`adjagent.agents_file` installs between the operator's own text."""
 
-@!dyn.existing-user-content-before-rendered-minus-h1!@
+from adjagent import clauses
+from adjagent.definition import Definition
+from adjagent.vocabulary import Kind
+
+DEFINITIONS = (
+    Definition(
+        name="harness-agents-file",
+        kind=Kind.AGENTS_FILE,
+        body=f"""# @!agf-scope-name!@ info and directives
 
  <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->
- 
+\x20
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —
-throwaway builds, probe harnesses, captured output — goes in `@!hrn.project-temp-dir!@/` under the
-active project root, beside `@!hrn.project-harness-dir!@/` and never inside it (writes there trip
+throwaway builds, probe harnesses, captured output — goes in `{clauses.PROJECT_TEMP_DIR}/` under the
+active project root, beside `{clauses.PROJECT_HARNESS_DIR}/` and never inside it (writes there trip
 the permission system's own-settings protections). If it doesn't exist, stop and say so; don't
 improvise a location.
 
@@ -49,7 +50,7 @@ to right answers for tricky problems.
   templates, requirements feeding an agent. A single-use dispatch brief is exempt; a durable
   artifact it drafts is not.
 - Coder dispatches: when the brief is fully mechanical — every edit enumerated, no design choice, no
-  debugging — dispatch at `model: @!dyn.tier-medium!@`; otherwise the definition's pin stands.
+  debugging — dispatch at `model: @!agf-dispatch-model!@`; otherwise the definition's pin stands.
 - **Direction a sub-agent reads carries outcome and operative consequence only**, plus the guiding
   principle where one still steers open choices. Decision history — who ruled, when, which branches
   lost, the deciding narrative — stays in the audit record (changelog, ruling record, owner
@@ -85,7 +86,7 @@ to invoke one piece of implementation from another is injecting complexity where
 A behavior change — yours or a dispatched agent's — is a first-class work item: surfaced, proposed
 and landed like any other change, never a private adjustment made in passing. It lands somewhere
 permanent, preferably tracked, scoped to the domain that needs it:
-`@!hrn.user-harness-dir!@/@!hrn.agents-file!@`, the project `AGENTS.md`, an agent/command/skill
+`{clauses.USER_HARNESS_DIR}/{clauses.AGENTS_FILE}`, the project `AGENTS.md`, an agent/command/skill
 definition, or a project doc.
 
 **INVARIANT**: Never create or update a cross-session memory store — a memory directory, its index,
@@ -174,7 +175,7 @@ blocker needing user intervention during planning, never as a mid-run discovery.
 - **ZERO SELF-BLAME LANGUAGE.** Self-blame is theater: it neither identifies the problem nor
   prevents recurrence. Never assign blame to yourself or an agent as an entity; answer a mistake
   with diagnostic attribution — identify the source of the error. If it is systemic rather than
-  categorical, name where the remediation belongs (e.g. @!hrn.agents-file!@, agent definition,
+  categorical, name where the remediation belongs (e.g. {clauses.AGENTS_FILE}, agent definition,
   project docs, next prompt) and suggest the language or rule to effect it. If categorical — the
   task asked for something models can't do or are terrible at — say so by naming the incompatible
   capability it required.
@@ -188,6 +189,6 @@ blocker needing user intervention during planning, never as a mid-run discovery.
   project's own terms, and takes neither the figure nor a name drawn from it unless the user asks
   for that wording.
 
- <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->
-
-@!dyn.existing-user-content-after-rendered!@
+ <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->""",
+    ),
+)

@@ -1,6 +1,6 @@
 """android-app-expert: the Android platform seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -71,7 +71,7 @@ rules.
   factors
 - Permissions are UX flow: rationale dialogs, graceful degradation, settings deep-links
 
-{t.AUTHORING_STANDARDS_LEAD}
+{clauses.AUTHORING_STANDARDS_LEAD}
 
 - Complete, compilable Kotlin (or C/C++ for NDK) with imports
 - Show build.gradle.kts when adding dependencies; for NDK show native source and JNI bridge
@@ -82,50 +82,50 @@ rules.
 - Security: EncryptedSharedPreferences for sensitive data, Play Integrity for attestation, no
   secrets in code/assets
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent="AndroidManifest.xml, build.gradle, ProGuard rules, CMakeLists.txt")}
-{t.PE_SHARED_BULLETS}
-{t.pe_scope_creep_bullet()}
-{t.PE_EXPANSION_BULLET}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()} {clauses.pe_platform_adjacent(adjacent="AndroidManifest.xml, build.gradle, ProGuard rules, CMakeLists.txt")}
+{clauses.PE_SHARED_BULLETS}
+{clauses.pe_scope_creep_bullet()}
+{clauses.PE_EXPANSION_BULLET}
 
-{t.PLATFORM_TESTING_LEAD}
+{clauses.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level="at WARN/ERROR level with structured tags", sink="logcat")}
+{clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at WARN/ERROR level with structured tags", sink="logcat")}
 
 *Unit tests*: JUnit with `@ParameterizedTest` for table-driven cases; `runTest` +
-`TestCoroutineScheduler` for coroutines. {t.unit_test_scope(artifact="UI state")}
-{t.MOCKING_THRESHOLD_PLATFORM}
+`TestCoroutineScheduler` for coroutines. {clauses.unit_test_scope(artifact="UI state")}
+{clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: Espresso for View-based UI, Compose UI testing APIs for Compose. Always test
 with "Don't keep activities" enabled for process death. Test across API levels and representative
-OEM skins. {t.integration_logging_signal(sink="logcat")}
+OEM skins. {clauses.integration_logging_signal(sink="logcat")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Code Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_PLATFORM}
+{clauses.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct="`./gradlew`")}
+{clauses.build_system(direct="`./gradlew`")}
 
-{t.PROJECT_SETUP_PLATFORM} Prefer packages from Maven Central. {t.STDLIB_FIRST_ALWAYS}
+{clauses.PROJECT_SETUP_PLATFORM} Prefer packages from Maven Central. {clauses.STDLIB_FIRST_ALWAYS}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
 **Logging**: use a thin wrapper over `android.util.Log` for structured leveled logging — not println
 or System.out. In release builds, the wrapper can suppress below a configured level. Never log
-sensitive data (PII, tokens, passwords) at any level. This {t.LOGGING_ABSTRACTION_NOTE}
+sensitive data (PII, tokens, passwords) at any level. This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

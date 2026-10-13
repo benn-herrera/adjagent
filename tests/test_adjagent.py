@@ -1,10 +1,10 @@
 """The adjagent package's own logic, each case checked against values the
 renderer did not compute: the two map flags' grammar, the rendered model text,
 the CLI's Render refusals, the frontmatter of each kind against literal lines of
-the pre-1.0 render, guest extraction leaving exactly a definition's body and every
+the pre-1.0 render, every rendered definition extracting frontmatter-free and every
 participant extracting to the contract, placeholder filling and refusal, overlay
-resolution and stock, Definition refusals, the loader's refusal, and the
-package's source invariants as walks of its syntax trees.
+resolution and stock, Definition refusals, the loader's refusal, the line cap, and
+the package's source invariants as walks of its syntax trees.
 
 The package is imported from the repository root, which `just test` puts on
 PYTHONPATH.
@@ -13,6 +13,8 @@ PYTHONPATH.
 import ast
 import inspect
 import re
+import shutil
+import subprocess
 import sys
 import types
 from pathlib import Path, PurePosixPath
@@ -20,7 +22,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 import adjagent
-import adjagent.text
+import adjagent.clauses
 from adjagent.context import TIER_MAP_FLAG, Render, build_render, parse_tier_map
 from adjagent.definition import Definition
 from adjagent.definitions import definitions_of
@@ -32,7 +34,15 @@ from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.loading import load
-from adjagent.render import agent_fields, definitions, filled_body, keyed_by_path, render_definition
+from adjagent.render import (
+    agent_fields,
+    definitions,
+    filled_body,
+    keyed_by_path,
+    render_all,
+    render_definition,
+    write_renders,
+)
 from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tool, hole
 from devtools import render_diff
 from tests._structure import (
@@ -191,6 +201,33 @@ def test_opencode_frontmatter_matches_the_pre_1_0_render() -> None:
     )
 
 
+_PYTHON_CODER_DESCRIPTION = (
+    'description: "Python implementation specialist. Writes idiomatic, readable Python — explicit over implicit, '
+    "stdlib-first, no over-engineering. Covers type hints, async, testing, packaging, virtual environments, and "
+    'common ecosystem tooling. Parallel-execution safe. Prefer over generalist-coder for any Python file '
+    'modification or Python project task."'
+)
+
+
+@pytest.mark.parametrize(
+    "ctx, expected",
+    [
+        (
+            Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers)),
+            ("name: python-coder", _PYTHON_CODER_DESCRIPTION, "model: opus", 'color: "#3776AB"'),
+        ),
+        (
+            Render(harness=OPENCODE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT),
+            (_PYTHON_CODER_DESCRIPTION, 'color: "#3776AB"', "mode: subagent"),
+        ),
+    ],
+    ids=["claude", "opencode"],
+)
+def test_an_unrestricted_agent_frontmatter_matches_the_pre_1_0_render(ctx: Render, expected: tuple[str, ...]) -> None:
+    [defn] = [defn for _, defn in definitions() if defn.name == "python-coder"]
+    assert ctx.harness.frontmatter(agent_fields(defn, ctx)) == expected
+
+
 # The first body line of the pre-1.0 render of agents/mad/participant-contract.md.
 _CONTRACT_FIRST_LINE = (
     "You are an independent technical reviewer participating in a structured multi-model debate review "
@@ -250,18 +287,23 @@ def _extracted(defn: Definition, ctx: Render, *, module: str) -> str:
     return "\n".join(lines[lines.index("---", 1) + 1 :]).strip("\n")
 
 
+@pytest.mark.skipif(shutil.which("sed") is None, reason="extraction needs sed")
 @pytest.mark.parametrize("ctx", _HARNESS_RENDERS, ids=lambda ctx: ctx.harness.name)
-def test_guest_extraction_leaves_exactly_the_body(discovered: Discovered, ctx: Render) -> None:
-    extractable = [
-        (module, defn)
-        for module, defn in discovered
-        if (defn.kind is Kind.AGENT and defn.folder == "") or defn.output_path == PurePosixPath(_CONTRACT_PATH)
-    ]
-    assert len(extractable) > 1
-    for module, defn in extractable:
-        assert _extracted(defn, ctx, module=module) == filled_body(defn, ctx), defn.output_path
-    module, contract = _found(discovered, _CONTRACT_PATH)
-    assert _extracted(contract, ctx, module=module).split("\n", 1)[0] == _CONTRACT_FIRST_LINE
+def test_every_rendered_definition_extracts_frontmatter_free(tmp_path: Path, ctx: Render) -> None:
+    """The definitions' own extraction command, run over every rendered file under agents/: it exits
+    0, leaves no banner, and the frontmatter block plus what it printed is the file byte for byte."""
+    write_renders(tmp_path, render_all(ctx))
+    rendered = sorted((tmp_path / "agents").rglob("*.md"))
+    assert len(rendered) > 20
+    for path in rendered:
+        done = subprocess.run(["sed", "1,/^---$/d", str(path)], capture_output=True, text=True, check=False)
+        assert done.returncode == 0, done.stderr
+        assert "!GENERATED!" not in done.stdout, path
+        text = path.read_text(encoding="utf-8")
+        between = text.removeprefix("---\n").split("\n---\n", 1)[0]
+        assert text == "---\n" + between + "\n---\n" + done.stdout, path
+        if path == tmp_path / _CONTRACT_PATH:
+            assert done.stdout.lstrip("\n").split("\n", 1)[0] == _CONTRACT_FIRST_LINE
 
 
 @pytest.mark.parametrize("ctx", _HARNESS_RENDERS, ids=lambda ctx: ctx.harness.name)
@@ -305,7 +347,7 @@ def test_an_unknown_placeholder_is_refused_at_render(placeholder: str) -> None:
 
 @pytest.mark.parametrize("part", list(HarnessText), ids=lambda part: part.name)
 def test_the_text_module_spells_each_harness_placeholder_as_the_renderer_fills_it(part: HarnessText) -> None:
-    assert getattr(adjagent.text, part.name) == hole(part)
+    assert getattr(adjagent.clauses, part.name) == hole(part)
 
 
 _TUNED = Family(
@@ -400,7 +442,7 @@ def _modules(*subpaths: str) -> list[tuple[str, ast.Module]]:
 
 def _imported(tree: ast.Module) -> list[str]:
     """Every module an import statement names, a relative import as under adjagent, and each name a
-    from-import takes as a possible submodule (`from adjagent import text` names `adjagent.text`)."""
+    from-import takes as a possible submodule (`from adjagent import clauses` names `adjagent.clauses`)."""
     names = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -438,7 +480,7 @@ def test_no_composed_text_is_rescanned() -> None:
 def test_definitions_and_text_reach_nothing_outside_their_arguments() -> None:
     banned = {"os", "sys", "subprocess", "time", "random"}
     offenders = []
-    for path, tree in _modules("definitions", "text.py"):
+    for path, tree in _modules("definitions", "clauses.py"):
         offenders += [f"{path} imports {name}" for name in _imported(tree) if name.split(".")[0] in banned]
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -472,11 +514,11 @@ _DEFINITION_PATHS = sorted(path for path in (_PACKAGE / "definitions").glob("*.p
 
 
 def test_the_definition_modules_and_the_text_module_hold_their_structure() -> None:
-    violations = check_structure([*_DEFINITION_PATHS, _PACKAGE / "text.py"])
+    violations = check_structure([*_DEFINITION_PATHS, _PACKAGE / "clauses.py"])
     assert violations == [], "\n".join(violations)
 
 
-_DEFINITION_HEAD = "from adjagent import text as t\nfrom adjagent.definition import Definition\n"
+_DEFINITION_HEAD = "from adjagent import clauses\nfrom adjagent.definition import Definition\n"
 
 
 def _definitions_of_body(body: str, *, head: str = "") -> str:
@@ -491,24 +533,24 @@ def _definitions_of_body(body: str, *, head: str = "") -> str:
         (f'{_DEFINITION_HEAD}_D = {{"a": "b"}}\n', 3, ASSIGNMENT_RULE),
         (f'{_DEFINITION_HEAD}_T = ("a", _X)\n', 3, ASSIGNMENT_RULE),
         (f'{_DEFINITION_HEAD}_C = "".join(x for x in "ab")\n', 3, ASSIGNMENT_RULE),
-        (f'{_DEFINITION_HEAD}_F = f"{{t.DISSENT}}"\n', 3, ASSIGNMENT_RULE),
-        (_definitions_of_body('f"{t.dissent(x=t.other())}"'), 3, ARGUMENT_RULE),
+        (f'{_DEFINITION_HEAD}_F = f"{{clauses.DISSENT}}"\n', 3, ASSIGNMENT_RULE),
+        (_definitions_of_body('f"{clauses.dissent(x=clauses.other())}"'), 3, ARGUMENT_RULE),
         (_definitions_of_body('f"{_S.format(x=_V)}"', head='_S = "{x}"\n_V = f"{_S}"\n'), 5, ""),
         (_definitions_of_body("f\"{_F.format(x='a')}\"", head='_A = "a"\n_F = f"{_A} {{x}}"\n'), 5, CALL_RULE),
         (_definitions_of_body('f"{len(_S)}"', head='_S = "s"\n'), 4, CALL_RULE),
         (_definitions_of_body('f"{_S.upper()}"', head='_S = "s"\n'), 4, CALL_RULE),
-        (_definitions_of_body('f"{t.x(**_K)}"'), 3, ARGUMENT_RULE),
+        (_definitions_of_body('f"{clauses.x(**_K)}"'), 3, ARGUMENT_RULE),
         (_definitions_of_body('f"{_S if _S else _S}"', head='_S = "s"\n'), 4, BODY_RULE),
         (
-            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=t.f(), body="b"),)\n',
+            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=clauses.f(), body="b"),)\n',
             3,
             CALL_RULE,
         ),
         (f"{_DEFINITION_HEAD}def helper():\n    pass\n", 3, DEFINITION_TOP_RULE),
         (f"{_DEFINITION_HEAD}DEFINITIONS = (_ONE,)\n", 3, DEFINITION_TOP_RULE),
-        ("from adjagent.text import X\n", 1, IMPORT_RULE),
-        ("from adjagent import text\n", 1, IMPORT_RULE),
-        ("import adjagent.text\n", 1, IMPORT_RULE),
+        ("from adjagent.clauses import X\n", 1, IMPORT_RULE),
+        ("from adjagent import clauses as c\n", 1, IMPORT_RULE),
+        ("import adjagent.clauses\n", 1, IMPORT_RULE),
     ],
 )
 def test_check_structure_refuses_a_definition_module_off_its_rules(source: str, line: int, rule: str) -> None:
@@ -536,39 +578,50 @@ def test_check_structure_refuses_a_definition_module_off_its_rules(source: str, 
     ],
 )
 def test_check_structure_refuses_a_text_module_off_its_rules(source: str, rule: str) -> None:
-    expected = [f"text.py:1: {rule}"] if rule else []
-    assert check_source(source, where="text.py", text_module=True) == expected
+    expected = [f"clauses.py:1: {rule}"] if rule else []
+    assert check_source(source, where="clauses.py", text_module=True) == expected
 
 
 # Shared text has one source: a paragraph two outputs carry is not written out in either.
 
 _CLAUDE_RENDER = Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+RENDERED_DEFINITION_LINE_CAP = 500  # a runaway guard, not a target; the 100-column wrap makes lines a fair size
+
+
+def test_no_rendered_agent_definition_exceeds_the_line_cap(discovered: Discovered) -> None:
+    over = [
+        f"{defn.output_path} renders at {count} lines after the banner; the cap is {RENDERED_DEFINITION_LINE_CAP}"
+        for _, defn in discovered
+        if defn.output_path.parts[0] == "agents"
+        and (count := len(filled_body(defn, _CLAUDE_RENDER).splitlines())) > RENDERED_DEFINITION_LINE_CAP
+    ]
+    assert over == []
 
 
 def _credited_text() -> types.SimpleNamespace:
-    """The text module with every constant and function standing as a sentinel naming it; a constant
-    that is a bare placeholder keeps its value, so prose around it is not credited to it."""
+    """The clauses module with every constant and function standing as a sentinel naming it; a
+    constant that is a bare placeholder keeps its value, so prose around it is not credited to it."""
     standing: dict[str, object] = {}
-    for name, value in vars(adjagent.text).items():
+    for name, value in vars(adjagent.clauses).items():
         if isinstance(value, str) and not re.fullmatch(r"@![a-z0-9-]+!@", value):
-            standing[name] = f"<<adjagent.text.{name}>>"
+            standing[name] = f"<<adjagent.clauses.{name}>>"
         elif isinstance(value, str):
             standing[name] = value
-        elif inspect.isfunction(value) and value.__module__ == adjagent.text.__name__:
-            standing[name] = lambda _sentinel=f"<<adjagent.text.{name}()>>", **_: _sentinel
+        elif inspect.isfunction(value) and value.__module__ == adjagent.clauses.__name__:
+            standing[name] = lambda _sentinel=f"<<adjagent.clauses.{name}()>>", **_: _sentinel
     return types.SimpleNamespace(**standing)
 
 
 def _source_definitions(source: str, *, module: str, credited: bool) -> tuple[Definition, ...]:
     """DEFINITIONS as the module's source builds them; credited, with each of the module's string
-    constants and everything it reaches through `t` standing as a sentinel naming it."""
+    constants and everything it reaches through `clauses` standing as a sentinel naming it."""
     tree = ast.parse(source)
     namespace: dict[str, object] = {"__name__": module}
     if credited:
-        namespace["t"] = _credited_text()
+        namespace["clauses"] = _credited_text()
         body = []
         for node in tree.body:
-            if isinstance(node, ast.ImportFrom) and any(alias.name == "text" for alias in node.names):
+            if isinstance(node, ast.ImportFrom) and any(alias.name == "clauses" for alias in node.names):
                 continue
             target = node.targets[0].id if isinstance(node, ast.Assign) else ""
             if target and target != "DEFINITIONS":
@@ -608,8 +661,9 @@ def _uncredited_shared_paragraphs(sources: dict[str, str]) -> list[str]:
             literal = _prose_units(filled_body(defn, _CLAUDE_RENDER)) & _prose_units(
                 filled_body(sentinel, _CLAUDE_RENDER)
             )
+            label = defn.name if defn.kind is Kind.AGENTS_FILE else str(defn.output_path)
             for unit in literal:
-                written.setdefault(unit, []).append(str(defn.output_path))
+                written.setdefault(unit, []).append(label)
     return [
         f"written out in {', '.join(written[unit])}: {unit.decode()[:120]}"
         for unit in sorted(written)
@@ -624,7 +678,7 @@ def test_a_paragraph_two_outputs_carry_has_one_source() -> None:
 
 
 _FIXTURE_HEAD = (
-    "from adjagent import text as t\nfrom adjagent.definition import Definition\nfrom adjagent.vocabulary import Kind\n"
+    "from adjagent import clauses\nfrom adjagent.definition import Definition\nfrom adjagent.vocabulary import Kind\n"
 )
 
 
@@ -636,8 +690,8 @@ def _fixture_module(*bodies: tuple[str, str], head: str = "") -> str:
 
 def test_a_paragraph_written_out_in_two_outputs_is_found_and_a_constant_is_not() -> None:
     sources = {
-        "fixture.a": _fixture_module(("a", 'f"Own a.\\n\\nWritten out twice.\\n\\n{t.DISSENT}"')),
-        "fixture.b": _fixture_module(("b", 'f"Written out twice.\\n\\n{t.DISSENT}\\n\\nOwn b."')),
+        "fixture.a": _fixture_module(("a", 'f"Own a.\\n\\nWritten out twice.\\n\\n{clauses.DISSENT}"')),
+        "fixture.b": _fixture_module(("b", 'f"Written out twice.\\n\\n{clauses.DISSENT}\\n\\nOwn b."')),
         "fixture.group": _fixture_module(
             ("c", "f\"{_SHARED}\\n\\n{_SLOT.format(word='one')}\""),
             ("d", "f\"{_SLOT.format(word='one')}\\n\\n{_SHARED}\""),

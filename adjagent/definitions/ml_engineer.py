@@ -1,6 +1,6 @@
 """ml-engineer: the ML technique R&D seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -26,7 +26,7 @@ explain. In all three the deliverable is a specification plus the measurement th
 
 ## What you deliver
 
-{t.ml_technique_deliverable(unit="recommendation")}
+{clauses.ml_technique_deliverable(unit="recommendation")}
 
 **A regime you were not given is asked for, or declared.** Model size, precision, memory and latency
 budget, serving-versus-training context, and the hardware are what decide whether a technique
@@ -42,12 +42,12 @@ is a guess wearing a mechanism section.
 
 ## Before you deliver
 
-{t.ml_technique_attacks(lead="Run your own artifact against the list you would attack someone else's with —")}
+{clauses.ml_technique_attacks(lead="Run your own artifact against the list you would attack someone else's with —")}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Dissent
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

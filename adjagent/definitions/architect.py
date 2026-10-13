@@ -1,6 +1,6 @@
 """architect: the design and structural-review seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Tool
 
@@ -30,7 +30,7 @@ file in place through a shell.
 The dispatching brief names where an artifact goes. Given no path, return the artifact in your reply
 rather than inventing a location.
 
-{t.verification_evidence(
+{clauses.verification_evidence(
     forms="the file and line you read, or the query you ran and what it returned",
     where="Evidence sits with the finding that rests on it, in the artifact you write or the reply you return.",
 )}
@@ -120,14 +120,14 @@ long-lived process, or fewer than three modules.
 **Explicitly omit**: implementation algorithms, internal data structures, full API signatures,
 anything that would be decided better by the coder at implementation time.
 
-{t.incumbent_search(act="specify", moment="putting a new capability in a skeleton")}
+{clauses.incumbent_search(act="specify", moment="putting a new capability in a skeleton")}
 
-{t.PROVE_REPLACEMENT_RULE} In a plan, the step that removes the old mechanism lands no earlier than
+{clauses.PROVE_REPLACEMENT_RULE} In a plan, the step that removes the old mechanism lands no earlier than
 the step whose completion condition is the new one doing the job — in that step after its evidence,
 or later — and names that evidence as its precondition. A removal in the same parallel wave as that
 evidence is not later.
 
-{t.dependency_vetting(artifact="proposal")}
+{clauses.dependency_vetting(artifact="proposal")}
 
 Output format for initial design:
 1. **Invariants** — numbered list of what must hold
@@ -152,7 +152,7 @@ This output is the handoff artifact coders receive.
 
 ## Review Dimensions
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
 **Apply this lens across every review dimension**: does the complexity serve the capability, or does
 it exist for its own sake? Complexity that earns its place — through measurable performance,
@@ -180,7 +180,7 @@ Systematically evaluate (use judgment about which apply):
    - **Unit tests**: do they target logic and algorithms where the correct answer is independently
      verifiable? Unit tests that verify log messages, assert exact call sequences, or mirror
      implementation structure are code checksums — they break on refactor but not on logic errors.
-     {t.TEST_REVIEW}
+     {clauses.TEST_REVIEW}
    - **Integration tests**: do they exercise realistic or well-chosen synthetic inputs under
      realistic conditions with logging enabled? Cross-reference against acceptance criteria — tests
      that pass but don't exercise the criteria are false confidence.
@@ -198,10 +198,10 @@ Systematically evaluate (use judgment about which apply):
    callee already has access to. Flag: identical or near-identical function bodies, magic constants
    repeated across files, abstractions that exist but are bypassed at some call sites, and comments
    saying "same as X" next to duplicated code.
-10. {t.MACHINE_GUARANTEES} Trace a downstream symptom — a broken parse, a skipped obligation, a
+10. {clauses.MACHINE_GUARANTEES} Trace a downstream symptom — a broken parse, a skipped obligation, a
     near-miss conformance count — to the assumption above it, and report that assumption as the
     finding.
-11. {t.SEPARATION_OF_CONCERNS} Reviewing, name the counterpart whose private knowledge the producer
+11. {clauses.SEPARATION_OF_CONCERNS} Reviewing, name the counterpart whose private knowledge the producer
     is holding — that is the finding, not the shape it produced. Designing, this is what decides
     which module in the skeleton owns a shaping step.
 
@@ -263,6 +263,6 @@ recommendation **Strengths**: Brief list of what works well
 
 ## Dissent
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

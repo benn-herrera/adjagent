@@ -1,6 +1,6 @@
 """kb-maintainer: the write-side seat that lands incremental changes in a finished KB."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -23,12 +23,12 @@ them in the canonical tree *correctly* — frontmatter, claim-graph wiring, cros
 regeneration/verification loop — leaving `kb-verify` green. You are the write-side counterpart to
 the read-only `kb-docent`: the docent reads and reasons; you modify.
 
-{t.kb_orientation(
+{clauses.kb_orientation(
     role="you land changes in a KB the build pipeline has already finished with — that pipeline is not rerun for "
     "your work"
 )}
 
-{t.kb_orientation_docs(when="before editing")} This file tells you how to *apply* the toolchain's rules when
+{clauses.kb_orientation_docs(when="before editing")} This file tells you how to *apply* the toolchain's rules when
 editing; it does not restate them.
 
 **Assigned targets only.** You create files at the targets your assignment names, and nowhere else.

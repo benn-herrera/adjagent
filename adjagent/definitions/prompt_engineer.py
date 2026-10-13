@@ -1,6 +1,6 @@
 """prompt-engineer: the author and reviewer seat for model-facing text."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -49,7 +49,7 @@ text has more than one reader, and you must know all of them.
 **Emphasis economy.** State each rule exactly once, at the highest altitude that still reaches every
 reader who needs it. Before writing a clause, trace its delivery path: who loads this text, at what
 moment, and does anyone load it twice? Assume the base environment's delivery — the operator's
-baseline {t.USER_HARNESS_DIR}/{t.AGENTS_FILE} and the consuming project's AGENTS.md are in
+baseline {clauses.USER_HARNESS_DIR}/{clauses.AGENTS_FILE} and the consuming project's AGENTS.md are in
 context alongside every definition you write — and never restate what they already carry; write only
 the domain residue they do not. The dispatch is another such source, and the hazardous one: it
 carries the per-invocation facts with actual values, but the definition loads first and so wins any

@@ -60,34 +60,16 @@ deliberately so: it is indistinguishable from the sanctioned shape, being a dire
 sits under rather than the repository or one of its sources, and the cost of accepting it is an
 untracked render landing outside this repository rather than inside it.
 
-An installed tree is an **artifact**, not a working copy. This repository is the source of truth,
-and a re-install always overwrites, and removes what this repository no longer produces (Write
-Safety, below) — local edits to installed files are never preserved, by design. The fix for a wrong
-installed definition is a change made here and a re-install. The overwrite replaces without
-destroying: an installed file that is not provably this tool's own output is set aside as a numbered
-`.bak` beside itself before being replaced, and those safety copies are the consumer's to delete. A
-shipped package's destination is the one place that does not reach, and the difference is of unit
-rather than of degree: the directory belongs to this repository entire, nothing in it is a consuming
-project's to maintain, so an install replaces it whole rather than reconciling it file by file.
-Nothing inside one is ever set aside, and a local edit made there is gone at the next install.
+An installed tree is an **artifact**, tracked by the consuming project and not for local edit: a
+re-install overwrites it and removes what this repository no longer produces (Write Safety, below),
+and a change request comes to this repository. A shipped package's destination belongs to this
+repository entire and is replaced whole by every install.
 
-Every installed file states its own origin and records the hash of the content beneath that
-statement — the generated banner (Generated-Definition Integrity) on a definition rendered here, an
-installed banner on a file copied here. The banner is written in whatever comment syntax the file's
-type admits, and never where it changes how the file is read: out of a definition's prompt body, out
-of a script's executable content, out of the first body line a frontmatter-less command is described
-by, and never in a form that would present a shipped package's own documentation as a definition.
-Where a file's whole content is itself the payload — consumed verbatim as prompt text, or written
-out verbatim as a consuming project's own file — there is no place a banner does not change how the
-file is read, and the file is installed unstamped whatever comment syntax its type would admit: the
-shipped `.tmpl.md` templates, prompt and document alike, are that case. A filetype admitting no
-comment is likewise installed unbannered. Third-party source vendored into a shipped package's
-`_vendor/` directory is a third class: it ships byte-verbatim and is never bannered whatever comment
-syntax its filetype would admit, because a banner would carry this repository's provenance claim and
-edit-here pointer over code it did not write. The verbose install report names every file it leaves
-unstamped.
-The recorded hash is what makes Write Safety below decidable for an installed tree exactly as it is
-for a regenerated one.
+Every installed file states its own origin in one banner line — the generated banner
+(Generated-Definition Integrity) in a rendered definition's frontmatter, an installed banner at the
+top of a copied file whose type takes a `#` comment, below its shebang where it has one — and never
+where it changes how the file is read. Every other copied file, the shipped `.tmpl.md` templates
+included, is installed byte-verbatim and unstamped.
 
 Every path written inside a definition body — a file the agent is told to `Read`, a script it
 invokes — is written against the installing harness's project directory —
@@ -164,56 +146,20 @@ hand-authored — the partition is total, because a definition no template decla
 and so never reaches the product at all. For every definition:
 
 - Its content is byte-identical to what its declared template currently renders.
-- Every banner claiming a definition is generated names a template that exists and declares that
-  definition. A banner naming a missing template, or naming a template that does not declare it, is
-  a contract violation.
-- Every banner records the hash of the definition body beneath it, so a modification is detectable
-  from the file alone — without the template, the chunk source, or the generator.
+- Every banner claiming a definition is generated names the definition module that renders it and
+  states that the file is not for local edit. The consuming project's git, not a recorded hash, is
+  what detects a modification.
 
 A file without a generated banner is not a definition this repository produced, and is outside this
 guarantee — Write Safety, below, is what governs meeting one at a generation target.
 
 ## Write Safety
 
-Regenerating definitions never destroys hand-maintained or already-correct content. For any
-generation target:
-
-| Target state | Outcome |
-|---|---|
-| does not exist | created |
-| generated banner, render identical | untouched |
-| generated banner, body matches the banner's hash, render differs | overwritten in place, no backup kept |
-| generated banner, body hash absent or mismatched, render differs | prior content copied aside as a numbered backup, then overwritten |
-| no generated banner | refused — never written |
-
-A target is written only when it is provably the tool's own output. A hand-maintained file that
-happens to share a name with a template's declared output is never silently overwritten.
-
-The banner's body hash is what separates the two overwrite rows. Content that hashes to its own
-banner's claim is reproducible from the template at will, so preserving a copy of it protects
-nothing; content that does not — because someone edited it, or because it predates the hash — is
-unreproducible and is preserved before being replaced.
-
-An install additionally **prunes**, because overwriting is only half of keeping an artifact true to
-its source: a definition whose template has since been deleted here is written by nothing and so
-survives every re-install, drifting in the installed tree with nothing left that could ever correct
-it. A file under a deployed surface that the install did not write, that carries one of this
-repository's banners, and whose body hashes to that banner's claim, is deleted; a directory the
-deletion empties is removed with it. The two complements are the rule and not exceptions to it. A
-file whose banner's hash does not match its body is hand-edited, and is **never** deleted — that is
-the numbered-backup row's territory above, and a template no longer claiming the file makes it more
-the consumer's, not less. A file carrying no banner of this repository's is not this repository's to
-remove at all, because a consuming project's `.claude/` holds other people's files. Every deletion
-the prune makes is named in the install report, whether or not the report was asked for detail.
-
-The shipped packages' destinations are outside the prune, and outside the table above with it.
-Neither asks a file-by-file question there, because the unit is the directory: an install removes a
-shipped package's destination and writes the package fresh, which is also what retires a file whose
-source here has since been deleted. There is no refusal, no numbered backup, and no prune verdict to
-be reached inside one. The two rules divide on the same line the install product already draws —
-per-file and banner-gated across the deployed surfaces, where a consuming project's own files
-legitimately sit; wholesale inside a package destination, where they do not. An install names every
-package destination it replaced.
+An install overwrites every definition it renders, and removes — naming each in its report — every
+file under a deployed surface that it did not write and whose frontmatter opens with a `!GENERATED!`
+banner, with any directory that leaves empty; a file without that banner is never touched. A
+shipped package's destination is replaced whole, and the consuming project's git, which tracks the
+installed set, is the record of what an install changed.
 
 ## Guest-Extraction Contract
 
@@ -235,8 +181,8 @@ prompt.
 
 ## Harness Agents File
 
-The repository publishes a recommended operator agents file as one template, rendered per supported
-harness. It is installed only by explicit act, into a directory the operator names — the harness's
+The repository publishes a recommended operator agents file as one definition, rendered per
+supported harness. It is installed only by explicit act, into a directory the operator names — the harness's
 user-global directory or a project's own; `install` never installs it.
 
 Agent directives live in `AGENTS.md`. Installed into the harness's user-global directory, the file
@@ -246,21 +192,18 @@ another name gets that file as the one-line redirect `@AGENTS.md`, created when 
 alone when already present. A file of that other name holding anything else is refused with nothing
 written: moving its content into `AGENTS.md` is the operator's act, never the install's.
 
-The installed file carries the repository's content as **one delimited block**, recognised by the
-fixed ends of its begin and end lines, so a block written by any earlier revision is still found.
-Installation replaces that block wholesale and
-owns nothing outside it. Text above and below the block is the operator's, returned verbatim except
-for leading and trailing blank lines; the title line is the repository's. An existing file without a
-block is kept entire above it as the operator's own. A file whose markers are not exactly one
-ordered pair is refused, and nothing is written. A destination whose only content is one `@<path>`
-import is a redirect: installation goes into the file it names, one hop and within the named
-directory only, and never rewrites the redirect itself; a longer chain, or a target outside that
-directory, is refused with nothing written.
+The installed file carries the repository's content as **one delimited block**, from its begin
+marker line through its end marker line, recognised by their fixed ends so a block any earlier
+revision wrote is still found; installation replaces that span and keeps every other byte of the
+file as the operator's, writes an absent file whole, and refuses with nothing written a file without
+exactly one ordered marker pair. A destination whose only content is one `@<path>` import is a
+redirect followed one hop, within the named directory, and never rewritten itself; a longer chain,
+or a target outside that directory, is refused with nothing written.
 
 Edits made inside the block are not preserved. A write that changes the file keeps one rolling
 backup of the prior content beside it; identical output writes nothing, so installing twice changes
-nothing. Installation is refused while the templates carry uncommitted changes. Publishing an
-improvement is a manual edit to the template.
+nothing. Installation is refused while the generator's sources carry uncommitted changes.
+Publishing an improvement is a manual edit to the agents-file definition.
 
 Neither direction is a symlink, so a write to this repository can never silently rewrite live
 operator configuration. The install writes a regular file, and refuses a symlink in place of the

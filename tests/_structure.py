@@ -1,40 +1,40 @@
-"""The source rules a definition module and the text module are written to, checked over their
+"""The source rules a definition module and the clauses module are written to, checked over their
 syntax trees. Nothing here runs at render: the suite asserts `check_structure` empty over the
 package, and proves each rule on a fixture.
 
 A definition module holds imports, string constants and `DEFINITIONS`. Its constants are string
 literals or f-strings over its own constants. Its only calls are `Definition(...)` as a
-`DEFINITIONS` element and, inside a `body=` value, `t.<name>(...)` and `<constant>.format(...)` on
-one of its string literals, every argument a string literal or a constant. The text module holds
-string constants and text functions: at most three keyword-only parameters, one returned string
-over the parameters and its constants, and no call.
+`DEFINITIONS` element and, inside a `body=` value, `clauses.<name>(...)` and
+`<constant>.format(...)` on one of its string literals, every argument a string literal or a
+constant. The clauses module holds string constants and text functions: at most three keyword-only
+parameters, one returned string over the parameters and its constants, and no call.
 """
 
 import ast
 from pathlib import Path
 
-TEXT_MODULE = "text.py"
-TEXT_ALIAS = "t"
+TEXT_MODULE = "clauses.py"
+CLAUSES = "clauses"
 
 ASSIGNMENT_RULE = "a module-level assignment is a string literal or an f-string over the module's constant names"
 CALL_RULE = (
     "a definition module calls only Definition(...) in DEFINITIONS and, inside a body= value, "
-    "t.<name>(...) or .format(...) on one of its string literals"
+    "clauses.<name>(...) or .format(...) on one of its string literals"
 )
 ARGUMENT_RULE = "an argument to a text function or a .format is a string literal or a module-level constant"
-BODY_RULE = "a body= expression is a module constant, a t.<name>, or a permitted call"
+BODY_RULE = "a body= expression is a module constant, a clauses.<name>, or a permitted call"
 FUNCTION_RULE = (
     "a text function takes at most three keyword-only parameters and returns one string over its "
     "parameters and module constants, with no call"
 )
 DEFINITION_TOP_RULE = "a definition module's top level holds only imports, string constants and DEFINITIONS"
 TEXT_TOP_RULE = "the text module's top level holds only string constants and text functions"
-IMPORT_RULE = "the text module is imported only as `from adjagent import text as t`"
+IMPORT_RULE = "the clauses module is imported only as `from adjagent import clauses`"
 
 
 def check_structure(paths: list[Path]) -> list[str]:
-    """Every violation in the given files, as `<path>:<line>: <rule>`; the file named `text.py` is
-    read as the text module, any other as a definition module."""
+    """Every violation in the given files, as `<path>:<line>: <rule>`; the file named `clauses.py`
+    is read as the clauses module, any other as a definition module."""
     violations = []
     for path in paths:
         source = path.read_text(encoding="utf-8")
@@ -100,11 +100,11 @@ def _is_constant_text(node: ast.expr, *, names: dict[str, ast.expr] | set[str]) 
 
 def _imports_text_wrongly(node: ast.Import | ast.ImportFrom) -> bool:
     if isinstance(node, ast.Import):
-        return any(alias.name == "adjagent.text" for alias in node.names)
-    if node.module == "adjagent.text":
+        return any(alias.name == f"adjagent.{CLAUSES}" for alias in node.names)
+    if node.module == f"adjagent.{CLAUSES}":
         return True
     return node.module == "adjagent" and any(
-        alias.name == "text" and alias.asname != TEXT_ALIAS for alias in node.names
+        alias.name == CLAUSES and alias.asname is not None for alias in node.names
     )
 
 
@@ -170,10 +170,10 @@ def _body_violations(body: ast.expr, constants: dict[str, ast.expr]) -> list[tup
 
 
 def _is_reference(node: ast.expr, constants: dict[str, ast.expr]) -> bool:
-    """A name among the module's constants, or `t.<name>`."""
+    """A name among the module's constants, or `clauses.<name>`."""
     if isinstance(node, ast.Name):
         return node.id in constants
-    return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == TEXT_ALIAS
+    return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == CLAUSES
 
 
 def _call_violations(call: ast.Call, constants: dict[str, ast.expr]) -> list[tuple[int, str]]:

@@ -1,6 +1,6 @@
 """go-coder: the Go implementation seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -20,11 +20,11 @@ recognize when a clever approach is worse than a boring one.
 
 ## Core Principles
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_CODER}
+{clauses.CODE_PRINCIPLES_CODER}
 
 **Explicit over implicit**: errors are returned and checked immediately, not swallowed or deferred.
 No panics for recoverable conditions. No global state.
@@ -52,18 +52,18 @@ synchronization; the race detector (`-race`) is always right.
 **Interfaces and composition**: embed interfaces and structs for composition, not inheritance. Keep
 method sets minimal. Return concrete types from constructors; accept interfaces as parameters.
 
-{t.TESTING_LAYERS_CODER}
+{clauses.TESTING_LAYERS_CODER}
 
-{t.boundary_checks_lead()} {t.boundary_check_coder_body(expectation="state/goroutine/context")} {t.BOUNDARY_CHECK_CONSUMERS_CODER}
+{clauses.boundary_checks_lead()} {clauses.boundary_check_coder_body(expectation="state/goroutine/context")} {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
 
 *Unit tests*: table-driven (`[]struct{{ name, input, want }}`), subtests via `t.Run`, helpers with
-`t.Helper()`. {t.unit_test_scope_coder()} {t.MOCKING_THRESHOLD_GENERAL}
+`t.Helper()`. {clauses.unit_test_scope_coder()} {clauses.MOCKING_THRESHOLD_GENERAL}
 
-{t.integration_tests_coder()} {t.integration_logging_signal(level="maximum logging", sink="output")} Use `testing.B` for benchmarks. Race detector (`-race`) on all test runs.
+{clauses.integration_tests_coder()} {clauses.integration_logging_signal(level="maximum logging", sink="output")} Use `testing.B` for benchmarks. Race detector (`-race`) on all test runs.
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 **Modules**: `go.mod` / `go.sum` discipline. Use `replace` directives sparingly (document why).
 Workspace mode (`go.work`) for multi-module repos. Understand `go mod tidy` and run it. Prefer
@@ -74,11 +74,11 @@ CGo calls, never call CGo in tight loops. CGo types do not escape to Go GC; mana
 explicitly (`C.free`). Use `//export` carefully — it disables dead-code elimination for those
 symbols. Build tag `cgo` is implicit when CGo is in use.
 
-{t.build_system_lead(ops="build, test, and integration", direct="the compiler (`go build`, `clang`, CGo compilation, etc.)")} Integration targets may dispatch to shell scripts for complex procedures. `bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
+{clauses.build_system_lead(ops="build, test, and integration", direct="the compiler (`go build`, `clang`, CGo compilation, etc.)")} Integration targets may dispatch to shell scripts for complex procedures. `bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
 
-{t.NEW_PROJECT_SETUP}
+{clauses.NEW_PROJECT_SETUP}
 
-{t.PROJECT_DOCS_SETUP}
+{clauses.PROJECT_DOCS_SETUP}
 
 **Performance**: understand escape analysis — stack allocation is free, heap allocation has GC cost.
 Use `sync.Pool` for high-churn allocations. Profile before optimizing (`pprof`). Avoid `interface{{}}`
@@ -87,13 +87,13 @@ Use `sync.Pool` for high-churn allocations. Profile before optimizing (`pprof`).
 **Logging**: when the task requires logging, use a structured leveled logger — not fmt.Println,
 log.Println, or direct stderr writes. Prefer `log/slog` (stdlib, Go 1.21+) as the default — it is
 structured, leveled, and has zero dependencies. Define a thin interface over it so the backend can
-be swapped. {t.heavy_logging_framework(baseline="slog")} This {t.LOGGING_ABSTRACTION_NOTE}
+be swapped. {clauses.heavy_logging_framework(baseline="slog")} This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.DATA_FORMATS}
+{clauses.DATA_FORMATS}
 
-{t.DEPENDENCIES_LEAD_PACKAGES} {t.manual_over_large_dependency()}
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.manual_over_large_dependency()}
 
-{t.dependency_vetting(registry="the pkg.go.dev Imported-by count")}
+{clauses.dependency_vetting(registry="the pkg.go.dev Imported-by count")}
 
 ## Critical Gotchas
 
@@ -111,16 +111,16 @@ be swapped. {t.heavy_logging_framework(baseline="slog")} This {t.LOGGING_ABSTRAC
 - `time.After` in a loop leaks timers until they fire on Go ≤ 1.22; from Go 1.23 an unreferenced
   timer is collectable before firing. On pre-1.23 toolchains use `time.NewTimer` and `Reset`.
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()}
-{t.PE_SHARED_BULLETS}
-{t.PE_EXPANSION_BULLET}
-{t.pe_scope_creep_bullet()}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()}
+{clauses.PE_SHARED_BULLETS}
+{clauses.PE_EXPANSION_BULLET}
+{clauses.pe_scope_creep_bullet()}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

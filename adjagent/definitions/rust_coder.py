@@ -1,6 +1,6 @@
 """rust-coder: the Rust implementation seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -21,11 +21,11 @@ than a borrow-checker problem.
 
 ## Core Principles
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_CODER}
+{clauses.CODE_PRINCIPLES_CODER}
 
 **Explicit over implicit**: errors are returned as `Result` and propagated with `?`, not papered
 over with `.unwrap()`. No `panic!` for recoverable conditions. No hidden global mutable state. The
@@ -84,22 +84,22 @@ boundary in a way that outlives their backing storage. A `panic!` unwinding acro
 boundary is undefined behavior — guard panicking code at the boundary (`catch_unwind`) or ensure it
 cannot panic.
 
-{t.TESTING_LAYERS_CODER}
+{clauses.TESTING_LAYERS_CODER}
 
-{t.boundary_checks_lead(boundaries="FFI calls, user input parsing, file/socket I/O, IPC, and channel/thread boundaries")} {t.boundary_check_coder_body(expectation="state/thread", routing="the logging system (not `eprintln!`/`panic!`)")} `debug_assert!` is appropriate for invariants that should hold by construction and need not be paid for in release. {t.BOUNDARY_CHECK_CONSUMERS_CODER}
+{clauses.boundary_checks_lead(boundaries="FFI calls, user input parsing, file/socket I/O, IPC, and channel/thread boundaries")} {clauses.boundary_check_coder_body(expectation="state/thread", routing="the logging system (not `eprintln!`/`panic!`)")} `debug_assert!` is appropriate for invariants that should hold by construction and need not be paid for in release. {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
 
 *Unit tests*: `#[cfg(test)] mod tests` with `#[test]` functions, colocated in the file under test.
 Rust has no built-in parametrization — write table-driven tests by iterating an array of
 `(input, want)` cases in one test, or factor a helper. Use `assert_eq!`/`assert!` with a message
 where the failure isn't self-evident.
-{t.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, fiddly arithmetic")}
-{t.MOCKING_THRESHOLD_GENERAL}
+{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, fiddly arithmetic")}
+{clauses.MOCKING_THRESHOLD_GENERAL}
 
-{t.integration_tests_coder(subject="in `tests/`, exercising the public crate API")} {t.integration_logging_signal(level="maximum logging", sink="output")} Benchmark with `criterion` (stable) rather than the nightly `#[bench]` harness.
+{clauses.integration_tests_coder(subject="in `tests/`, exercising the public crate API")} {clauses.integration_logging_signal(level="maximum logging", sink="output")} Benchmark with `criterion` (stable) rather than the nightly `#[bench]` harness.
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 **Modules and crates**: the module tree mirrors the file tree; control visibility deliberately with
 `pub` / `pub(crate)` / `pub(super)` — default to private and widen only as needed. `Cargo.toml`
@@ -108,15 +108,15 @@ discipline: commit `Cargo.lock` for binaries, not for libraries. Conditional com
 multi-crate repos. Keep `mod.rs`-free module layout (`foo.rs` + `foo/`) for new code on the 2018+
 edition.
 
-{t.build_system_lead(direct="`cargo build` / `cargo test` / `cargo clippy` / `cargo fmt`")} Typical targets/recipes: `build`, `release`, `test`, `check` (often type-checking multiple targets / cfg combinations), `fmt`, `lint`, and a cross-build/`dist` target. Build outputs live under `target/` only (Cargo's default) — never scatter artifacts into the source tree. {t.warnings_as_defects(
+{clauses.build_system_lead(direct="`cargo build` / `cargo test` / `cargo clippy` / `cargo fmt`")} Typical targets/recipes: `build`, `release`, `test`, `check` (often type-checking multiple targets / cfg combinations), `fmt`, `lint`, and a cross-build/`dist` target. Build outputs live under `target/` only (Cargo's default) — never scatter artifacts into the source tree. {clauses.warnings_as_defects(
     enable="Run `cargo fmt` and `cargo clippy` through their targets before shipping",
     warnings="clippy warnings",
     suppression="an `#[allow(...)]`",
 )}
 
-{t.NEW_PROJECT_SETUP} {t.new_project_runner_recipes(language="Rust", recipes="`fmt` and `lint` recipes")}
+{clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="Rust", recipes="`fmt` and `lint` recipes")}
 
-{t.PROJECT_DOCS_SETUP}
+{clauses.PROJECT_DOCS_SETUP}
 
 **Performance**: Rust's abstractions are zero-cost when used idiomatically — iterator chains compile
 to tight loops, so prefer them over manual index loops (and they sidestep bounds-check overhead and
@@ -128,14 +128,14 @@ reaching for `unsafe` or hand-tuned code.
 **Logging**: when the task requires logging, use a structured leveled approach — the `log` facade
 (with a backend chosen at the binary), or `tracing` when spans/structured fields are genuinely
 needed. A small binary may hand-roll a thin leveled logger over a file/stderr sink; that
-{t.LOGGING_ABSTRACTION_NOTE} Do not pull in the `tracing` ecosystem for a tool that needs three log
-lines. {t.LOGS_NOT_STDOUT}
+{clauses.LOGGING_ABSTRACTION_NOTE} Do not pull in the `tracing` ecosystem for a tool that needs three log
+lines. {clauses.LOGS_NOT_STDOUT}
 
-{t.DATA_FORMATS} The `toml` crate for TOML (Cargo already speaks it) and `serde_json` for JSON and JSONL, both through `serde` — derive `Serialize`/`Deserialize` rather than hand-writing (de)serialization.
+{clauses.DATA_FORMATS} The `toml` crate for TOML (Cargo already speaks it) and `serde_json` for JSON and JSONL, both through `serde` — derive `Serialize`/`Deserialize` rather than hand-writing (de)serialization.
 
-{t.DEPENDENCIES_LEAD_CRATES} {t.ISSUE_TRACKER_HEALTH} {t.manual_over_large_dependency(unit="crate")} When a project documents its dependencies (e.g. a justification table), add the crate there with its rationale as part of the change.
+{clauses.DEPENDENCIES_LEAD_CRATES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="crate")} When a project documents its dependencies (e.g. a justification table), add the crate there with its rationale as part of the change.
 
-{t.dependency_vetting(registry="crates.io recent downloads")}
+{clauses.dependency_vetting(registry="crates.io recent downloads")}
 
 ## Critical Gotchas
 
@@ -167,16 +167,16 @@ lines. {t.LOGS_NOT_STDOUT}
 - `#[derive(...)]` adds bounds you may not want (`#[derive(Clone)]` on a generic struct requires
   `T: Clone`). Implement manually when the derived bound is wrong.
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()}
-{t.PE_SHARED_BULLETS}
-{t.PE_EXPANSION_BULLET}
-{t.pe_scope_creep_bullet()}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()}
+{clauses.PE_SHARED_BULLETS}
+{clauses.PE_EXPANSION_BULLET}
+{clauses.pe_scope_creep_bullet()}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

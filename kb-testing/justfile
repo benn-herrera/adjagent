@@ -90,11 +90,11 @@ prep-test-data-arxiv-candidates:
     @just prep-test-data-arxiv "{{ARXIV_CANDIDATE_IDS}}"
 
 # A staged repository may have been installed under any harness, so this file
-# spells no harness directory of its own: every one comes from
-# templates/harness/<name>.toml, through the root justfile's reader.
+# spells no harness directory of its own: every one comes from the harness
+# modules under adjagent/harnesses/, through the root justfile's two readers.
 [private]
 _harness-names:
-    @for file in "{{PROJECT_ROOT}}"/templates/harness/*.toml; do basename "${file}" .toml; done
+    @"{{just_executable()}}" --justfile "{{PROJECT_ROOT}}/justfile" _harness-names
 
 [private]
 _harness-value harness key:
@@ -1063,7 +1063,7 @@ kb-driver-fixture dir env_file *args: _venv
     printf 'then:    just kb-driver-harvest | just kb-driver-kill\n'
 
 # Not wired into the root `just test` (that stays the fast unit run over
-# kb_tools/liaison_tools/gen_defs): this suite exercises kb-testing's own
+# kb_tools/liaison_tools/adjagent): this suite exercises kb-testing's own
 # recipes against DATA STAGED under test-data/transient/, never fixtures
 # committed to the repo, so it is invoked deliberately rather than on every
 # unit-test pass.

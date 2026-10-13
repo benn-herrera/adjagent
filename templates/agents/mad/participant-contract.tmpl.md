@@ -1,4 +1,0 @@
----
----
-
-@!mad-participant-contract!@

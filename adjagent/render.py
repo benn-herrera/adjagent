@@ -1,24 +1,26 @@
 """The renderer: every discovered definition to its file text, its banner, and
 the writer. Holds no prose, knows no individual definition, fills a body's
-placeholders in one pass and never rescans what it filled, and is the only
-module that writes files."""
+placeholders in one pass and never rescans what it filled, and writes the
+rendered definitions."""
 
 import dataclasses
 import re
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
-from adjagent.context import Render, map_spec
+from adjagent.context import DEFAULT_FAMILY, Render, map_spec
 from adjagent.definition import Definition
 from adjagent.definitions import discover
 from adjagent.errors import InputError
-from adjagent.harness import AgentFields
-from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tier, hole
+from adjagent.harness import AgentFields, Harness
+from adjagent.loading import load
+from adjagent.vocabulary import ALL, AgentsFileText, Anchor, HarnessText, Kind, Tier, hole
 
 GENERATED_NOTICE = (
     "do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md."
 )
 _PLACEHOLDER = re.compile(r"@![a-z0-9.-]+!@")
+_DISPATCH_TIER: Tier = "medium"  # the tier the agents file's coder-dispatch rule cites
 
 
 def keyed_by_path(
@@ -37,8 +39,11 @@ def keyed_by_path(
 
 
 def definitions() -> tuple[tuple[str, Definition], ...]:
-    """Every discovered definition, as keyed_by_path gives it."""
-    return keyed_by_path(discover())
+    """Every discovered definition but the agents file, which has no output path, as keyed_by_path
+    gives it."""
+    return keyed_by_path(
+        (module, tuple(defn for defn in entries if defn.kind is not Kind.AGENTS_FILE)) for module, entries in discover()
+    )
 
 
 def agent_fields(defn: Definition, ctx: Render) -> AgentFields:
@@ -92,13 +97,16 @@ def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
 
 def filled_body(defn: Definition, ctx: Render) -> str:
     """The body with every placeholder filled in one pass: a harness text from ctx.harness, an anchor
-    from ctx.overlay for the definition's seat ("" where the family fills none). A paragraph that fills
-    to nothing is dropped with its blank line, so an unfilled anchor standing as its own paragraph
-    leaves no empty one. A placeholder-shaped span naming no key is refused, naming the definition and
-    the span. Filled text is not rescanned."""
+    from ctx.overlay for the definition's seat ("" where the family fills none), and for the agents file
+    alone its scope name and dispatch model. A paragraph that fills to nothing is dropped with its blank
+    line, so an unfilled anchor standing as its own paragraph leaves no empty one. A placeholder-shaped
+    span naming no key is refused, naming the definition and the span. Filled text is not rescanned."""
     seated = dataclasses.replace(ctx, seat=defn.tier)
     values = {hole(part): ctx.harness.text(part) for part in HarnessText}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
+    if defn.kind is Kind.AGENTS_FILE:
+        values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope
+        values[hole(AgentsFileText.DISPATCH_MODEL)] = ctx.model(_DISPATCH_TIER)
 
     def value(match: re.Match[str]) -> str:
         if match[0] not in values:
@@ -118,6 +126,16 @@ def render_definition(defn: Definition, ctx: Render, *, module: str) -> str:
 def render_all(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:
     """(output path, text) for every definition, sorted by path."""
     return tuple((defn.output_path, render_definition(defn, ctx, module=module)) for module, defn in definitions())
+
+
+def render_agents_file(harness: Harness, *, scope: str) -> str:
+    """The harness agents file as a fresh file holds it: the agents-file definition's body filled for
+    `harness` and `scope` under the default family's own tiers, whatever the invocation's tuning and
+    with no harness model-shape check, then one final newline."""
+    [defn] = [defn for _, entries in discover() for defn in entries if defn.kind is Kind.AGENTS_FILE]
+    family = load("adjagent.families", "FAMILY")[DEFAULT_FAMILY]
+    ctx = Render(harness=harness, family=family, tier_map=dict(family.tiers), scope=scope)
+    return filled_body(defn, ctx) + "\n"
 
 
 def write_renders(out: Path, renders: Iterable[tuple[PurePosixPath, str]]) -> list[Path]:

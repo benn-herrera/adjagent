@@ -1,6 +1,6 @@
 """web-app-expert: the web and browser platform seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -65,7 +65,7 @@ calls, use Transferable/SharedArrayBuffer. MIME type must be `application/wasm`.
 - HTTPS required for secure contexts (Service Workers, SharedArrayBuffer, etc.)
 - Mixed content blocks in production—warn proactively
 
-{t.AUTHORING_STANDARDS_LEAD}
+{clauses.AUTHORING_STANDARDS_LEAD}
 
 - **Progressive enhancement**: baseline works everywhere, enhancements layer on. If a feature has
   poor support, state the support matrix and provide graceful degradation.
@@ -82,49 +82,49 @@ calls, use Transferable/SharedArrayBuffer. MIME type must be `application/wasm`.
 - Prefer small-footprint npm packages; mention if no dependency needed
 - CSS over JS when possible, TypeScript strict mode, explicit error handling, teardown cleanup
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent="package.json, tsconfig.json, vite/webpack config, service worker manifests")}
-{t.PE_SHARED_BULLETS}
-{t.pe_scope_creep_bullet()}
-{t.PE_EXPANSION_BULLET}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()} {clauses.pe_platform_adjacent(adjacent="package.json, tsconfig.json, vite/webpack config, service worker manifests")}
+{clauses.PE_SHARED_BULLETS}
+{clauses.pe_scope_creep_bullet()}
+{clauses.PE_EXPANSION_BULLET}
 
-{t.PLATFORM_TESTING_LEAD}
+{clauses.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level="at `warn`/`error` level with structured context objects", sink="browser DevTools, log aggregators")}
+{clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at `warn`/`error` level with structured context objects", sink="browser DevTools, log aggregators")}
 
-*Unit tests*: Vitest or Jest. {t.unit_test_scope(artifact="DOM snapshots")}
-{t.MOCKING_THRESHOLD_PLATFORM}
+*Unit tests*: Vitest or Jest. {clauses.unit_test_scope(artifact="DOM snapshots")}
+{clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: Playwright for browser-level flows; test across Chrome, Firefox, and Safari.
-Test on mobile viewport sizes. {t.integration_logging_signal(sink="the test output")}
+Test on mobile viewport sizes. {clauses.integration_logging_signal(sink="the test output")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Code Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_PLATFORM}
+{clauses.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct="`npm`, `vite`, `vitest`, or `playwright`")}
+{clauses.build_system(direct="`npm`, `vite`, `vitest`, or `playwright`")}
 
-{t.PROJECT_SETUP_PLATFORM} {t.manual_over_large_dependency()}
+{clauses.PROJECT_SETUP_PLATFORM} {clauses.manual_over_large_dependency()}
 
-{t.dependency_vetting(registry="npm weekly downloads")}
+{clauses.dependency_vetting(registry="npm weekly downloads")}
 
 **Logging**: use a structured console wrapper for leveled logging — not raw `console.log`. The
 wrapper should emit structured objects (level, message, context) so logs are filterable in DevTools
 and parseable by log aggregators. In library code, accept a logger interface so callers can
-substitute their own. This {t.LOGGING_ABSTRACTION_NOTE}
+substitute their own. This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

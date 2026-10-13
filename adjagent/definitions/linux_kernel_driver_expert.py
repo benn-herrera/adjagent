@@ -1,6 +1,6 @@
 """linux-kernel-driver-expert: the Linux kernel and driver seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -115,7 +115,7 @@ and scripts, never into a command line the reply asks someone to paste.
 - A lock also taken in a hardirq handler is taken with `spin_lock_irqsave` everywhere else, or the
   handler deadlocks on it — lockdep reports this before the field does
 
-{t.AUTHORING_STANDARDS_LEAD}
+{clauses.AUTHORING_STANDARDS_LEAD}
 
 - Complete code with the headers it needs and the Kbuild and Kconfig entries that build it
 - State whether the target is in-tree or out-of-tree, which kernel versions are in scope, and
@@ -128,52 +128,52 @@ and scripts, never into a command line the reply asks someone to paste.
 - Security: validate everything crossing from userspace, zero what you copy back, and treat a
   capability check as part of the interface
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent="Kconfig, Kbuild and Makefile entries, device tree bindings and sources, UAPI headers, DKMS configuration")}
-{t.PE_SHARED_BULLETS}
-{t.pe_scope_creep_bullet()}
-{t.PE_EXPANSION_BULLET}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()} {clauses.pe_platform_adjacent(adjacent="Kconfig, Kbuild and Makefile entries, device tree bindings and sources, UAPI headers, DKMS configuration")}
+{clauses.PE_SHARED_BULLETS}
+{clauses.pe_scope_creep_bullet()}
+{clauses.PE_EXPANSION_BULLET}
 
-{t.PLATFORM_TESTING_LEAD}
+{clauses.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level="at `KERN_WARNING` or above", sink="the kernel log")}
+{clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at `KERN_WARNING` or above", sink="the kernel log")}
 
 *Unit tests*: KUnit for logic that can be exercised without hardware.
-{t.unit_test_scope(artifact="parsing, state machines and register-level computation")}
-{t.MOCKING_THRESHOLD_PLATFORM}
+{clauses.unit_test_scope(artifact="parsing, state machines and register-level computation")}
+{clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: boot the module in a virtual machine against the debugging configuration, and
 exercise it through the interface a consumer actually uses. `kselftest` is where a test that belongs
-to the kernel goes. {t.integration_logging_signal(sink="the kernel log")}
+to the kernel goes. {clauses.integration_logging_signal(sink="the kernel log")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Code Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_PLATFORM}
+{clauses.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct="`make`, `kbuild`, or test runners")}
+{clauses.build_system(direct="`make`, `kbuild`, or test runners")}
 
-{t.PROJECT_SETUP_PLATFORM} In-kernel code depends on kernel subsystems, not on libraries — reach for the existing subsystem (regmap, IIO, the GPIO and clock frameworks) before writing register access by hand. {t.STDLIB_FIRST_ALWAYS}
+{clauses.PROJECT_SETUP_PLATFORM} In-kernel code depends on kernel subsystems, not on libraries — reach for the existing subsystem (regmap, IIO, the GPIO and clock frameworks) before writing register access by hand. {clauses.STDLIB_FIRST_ALWAYS}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
 **Logging**: use the kernel's own facilities — `dev_err`, `dev_warn`, `dev_dbg` and their
 `_ratelimited` forms, which carry the device identity a bare `pr_*` loses. Dynamic debug is what
 makes `dev_dbg` runtime-selectable; a driver that needs a rebuild to say more is one that cannot be
-diagnosed in the field. {t.logging_backend_seam(backend="the kernel log")} This
-{t.LOGGING_ABSTRACTION_NOTE}
+diagnosed in the field. {clauses.logging_backend_seam(backend="the kernel log")} This
+{clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

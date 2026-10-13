@@ -5,7 +5,7 @@ library and review has none, and design's run name comes from the prose, after a
 review's first token is the run name.
 """
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Kind
 
@@ -40,9 +40,9 @@ DEFINITIONS = (
     Definition(
         name="mad-review",
         kind=Kind.COMMAND,
-        body=f"""@{t.PROJECT_HARNESS_DIR}/agents/mad-review-referee.md
-@{t.PROJECT_HARNESS_DIR}/agents/mad/participant-contract.md
-@{t.PROJECT_HARNESS_DIR}/agents/mad-alignment-assessor.md
+        body=f"""@{clauses.PROJECT_HARNESS_DIR}/agents/mad-review-referee.md
+@{clauses.PROJECT_HARNESS_DIR}/agents/mad/participant-contract.md
+@{clauses.PROJECT_HARNESS_DIR}/agents/mad-alignment-assessor.md
 
 You are the MAD Review Referee. Start a multi-agent review debate.
 
@@ -83,16 +83,16 @@ review process.""",
     Definition(
         name="mad-design",
         kind=Kind.COMMAND,
-        body=f"""@{t.PROJECT_HARNESS_DIR}/agents/mad-design-referee.md
-@{t.PROJECT_HARNESS_DIR}/agents/mad/participant-contract.md
-@{t.PROJECT_HARNESS_DIR}/agents/mad-alignment-assessor.md
+        body=f"""@{clauses.PROJECT_HARNESS_DIR}/agents/mad-design-referee.md
+@{clauses.PROJECT_HARNESS_DIR}/agents/mad/participant-contract.md
+@{clauses.PROJECT_HARNESS_DIR}/agents/mad-alignment-assessor.md
 
 You are the MAD Design Referee. Start a multi-agent design debate.
 
 {_PREREQUISITES}
 
 {_PARSING_ARGUMENTS}
-- **Topic name**: the first token — matches a file in `{t.PROJECT_HARNESS_DIR}/agents/mad/design-topics/[topic-name].md`. Load that file as the topic. If the file does not exist, list available topics from `{t.PROJECT_HARNESS_DIR}/agents/mad/design-topics/` and halt.
+- **Topic name**: the first token — matches a file in `{clauses.PROJECT_HARNESS_DIR}/agents/mad/design-topics/[topic-name].md`. Load that file as the topic. If the file does not exist, list available topics from `{clauses.PROJECT_HARNESS_DIR}/agents/mad/design-topics/` and halt.
 {_KEYED_ARGUMENTS}
 - **Target** (`TARGET=`): path to the problem statement. Either (a) an existing brief defining the open problem (file or directory), or (b) an empty/not-yet-created output location — in case (b) the referee will elicit the problem statement from the user interactively before dispatching participants.
 - **Remaining text**: free-form description of the design target, minus the `KEY=` tokens. The

@@ -4,7 +4,9 @@ A file's text is its bytes after two steps. First, its body (`body`): a file who
 `---` and whose next lines match exactly one of the two banner shapes (`OLD`, `NEW`) has those lines
 replaced by the constant line `# !BANNER!`. Replacing rather than deleting means a file that loses
 its banner still differs, and a block of any other shape stays in place, so it shows as a difference
-rather than hiding one. Second (`collapsed`), whitespace a model does not read is dropped: outside
+rather than hiding one. Any other file whose lines from line 1, or from line 2 below a `#!` line,
+match one of the two copied-package banner shapes (`OLD_INSTALLED`, `NEW_INSTALLED`) has them
+replaced the same way. Second (`collapsed`), whitespace a model does not read is dropped: outside
 the frontmatter and fenced code, each paragraph is joined into one line with runs of spaces
 collapsed to one, each list item (a line starting `- `, `* `, `+ ` or `1. `/`1) `, plus its
 continuation lines) is likewise its own one-line unit, each ATX heading (a line matching
@@ -33,6 +35,9 @@ RENDERED_DIR = Path(__file__).resolve().parent.parent / "rendered"
 # so the two shapes cannot both match one file.
 OLD = (b"#", b"# !GENERATED! from ", b"# !TUNING! ", b"# !BODY-SHA256! ", b"#")
 NEW = (b"# !GENERATED! from ", b"# !TUNING! ")
+# A copied package file's banner, from line 1, or from line 2 below a `#!` line.
+OLD_INSTALLED = (b"#", b"# !INSTALLED! ", b"# !BODY-SHA256! ", b"#")
+NEW_INSTALLED = (b"# !INSTALLED! from ",)
 FENCE_OPEN = re.compile(rb" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 FENCE_CLOSE = re.compile(rb" {0,3}(`{3,}|~{3,})[ \t]*")
 LIST_ITEM = re.compile(rb" {0,3}(?:[-*+]|\d+[.)]) ")
@@ -41,11 +46,15 @@ HEADING = re.compile(rb" {0,3}#{1,6}( |$)")
 
 def body(data: bytes) -> bytes:
     lines = data.split(b"\n")
-    for shape in (OLD, NEW):
-        head = lines[1:1 + len(shape)]
-        if lines[0] == b"---" and len(head) == len(shape) and all(
+    if lines[0] == b"---":
+        start, shapes = 1, (OLD, NEW)
+    else:
+        start, shapes = (1 if lines[0].startswith(b"#!") else 0), (OLD_INSTALLED, NEW_INSTALLED)
+    for shape in shapes:
+        head = lines[start:start + len(shape)]
+        if len(head) == len(shape) and all(
                 line == want if want == b"#" else line.startswith(want) for line, want in zip(head, shape)):
-            return b"\n".join([b"---", b"# !BANNER!", *lines[1 + len(shape):]])
+            return b"\n".join([*lines[:start], b"# !BANNER!", *lines[start + len(shape):]])
     return data
 
 

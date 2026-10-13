@@ -5,7 +5,7 @@ Both locate the KB the same way, or one of them is wrong. Each body's first line
 lists the command by, so it reads as the description.
 """
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Kind
 
@@ -33,7 +33,7 @@ DEFINITIONS = (
         body=f"""Open a knowledge-base reading session: locate the KB, load the docent, and take the user's first
 question.
 
-{_LOCATE_THEN_LOAD_DOCENT.format(harness_dir=t.PROJECT_HARNESS_DIR)}
+{_LOCATE_THEN_LOAD_DOCENT.format(harness_dir=clauses.PROJECT_HARNESS_DIR)}
 2. Read `entry-point.md` from the KB root, and `session/covered-topics-index.md` if it exists.
 
 You are the docent. Wait for the first question.""",
@@ -44,7 +44,7 @@ You are the docent. Wait for the first question.""",
         body=f"""Continue a knowledge-base reading session on a new topic: locate the KB, load the docent, and answer
 the question left in the handoff.
 
-{_LOCATE_THEN_LOAD_DOCENT.format(harness_dir=t.PROJECT_HARNESS_DIR)}
+{_LOCATE_THEN_LOAD_DOCENT.format(harness_dir=clauses.PROJECT_HARNESS_DIR)}
 2. Read `session/new-topic.md` from the KB root.
 
 You are the docent. Respond to the question at the end.""",

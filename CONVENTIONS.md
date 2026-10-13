@@ -1,17 +1,17 @@
 # CONVENTIONS – Adjagent
 
 House rules and project-specific traps only. Doc-structure conventions and general engineering ethos
-live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl.md`), not here.
+live in operator config (the harness agents file, `adjagent/definitions/harness_agents_file.py`),
+not here.
 
-- **Chunk single-sourcing.** Text shared by two or more definitions lives in exactly one
-  `[chunks.*]` entry in `shared-chunks.toml`. A template never pastes a paraphrase of shared text
-  inline — reference the chunk, or add a variant if the shared text needs a per-agent difference.
-- **A checkpoint is not complete until the sweep has run.** `just sweep-prose` and
-  `just sweep-python` enumerate what no single file can report — one sentence inline in seven
-  templates, one concept with two implementations, one constant with two definitions — because a
-  rule honoured completely inside one file is still broken across two. They emit candidates and
-  never verdicts, so the run is not finished when they exit zero; it is finished when someone has
-  read the list and said which pairs are one idea.
+- **Shared-text single-sourcing.** Text shared by two or more definitions is one constant: in
+  `adjagent/clauses.py`, or in the group module of a set that ships together. A definition never
+  pastes a paraphrase of shared text inline; `just test` fails on a paragraph two outputs write out.
+- **A checkpoint is not complete until the sweep has run.** `just sweep-python` enumerates what no
+  single file can report — one concept with two implementations, one constant with two definitions
+  — because a rule honoured completely inside one file is still broken across two. It emits
+  candidates and never verdicts, so the run is not finished when it exits zero; it is finished when
+  someone has read the list and said which pairs are one idea.
 - **The gate after a change is `just test-changed [base]`.** It runs only the test surfaces the
   change touches (the mapping lives in the justfile's `TEST_SURFACE_MAP`); bare `just test` is the
   full run. Cross-surface coupling is either removed or explicitly accepted as a risk — never paid
@@ -29,10 +29,9 @@ live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl
   - **A namespace sits ahead of the name, outside the class, and routes rather than describes.**
     Both systems run on it. A prompt-template slot spelled `@!dyn.<name>!@` is filled from the
     caller's per-call data and one spelled `@!<name>!@` from the composer's own sources, each from
-    nowhere else (`kb_tools/ARCHITECTURE.md`, the `prompt_templates.py` row). A generator marker
-    spelled `@!<name>!@` is a chunk, `@!arg.<name>!@` the value its call site bound,
-    `@!dyn.<name>!@` an invocation parameter, `@!fam.<key>!@` the family overlay, `@!hrn.<key>!@`
-    the harness file — each from nowhere else (`ARCHITECTURE.md`, Template System). The `.` is what
+    nowhere else (`kb_tools/ARCHITECTURE.md`, the `prompt_templates.py` row). The generator's
+    render-time holes are a closed flat key set, `@!hrn-<key>!@`, `@!fam-<key>!@` and
+    `@!agf-<key>!@`, spelled by `adjagent/vocabulary.py`'s `hole`. The `.` is what
     keeps them apart — never admit it to the identifier class, and a namespace can never be mistaken
     for a name nor a name claim a namespace. Two consequences the generator's own history earned: a
     namespace earns its place by deciding where a value comes from, and one that only labels what a
@@ -46,17 +45,17 @@ live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl
 - **Never comment in a rendered body.** A template or chunk body becomes an agent's system prompt;
   maintainer commentary there ships into every dispatch and is read by every seat.
 - **An untracked file under `.claude/`, `.opencode/` or `rendered/` is render or install output.**
-  Its source is a template under `templates/` or a module at the repository root (`liaison_tools/`,
-  `kb_tools/`), and the next install overwrites the copy. Before an edit brief names a path,
+  Its source is a definition module under `adjagent/definitions/` or a module at the repository root
+  (`liaison_tools/`, `kb_tools/`), and the next install overwrites the copy. Before an edit brief names a path,
   `git ls-files <path>` settles which it is, and the brief names the source. Running definitions
   point at the copy, which is how a brief comes to name it.
 - **A dispatch names its seats before the tool call.** The acting message states the agent count
   and model. More than one seat at the family's highest tier waits for a go that names the count: a
   fan-out's cost shows only as the plan's usage moving, and by then it is spent.
 - **The harness agents file changes by explicit act, in either direction.** Publish by hand: edit
-  `templates/harness/AGENTS.tmpl.md`, then commit. Adopt with
+  `adjagent/definitions/harness_agents_file.py`, then commit. Adopt with
   `just install-agents-file <dir> [harness]`, which replaces only the block between the `adjagent`
-  marker lines and refuses while `templates/` is dirty. Your own rules go outside the markers,
+  marker lines and refuses while `adjagent/` has uncommitted changes. Your own rules go outside the markers,
   because inside is replaced on every install. Machine-local sections (an auth sandbox,
   host-specific paths) live outside the block in the live file and are never published.
 - **Obviated code is deleted, not parked.** When a change makes code unnecessary, it goes in the
@@ -82,22 +81,8 @@ live in operator config (the harness agents file, `templates/harness/AGENTS.tmpl
   list items break at 100, list continuations indented under their bullet. Headings, table rows and
   URLs that cannot break stay whole.
 
-## Adding Templates and Promoting Definitions
+## Adding Definitions
 
-Mechanism — markers, variants, overlay anchors, the write-safety table — lives in the `gen_defs`
-module docstrings: `markers.py`, `chunks.py`, `model_tuning.py`, `generation.py`. This section is
-procedure only.
-
-- **Adding a new template** Create `templates/agents/<path>/<name>.tmpl.md` (or the same under
-  `templates/commands/`). Placement is the whole declaration: a template's path within its surface
-  tree is its output's path within `agents/` or `commands/`, nesting included, and a template's
-  existence is its enrollment — there is no list to join. The body is the definition as it should
-  render — frontmatter (an agents template must open with one), then content, with shared spans as
-  chunk markers — optionally preceded by a `+++ ... +++` TOML fence declaring multiple outputs, the
-  parameters that differ between them, and maintainer comments. The render creates the output and
-  stamps its banner. An agents template's body must hold SPEC.md's Guest-Extraction Contract when it
-  renders a dispatchable definition — a template directly under `templates/agents/`. Nested deeper,
-  the obligation reaches only `mad/participant-contract.tmpl.md`, which exists to be extracted; a
-  `mad/design-topics/` methodology topic is outside it. An agents template authors `tools:` as a
-  comma-separated list of the names `[harness.tools]` defines (`read`, `grep`, `webfetch`, ...), not
-  in any harness's spelling; the render refuses any other name.
+- **Adding a definition** Create a module under `adjagent/definitions/` holding nothing but imports,
+  string constants and `DEFINITIONS`; its existence is its enrollment, and its `kind` and `folder`
+  decide its output path. Mechanism lives in the `adjagent` package and module docstrings.

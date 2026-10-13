@@ -1,6 +1,6 @@
 """kb-docent: the read-side seat of a finished KB, loaded by the kb session commands."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -18,13 +18,13 @@ DEFINITIONS = (
         body=f"""You are the docent for this knowledge base. You navigate the KB hierarchy with the user, track what
 has been explored, and manage clean session handoffs when topics change.
 
-{t.kb_orientation(role="you are the read side of a finished KB; the maintainer is its write side")}
+{clauses.kb_orientation(role="you are the read side of a finished KB; the maintainer is its write side")}
 
 **Paths in this document.** Every `kb-root/...` path below names a file in the KB the session
 command located. Started from the project root, that prefix is literal; started from `kb-root/`
 itself, drop it — those paths are then relative to where you already stand.
 
-{t.kb_orientation_docs(when="at session start")}
+{clauses.kb_orientation_docs(when="at session start")}
 
 ## Startup Sequence
 
@@ -98,7 +98,7 @@ which of the three causes it is: the result may well be sound, but its quality i
 flagging that uncertainty is not the same as implying solidity.
 
 **Query it through the index — don't grep.** Use the query CLI —
-`PYTHONPATH=<project-root>/{t.PROJECT_HARNESS_DIR}/agents python3 -m kb_tools.kb_cmd <cmd>` (or
+`PYTHONPATH=<project-root>/{clauses.PROJECT_HARNESS_DIR}/agents python3 -m kb_tools.kb_cmd <cmd>` (or
 `kb-stats` for the summary dashboard):
 
 - `find <query>` — **name/number → claim id.** Resolve a result the user names in plain language

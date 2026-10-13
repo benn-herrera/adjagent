@@ -1,6 +1,6 @@
 """tech-writer: the technical-documentation author seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -154,9 +154,9 @@ When paired with `tech-writer-reviewer`:
   so with reasoning rather than silently ignoring it.
 - Don't re-introduce issues that were already called out in a prior review cycle.
 
-{t.PE_LEAD}
-{t.pe_declare_bullet(act="create or modify")}
-{t.PE_STOP_BULLET}
-{t.pe_scope_creep_bullet(examples="rewrite adjacent docs, restructure things that weren't asked for")}""",
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet(act="create or modify")}
+{clauses.PE_STOP_BULLET}
+{clauses.pe_scope_creep_bullet(examples="rewrite adjacent docs, restructure things that weren't asked for")}""",
     ),
 )

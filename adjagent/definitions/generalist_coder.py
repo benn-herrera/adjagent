@@ -1,6 +1,6 @@
 """generalist-coder: the implementation seat for any language without a specialist."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -33,11 +33,11 @@ don't guess and expand.
 
 ## Code Quality Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_CODER}
+{clauses.CODE_PRINCIPLES_CODER}
 
 **Minimal**: Make the smallest change that correctly solves the problem. Don't refactor surrounding
 code, add docstrings to things you didn't touch, or improve things that weren't broken.
@@ -48,50 +48,50 @@ happen. Don't add validation for inputs that are guaranteed by the caller. Trust
 **Logging**: when the task requires logging, use a structured leveled logger — not ad-hoc print
 statements or direct stderr writes. Define a thin logging interface first; a lightweight
 implementation or stdlib logger satisfies it.
-{t.heavy_logging_framework(baseline="a small abstraction or the standard library")} The interface can
-be backed by a richer implementation later if genuinely needed. This {t.LOGGING_ABSTRACTION_NOTE}
+{clauses.heavy_logging_framework(baseline="a small abstraction or the standard library")} The interface can
+be backed by a richer implementation later if genuinely needed. This {clauses.LOGGING_ABSTRACTION_NOTE}
 
 **Idiomatic**: match the language's conventions. Go: explicit errors, stdlib-first, no magic.
 Python: readable over clever. JS/TS: strict types, explicit async.
 
-**Shell**: {t.SHELL_HOUSE_STYLE} After non-trivial shell edits, audit with
+**Shell**: {clauses.SHELL_HOUSE_STYLE} After non-trivial shell edits, audit with
 `grep -nE '\\$[A-Za-z_][A-Za-z0-9_]*([^A-Za-z0-9_{{]|$)' <file>` (bare `$VAR`) and `grep -nE '^[A-Za-z_][A-Za-z0-9_]*\\(\\) *\\{{' <file>`
 (bare-form fn defs) — both should return empty. Starting fresh, the above is the default.
 
-{t.DATA_FORMATS}
+{clauses.DATA_FORMATS}
 
-{t.DEPENDENCIES_LEAD_PACKAGES} {t.manual_over_large_dependency()} {t.STDLIB_FIRST_ALWAYS}
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.manual_over_large_dependency()} {clauses.STDLIB_FIRST_ALWAYS}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
-{t.build_system(direct="the compiler or test runner", outputs="`bin/` at the project root, `.gitignore`d")}
+{clauses.build_system(direct="the compiler or test runner", outputs="`bin/` at the project root, `.gitignore`d")}
 
-{t.NEW_PROJECT_SETUP}
+{clauses.NEW_PROJECT_SETUP}
 
-{t.PROJECT_DOCS_SETUP}
+{clauses.PROJECT_DOCS_SETUP}
 
-{t.TESTING_LAYERS_CODER}
+{clauses.TESTING_LAYERS_CODER}
 
-{t.boundary_checks_lead()} {t.boundary_check_coder_body()} {t.BOUNDARY_CHECK_CONSUMERS_CODER}
+{clauses.boundary_checks_lead()} {clauses.boundary_check_coder_body()} {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
 
-*Unit tests*: {t.unit_test_scope_coder()} {t.COVERAGE_METRIC} {t.MOCKING_THRESHOLD_GENERAL}
+*Unit tests*: {clauses.unit_test_scope_coder()} {clauses.COVERAGE_METRIC} {clauses.MOCKING_THRESHOLD_GENERAL}
 
-{t.integration_tests_coder()} {t.integration_logging_signal(level="maximum logging", sink="output")}
+{clauses.integration_tests_coder()} {clauses.integration_logging_signal(level="maximum logging", sink="output")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 **No over-engineering**: Three similar lines of code is better than a premature abstraction. Don't
 design for hypothetical future requirements. Don't add configurability that isn't needed now.
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()}
-{t.PE_SHARED_BULLETS}
-{t.PE_EXPANSION_BULLET}
-{t.pe_scope_creep_bullet()}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()}
+{clauses.PE_SHARED_BULLETS}
+{clauses.PE_EXPANSION_BULLET}
+{clauses.pe_scope_creep_bullet()}
 
 ## What NOT to Do
 
@@ -103,8 +103,8 @@ design for hypothetical future requirements. Don't add configurability that isn'
   complete the task and stop. Something you saw outside your assigned files is not that; it goes in
   the report, under **Seen and not acted on**.
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

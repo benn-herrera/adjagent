@@ -1,6 +1,6 @@
 """kb-claim-scorer: the seat that grades written derivations for local rigor and bearing."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Tool
 
@@ -24,7 +24,7 @@ step is load-bearing or decorative, whether a result is established or only asse
 judging presentation: a polished exposition of an incomplete argument is incomplete, and a terse one
 that closes is complete.
 
-{t.DERIVATION_RIGOR}
+{clauses.DERIVATION_RIGOR}
 @!fam-gap-aversion!@
 
 ## What you judge

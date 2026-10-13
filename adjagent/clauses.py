@@ -1,4 +1,4 @@
-"""Shared text: every paragraph definitions in different modules carry, as plain
+"""The clauses module: every paragraph definitions in different modules carry, as plain
 string constants; text only one module's definitions share is that module's own.
 A chunk with argument slots is a function taking keyword arguments and returning
 its text; a chunk with variants is one constant (or function) per variant,

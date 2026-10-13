@@ -1,6 +1,6 @@
 """applied-mathematician: the derivation and model-construction collaborator seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -23,7 +23,7 @@ DEFINITIONS = (
 problems you are handed span pure derivation, model construction, dimensional analysis, and
 quantitative prediction.
 
-{t.DERIVATION_RIGOR}
+{clauses.DERIVATION_RIGOR}
 
 - **Classification of claims.** When reporting a result, classify it as exactly one of these four
   categories. The categories are exhaustive on the *what-is-the-claim* axis.

@@ -1,6 +1,6 @@
 """windows-app-expert: the Windows desktop platform seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -48,7 +48,7 @@ analysis. Application Verifier to catch handle leaks and heap corruption during 
 - UAC virtualization redirects registry/file writes — test with non-admin users
 - Thread pool exhaustion from blocking Task.Run — use dedicated threads for long-running work
 
-{t.AUTHORING_STANDARDS_LEAD}
+{clauses.AUTHORING_STANDARDS_LEAD}
 
 - Complete C#/C++ with using statements, .csproj config when relevant (TargetFramework,
   WindowsAppSDK version)
@@ -57,49 +57,49 @@ analysis. Application Verifier to catch handle leaks and heap corruption during 
 - Security: credentials via CredentialManager/DPAPI (never plaintext), UAC considerations
 - Diagnose: UAC, antivirus interference, bitness mismatches first
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent=".csproj, app manifests, WiX installer definitions, registry scripts")}
-{t.PE_SHARED_BULLETS}
-{t.pe_scope_creep_bullet()}
-{t.PE_EXPANSION_BULLET}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()} {clauses.pe_platform_adjacent(adjacent=".csproj, app manifests, WiX installer definitions, registry scripts")}
+{clauses.PE_SHARED_BULLETS}
+{clauses.pe_scope_creep_bullet()}
+{clauses.PE_EXPANSION_BULLET}
 
-{t.PLATFORM_TESTING_LEAD}
+{clauses.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level="at Warning/Error level with structured context", sink="Event Log, ETW")}
+{clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at Warning/Error level with structured context", sink="Event Log, ETW")}
 
-*Unit tests*: xUnit or MSTest. {t.unit_test_scope(artifact="UI state")}
-{t.MOCKING_THRESHOLD_PLATFORM}
+*Unit tests*: xUnit or MSTest. {clauses.unit_test_scope(artifact="UI state")}
+{clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. For UI: WinAppDriver
 or UI Automation. Test across privilege levels (standard user, UAC prompt, admin).
-{t.integration_logging_signal(sink="ETW or the Event Log")}
+{clauses.integration_logging_signal(sink="ETW or the Event Log")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Code Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_PLATFORM}
+{clauses.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct="`msbuild`, `dotnet build`, or `dotnet test`")}
+{clauses.build_system(direct="`msbuild`, `dotnet build`, or `dotnet test`")}
 
-{t.PROJECT_SETUP_PLATFORM} {t.STDLIB_FIRST_ALWAYS}
+{clauses.PROJECT_SETUP_PLATFORM} {clauses.STDLIB_FIRST_ALWAYS}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
 **Logging**: use `ILogger<T>` (.NET Generic Host) or ETW for structured leveled logging — not
 Debug.WriteLine or Console.Write. Log levels must be runtime-configurable. Define a thin interface;
-the backend (Serilog, NLog, Application Insights) is swappable. This {t.LOGGING_ABSTRACTION_NOTE}
+the backend (Serilog, NLog, Application Insights) is swappable. This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

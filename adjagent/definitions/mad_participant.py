@@ -4,7 +4,7 @@ They are separate definitions because the referee dispatches by `subagent_type`,
 its own file presenting the identical contract.
 """
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -21,7 +21,7 @@ DEFINITIONS = (
         tools=ALL,
         tier="highest",
         color="#7C3AED",
-        body=t.MAD_PARTICIPANT_CONTRACT,
+        body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
     Definition(
         name="mad-participant-opus",
@@ -29,7 +29,7 @@ DEFINITIONS = (
         tools=ALL,
         tier="high",
         color="#6D28D9",
-        body=t.MAD_PARTICIPANT_CONTRACT,
+        body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
     Definition(
         name="mad-participant-sonnet",
@@ -37,7 +37,7 @@ DEFINITIONS = (
         tools=ALL,
         tier="medium",
         color="#5B21B6",
-        body=t.MAD_PARTICIPANT_CONTRACT,
+        body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
     Definition(
         name="mad-participant-haiku",
@@ -45,6 +45,6 @@ DEFINITIONS = (
         tools=ALL,
         tier="low",
         color="#4C1D95",
-        body=t.MAD_PARTICIPANT_CONTRACT,
+        body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
 )

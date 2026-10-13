@@ -4,7 +4,7 @@ A paragraph the topics carry alike is a constant here, or a slot constant filled
 it.
 """
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Kind
 
@@ -205,7 +205,7 @@ not yet known and may require empirical validation to resolve.
 
 ## Constructive Technique, Adversarially Defended
 
-{t.ml_technique_deliverable(unit="proposal")}
+{clauses.ml_technique_deliverable(unit="proposal")}
 
 {_MARK_CONDITIONAL.format(
     unit="step",
@@ -215,7 +215,7 @@ not yet known and may require empirical validation to resolve.
 
 ### Attack Surface
 
-{t.ml_technique_attacks(lead="Identify")} Defend your own proposal by sharpening the mechanism, grounding the
+{clauses.ml_technique_attacks(lead="Identify")} Defend your own proposal by sharpening the mechanism, grounding the
 justification more concretely, tightening the prediction, or proposing a more discriminating measurement.
 
 ## Convergence Criteria

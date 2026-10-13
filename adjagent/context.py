@@ -15,6 +15,8 @@ MAP_ALL = "all"
 INHERIT_MODEL = "inherit"
 TIER_MAP_FLAG = "--model-tier-map"
 ALIAS_MAP_FLAG = "--model-pin-tier-alias-map"
+DEFAULT_HARNESS = "claude"
+DEFAULT_FAMILY = "claude"
 
 
 def parse_tier_map(spec: str, *, flag: str) -> dict[Tier, str]:
@@ -67,6 +69,7 @@ class Render:
     tier_map: TierMap  # effective tier -> member; total
     alias_map: TierMap | None = None  # tier -> alias; total when set
     seat: Tier | None = None  # the rendered definition's tier; render_definition binds it
+    scope: str = ""  # the agents file's scope name; render_agents_file binds it
 
     def __post_init__(self) -> None:
         """Refuse a non-total map, or a family member override no tier reaches (family tiers ∪ tier_map)."""
@@ -105,20 +108,26 @@ class Render:
         return tuple(tier for tier in TIERS if self.tier_map[tier] not in tuned)
 
 
+def harness_named(name: str) -> Harness:
+    """The harness `name` loads as; an unknown name is refused, listing the names there are."""
+    harnesses = load("adjagent.harnesses", "HARNESS")
+    if name not in harnesses:
+        raise InputError(f"unknown harness '{name}' — harnesses are {', '.join(harnesses)}")
+    return harnesses[name]
+
+
 def build_render(*, harness: str, family: str, tier_spec: str | None, alias_spec: str | None) -> Render:
     """The CLI's Render. Unknown harness/family names are refused, listing the names there are (a
     path-shaped --family included). Then every tier's model text is checked against
     harness.model_pattern, refusing with tier, value, supplier and model_shape."""
-    harnesses = load("adjagent.harnesses", "HARNESS")
-    if harness not in harnesses:
-        raise InputError(f"unknown harness '{harness}' — harnesses are {', '.join(harnesses)}")
+    loaded_harness = harness_named(harness)
     families = load("adjagent.families", "FAMILY")
     if family not in families:
         raise InputError(f"--family '{family}' names no family — families are {', '.join(families)}")
     loaded = families[family]
     tier_map = dict(loaded.tiers) if tier_spec is None else parse_tier_map(tier_spec, flag=TIER_MAP_FLAG)
     alias_map = None if alias_spec is None else parse_tier_map(alias_spec, flag=ALIAS_MAP_FLAG)
-    render = Render(harness=harnesses[harness], family=loaded, tier_map=tier_map, alias_map=alias_map)
+    render = Render(harness=loaded_harness, family=loaded, tier_map=tier_map, alias_map=alias_map)
     if alias_map is not None:
         supplier = ALIAS_MAP_FLAG
     elif tier_spec is not None:

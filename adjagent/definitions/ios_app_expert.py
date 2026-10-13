@@ -1,6 +1,6 @@
 """ios-app-expert: the iOS platform seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -62,7 +62,7 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 - Never force-unwrap in production unless invariant is provably maintained
 - Info.plist keys required for sensors/camera/mic—crashes without them
 
-{t.AUTHORING_STANDARDS_LEAD}
+{clauses.AUTHORING_STANDARDS_LEAD}
 
 - Complete, compilable code with imports (unless snippet requested)
 - Explain "why" behind decisions, especially gotchas and alternatives
@@ -71,47 +71,47 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 - For C integration: provide complete module map and Package.swift
 - Verify thread safety (queue/actor), memory management (weak/unowned), Sendable conformance
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent=t.APPLE_PROJECT_FILES)}
-{t.PE_SHARED_BULLETS}
-{t.pe_scope_creep_bullet()}
-{t.PE_EXPANSION_BULLET}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()} {clauses.pe_platform_adjacent(adjacent=clauses.APPLE_PROJECT_FILES)}
+{clauses.PE_SHARED_BULLETS}
+{clauses.pe_scope_creep_bullet()}
+{clauses.PE_EXPANSION_BULLET}
 
-{t.PLATFORM_TESTING_LEAD}
+{clauses.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level=t.APPLE_VIOLATION_LEVEL, sink="Console.app")}
+{clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level=clauses.APPLE_VIOLATION_LEVEL, sink="Console.app")}
 
 *Unit tests*: XCTest with `async`/`await` and `runTest`/`TestClock` for concurrency.
-{t.unit_test_scope(artifact="UI appearance")} {t.MOCKING_THRESHOLD_PLATFORM}
+{clauses.unit_test_scope(artifact="UI appearance")} {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. Always test under
 memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lifecycle transitions
-(background/foreground, low-memory warnings). {t.integration_logging_signal(sink="Console.app")}
+(background/foreground, low-memory warnings). {clauses.integration_logging_signal(sink="Console.app")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Code Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_PLATFORM}
+{clauses.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct=t.APPLE_BUILD_TOOLS)}
+{clauses.build_system(direct=clauses.APPLE_BUILD_TOOLS)}
 
-{t.PROJECT_SETUP_PLATFORM} {t.STDLIB_FIRST_ALWAYS}
+{clauses.PROJECT_SETUP_PLATFORM} {clauses.STDLIB_FIRST_ALWAYS}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
-{t.OSLOG_LOGGING_LEAD} {t.logging_backend_seam(backend="OSLog")} This {t.LOGGING_ABSTRACTION_NOTE}
+{clauses.OSLOG_LOGGING_LEAD} {clauses.logging_backend_seam(backend="OSLog")} This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

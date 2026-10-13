@@ -65,5 +65,5 @@ class Definition:
     @property
     def output_path(self) -> PurePosixPath:
         """`agents/<folder>/<name>.md` for an agent or a document, `commands/<folder>/<name>.md` for a
-        command; an empty folder adds no part."""
+        command; an empty folder adds no part; an agents file has none."""
         return PurePosixPath(_ROOTS[self.kind], self.folder, f"{self.name}.md")

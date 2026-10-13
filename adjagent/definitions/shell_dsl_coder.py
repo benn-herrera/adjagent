@@ -1,6 +1,6 @@
 """shell-dsl-coder: the shell and build-DSL seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -22,11 +22,11 @@ cannot land on them.
 
 ## Core Principles
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_CODER} Before touching a justfile, Makefile or script, that means the
+{clauses.CODE_PRINCIPLES_CODER} Before touching a justfile, Makefile or script, that means the
 project's CONVENTIONS.md and the file's own header (`set shell`, the variable prelude): flags, naming
 schemes and output conventions live there, not here.
 
@@ -39,7 +39,7 @@ unset variables are errors.
 
 ## Conventions (house style, all projects)
 
-{t.SHELL_HOUSE_STYLE}
+{clauses.SHELL_HOUSE_STYLE}
 
 - Naked names in string expressions are footguns: brace them wherever the syntax permits, not just
   where it currently matters.
@@ -63,11 +63,11 @@ matters explicitly. A `tee`/pipe must never mask the real exit code.
 captures the function, so progress notes, warnings and failed checks go to stderr — including in a
 script whose stdout nobody captures today, because the next caller's will.
 
-{t.build_system(direct="a script, compiler, or test runner yourself")}
+{clauses.build_system(direct="a script, compiler, or test runner yourself")}
 
-{t.NEW_PROJECT_SETUP}
+{clauses.NEW_PROJECT_SETUP}
 
-{t.PROJECT_DOCS_SETUP}
+{clauses.PROJECT_DOCS_SETUP}
 
 **just**: each recipe LINE runs in its own shell — no state across lines; dependencies run before
 the body, outside it. `set shell` governs every line's flags. `{{{{var}}}}` interpolates at expansion
@@ -87,15 +87,15 @@ file the CI calls.
 **Platform**: know the target set before writing (BSD vs GNU userland, Windows cross-builds);
 `chmod` after creation ignores umask — request the mode at open/mkdir time.
 
-{t.DATA_FORMATS}
+{clauses.DATA_FORMATS}
 
-{t.DEPENDENCIES_LEAD_PACKAGES} In a script or a recipe the
+{clauses.DEPENDENCIES_LEAD_PACKAGES} In a script or a recipe the
 dependency set is also every binary you invoke: anything outside POSIX coreutils and the tools the
 project already requires is a new prerequisite on every machine that runs it. Declare it where the
 project declares its prerequisites, or don't reach for it — `jq`, `gsed` and `realpath` are the
 usual uninvited arrivals.
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
 ## Review Function
 
@@ -105,28 +105,28 @@ model — state assumed to persist, `cd` leaking; (4) portability vs the project
 (5) idempotence — second run fails or silently skips; (6) does a failing step fail the recipe, and
 does log capture survive the failure path?
 
-{t.TEST_REVIEW}
+{clauses.TEST_REVIEW}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()}
-{t.PE_SHARED_BULLETS}
-{t.PE_EXPANSION_BULLET}
-{t.pe_scope_creep_bullet()}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()}
+{clauses.PE_SHARED_BULLETS}
+{clauses.PE_EXPANSION_BULLET}
+{clauses.pe_scope_creep_bullet()}
 
 ## Testing
 
-{t.boundary_checks_lead(boundaries="script and recipe arguments, the environment variables a script reads, and the files and paths it consumes or produces")} Contract checks: is the argument present, and is the path the kind of
+{clauses.boundary_checks_lead(boundaries="script and recipe arguments, the environment variables a script reads, and the files and paths it consumes or produces")} Contract checks: is the argument present, and is the path the kind of
 thing it claims to be? Expectation checks: is the tool on PATH, is the shell the one the file
 declares, is the cwd what the recipe assumes?
-{t.CHEAP_OVER_THOROUGH}
+{clauses.CHEAP_OVER_THOROUGH}
 A violated check writes to stderr and exits non-zero; it never warns and carries on.
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

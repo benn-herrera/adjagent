@@ -27,6 +27,19 @@ class BodyTest(unittest.TestCase):
     def test_new_banner_replaced(self):
         self.assertEqual(body(NEW_BANNER), BANNERED_BODY)
 
+    def test_installed_banners_replaced(self):
+        old = b"#\n# !INSTALLED! from the adjagent repo\n# !BODY-SHA256! abc\n#\n"
+        new = b"# !INSTALLED! from kb_tools/x.py \xe2\x80\x94 do not edit here\n"
+        for shebang in (b"", b"#!/usr/bin/env python3\n"):
+            for banner in (old, new):
+                with self.subTest(shebang=shebang, banner=banner):
+                    self.assertEqual(body(shebang + banner + b"x = 1\n"), shebang + b"# !BANNER!\nx = 1\n")
+
+    def test_a_comment_that_is_not_a_banner_is_unchanged(self):
+        for data in (b"# a comment\nx = 1\n", b"#!/bin/sh\n# !INSTALLED\nx\n", b"#\n# !INSTALLED! from y\n#\n"):
+            with self.subTest(data=data):
+                self.assertEqual(body(data), data)
+
     def test_unbannered_files_unchanged(self):
         short_block = b"---\n#\n# !GENERATED! from x\nname: a\n"
         wrong_prefix = b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# other\n#\nname: a\n"

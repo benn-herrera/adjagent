@@ -1,6 +1,6 @@
 """linux-app-expert: the Linux desktop platform seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -57,7 +57,7 @@ library flags — not hardcoded paths.
 - systemd: proper journal log levels
 - Absolute paths break across distros — use XDG directories, check /etc/os-release
 
-{t.AUTHORING_STANDARDS_LEAD}
+{clauses.AUTHORING_STANDARDS_LEAD}
 
 - Complete code with includes, link flags (-lgtk-4, -lQt6Core), pkg-config usage
 - Show build files (CMakeLists.txt, meson.build) when adding dependencies
@@ -68,50 +68,50 @@ library flags — not hardcoded paths.
   protocol support
 - Security: avoid setuid (use polkit/D-Bus), credentials via libsecret, validate input
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()} {t.pe_platform_adjacent(adjacent=".desktop files, systemd units, CMakeLists.txt, meson.build, packaging manifests")}
-{t.PE_SHARED_BULLETS}
-{t.pe_scope_creep_bullet()}
-{t.PE_EXPANSION_BULLET}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()} {clauses.pe_platform_adjacent(adjacent=".desktop files, systemd units, CMakeLists.txt, meson.build, packaging manifests")}
+{clauses.PE_SHARED_BULLETS}
+{clauses.pe_scope_creep_bullet()}
+{clauses.PE_EXPANSION_BULLET}
 
-{t.PLATFORM_TESTING_LEAD}
+{clauses.PLATFORM_TESTING_LEAD}
 
-{t.boundary_checks_lead()} {t.platform_boundary_routing(level="at WARNING/CRITICAL level", sink="journald")}
+{clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at WARNING/CRITICAL level", sink="journald")}
 
 *Unit tests*: GTest or GLib Testing Framework (GTK); Qt Test (Qt).
-{t.unit_test_scope(artifact="widget state")} {t.MOCKING_THRESHOLD_PLATFORM}
+{clauses.unit_test_scope(artifact="widget state")} {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. Test on both X11 and
 Wayland where relevant. Test with AppArmor/SELinux confined execution.
-{t.integration_logging_signal(sink="the journal")}
+{clauses.integration_logging_signal(sink="the journal")}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
 ## Code Standards
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_PLATFORM}
+{clauses.CODE_PRINCIPLES_PLATFORM}
 
-{t.build_system(direct="`cmake`, `meson`, `ninja`, or test runners")}
+{clauses.build_system(direct="`cmake`, `meson`, `ninja`, or test runners")}
 
-{t.PROJECT_SETUP_PLATFORM} Prefer packages available in major distro repos. {t.STDLIB_FIRST_ALWAYS}
+{clauses.PROJECT_SETUP_PLATFORM} Prefer packages available in major distro repos. {clauses.STDLIB_FIRST_ALWAYS}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
 **Logging**: use GLib structured logging (`g_log_structured`) for GTK apps, or `sd_journal_print`
 for systemd-integrated services — not printf, g_print, or raw writes to stderr. Log levels must be
 runtime-configurable (G_MESSAGES_DEBUG, journald verbosity).
-{t.logging_backend_seam(backend="the logging backend")} This {t.LOGGING_ABSTRACTION_NOTE}
+{clauses.logging_backend_seam(backend="the logging backend")} This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )

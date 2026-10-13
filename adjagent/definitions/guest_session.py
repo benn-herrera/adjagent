@@ -2,7 +2,7 @@
 guest liaison, and relay its return to the user untouched.
 """
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Kind
 
@@ -22,7 +22,7 @@ DEFINITIONS = (
     Definition(
         name="guest-start",
         kind=Kind.COMMAND,
-        body=rf"""{_LOAD_LIAISON.format(harness_dir=t.PROJECT_HARNESS_DIR)}
+        body=rf"""{_LOAD_LIAISON.format(harness_dir=clauses.PROJECT_HARNESS_DIR)}
 
 You are starting a new guest-model session via the `guest-liaison` subagent.
 
@@ -63,8 +63,8 @@ Parse `$ARGUMENTS` as follows:
      Offer the project root as the default, or a narrower corpus directory if the user names one.
 
 4. **New session only** — collect the system-prompt source:
-   - **Agent identity**: a path under `{t.PROJECT_HARNESS_DIR}/agents/` (e.g.
-     `{t.PROJECT_HARNESS_DIR}/agents/applied-mathematician.md`). The liaison will extract the
+   - **Agent identity**: a path under `{clauses.PROJECT_HARNESS_DIR}/agents/` (e.g.
+     `{clauses.PROJECT_HARNESS_DIR}/agents/applied-mathematician.md`). The liaison will extract the
      definition's body, frontmatter stripped.
    - **Default**: if the user declines to pick an agent, the liaison will use the literal string
      `You are a helpful assistant.`
@@ -109,7 +109,7 @@ Parse `$ARGUMENTS` as follows:
     Definition(
         name="guest",
         kind=Kind.COMMAND,
-        body=f"""{_LOAD_LIAISON.format(harness_dir=t.PROJECT_HARNESS_DIR)}
+        body=f"""{_LOAD_LIAISON.format(harness_dir=clauses.PROJECT_HARNESS_DIR)}
 
 You are continuing the active guest-model session via the `guest-liaison` subagent.
 

@@ -50,11 +50,13 @@ class Anchor(Enum):
 class Kind(Enum):
     """What a definition renders as. An agent is dispatchable and carries the harness's agent
     frontmatter; a document is read by agents and carries the harness's document frontmatter; a
-    command carries no field lines."""
+    command carries no field lines; an agents file renders to a block that an installer wraps the
+    operator's text around; it has no output path and no frontmatter."""
 
     AGENT = "agent"
     DOCUMENT = "document"
     COMMAND = "command"
+    AGENTS_FILE = "agents file"
 
 
 class HarnessText(Enum):
@@ -66,8 +68,21 @@ class HarnessText(Enum):
     USER_HARNESS_DIR = "user_harness_dir"
 
 
-def hole(name: HarnessText | Anchor) -> str:
+class AgentsFileText(Enum):
+    """A value only the agents file's prose names, bound when it renders."""
+
+    SCOPE_NAME = "scope_name"
+    DISPATCH_MODEL = "dispatch_model"
+
+
+def key(name: HarnessText | Anchor | AgentsFileText) -> str:
+    """A render-time value's flat key: its enum value with each "_" read as "-"."""
+    return "-".join(name.value.split("_"))
+
+
+def hole(name: HarnessText | Anchor | AgentsFileText) -> str:
     """The placeholder a definition body carries for a render-time value: `@!hrn-<key>!@` for a harness
-    text, `@!fam-<key>!@` for an overlay anchor, key in kebab. No rendered prose spells `@!`."""
-    namespace = "hrn" if isinstance(name, HarnessText) else "fam"
-    return f"@!{namespace}-{'-'.join(name.value.split('_'))}!@"
+    text, `@!fam-<key>!@` for an overlay anchor, `@!agf-<key>!@` for an agents-file value. No rendered
+    prose spells `@!`."""
+    namespace = {HarnessText: "hrn", Anchor: "fam", AgentsFileText: "agf"}[type(name)]
+    return f"@!{namespace}-{key(name)}!@"

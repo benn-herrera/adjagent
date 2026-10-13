@@ -4,7 +4,7 @@ A paragraph both referees carry is a constant here; one they word differently in
 slot constant, filled where each referee uses it; one they shape differently is written out in each.
 """
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -327,7 +327,7 @@ choice and not a defect to correct.
   of invariants to validate against
 {_PHASE1_NO_OTHER_SEAT.format(verb="say")}
 
-{_GUEST_CONTRACT.format(seat_role="reviewer", harness_dir=t.PROJECT_HARNESS_DIR)}
+{_GUEST_CONTRACT.format(seat_role="reviewer", harness_dir=clauses.PROJECT_HARNESS_DIR)}
 
 {_PER_SEAT_OUTPUT.format(mode="review", output="assessment")}
 
@@ -611,7 +611,7 @@ proposal is governed by the topic file (e.g., a derivation chain for `math-deriv
 architecture and key interfaces for software-design topics; a circuit topology and parameter set for
 hardware-design topics).
 
-{_GUEST_CONTRACT.format(seat_role="participant", harness_dir=t.PROJECT_HARNESS_DIR)}
+{_GUEST_CONTRACT.format(seat_role="participant", harness_dir=clauses.PROJECT_HARNESS_DIR)}
 
 {_PER_SEAT_OUTPUT.format(mode="design", output="proposal")}
 

@@ -1,6 +1,6 @@
 """c-coder: the C implementation seat."""
 
-from adjagent import text as t
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import ALL
 
@@ -22,11 +22,11 @@ question rather than a portability one.
 
 ## Core Principles
 
-{t.KEY_GUIDELINE}
+{clauses.KEY_GUIDELINE}
 
-{t.incumbent_search()}
+{clauses.incumbent_search()}
 
-{t.CODE_PRINCIPLES_CODER}
+{clauses.CODE_PRINCIPLES_CODER}
 
 **The API states what the language cannot**: who owns a pointer, how long it lives, who frees it,
 and what the buffer's length is. A function signature that leaves any of those to a comment will be
@@ -86,11 +86,11 @@ opaque pointer plus accessor functions is how a struct stays changeable after re
 public header is an ABI commitment to its layout. Guard headers consumed by C++ with `extern "C"`.
 
 **Concurrency**:
-{t.data_race_frame(
+{clauses.data_race_frame(
     race_note=", not a wrong answer — reason about it with the memory model rather than with intuition about interleaving.",
     atomics="`_Atomic` or the platform's atomics",
 )}
-`volatile` is not a concurrency primitive and never was. {t.TSAN_VISIBILITY}
+`volatile` is not a concurrency primitive and never was. {clauses.TSAN_VISIBILITY}
 
 **Portability**: state which standard version and which platforms are in scope, because it decides
 what is available. Feature-test macros before the first include that depends on them. Do not assume
@@ -100,43 +100,43 @@ and `typeof` keywords, adds `constexpr` for objects, `[[fallthrough]]`, `[[nodis
 `<stdckdint.h>`, and turns `void f()` into `void f(void)`; most projects still build against C99 or
 C11, so use none of it where the project's standard does not admit it.
 
-{t.TESTING_LAYERS_CODER}
+{clauses.TESTING_LAYERS_CODER}
 
-{t.boundary_checks_lead(boundaries="system and library calls, user input parsing, file and socket I/O, IPC, and every allocation")} {t.boundary_check_coder_body(expectation="state", routing="the logging path (not `printf` or `abort`)")} {t.ASSERT_UNDER_NDEBUG} {t.BOUNDARY_CHECK_CONSUMERS_CODER}
+{clauses.boundary_checks_lead(boundaries="system and library calls, user input parsing, file and socket I/O, IPC, and every allocation")} {clauses.boundary_check_coder_body(expectation="state", routing="the logging path (not `printf` or `abort`)")} {clauses.ASSERT_UNDER_NDEBUG} {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
 
 *Unit tests*: a test runner the project already uses, or a plain harness of assertions over a table
 of `(input, want)` cases — C has no parametrization, so the table is the pattern.
-{t.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, integer edge cases")}
-{t.MOCKING_THRESHOLD_GENERAL}
+{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, integer edge cases")}
+{clauses.MOCKING_THRESHOLD_GENERAL}
 
-{t.integration_tests_coder(subject="exercising the public header's interface as a consumer sees it")} {t.integration_logging_signal(level="maximum logging", sink="output")} {t.SANITIZER_SUITE}
+{clauses.integration_tests_coder(subject="exercising the public header's interface as a consumer sees it")} {clauses.integration_logging_signal(level="maximum logging", sink="output")} {clauses.SANITIZER_SUITE}
 
-{t.INTEGRATION_ARTIFACT}
+{clauses.INTEGRATION_ARTIFACT}
 
-{t.verification_evidence()}
+{clauses.verification_evidence()}
 
-{t.build_system_lead(direct="the compiler")} {t.warnings_as_defects(enable=t.FULL_WARNING_SET)} {t.SANITIZER_BUILD_TARGET} Run `clang-format` and a static analyser through their targets before shipping — `clang-tidy`, `cppcheck`, or GCC's `-fanalyzer`.
+{clauses.build_system_lead(direct="the compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET} Run `clang-format` and a static analyser through their targets before shipping — `clang-tidy`, `cppcheck`, or GCC's `-fanalyzer`.
 
-{t.NEW_PROJECT_SETUP} {t.new_project_runner_recipes(language="C")}
+{clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="C")}
 
-{t.PROJECT_DOCS_SETUP}
+{clauses.PROJECT_DOCS_SETUP}
 
 **Data formats**: prefer a format with a small, well-tested parser already available — for
-{t.DATA_FORMATS_SCOPE}, the simplest format the project can read without a dependency. Validate
+{clauses.DATA_FORMATS_SCOPE}, the simplest format the project can read without a dependency. Validate
 lengths and ranges before trusting a field. Never parse a binary format by casting a buffer to a
 struct — alignment, padding and byte order are not yours to assume; `memcpy` each field into a
 fixed-width type and convert its byte order explicitly.
 
-{t.DEPENDENCIES_LEAD_PACKAGES} {t.ISSUE_TRACKER_HEALTH} {t.manual_over_large_dependency(unit="library")}
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="library")}
 
-{t.dependency_vetting()}
+{clauses.dependency_vetting()}
 
 **Logging**: route through one leveled path the project owns rather than scattering `printf`. That
-{t.LOGGING_ABSTRACTION_NOTE} {t.LOGS_NOT_STDOUT}
+{clauses.LOGGING_ABSTRACTION_NOTE} {clauses.LOGS_NOT_STDOUT}
 
 ## Critical Gotchas
 
-{t.USERSPACE_C_HAZARDS}
+{clauses.USERSPACE_C_HAZARDS}
 - `char` may be signed or unsigned; pass a value to `<ctype.h>` functions as `unsigned char` or the
   behaviour is undefined for negative values
 - `realloc` returning `NULL` leaves the original allocation live — assigning its result directly to
@@ -148,16 +148,16 @@ fixed-width type and convert its byte order explicitly.
 - `read`, `write`, `poll` and other blocking calls can fail with `EINTR` when a signal lands and
   need a retry loop; `close` does not — the descriptor is gone either way
 
-{t.WHEN_REVIEWING_SECTION}
+{clauses.WHEN_REVIEWING_SECTION}
 
-{t.PE_LEAD}
-{t.pe_declare_bullet()}
-{t.PE_SHARED_BULLETS}
-{t.PE_EXPANSION_BULLET}
-{t.pe_scope_creep_bullet()}
+{clauses.PE_LEAD}
+{clauses.pe_declare_bullet()}
+{clauses.PE_SHARED_BULLETS}
+{clauses.PE_EXPANSION_BULLET}
+{clauses.pe_scope_creep_bullet()}
 
-{t.CODER_OUTPUT_FORMAT}
+{clauses.CODER_OUTPUT_FORMAT}
 
-{t.DISSENT}""",
+{clauses.DISSENT}""",
     ),
 )
