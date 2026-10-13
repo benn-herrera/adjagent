@@ -6,8 +6,8 @@ Unqualified, those names mean this directory's copies; the repository-root docum
 root.
 
 - **These files are edited in place.** `liaison_tools/` is a shipped package — never rendered, and
-  so never bannered here (root SPEC.md, Deployed Surfaces). There is no `templates/` counterpart to
-  go looking for, and no banner forbidding the edit.
+  so never bannered here (root SPEC.md, Deployed Surfaces). There is no `adjagent/definitions/`
+  counterpart to go looking for, and no banner forbidding the edit.
 - **A capability a caller needs and these tools lack is extended here.** `openai_chat` is the
   only transport — `post-openai.py` is its command — and `msg-util.py` the only messages-file
   mutator any caller uses (SPEC.md, Components). Add the capability to the tool; an inline `jq`,
@@ -33,10 +33,10 @@ root.
   closed allowlist, so until it names the new key `--env-file` refuses it — loudly and correctly,
   which is exactly why the second edit gets forgotten. Make both in one change.
 - **The exit codes have two consumers outside this package's tests.**
-  `templates/shared-chunks.toml`'s `[chunks.liaison-error-handling]`, which both liaison agent
-  definitions call, and `relay-driver.py`'s `POST_PROTOCOL_EXITS`/`is_transport_failure`. Adding,
-  removing, or renumbering a code without both falsifies the chunk's "re-ask on exit 3" instruction,
-  and nothing under `tests/` reaches the chunk.
+  `adjagent/clauses.py`'s `liaison_error_handling`, which both liaison agent definitions call, and
+  `relay-driver.py`'s `POST_PROTOCOL_EXITS`/`is_transport_failure`. Adding, removing, or
+  renumbering a code without both falsifies the clause's "re-ask on exit 3" instruction, and
+  nothing under `tests/` reaches the clause.
 - **In `msg-util.py`: no scratch path that bypasses `scratch_dir`, and no `unlink` of the lock
   file.** ARCHITECTURE.md, Messages-File Mutator Internals, gives the mechanism and the bug each one
   closes — a scratch file carries the whole transcript, and a removed lock file puts two mutators in

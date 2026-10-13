@@ -4,9 +4,16 @@ House rules and project-specific traps only. Doc-structure conventions and gener
 live in operator config (the harness agents file, `adjagent/definitions/harness_agents_file.py`),
 not here.
 
-- **Shared-text single-sourcing.** Text shared by two or more definitions is one constant: in
-  `adjagent/clauses.py`, or in the group module of a set that ships together. A definition never
-  pastes a paraphrase of shared text inline; `just test` fails on a paragraph two outputs write out.
+- **A definition module holds nothing but imports, string constants and `DEFINITIONS`.** It reads
+  top to bottom as the file it renders. `just test` fails on any other top-level statement or call.
+- **Text two definitions share byte for byte is one constant**, in `adjagent/clauses.py`, or in a
+  group module's private constants when only that set shares it. A definition never pastes shared
+  text or a paraphrase of it; `just test` fails on a paragraph two outputs write out.
+  - **A private constant cannot name `clauses.*`.** Shared text that holds a harness string takes a
+    hole, filled at the call site in the body.
+- **`just retake-reference` is run only after a content change is accepted.** It overwrites the
+  baseline `just render-diff` compares against, so running it earlier erases the change from the
+  next comparison.
 - **A checkpoint is not complete until the sweep has run.** `just sweep-python` enumerates what no
   single file can report — one concept with two implementations, one constant with two definitions
   — because a rule honoured completely inside one file is still broken across two. It emits
@@ -18,45 +25,23 @@ not here.
   for by running unrelated surfaces. The accepted exception today:
   `kb_tools/tests/test_kb_driver_head.py` runs the real generator install, so a generator change can
   break it unnoticed until the `kb_tools` surface next runs.
-- **Every template identifier is strict kebab, in every template system.**
-  `[a-z][a-z0-9]*(-[a-z0-9]+)*` — letter-led segments joined by single hyphens; no leading digit, no
-  leading or trailing hyphen, no doubled hyphen, no underscore. Chunk and marker names, namespaces,
-  family anchor keys, chunk-argument keys, prompt-template slots. Each system spells the class in
-  its own constant; none imports another. The reason to have one class at all is that these
-  templates are read and increasingly written by models, and a reviewer of either surface should not
-  have to hold two grammars — the same argument that put both systems on the `@!` … `!@` delimiter
-  pair.
-  - **A namespace sits ahead of the name, outside the class, and routes rather than describes.**
-    Both systems run on it. A prompt-template slot spelled `@!dyn.<name>!@` is filled from the
-    caller's per-call data and one spelled `@!<name>!@` from the composer's own sources, each from
-    nowhere else (`kb_tools/ARCHITECTURE.md`, the `prompt_templates.py` row). The generator's
-    render-time holes are a closed flat key set, `@!hrn-<key>!@`, `@!fam-<key>!@` and
-    `@!agf-<key>!@`, spelled by `adjagent/vocabulary.py`'s `hole`. The `.` is what
-    keeps them apart — never admit it to the identifier class, and a namespace can never be mistaken
-    for a name nor a name claim a namespace. Two consequences the generator's own history earned: a
-    namespace earns its place by deciding where a value comes from, and one that only labels what a
-    name already says is a second grammar for nothing; and where the namespace decides, **nothing
-    needs reserving and no source needs precedence** — a collision between two sources is
-    unrepresentable rather than arbitrated. The prefix goes where a value is **consumed**, never
-    where it is bound: an argument's call site and its defaults table are already unambiguous by
-    position. A fence metakey (`_resolve`) is underscore-led on purpose, outside the identifier
-    class, so it can never be read as an output name — the same reasoning that keeps `.` out of the
-    class.
-- **Never comment in a rendered body.** A template or chunk body becomes an agent's system prompt;
-  maintainer commentary there ships into every dispatch and is read by every seat.
+- **Never comment in a rendered body.** A definition's body, and every constant it interpolates,
+  becomes an agent's system prompt; maintainer commentary there ships into every dispatch and is
+  read by every seat. A Python `#` comment above a constant is not in the string and is the place
+  for a note the next editor needs.
 - **An untracked file under `.claude/`, `.opencode/` or `rendered/` is render or install output.**
-  Its source is a definition module under `adjagent/definitions/` or a module at the repository root
-  (`liaison_tools/`, `kb_tools/`), and the next install overwrites the copy. Before an edit brief names a path,
-  `git ls-files <path>` settles which it is, and the brief names the source. Running definitions
-  point at the copy, which is how a brief comes to name it.
+  Its source is a definition module under `adjagent/definitions/` or a module at the repository
+  root (`liaison_tools/`, `kb_tools/`), and the next install overwrites the copy. Before an edit
+  brief names a path, `git ls-files <path>` settles which it is, and the brief names the source.
+  Running definitions point at the copy, which is how a brief comes to name it.
 - **A dispatch names its seats before the tool call.** The acting message states the agent count
   and model. More than one seat at the family's highest tier waits for a go that names the count: a
   fan-out's cost shows only as the plan's usage moving, and by then it is spent.
 - **The harness agents file changes by explicit act, in either direction.** Publish by hand: edit
   `adjagent/definitions/harness_agents_file.py`, then commit. Adopt with
   `just install-agents-file <dir> [harness]`, which replaces only the block between the `adjagent`
-  marker lines and refuses while `adjagent/` has uncommitted changes. Your own rules go outside the markers,
-  because inside is replaced on every install. Machine-local sections (an auth sandbox,
+  marker lines and refuses while `adjagent/` has uncommitted changes. Your own rules go outside the
+  markers, because inside is replaced on every install. Machine-local sections (an auth sandbox,
   host-specific paths) live outside the block in the live file and are never published.
 - **Obviated code is deleted, not parked.** When a change makes code unnecessary, it goes in the
   same change — not commented out, not left unreferenced behind a "maybe someday", not kept as a
@@ -77,12 +62,23 @@ not here.
     is deleted. A plan still on disk reads as work waiting to be done.
 - **`.md` files wrap at 100 columns** — the project documents (`THESIS.md`, `SPEC.md`,
   `ARCHITECTURE.md`, `CONVENTIONS.md`, `ROADMAP.md`, READMEs), the planning documents
-  (`ACTIVE_PLAN.md`, everything in `ROADMAP_PLANS/`), and every template (`.tmpl.md`). Prose and
-  list items break at 100, list continuations indented under their bullet. Headings, table rows and
-  URLs that cannot break stay whole.
+  (`ACTIVE_PLAN.md`, everything in `ROADMAP_PLANS/`), and every shipped template (`.tmpl.md`).
+  Prose and list items break at 100, list continuations indented under their bullet. Headings,
+  table rows and URLs that cannot break stay whole.
 
 ## Adding Definitions
 
-- **Adding a definition** Create a module under `adjagent/definitions/` holding nothing but imports,
-  string constants and `DEFINITIONS`; its existence is its enrollment, and its `kind` and `folder`
-  decide its output path. Mechanism lives in the `adjagent` package and module docstrings.
+- **Where it goes.** One module in `adjagent/definitions/`; its existence is its enrollment, and
+  nothing imports it by name. Definitions that share text and ship as a set share one module.
+- **What it is called.** From the output path below `agents/` or `commands/`, the folder as a
+  prefix and each `/` and `-` read as `_`: `python_coder.py` for `agents/python-coder.md`,
+  `mad_design_topics.py` for `agents/mad/design-topics/*.md`. A module of a set is named for the
+  set (`mad_referees.py`). The harness agents file, which has no output path, is
+  `harness_agents_file.py`.
+- **What it sets.** `kind` is agent, document, command or agents file; it decides the output root,
+  the frontmatter and the required fields. `folder` is the path below the root for a nested output
+  and empty otherwise. Output paths, not names, are unique.
+- **What `render-diff` shows.** The first `just render-diff` after adding a definition shows its
+  whole file as `Only in`.
+- **Where the rest is.** The composition model is in ARCHITECTURE.md; the `adjagent` package and
+  module docstrings hold the mechanism.

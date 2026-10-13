@@ -29,7 +29,7 @@ default, or the selected `--harness`'s `project-harness-dir` (`.opencode/` for `
 into the project path: every definition, rendered by that same invocation — together with the
 shipped packages those definitions read (below), delivered to their own frozen destinations by
 explicit mapping rather than as part of either surface. What is not part of the product does not
-travel: test suites and their fixtures, caches, `.DS_Store`, generator safety copies, and this
+travel: test suites and their fixtures, caches, `.DS_Store`, backup (`.bak`) copies, and this
 repository's own project documentation. That last class is a filename vocabulary — the contract
 documents (`SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `THESIS.md`) and the development
 apparatus (`ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`) — matched at any depth in a shipped package's
@@ -49,7 +49,7 @@ shape has a consuming project gitignore a subdirectory for this repository's own
 install from inside it, so ROOT resolves to the project's `.claude/` with the repository sitting
 underneath it as one of the sources the install reads — that containment is what the sanctioned
 shape *is*, not a hazard it happens to create. ROOT may not, however, be this repository's own root:
-the render would then land beside the templates that produce it, as `agents/` and `commands/`
+the render would then land beside the sources that produce it, as `agents/` and `commands/`
 materializing untracked at the repository's own top level, in a place no `.gitignore` entry here
 covers. Nor may ROOT sit inside any shipped package's source (Deployed Surfaces, above, names the
 packages): installing there once writes the product into the tree a later install reads from, and
@@ -65,11 +65,12 @@ re-install overwrites it and removes what this repository no longer produces (Wr
 and a change request comes to this repository. A shipped package's destination belongs to this
 repository entire and is replaced whole by every install.
 
-Every installed file states its own origin in one banner line — the generated banner
-(Generated-Definition Integrity) in a rendered definition's frontmatter, an installed banner at the
-top of a copied file whose type takes a `#` comment, below its shebang where it has one — and never
-where it changes how the file is read. Every other copied file, the shipped `.tmpl.md` templates
-included, is installed byte-verbatim and unstamped.
+Every installed file states its own origin in banner lines. A rendered definition carries two in
+its frontmatter: the generated banner (Generated-Definition Integrity), which says where the file
+was generated from and that it is not for local edit, and the tuning line (Generation System). A
+copied file whose type takes a `#` comment carries one, an installed banner at its top, below its
+shebang where it has one. No banner sits where it changes how the file is read. Every other copied
+file, the shipped `.tmpl.md` templates included, is installed byte-verbatim and unstamped.
 
 Every path written inside a definition body — a file the agent is told to `Read`, a script it
 invokes — is written against the installing harness's project directory —
@@ -80,14 +81,14 @@ directory, named as the harness names it. A project's agents file is named `AGEN
 harness (Harness Agents File, below); only the operator's user-global agents file is named as the
 harness names it.
 
-Every file directly under `agents/` matching `*.md` whose template authors frontmatter with dispatch
-keys (`name`, `description`, `model`) is a dispatchable agent definition — the rule holds without
-exception, and its rendered frontmatter spells those keys as the installing harness reads them. What
-sits under `agents/` besides those definitions is generated too, and structurally outside the
-dispatch namespace: `mad/participant-contract.md` and the design referee's methodology topic set,
-`mad/design-topics/`. Each additionally authors a frontmatter block empty of dispatch keys, an
-independent second guard that keeps it undispatchable on its own terms, rendered in the installing
-harness's spelling of that guard — under opencode, `disable: true`.
+Every file directly under `agents/` matching `*.md` whose definition is an agent, its frontmatter
+carrying dispatch keys (`name`, `description`, `model`), is a dispatchable agent definition — the
+rule holds without exception, and its rendered frontmatter spells those keys as the installing
+harness reads them. What sits under `agents/` besides those definitions is generated too, and
+structurally outside the dispatch namespace: `mad/participant-contract.md` and the design referee's
+methodology topic set, `mad/design-topics/`. Each additionally carries a frontmatter block empty of
+dispatch keys, an independent second guard that keeps it undispatchable on its own terms, rendered
+in the installing harness's spelling of that guard — under opencode, `disable: true`.
 
 The repository's fourth file class is a **shipped package**: plain code, never rendered and so never
 carrying a `!GENERATED!` banner in this repository, its tests beside it, installed by explicit
@@ -111,29 +112,28 @@ properties, independent of how they are implemented (see ARCHITECTURE.md):
 - **Single-sourcing.** Text shared across two or more definitions has exactly one source. Wherever
   rendered output shares text across definitions, that text is identical by construction — not by
   maintenance discipline that could silently drift apart.
-- **Additive-only model tuning.** A family's tuning file may extend a definition's base text at
-  declared anchor points; it can never replace, suppress, or fork that text. A definition whose
-  anchors the loaded family does not fill is byte-identical to its base render.
-- **Tier-keyed tuning, with recorded provenance.** A definition declares a tier at its pin site —
+- **Additive-only model tuning.** A family's tuning may extend a definition's base text at declared
+  anchor points; it can never replace, suppress, or fork that text. A definition whose
+  anchors the loaded family does not fill is byte-identical, below its banner, to its base render.
+- **Tier-keyed tuning, with recorded provenance.** Every agent definition declares a tier —
   one of `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability — and the family's tier
   map, the one model source on every harness, resolves it: the tier's family member is both what
-  the definition is tuned against and the model it renders with. The tier map comes from the family
-  file, or whole from the tier-map argument. Either map argument covers all five tiers, naming each
-  or giving one value for all and naming any exceptions; one leaving a tier unnamed is refused, with
-  no fallback to the family file. An optional alias map, with no
+  the definition is tuned against and the model it renders with. The tier map comes from the family,
+  or whole from the tier-map argument. Either map argument covers all five tiers, naming each or
+  giving one value for all and naming any exceptions; one leaving a tier unnamed is refused, with no
+  fallback to the family. An optional alias map, with no
   default, renders an alias in place of each tier's member and changes nothing else, so what a
   definition is tuned for and what it dispatches on may diverge; it exists for a harness that
   resolves aliases through its own remapping, such as Claude Code's `ANTHROPIC_*` model variables,
   and any harness may use it. A harness declares the shape a rendered model must have — a model
   outside it fails the render before anything is written, naming the tier, the value, and the
-  argument or family file that supplied it — and the text `inherit` renders as; an empty rendering
-  leaves the definition without a model line. Every generated definition's banner records the family
-  file, the tier map, the alias map where one was given, and the harness it was rendered for, so
-  what it is tuned for and what it dispatches on are readable from the definition alone. A model pin
-  is not required and a definition with no pin site declares no tier and stands outside this
-  resolution; family-wide tuning text still fills its anchors. A family file whose
-  `[family.*.models.*]` tables name a member no tier reaches — in neither its own `[tiers]` nor the
-  effective tier map — fails to load.
+  argument or family that supplied it — and the text `inherit` renders as; an empty rendering leaves
+  the definition without a model line. Every generated definition's tuning line records the
+  family's name, the tier map, the alias map where one was given, and the harness it was rendered
+  for, so what it is tuned for and what it dispatches on are readable from the definition alone.
+  Documents and commands declare no tier and stand outside this resolution; family-wide tuning text
+  still fills their anchors. A family whose member-scoped tuning names a member no tier reaches — in
+  neither its own tier map nor the effective one — is refused before anything is rendered.
 
 An install that requests a tuning other than the default (Deployed Surfaces, above) renders the
 generated definitions under it; Generated-Definition Integrity, below, holds for the tuning the
@@ -142,13 +142,13 @@ install was given exactly as it holds for the default one.
 ## Generated-Definition Integrity
 
 Every definition in the deployed surfaces (`agents/`, `commands/`) is generated rather than
-hand-authored — the partition is total, because a definition no template declares is never rendered
+hand-authored — the partition is total, because a definition with no source here is never rendered
 and so never reaches the product at all. For every definition:
 
-- Its content is byte-identical to what its declared template currently renders.
-- Every banner claiming a definition is generated names the definition module that renders it and
-  states that the file is not for local edit. The consuming project's git, not a recorded hash, is
-  what detects a modification.
+- Its content is exactly what the generator renders for it from its source, deterministically; a
+  rendered file whose source no longer exists is removed on the next install.
+- Every banner claiming a definition is generated names the source it was rendered from and states
+  that the file is not for local edit. The consuming project's git is what detects a modification.
 
 A file without a generated banner is not a definition this repository produced, and is outside this
 guarantee — Write Safety, below, is what governs meeting one at a generation target.
@@ -169,8 +169,9 @@ the dispatchable definitions directly under `agents/`, plus the participant cont
 `agents/mad/participant-contract.md`, must hold the property mechanically — dropping every line
 through the one that closes the frontmatter block yields the body entire, losing no content and
 needing no knowledge of what the block holds. The property is guaranteed where a definition is
-built, not where it is read: a definition that would not extract fails at generation rather than
-reaching a guest model truncated. The extracted body does not carry the definition's `model:` pin,
+built, not where it is read: the project's test suite, run before a change lands, refuses a
+definition that would not extract, so none reaches a guest model truncated. The install does not
+check it. The extracted body does not carry the definition's `model:` pin,
 which stays in the frontmatter where the harness render carries one: a caller that uses the body
 without `--agent` carries the pin itself.
 
@@ -182,8 +183,8 @@ prompt.
 ## Harness Agents File
 
 The repository publishes a recommended operator agents file as one definition, rendered per
-supported harness. It is installed only by explicit act, into a directory the operator names — the harness's
-user-global directory or a project's own; `install` never installs it.
+supported harness. It is installed only by explicit act, into a directory the operator names — the
+harness's user-global directory or a project's own; `install` never installs it.
 
 Agent directives live in `AGENTS.md`. Installed into the harness's user-global directory, the file
 takes the name that harness reads there — `CLAUDE.md` for Claude Code, `AGENTS.md` for opencode —

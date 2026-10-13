@@ -2,11 +2,11 @@
 
 This repository generates agents rather than collecting them — a single-sourced generation system
 paired with the multi-capability agent and command set it renders. Definitions are produced to
-order: tuned per model family, installed into consuming projects as hash-verified artifacts,
-regenerated rather than copied and hand-maintained. The generator owns the guarantees — one source
-for every shared span of text, additive-only model tuning, drift caught by content hash; the
-rendered set does the work — coder and platform specialists, multi-agent debate processes,
-knowledge-base construction and tooling, guest-model liaisons.
+order: written as Python modules, tuned per model family, rendered into consuming projects that
+commit the result and never edit it. The generator owns the guarantees — one source for every shared
+span of text, additive-only model tuning, drift visible as the consumer's `git diff`; the rendered
+set does the work — coder and platform specialists, multi-agent debate processes, knowledge-base
+construction and tooling, guest-model liaisons.
 
 ## Usage
 
@@ -34,36 +34,27 @@ just install ~/projects/foo
 
 That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` in full: every definition,
 the MAD design-topic set, `kb_tools/`, `liaison_tools/`, and the slash commands. The definitions are
-rendered by that invocation — this repo keeps no checked-in copy of them — and the tool packages are
-copied. Test suites and caches stay behind. `--harness=opencode` installs into `.opencode/` instead
-(the harness's project directory; `--subdir=` overrides). Every `--*` flag after the target forwards
-verbatim to `gen_defs`, so tuning the render is one more flag, not a different command —
+rendered by that invocation and the tool packages are copied. Test suites and caches stay behind.
+`--harness=opencode` installs into `.opencode/` instead (the harness's project directory;
+`--subdir=` overrides). Every `--*` flag after the target forwards verbatim to
+`python3 -m adjagent`, so tuning the render is one more flag, not a different command —
 `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family
 (see "Model Tuning" below).
 
-The installed tree is an **artifact**: this repo is the source of truth, and re-running the install
-overwrites it. Don't edit files under a consuming project's `.claude/agents/` — change the template
-here, then re-install. Every installed file says as much in a banner of its own, which also records
-the hash of the content below it; an edit that breaks that hash is not lost when the re-install
-replaces the file, but set aside beside it as a numbered `.bak` (yours to delete). Re-installing an
-untouched tree changes nothing and backs up nothing.
+The installed tree is **committed by the consuming project and not for local edit**. A change
+request comes to this project, which evaluates it, implements it and makes it available to every
+consumer; a consumer's own needs go in its `CONVENTIONS.md`. Every rendered file's first banner line
+says so. Re-running the install overwrites the tree and removes definitions this project no longer
+produces; the consumer's `git diff` is the review of what changed. Re-installing an unchanged
+source changes nothing.
 
 Claude Code reads agent and command definitions from `.claude/`; nothing outside `agents/` and
-`commands/` is installed, so nothing else is visible to a session. Optionally, a symlink gives
-sessions in a consuming project a path to this repo's project space (justfile, templates, contract
-docs):
-
-```sh
-ln -s <path-to-this-repo>  .claude/adjagent-repo
-```
-
-Upgrading from the old symlink setup: remove the `.claude/agents` and `.claude/commands` symlinks
-and run `just install` against the project instead — that is now the only supported shape.
+`commands/` is installed, so nothing else is visible to a session.
 
 ### Harness Agents File
 
-The agent definitions assume a set of operator-level working rules, published as one template
-(`templates/harness/AGENTS.tmpl.md`) rendered per harness. Install it with
+The agent definitions assume a set of operator-level working rules, published as one definition
+(`adjagent/definitions/harness_agents_file.py`) rendered per harness. Install it with
 `just install-agents-file <dir> [harness]`, where `<dir>` is `~/.claude`, `~/.config/opencode`, or a
 project root. The harness is inferred when `<dir>` is a harness's user-global directory; for a
 project root (or anything else) name it: `just install-agents-file ~/projects/foo opencode`. The
@@ -72,14 +63,16 @@ that harness reads there (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`)
 writes `<dir>/AGENTS.md`, and for a harness that reads another name it creates that file as the
 one-line redirect `@AGENTS.md` (Claude Code's `CLAUDE.md`), leaving an existing one alone. A
 `CLAUDE.md` there holding anything else is refused with nothing written — move its content into
-`AGENTS.md` and replace it with `@AGENTS.md` yourself. The install replaces only our block between
-the `adjagent` marker lines and keeps everything outside it. If the destination holds nothing but a
-single `@<path>` import, the install goes into that target and leaves the redirect alone; a redirect
-to another redirect, or to a file outside `<dir>`, is refused for you to merge by hand. A first
-install over a file without markers keeps that whole file above the block, so you then delete what
-the block now supplies. A file whose markers are malformed is refused, a write that changes the file
-keeps one rolling `backup.<name>` of what it replaced, and the install refuses while `templates/`
-has uncommitted changes.
+`AGENTS.md` and replace it with `@AGENTS.md` yourself.
+
+The install replaces only the block between the `adjagent` marker lines and keeps everything outside
+it; put your own rules outside the markers. Edits inside the block are not preserved. An absent file
+is written whole. If the destination holds nothing but a single `@<path>` import, the install goes
+into that target and leaves the redirect alone; a redirect to another redirect, or to a file outside
+`<dir>`, is refused for you to merge by hand. A file without exactly one begin marker line followed
+by one end marker line is refused with nothing written, as is any run while `adjagent/` has
+uncommitted changes. A write that changes the file keeps one rolling `backup.<name>` of what it
+replaced.
 
 `agents/` and `commands/` are the two deployed surfaces install produces inside
 `<project>/.claude/`; the catalogs below name entries by where they land there — every entry lives
@@ -87,29 +80,27 @@ under `agents/` unless noted as a command.
 
 ### Model Tuning
 
-Model-specific defensive text is delivered through **overlay anchors and model-family files**. A
-template or shared chunk may expose an `@!fam.<key>!@` anchor at a spot where an observed failure
-mode needs a targeted note; the namespace ahead of the key names the registered source that fills it
-(`fam`, the family file, is the only one registered today), and with no such source loaded, or no
-entry for the key, the anchor renders as nothing, so the base definitions are byte-identical to an
-anchor-free render. A family file — `templates/family/<family>.toml`, one per model family, schema
-and the two-map system in [templates/family/README.md](templates/family/README.md) — fills anchors:
-family-wide `text`, with per-model overrides inside the same file. Resolution, not accumulation: at
-most one overlay renders per anchor, model scope winning over family scope, and the filled text
-renders verbatim in place with no lead-in or wrapper — an author who wants one writes it into their
-own text. A family file can never replace, suppress, or modify base text — it only fills anchors.
-Tuned sets are rendered to order, typically out of repo:
-`python3 -m gen_defs generate <root> --family NAME`, where `NAME` selects `templates/family/<NAME>.toml`
-— a bare model name is not a family name. Two independent flags carry the tuning further:
-`--model-tier-map` overrides which family member each tier is tuned against, and the optional
-`--model-pin-tier-alias-map` renders an alias in place of each tier's member; narrowed to a subset of definitions by
-`--agent-glob`/`--command-glob` when the whole set is not wanted.
+Model-specific defensive text is delivered through **overlay anchors and model families**. A
+definition may expose an anchor at a spot where an observed failure mode needs a targeted note; with
+no overlay for the anchor in the loaded family, it renders as nothing, so the base definitions are
+identical to an anchor-free render. A family — a Python module under `adjagent/families/`, one per
+model family, fields documented in the docstring of `adjagent/family.py` — fills anchors:
+family-wide `text`, with per-model overrides inside the same module. Resolution, not accumulation:
+at most one overlay renders per anchor, model scope winning over family scope, and the filled text
+renders verbatim in place with no lead-in or wrapper — an author who wants one writes it into the
+overlay text. A family can never replace, suppress, or modify base text — it only fills anchors.
+
+Tuned sets are rendered to order, typically out of repo, with `--family NAME`, where `NAME` is a
+module name under `adjagent/families/` — a bare model name is not a family name, and a path is not
+accepted. Two independent flags carry the tuning further: `--model-tier-map` overrides which family
+member each tier is tuned against, and the optional `--model-pin-tier-alias-map` renders an alias in
+place of each tier's member.
 `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]`
 applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to
-`gen_defs`.
+`python3 -m adjagent`.
 
-Authoring a new family file, or extending an existing one, is repository work — see Development →
-Authoring Family Files.
+Authoring a new family, or extending an existing one, is repository work — see Development →
+Authoring a Family.
 
 ### Coding Agent Set
 
@@ -134,7 +125,7 @@ Authoring Family Files.
 Every definition in this catalog is **generated** — the coder and platform files, the MAD agent set,
 all three kb definitions, the specialists, the liaisons, and every slash command. There are no
 hand-maintained definitions and nothing to edit directly; see Development → Generated Definitions
-for how a definition maps to its source template.
+for how a definition maps to its source module.
 
 ### Specialists
 Single-purpose agents invoked directly for non-coding work.
@@ -153,7 +144,7 @@ Single-purpose agents invoked directly for non-coding work.
 * theoretical-economist.md - stress-tests production/growth, market-structure, and mechanism-design
   claims; the economics lens in an adversarial panel
 * prompt-engineer.md - authors and revises model-facing text: agent definitions, commands, skills,
-  template/chunk bodies, model-tuning overlay entries, agent-facing docs.
+  definition bodies, model-tuning overlay entries, agent-facing docs.
 
 ### Multi-Agent Debate Agent Set
 Uses Multi-Agent Debate Process. Two modes share the same participants but use different referees;
@@ -329,7 +320,7 @@ Agents and portable tooling for building, navigating, and maintaining a knowledg
 navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph
 metadata spine. All three kb-* definitions are project-portable: per-project facts live in the
 consuming project's `kb-root/AGENTS.md`, not in the definitions. All three are **generated** from
-their templates.
+their definition modules.
 
 A build derives the KB from the LaTeX corpus, and the corpus is the only thing that exists at that
 point. Once you have edited the KB by hand — a leaf's prose, a claim minted or wired — that work
@@ -369,16 +360,27 @@ consuming project:
 
 ## Development
 
-This section is for working on this repository itself — the generator, its templates, and the
+This section is for working on this repository itself — the generator, its definitions, and the
 shipped tool packages. If you are installing the product into a project, see Usage, above.
 
 ### Repository Layout
 
 ```
-templates/      template sources (not session-visible), rendered by the `gen_defs` package at the repo root — see ARCHITECTURE.md
-rendered/       gitignored build product — `just render [slug]` puts a render here per slot to inspect or PR-diff; see "Working In This Repo" below
-ROADMAP_PLANS/  tracked home for work that has some planning done but isn't ready to execute — usually, not necessarily, behind a ROADMAP.md item
+adjagent/                 the generator and every definition, run as `python3 -m adjagent`
+  clauses.py              shared text: named string constants, small functions for slotted text
+  definitions/            one module per definition, or per set that shares text and ships together
+  harnesses/              one module per harness (claude, opencode), each defining HARNESS
+  families/               one module per model family, each defining FAMILY
+devtools/render_diff.py   compares two rendered slots by text; reads only rendered output
+rendered/                 gitignored build product — `just render [slug]` puts a render here per
+                          slot; the three `reference*` slots are the baseline `just render-diff`
+                          compares against, written only by `just retake-reference`
+ROADMAP_PLANS/            tracked home for planned work not yet ready to execute
 ```
+
+In `adjagent/`, a definition module registers by existing in `definitions/`; its `kind` and
+`folder` decide where it lands. Mechanism is in the package and module docstrings, and in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 `agents/` and `commands/` are not directories in this repository. They are the two deployed surfaces
 of the *product*, produced into `<project>/.claude/` by an install (or into `rendered/` by
@@ -391,20 +393,33 @@ house rules. [ROADMAP.md](ROADMAP.md) tracks open follow-on work, outside this s
 
 ### Working In This Repo
 
-`just render [slug]` renders the full install product into `rendered/<slug>/` (slug defaults to
-`latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/` — Claude Code's
-`CLAUDE.md` by default, or another harness's with `--harness=NAME` (`--harness=opencode` gives
-`AGENTS.md`), which the render also forwards to its install so the slot's definitions render under
-the same harness. `just render reference` writes the known-good baseline to `rendered/reference/`,
-which nothing else writes. `just render-diff [a] [b]` compares two rendered slots — defaulting
-reference against latest — and reports differences without failing on them. The working sequence for
-a change: `just render reference` to capture the known-good state, make the edit, `just render`,
-then `just render-diff` to see which definitions actually changed. `just test` runs the full tooling
-test suite (`kb_tools` + `liaison_tools` + `gen_defs` + `dupe_sweep`, auto-provisioning a `.venv`).
+A definition is `adjagent/definitions/<name>.py`: a `DEFINITIONS` tuple whose `body` is the rendered
+text with holes, read top to bottom as the file it renders.
+
+* A definition's own prose is in its module. Shared text is a named constant in
+  `adjagent/clauses.py`, or a private constant of a group module whose definitions ship together.
+* To change what shared text says for every definition, edit the constant; to change it for one,
+  edit that definition's module.
+* To see what a change does, run `just render`, then `just render-diff`. An unknown placeholder
+  fails at render; a definition module holding anything but imports, string constants and
+  `DEFINITIONS` fails the suite.
+* The gate is `just test-changed`. Run `just retake-reference` only after a content change is
+  accepted; it re-takes the baseline slots `render-diff` compares against.
+
+Other targets: `just render [slug]` renders the full install product into `rendered/<slug>/` (slug
+defaults to `latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/` — Claude
+Code's `CLAUDE.md` by default, or another harness's with `--harness=NAME`. A slug starting with
+`reference` is refused. `just render-diff [a] [b]` compares two slots — reference against latest by
+default — by text, with each file's banner replaced by one constant line, and reports differences
+without failing on them. `just test` runs the full tooling test suite (the `kb_tools`,
+`liaison_tools`, `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
 `just test-changed [base]` runs only the surfaces the uncommitted tree (plus, given `base`, the
 commits since it) touches, and says which paths chose each.
 
-### Authoring Family Files
+### Authoring a Family
+
+A family is a module under `adjagent/families/` defining `FAMILY`; the fields, and how tiers, member
+overrides and `--model-tier-map` interact, are in the docstring of `adjagent/family.py`.
 
 The mechanism is a response to a real phenomenon: agent definitions tend to accumulate defensive
 language that's keyed to the *specific* model they were tested against. Defensive clauses that
@@ -415,14 +430,14 @@ helps the first model and slows the second.)
 
 The operating rule when porting an agent definition to a new model: **strip first, observe, patch.**
 Run the base definitions with the new model on a known-shape probe set. Watch for failure modes;
-only then author an anchor and a family-file entry targeted at the failure modes you actually
-observed. Anchors are never pre-sprinkled speculatively. Heavy scaffolding hides the model's true
-tendencies; you can't engineer for failure modes you never see.
+only then author an anchor and an overlay targeted at the failure modes you actually observed.
+Anchors are never pre-sprinkled speculatively. Heavy scaffolding hides the model's true tendencies;
+you can't engineer for failure modes you never see.
 
 When adding defensive clauses, record *what tendency the clause was added to correct, against which
 model*. Without that record, future maintainers can't distinguish "still load-bearing" from "residue
-from a model we don't use anymore." Comment family-file entries like code: not what the overlay
-says, but why and against which observed behavior it was added.
+from a model we don't use anymore." Comment overlays like code: not what the overlay says, but why
+and against which observed behavior it was added.
 
 (The earlier delivery vehicle — a parallel per-model definition file, e.g.
 `applied-mathematician-strict.md`, a gap-aversion variant built for running the math agent on Gemma
@@ -432,9 +447,12 @@ says, but why and against which observed behavior it was added.
 
 Every definition in the Usage catalogs — the coder and platform files, the MAD agent set, all three
 kb definitions, the specialists, the liaisons, and every slash command — is **generated**. There are
-no hand-maintained definitions and nothing to edit directly; see
-[CONVENTIONS.md](CONVENTIONS.md#adding-templates-and-promoting-definitions) for how a template maps
-to its rendered output, and how to add or change one.
+no hand-maintained definitions and nothing to edit directly in a rendered tree; the source is the
+definition's module (see "Working In This Repo"). A rendered file carries a two-line banner inside
+its frontmatter: a generated-from line naming its definition module and stating that the file is not
+for local edit, and a tuning line recording the family, seat, tier map and harness it was rendered
+for. There is no content hash; consuming projects track the rendered output, and their `git diff` is
+the drift check. See [CONVENTIONS.md](CONVENTIONS.md#adding-definitions) for how to add one.
 
 ### Liaison Tooling
 `liaison_tools/` contains the helpers used by both `mad-guest-liaison.md` (MAD process) and

@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Literal
 
 IDENTIFIER = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
-"""Output, family and harness names, and each folder part: strict kebab, as CONVENTIONS.md states the class."""
+"""Output, family and harness names, and each folder part: strict kebab, letter-led segments joined by single hyphens."""
 
 Tier = Literal["highest", "high", "medium", "low", "lowest"]
 TIERS: tuple[Tier, ...] = ("highest", "high", "medium", "low", "lowest")
