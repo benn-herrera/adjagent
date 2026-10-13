@@ -194,7 +194,10 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
 8. Add a Lua coding agent that handles Lua and LuaJIT
 
-9. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+9. Get rid of the tech-writer-reviewer - fold review into tech writer role the same way review
+   functions are included in coders and architect.
+
+10. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
     installs the agent and command definitions under a prefixed namespace so the set coexists with
     an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
     packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a
