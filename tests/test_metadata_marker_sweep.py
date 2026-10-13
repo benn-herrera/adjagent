@@ -6,7 +6,7 @@ is evidence for that change; it is not a guard for the repository, and its
 finding list is not something a reviewer re-checks on every future edit. This
 file is the guard, in two halves:
 
-* **The template surface** — every file under `templates/` and
+* **The template surface** — every module under `adjagent/` and
   `kb_tools/installed/`. The third tree carrying brief text,
   `kb_tools/kb_driver/prompt-templates/`, is `prompt_templates.lint`'s half:
   the tokens ride in ``steps.TEMPLATE_PROHIBITIONS`` and
@@ -59,7 +59,7 @@ _PATTERNS: Mapping[str, re.Pattern[str]] = MappingProxyType(
 )
 
 #: The template half's trees.
-_TEMPLATE_ROOTS: tuple[Path, ...] = (_REPO_ROOT / "templates", _REPO_ROOT / "kb_tools" / "installed")
+_TEMPLATE_ROOTS: tuple[Path, ...] = (_REPO_ROOT / "adjagent", _REPO_ROOT / "kb_tools" / "installed")
 
 #: The code half's tree.
 _CODE_ROOT = _REPO_ROOT / "kb_tools"
@@ -165,9 +165,9 @@ def test_the_template_sweep_reaches_the_shipped_surfaces() -> None:
     swept = set(_text_files(_TEMPLATE_ROOTS))
 
     for relative in (
-        "templates/agents/kb-maintainer.tmpl.md",
-        "templates/commands/kb-build.tmpl.md",
-        "templates/shared-chunks.toml",
+        "adjagent/definitions/kb_maintainer.py",
+        "adjagent/definitions/kb_build.py",
+        "adjagent/clauses.py",
         "kb_tools/installed/CONVENTIONS.tmpl.md",
         "kb_tools/installed/AGENTS.tmpl.md",
     ):

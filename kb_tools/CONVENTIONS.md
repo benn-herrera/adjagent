@@ -166,6 +166,6 @@ The agent-definition repo's own justfile; never installed into consumers:
 - `test` — the `kb_tools/tests/` suite (auto-provisions `.venv` + `pytest`; a dev dependency, never
   imported at runtime).
 - `format-python` — `black` (line-length 120) + `isort` over every python surface in the repo at
-  once: `kb_tools`, `liaison_tools`, `tests`, and `gen_defs`. There is no `kb_tools`-only
-  invocation, so a run after editing here also reformats anything left unformatted elsewhere; check
-  the diff before committing.
+  once: `kb_tools`, `liaison_tools`, `tests`, `adjagent`, and `devtools`. There is no
+  `kb_tools`-only invocation, so a run after editing here also reformats anything left unformatted
+  elsewhere; check the diff before committing.

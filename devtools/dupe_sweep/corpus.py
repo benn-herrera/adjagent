@@ -8,8 +8,9 @@ report every copy as a duplicate.
 import logging
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
-from gen_defs.paths import REPO_ROOT
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 log = logging.getLogger(__name__)
 

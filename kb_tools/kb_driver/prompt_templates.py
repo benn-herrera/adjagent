@@ -10,9 +10,9 @@ template to use — its callers do: the step table for the driver's own calls, a
 composed prompts land in that build's own workspace rather than through
 :func:`persist`.
 
-**A slot is spelled** ``@!slot-name!@``, the same marker grammar ``gen_defs``
-renders the agent-definition templates with — delimiters and name class alike
-(:data:`SLOT_NAME`) — so a model reading either surface reads one syntax. The
+**A slot is spelled** ``@!slot-name!@``, the same delimiters ``adjagent``
+spells its render-time holes with, so a model reading either surface reads one
+delimiter pair; the name class is :data:`SLOT_NAME`. The
 delimiter is polar rather than symmetric because an
 unclosed opener is then unambiguous: :func:`slots_of` refuses any ``@!`` or
 ``!@`` that does not parse as a marker and names the line, which a symmetric
@@ -90,11 +90,7 @@ TEMPLATE_SUFFIX = ".tmpl.md"
 #: correspondence is checked in both directions rather than asserted.
 FRAGMENTS_DIRNAME = "fragments"
 
-#: A slot name: letter-led lower-case segments joined by single hyphens, the
-#: identifier class ``gen_defs.markers`` admits for a marker name. Stated
-#: independently rather than imported — the generator is stdlib-only, does not
-#: ship, and neither package depends on the other — so the two spellings are
-#: kept identical by hand and by a reader comparing them, not by an import.
+#: A slot name: letter-led lower-case segments joined by single hyphens.
 SLOT_NAME = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
 
 #: The one namespace, and the whole of the routing grammar: a slot carrying it is

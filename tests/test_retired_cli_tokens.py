@@ -10,7 +10,7 @@ next runs the command it advertises. A retired *command* joins the same guard
 for the same reason: `mint_claim_ids` left the agent-facing surface with mint
 fusion, and it had no standing sweep until this one.
 
-It reads the source trees, never `rendered/`: the templates are what a render is
+It reads the source trees, never `rendered/`: the definition package is what a render is
 a function of, and `rendered/` is a gitignored build product that may be absent
 or stale (the same bound `test_manifest_views_in_definitions.py` states).
 
@@ -70,7 +70,7 @@ _PATTERNS = {
 
 #: The trees and files the sweep covers.
 _ROOTS: tuple[Path, ...] = (
-    _REPO_ROOT / "templates",
+    _REPO_ROOT / "adjagent",
     _REPO_ROOT / "kb_tools",
     _REPO_ROOT / "tests",
     _REPO_ROOT / "justfile",
@@ -173,7 +173,7 @@ def test_the_sweep_reaches_the_files_that_carried_the_old_surface() -> None:
         "kb_tools/runner-snippets/kb.just",
         "kb_tools/runner-snippets/kb.mk",
         "kb_tools/tests/test_kb_util.py",
-        "templates/commands/kb-build.tmpl.md",
+        "adjagent/definitions/kb_build.py",
         "justfile",
         "kb-testing/justfile",
         "README.md",

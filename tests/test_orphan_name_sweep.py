@@ -193,7 +193,7 @@ def test_the_sweep_reaches_the_modules_and_the_corpus_reaches_their_callers() ->
         assert relative in swept, relative
 
     corpus = {_where(path) for path in _corpus()}
-    for relative in ("kb_tools/tests/test_kb_driver_run.py", "templates/shared-chunks.toml", "ARCHITECTURE.md"):
+    for relative in ("kb_tools/tests/test_kb_driver_run.py", "adjagent/definitions/kb_maintainer.py", "ARCHITECTURE.md"):
         assert relative in corpus, relative
 
 

@@ -55,7 +55,7 @@ The ask templates and the shortlist are still moving
 (`ROADMAP_PLANS/UNMARKED_ASK_PRECISION_PLAN.md`, `ROADMAP_PLANS/ANAPHOR_SHORTLIST_HANDOFF.md`). A
 transport built against a reader seam whose question shape is about to change is built twice. When
 the passes settle, the design step is: name
-the harness invocations and their flags per harness (`templates/harness/<name>.toml` is where a
+the harness invocations and their flags per harness (`adjagent/harnesses/<name>.py` is where a
 per-harness spelling lives), decide how a build selects the transport without a config key that
 duplicates the environment's, and show one bounded local build and one headless build producing
 the same ledger shape.

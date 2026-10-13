@@ -135,29 +135,29 @@ with one of them is the defect.
 
 7. **One source per rating ladder, read by every consumer.** Two ladders are hand-copied today, and
    neither is pinned. `kb_schema.BUILD_BAND_LADDER` — five thresholds over computed solidity, with
-   the status phrases a reader acts on — is transcribed as a markdown table in
-   `[chunks.kb-solidity]` in `templates/shared-chunks.toml`, thresholds and phrases both. That chunk
-   is the one statement every seat that explains a score expands, so a drift reaches all of them at
-   once. The rigor grades — seven discrete values a person assigns to a derivation — exist **only**
-   as prose, in `[chunks.rigor-scale]`, with no code-side definition at all: `values.check_rigor`
-   accepts any number in `[0, 1]`.
+   the status phrases a reader acts on — is transcribed as a markdown table in the `kb-docent`
+   definition (`adjagent/definitions/kb_docent.py`), thresholds and phrases both. That table is the
+   one statement of the ladder any seat carries, so a drift lands in that one definition. The rigor
+   grades — seven discrete values a person assigns to a derivation — exist **only** as prose, in
+   the `kb-claim-scorer` definition (`adjagent/definitions/kb_claim_scorer.py`), with no code-side
+   definition at all: `values.check_rigor` accepts any number in `[0, 1]`.
 
    **The duplication stands for the prototype and a test carries the alarm — and that test does not
    exist yet.** It asserts that the two statements of the band ladder are identical,
-   `[chunks.kb-solidity]`'s table against `kb_schema.BUILD_BAND_LADDER`, thresholds and phrases
-   both. It is not single-sourcing and does not pretend to be; it converts silent drift into a
-   failing test, which is the property that is actually missing.
+   the `kb-docent` definition's band table against `kb_schema.BUILD_BAND_LADDER`, thresholds and
+   phrases both. It is not single-sourcing and does not pretend to be; it converts silent drift
+   into a failing test, which is the property that is actually missing.
 
    **Why pinning rather than single-sourcing.** True single-sourcing needs one side to read the
-   other, and neither direction is affordable. `kb_tools` cannot read `shared-chunks.toml`:
-   `gen_defs` is project space and never installs, so an installed `kb_tools` would import something
-   absent. The inverse is architecturally sound — a generator may read its inputs — but `gen_defs`
-   is stdlib-only and renders the whole definition set, most of it unrelated to this toolchain;
-   importing a shipped package to render it would make the agent set's build depend on this one
-   importing cleanly, which is the coupling the surface boundary exists to keep out.
-   `shared-chunks.toml` already handles unreachable-by-chunk duplication with a maintainer comment
-   saying *check by hand*; where the other side is a constant rather than prose, a test is strictly
-   stronger than the comment and costs little more. Templates own the text; code asserts agreement.
+   other, and neither direction is affordable. `kb_tools` cannot read the definition modules:
+   `adjagent` is project space and never installs, so an installed `kb_tools` would import
+   something absent. The inverse is architecturally sound — a generator may read its inputs — but
+   `adjagent` is stdlib-only and renders the whole definition set, most of it unrelated to this
+   toolchain; importing a shipped package to render it would make the agent set's render depend on
+   this one importing cleanly, which is the coupling the surface boundary exists to keep out.
+   Where the other side is a constant rather than prose, a test is strictly stronger than a
+   maintainer comment saying *check by hand* and costs little more. Definitions own the text; code
+   asserts agreement.
 
    **Not a consumer of this ladder:** `applied-mathematician`. That seat judges argument strength
    for any formal system, kb or not, so a grade scale is its own to own. The two aligning is
@@ -170,8 +170,8 @@ with one of them is the defect.
    solidity equal to its rigor, which is why they look mergeable; merging picks one vocabulary and
    loses the other.
 
-   **Not gating.** `[chunks.rigor-scale]` stays as it is, with its one consumer, as the seam this
-   builds on.
+   **Not gating.** The rigor scale in `kb_claim_scorer.py` stays as it is, with its one consumer,
+   as the seam this builds on.
 
 8. **A re-launch over a finished build still exits 0 rather than stopping loudly.** The destructive
    half of this item has landed: there is no build-mode setting, an invocation that finds `start`

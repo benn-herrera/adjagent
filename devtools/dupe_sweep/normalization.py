@@ -1,21 +1,13 @@
-"""dupe_sweep — text as the comparison reads it: lower-cased words, markers and fenced code dropped.
+"""dupe_sweep — text as the comparison reads it: lower-cased words, markers dropped.
 
 Every text becomes its lower-cased alphanumeric words — case, punctuation,
-markup and where the text wrapped all vanish — each remembering its source line.
-A prose text also loses its articles, so a passage differing only in "the" for
-"a" is still one passage; docstring and comment sentences keep theirs.
+markup and where the text wrapped all vanish.
 """
 
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
-
-from .clustering import Unit
 
 _MARKER = re.compile(r"@![^!]*!@")
 _WORD = re.compile(r"[a-z0-9]+")
-#: Matched before punctuation goes, so only a standalone article is removed.
-_ARTICLE = re.compile(r"\b(?:a|an|the)\b", re.IGNORECASE)
 
 
 def prose_tokens(text: str) -> tuple[str, ...]:
@@ -28,33 +20,3 @@ def prose_tokens(text: str) -> tuple[str, ...]:
 def ellipsis(text: str, width: int = 150) -> str:
     flat = " ".join(text.split())
     return flat if len(flat) <= width else flat[: width - 1] + "…"
-
-
-@dataclass(frozen=True)
-class ProseText:
-    """One prose body as the overlap detector reads it: its words, and each word's line."""
-
-    path: str
-    label: str
-    words: tuple[str, ...]
-    lines: tuple[int, ...]
-
-    def unit(self, start: int, end: int) -> Unit:
-        """The words `start` up to `end` as a reportable span, sited at its first word's line."""
-        words = self.words[start:end]
-        return Unit(self.path, self.lines[start], self.label, " ".join(words), words)
-
-
-def prose_text(path: str, label: str, body: str, *, line_of: Callable[[int], int]) -> ProseText:
-    """`body`'s words outside fenced code blocks, articles dropped, each sited by `line_of(0-based line offset)`."""
-    words: list[str] = []
-    lines: list[int] = []
-    fenced = False
-    for offset, line in enumerate(body.splitlines()):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-        elif not fenced:
-            for word in prose_tokens(_ARTICLE.sub(" ", line)):
-                words.append(word)
-                lines.append(line_of(offset))
-    return ProseText(path, label, tuple(words), tuple(lines))

@@ -195,9 +195,9 @@ reports the live numbers.
 
 All four suites are stdlib-only and never touch the network beyond `127.0.0.1` (per each module's
 own docstring). Run via `just test liaison_tools` (or `just test` for the full tooling suite:
-`kb_tools` + `liaison_tools` + `gen_defs`), which sets `PYTHONPATH` to the repository root so the
-shipped packages import as top-level packages — the same import shape a consumer gets with
-`PYTHONPATH=.claude/agents` after install.
+`kb_tools` + `liaison_tools` + `adjagent` + `dupe_sweep`), which sets `PYTHONPATH` to the
+repository root so the shipped packages import as top-level packages — the same import shape a
+consumer gets with `PYTHONPATH=.claude/agents` after install.
 
 ## Caller Composition
 

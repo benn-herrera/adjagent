@@ -78,7 +78,7 @@ def _make_fresh_consumer(root: Path, *, corpus: Path, files: Sequence[str]) -> P
     claude = root / kb_util.harness_dirname()
     claude.mkdir()
     installed = subprocess.run(
-        [sys.executable, "-m", "gen_defs", "install", str(claude)],
+        [sys.executable, "-m", "adjagent", "install", str(claude)],
         capture_output=True,
         text=True,
         encoding="utf-8",

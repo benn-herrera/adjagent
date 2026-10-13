@@ -19,28 +19,18 @@ set positional-arguments := true
 PROJECT_ROOT := justfile_directory()
 import 'python.just'
 
-GEN := "gen_defs"
+GEN := "adjagent"
 
 default:
     @just --list | grep -v '\[dev\]'
     @echo "===="
     @just --list | grep '\[dev\]'
 
-# The one deployment shape: copies both deployed
-# surfaces into <target>/.claude/ via gen_defs install, minus test suites
-# and caches, stamping each copied file with an !INSTALLED! banner carrying the
-# hash of the content below it. Every flag forwards verbatim to
-# gen_defs — --family, --model-tier-map, --model-pin-tier-alias-map,
-# --verbose, and
-# whatever it adds next: gen_defs's argparse is the single source of flag
-# truth, so an unknown spelling fails there — stripping `--` to
-# make the params positional would make the command line worse, not better. The
-# one flag this recipe intercepts is `--subdir=X`, because it addresses this
-# recipe's own target-composition, not gen_defs: read only when it is the
-# *first* flag, stripped before the rest forwards. Absent, subdir defaults to
-# the project-harness-dir of the harness named by `--harness=NAME` (default
-# claude), read from templates/harness/<NAME>.toml; `--harness` still forwards
-# to gen_defs. `--subdir=` (empty value) installs directly into <target>.
+# Renders every definition into <target>/<subdir>/ and copies the shipped packages beside them
+# through `python3 -m adjagent install`, overwriting what is there; a consuming project's git is
+# the record of what changed. Every flag forwards verbatim; adjagent's argparse is the single
+# source of flag truth. `--subdir=X`, read only as the first flag, is this recipe's own and
+# defaults to the --harness's project-harness-dir.
 [doc("install into <project>/<subdir>/; <project> is the first non-flag argument; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
 install target *args:
     #!/usr/bin/env bash
@@ -87,34 +77,29 @@ install target *args:
     # bash 3.2 that macOS ships at /bin/bash.
     PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install "${root}" ${args[@]+"${args[@]}"}
 
-# The one reader of templates/harness/<harness>.toml for recipes: prints the
-# `text` of table [harness.<key>], with a leading `~` expanded to $HOME. An
-# unknown harness fails listing the available harness files.
+# The one reader of a harness's values for recipes: prints KEY of harness NAME
+# through `python3 -m adjagent harness`, a leading `~` expanded to $HOME.
 [private]
 _harness-value harness key:
     #!/usr/bin/env bash
     set -euo pipefail
-    dir="{{PROJECT_ROOT}}/templates/harness"
-    if [[ ! -f "${dir}/${1}.toml" ]]; then
-        available="$(cd "${dir}" && printf '%s ' *.toml)"
-        printf "error: unknown harness '%s' — available harness files: %s\n" "${1}" "${available}" >&2
-        exit 1
-    fi
-    value="$(sed -n '/^\[harness\.'"${2}"'\]/,/^\[/s/^text = "\(.*\)"$/\1/p' "${dir}/${1}.toml")"
-    if [[ -z "${value}" ]]; then
-        printf "error: harness '%s' defines no [harness.%s] text\n" "${1}" "${2}" >&2
-        exit 1
-    fi
+    value="$(PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} harness "${1}" "${2}")"
     printf '%s\n' "${value/#\~/${HOME}}"
 
+# Every harness name, one per line.
+[private]
+_harness-names:
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} harnesses
+
 # A thin invocation on purpose: every protection the agents-file install
-# carries — block-only replacement, malformed-marker refusal, dirty-templates
-# refusal, the rolling backup — lives in gen_defs/agents_file.py. The one thing
+# carries — block-only replacement, malformed-marker refusal, the
+# uncommitted-sources refusal, the rolling backup — lives in
+# adjagent/agents_file.py. The one thing
 # done here is naming the harness when the caller omits it: the one whose
 # user-harness-dir is DIR (resolved to an absolute path). Zero or several
 # matches fail rather than guess — a project root matches none, so it takes an
 # explicit harness.
-[doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode) is inferred when <dir> is a harness's user directory and required otherwise")]
+[doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode) is inferred when <dir> is a harness's user directory and required otherwise")]
 install-agents-file dir harness="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -125,8 +110,7 @@ install-agents-file dir harness="":
         function resolve() { (cd "${1}" 2>/dev/null && pwd -P) || printf '%s\n' "${1}"; }
         want="$(resolve "${dir}")"
         matches=()
-        for file in "{{PROJECT_ROOT}}"/templates/harness/*.toml; do
-            name="$(basename "${file}" .toml)"
+        for name in $("{{just_executable()}}" --justfile "{{justfile()}}" _harness-names); do
             user_dir="$("{{just_executable()}}" --justfile "{{justfile()}}" _harness-value "${name}" user-harness-dir)"
             if [[ "$(resolve "${user_dir}")" == "${want}" ]]; then
                 matches+=("${name}")
@@ -160,8 +144,8 @@ RENDERED_DIR := "rendered"
 
 # render / render-diff: a slot is rebuilt on demand and never read back as
 # input to itself, so no slot is ever mistaken for a baseline. The working
-# sequence is `just render reference` to capture a known-good state, do the
-# work, `just render`, then `just render-diff`.
+# sequence is to do the work, `just render`, then `just render-diff` against
+# the reference slots.
 #
 # `render` mirrors `install`'s own leading-flag scan: the first argument that
 # is not a `--` flag, wherever it sits, is the slug (default `latest`) rather
@@ -181,76 +165,98 @@ RENDERED_DIR := "rendered"
 # render-agents-file recipe: `--harness=NAME` (default claude) is the one flag
 # this recipe reads as well as forwards, in any position — the agents file and
 # the install's definitions render under the same harness — and it is
-# recorded in RENDER-FLAGS.txt like any other flag given. That recipe never
-# overwrites a differing file, so the slot's harness/ subtree is removed
-# before each render; the file's name is read from the harness file ahead of
-# the install, so an unknown harness fails before the slot is touched further.
-[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — every --* flag, --harness included, forwards verbatim to gen_defs via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
+# recorded in RENDER-FLAGS.txt like any other flag given. The file's name is
+# read from the harness ahead of anything else, so an unknown harness fails
+# before the slot is touched.
+#
+# The slot is removed and rebuilt on every render. A slug starting with
+# `reference` is refused with nothing touched: those slots are the pre-1.0
+# oracle until stage 6 re-renders them.
+[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — refuses a slug starting with reference; every --* flag, --harness included, forwards verbatim to `python3 -m adjagent install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
 render *args:
     #!/usr/bin/env bash
     set -euo pipefail
     slug="latest"
-    harness="claude"
     args=()
-    recorded=()
     have_slug=""
     for arg in "$@"; do
         if [[ -z "${have_slug}" && "${arg}" != --* ]]; then
             slug="${arg}"
             have_slug=1
-        elif [[ "${arg}" == --harness=* ]]; then
-            harness="${arg#--harness=}"
-            args+=("${arg}")
-            recorded+=("${arg}")
         else
             args+=("${arg}")
-            recorded+=("${arg}")
         fi
     done
+    if [[ "${slug}" == reference* ]]; then
+        printf '%s\n' "error: slot '${slug}' is protected — a slug starting with 'reference' is the pre-1.0 oracle, which render never renders" >&2
+        exit 1
+    fi
+    "{{just_executable()}}" --justfile "{{justfile()}}" _render-slot "${slug}" ${args[@]+"${args[@]}"}
+
+# Everything `render` does once the slug is accepted: the slot is removed and
+# rebuilt from the flags given, which are recorded in it. `--harness=NAME` is
+# read here as well as forwarded.
+[private]
+_render-slot slug *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slug="${1}"
+    shift
+    harness="claude"
+    for arg in "$@"; do
+        if [[ "${arg}" == --harness=* ]]; then
+            harness="${arg#--harness=}"
+        fi
+    done
+    agents_file="$("{{just_executable()}}" --justfile "{{justfile()}}" _harness-value "${harness}" agents-file)"
     out="{{PROJECT_ROOT / RENDERED_DIR}}/${slug}"
-    mkdir -p "${out}"
-    if [[ "${#recorded[@]}" -gt 0 ]]; then
-        printf '%s\n' "${recorded[@]}" > "${out}/RENDER-FLAGS.txt"
+    rm -rf "${out}"
+    mkdir -p "${out}/harness/${harness}"
+    if [[ "$#" -gt 0 ]]; then
+        printf '%s\n' "$@" > "${out}/RENDER-FLAGS.txt"
     else
         : > "${out}/RENDER-FLAGS.txt"
     fi
-    agents_file="$(PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} dev agents-file-for-harness "${harness}")"
-    rm -rf "${out}/harness"
-    mkdir -p "${out}/harness/${harness}"
     "{{just_executable()}}" --justfile "{{justfile()}}" render-agents-file "${harness}" "${out}/harness/${harness}/${agents_file}"
-    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${args[@]+"${args[@]}"}
+    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${@+"${@}"}
+
+# The three `reference*` slots are the oracle `render-diff` reads. `render`
+# refuses their names so a render never overwrites the oracle by accident; this
+# recipe is the one deliberate way to re-take them, run after a change to what
+# the definitions say has been reviewed and accepted, so that the next
+# `render-diff` measures the next change and not that one.
+[doc("[dev] re-take the three oracle slots rendered/reference, reference-opencode and reference-gemma from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
+retake-reference:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    render_slot=("{{just_executable()}}" --justfile "{{justfile()}}" _render-slot)
+    "${render_slot[@]}" reference
+    "${render_slot[@]}" reference-opencode --harness=opencode --model-tier-map=all=inherit
+    "${render_slot[@]}" reference-gemma --family=gemma-4 --model-pin-tier-alias-map=all=sonnet
 
 # A stable interface, not a convenience: a later revision of this repository
 # invokes it inside a worktree of an earlier one to render that revision's
 # agents file. Its name and its two arguments never change incompatibly; the
-# body, and the gen_defs verb behind it, may.
+# body, and the `render-agents-file` verb behind it, may change.
 [private]
 render-agents-file harness out:
-    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} dev render-agents-file "$1" "$2"
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} render-agents-file "$1" "$2"
 
 # Reports and never gates: a difference between two slots is the expected
-# outcome of doing work, so `diff -rq`'s exit 1 is swallowed. Only a
-# comparison that could not be MADE is fatal — a missing slot, or `diff(1)`
-# itself in trouble (status 2).
-[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
+# outcome of doing work, so differences exit zero. Only a comparison that could
+# not be MADE is fatal — a missing slot, or a file that cannot be read.
+#
+# Files compare by text, not by bytes: a file whose first line is `---` and whose
+# next lines have exactly one of the two banner shapes has those lines replaced
+# by the one constant line `# !BANNER!`; then, outside fenced code, whitespace
+# inside a paragraph collapses to one space, while headings, table rows, list
+# items, fenced blocks and frontmatter stay exact (devtools/render_diff.py
+# states the rules). A copied file's `!INSTALLED!` banner is replaced the same
+# way. Two files are the same when that text is identical. The output keeps
+# `diff -rq`'s two line forms.
+[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
 render-diff a="reference" b="latest":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    a_dir="{{PROJECT_ROOT / RENDERED_DIR}}/{{a}}"
-    b_dir="{{PROJECT_ROOT / RENDERED_DIR}}/{{b}}"
-    if [[ ! -d "${a_dir}" ]]; then
-        printf 'error: %s does not exist — run '"'"'just render {{a}}'"'"' first\n' "${a_dir}" >&2
-        exit 1
-    fi
-    if [[ ! -d "${b_dir}" ]]; then
-        printf 'error: %s does not exist — run '"'"'just render {{b}}'"'"' first\n' "${b_dir}" >&2
-        exit 1
-    fi
-    diff_status=0
-    diff -rq "${a_dir}" "${b_dir}" || diff_status="$?"
-    if [[ "${diff_status}" -eq 2 ]]; then
-        exit 1
-    fi
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
 # The shipped packages are imported as top-level packages (`kb_tools`,
 # `liaison_tools`), and their sources sit at the repository root — so the
@@ -265,7 +271,7 @@ render-diff a="reference" b="latest":
 # directory. A flag alone does not narrow: pytest gets the directory plus the
 # flags. A path outside the surface's directory is refused. The word after a
 # flag that takes a separate value (`-k expr`) is that value, never a path.
-[doc("[dev] run tooling python tests: no argument runs all four (kb_tools + liaison_tools + gen_defs + dupe_sweep); a surface argument (kb_tools, liaison_tools, gen_defs, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+[doc("[dev] run tooling python tests: no argument runs all four (kb_tools + liaison_tools + adjagent + dupe_sweep); a surface argument (kb_tools, liaison_tools, adjagent, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -273,9 +279,9 @@ test surface="" *pytest_args: _venv
       if surface == "" { "kb_tools/tests liaison_tools/tests tests devtools/tests" } \
       else if surface == "kb_tools" { "kb_tools/tests" } \
       else if surface == "liaison_tools" { "liaison_tools/tests" } \
-      else if surface == "gen_defs" { "tests" } \
+      else if surface == "adjagent" { "tests" } \
       else if surface == "dupe_sweep" { "devtools/tests" } \
-      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, gen_defs, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
+      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, adjagent, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }}"
     root="{{PROJECT_ROOT}}"
     has_path=0
@@ -320,13 +326,13 @@ FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E7
 # argument order exactly — the order flake8 was already called with differs
 # from black/isort's, and that difference is preserved rather than
 # normalized away.
-[doc("[dev] black-format, isort, flake8 the shipped python packages and the generator, or the given path(s) in place of all four")]
+[doc("[dev] black-format, isort, flake8 the shipped python packages, the generator (adjagent), the tests and devtools, or the given path(s) in place of all of them")]
 format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
-        black_isort_paths=(kb_tools liaison_tools tests gen_defs devtools)
-        flake8_paths=(kb_tools liaison_tools gen_defs devtools tests)
+        black_isort_paths=(kb_tools liaison_tools tests adjagent devtools)
+        flake8_paths=(kb_tools liaison_tools adjagent devtools tests)
     else
         black_isort_paths=("$@")
         flake8_paths=("$@")
@@ -336,23 +342,22 @@ format-python *paths: _venv
     "{{VENV_PYTHON}}" -m flake8 --ignore="{{FLAKE8_IGNORE}}" "${flake8_paths[@]}"
 
 
-# The two duplication sweeps. One idea in two places is invisible inside either
+# The duplication sweep. One idea in two places is invisible inside either
 # of them — nothing in a file reports a fact about two files — so it has been
 # found here by adversarial multi-model review or by accident, and both are too
-# expensive to be the standing instrument. These are the standing instrument.
+# expensive to be the standing instrument. This is the standing instrument.
 #
-# They EMIT CANDIDATES AND NEVER VERDICTS, and exit zero with findings on
+# It EMITS CANDIDATES AND NEVER VERDICTS, and exits zero with findings on
 # purpose: whether two sites are one idea is a judgment, and a gate here would
 # be claiming it. Read the output, or hand it to a seat that will.
 #
 # Stdlib only under the system python3, like every other tool here, with
-# PYTHONPATH at the repository root, the one import path every recipe uses:
-# the sweep reads gen_defs's path constants, so the root must be on the path
-# whatever else is. `--rev` sweeps a past tree.
-[doc("[dev] list duplicated-prose candidates across templates/ — chunk bodies and template inline prose; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
-sweep-prose *args:
-    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep prose "$@"
-
+# PYTHONPATH at the repository root, the one import path every recipe uses.
+# `--rev` sweeps a past tree.
+#
+# The prose half is
+# `tests/test_adjagent.py::test_a_paragraph_two_outputs_carry_has_one_source`,
+# which runs in `just test`: shared prose is one constant by construction.
 [doc("[dev] list one-idea-two-places candidates across kb_tools/ — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-python *args:
     PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep python "$@"
@@ -373,9 +378,9 @@ sweep-python *args:
 # One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
 # ending in `/` matches everything under it.
 TEST_SURFACE_MAP := "
-gen_defs/ gen_defs
-templates/ gen_defs
-tests/ gen_defs
+adjagent/ adjagent
+tests/ adjagent
+devtools/render_diff.py adjagent
 devtools/ dupe_sweep
 kb_tools/ kb_tools
 liaison_tools/ liaison_tools
@@ -389,7 +394,7 @@ test-changed base="":
     set -euo pipefail
     cd "{{PROJECT_ROOT}}"
     base="${1}"
-    all_surfaces=(kb_tools liaison_tools gen_defs dupe_sweep)
+    all_surfaces=(kb_tools liaison_tools adjagent dupe_sweep)
     rows="{{TEST_SURFACE_MAP}}"
 
     changed=()
