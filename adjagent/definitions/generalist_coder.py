@@ -13,7 +13,8 @@ DEFINITIONS = (
             "parallel instances — stays strictly within assigned scope, declares file boundaries upfront, and stops "
             "when the task is done. Use when no language-specific or platform-specific agent matches the task. "
             "Prefer c-coder for C, cpp-coder for C++, go-coder for Go, lua-coder for Lua, python-coder for Python, "
-            "rust-coder for Rust, shell-dsl-coder for shell and build DSLs, and the relevant platform expert for "
+            "rust-coder for Rust, typescript-coder for TypeScript and JavaScript outside the browser, "
+            "shell-dsl-coder for shell and build DSLs, and the relevant platform expert for "
             "Android, iOS, Linux, macOS, web, or Windows targets."
         ),
         tools=ALL,

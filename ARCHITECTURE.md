@@ -214,10 +214,10 @@ Every entry below is rendered from the definition module under `adjagent/definit
 output path, or for its set (Composition Model). A shared-text name given here is a constant or
 function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
 
-- **Coder family** — generalist-coder, language coders (c, cpp, go, python, rust), shell-dsl-coder,
-  platform experts (android/ios/linux/macos/web/windows-app-expert, linux-kernel-driver-expert),
-  architect, and — sharing the coding-review domain — security-reviewer and tech-writer, which is
-  both the author and the review seat for technical documentation.
+- **Coder family** — generalist-coder, language coders (c, cpp, go, lua, python, rust, typescript),
+  shell-dsl-coder, platform experts (android/ios/linux/macos/web/windows-app-expert,
+  linux-kernel-driver-expert), architect, and — sharing the coding-review domain — security-reviewer
+  and tech-writer, which is both the author and the review seat for technical documentation.
 - **MAD set + `agents/mad/`** — mad-review-referee, mad-design-referee, mad-alignment-assessor, the
   four model-pinned participants (mad-participant-fable/opus/sonnet/haiku), and mad-guest-liaison
   sit directly under `agents/` as dispatchable definitions. What the set reads rather than

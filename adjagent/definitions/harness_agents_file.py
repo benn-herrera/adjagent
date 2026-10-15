@@ -33,6 +33,8 @@ improvise a location.
   looked, and not where one side is something you brought in yourself: an oracle, standard or method
   you chose serves the stated requirements and yields to them.
 - When the record settles it, act on what you found and say what settled it.
+- A reviewer's severity does not scope a fix pass: a finding that cites a written rule is in scope
+  whatever the label. Only a finding that needs a choice nothing written settles escalates.
 
 **PRINCIPLE**: maximal main session availability to the user is critical: fluid conversation leads
 to right answers for tricky problems.

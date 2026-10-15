@@ -116,6 +116,7 @@ Authoring a Family.
   * python-coder.md
   * rust-coder.md
   * shell-dsl-coder.md
+  * typescript-coder.md
 * platform-specific coders
   * android-app-expert.md
   * ios-app-expert.md

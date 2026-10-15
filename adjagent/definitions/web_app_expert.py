@@ -10,7 +10,8 @@ DEFINITIONS = (
         description=(
             "Web app development: JS/TS, HTML/CSS, WebSockets, Web Workers, WASM integration, cross-browser "
             "compatibility, mobile web, storage strategies, input events, and browser API expertise. Prefer over "
-            "generalist-coder for any web or browser target."
+            "generalist-coder for any web or browser target. Prefer typescript-coder for TypeScript or JavaScript "
+            "whose target is not a browser."
         ),
         tools=ALL,
         tier="high",

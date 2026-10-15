@@ -60,11 +60,6 @@ not here.
     change.** A superseding plan first absorbs every section, decision and piece of evidence it
     still relies on, stated as its own, and cites nothing in the plan it replaces; then the old plan
     is deleted. A plan still on disk reads as work waiting to be done.
-- **`.md` files wrap at 100 columns** — the project documents (`THESIS.md`, `SPEC.md`,
-  `ARCHITECTURE.md`, `CONVENTIONS.md`, `ROADMAP.md`, READMEs), the planning documents
-  (`ACTIVE_PLAN.md`, everything in `ROADMAP_PLANS/`), and every shipped template (`.tmpl.md`).
-  Prose and list items break at 100, list continuations indented under their bullet. Headings,
-  table rows and URLs that cannot break stay whole.
 
 ## Adding Definitions
 
