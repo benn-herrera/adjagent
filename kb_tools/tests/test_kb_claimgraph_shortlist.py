@@ -26,20 +26,6 @@ def test_every_source_ranks_every_other_node_by_what_their_statements_share():
     }
 
 
-def test_the_shortlist_is_the_first_k_of_the_ranking():
-    assert shortlist.top_k(ranked(PAPER), k=2) == {
-        "clm-a": ["clm-c", "clm-b"],
-        "clm-b": ["clm-d", "clm-e"],
-        "clm-c": ["clm-a", "clm-b"],
-        "clm-d": ["clm-b", "clm-e"],
-        "clm-e": ["clm-b", "clm-d"],
-    }
-
-
-def test_a_k_larger_than_the_pool_takes_the_whole_pool():
-    assert shortlist.top_k(ranked(PAPER), k=50)["clm-a"] == ["clm-c", "clm-b", "clm-d", "clm-e"]
-
-
 def test_equal_similarity_goes_to_the_lower_target_id():
     statements = {"clm-s": "monotone escape", "clm-y": "monotone escape", "clm-x": "monotone escape"}
     assert ranked(statements)["clm-s"] == ["clm-x", "clm-y"]

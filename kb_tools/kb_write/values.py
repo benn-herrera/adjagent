@@ -659,13 +659,13 @@ def check_path(value: object, field: str) -> str:
     return text
 
 
-def _one_of(vocabulary: tuple[str, ...], *, what: str) -> Callable[[object, str], str]:
-    """A checker for a string drawn from a closed ``vocabulary``."""
+def _one_of(vocabulary: tuple[str, ...], *, what: str, note: str = "") -> Callable[[object, str], str]:
+    """A checker for a string drawn from a closed ``vocabulary``; ``note`` ends the refusal's detail."""
 
     def check(value: object, field: str) -> str:
         text = _require_str(value, field)
         if text not in vocabulary:
-            raise _Refused(field, f"{text!r} is outside the closed {what} vocabulary {vocabulary}")
+            raise _Refused(field, f"{text!r} is outside the closed {what} vocabulary {vocabulary}{note}")
         return text
 
     return check
@@ -681,6 +681,13 @@ check_origin = _one_of(kb_schema.DEMOTED_ORIGINS, what="origin")
 #: What ``resolve-demoted`` does with a cut edge: delete it, or restore it to ``depends-on``.
 RESOLVE_ACTIONS: tuple[str, ...] = ("remove", "restore")
 check_resolve_action = _one_of(RESOLVE_ACTIONS, what="action")
+
+#: The outgoing lists ``drop-claim-edges`` empties. ``demoted`` is not one:
+#: a cut is ``resolve-demoted``'s to remove.
+DROP_EDGE_CLASSES: tuple[str, ...] = ("depends-on", "references")
+check_edge_class = _one_of(
+    DROP_EDGE_CLASSES, what="edge-class", note="; demoted rows are resolve-demoted's to remove, not drop-claim-edges'"
+)
 
 
 def _id_checker(*kinds: str) -> Callable[[object, str], str]:
@@ -1127,6 +1134,22 @@ OP_FIELDS: Mapping[str, tuple[Field, ...]] = {
         Field("target", check_claim_id, required=True),
         Field("action", check_resolve_action, required=True),
     ),
+    # Absent `edge-class` empties both lists.
+    "drop-claim-edges": (
+        Field("id", check_claim_id, required=True),
+        Field("edge-class", check_edge_class),
+    ),
+    # `id` is the claim the dropped bullets name, not the entries carrying them.
+    "drop-inbound-edges": (Field("id", check_claim_id, required=True),),
+    # The build's ring cut, bound by no surface: `origin` is the build's
+    # computation for the pair, never a seat's.
+    "demote-claim-edge": (
+        Field("id", check_claim_id, required=True),
+        Field("target", check_claim_id, required=True),
+        Field("origin", check_origin, required=True),
+        Field("context", check_prose),
+    ),
+    "drop-claim-node": (Field("id", check_claim_id, required=True),),
     "set-frontmatter": (
         Field("document", check_path, required=True),
         Field("kind", check_kind, required=True),

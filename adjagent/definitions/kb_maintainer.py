@@ -153,6 +153,19 @@ When a migration or edit adds/changes a node:
 - **A `demoted` edge is settled with `resolve-demoted`**; only the build writes one. `remove`
   deletes the edge; `restore` rewrites it as a `depends-on` edge, and is refused, naming the
   cycle's path, where that would close a cycle.
+- **Edges come off a whole class at a time.** `drop-claim-edges` removes a claim's outgoing
+  `depends-on` or `references` bullets — the class you name, or both where you name none — and
+  `drop-inbound-edges` removes every bullet, in any entry, that names the claim. To cut one wrong
+  edge, drop its class and re-add that class's standing edges with `add-depends-on`. `demoted`
+  edges are not theirs to touch.
+- **A claim that should not exist** — a duplicate of one already in the graph, or one a correction
+  withdraws — comes out in order: a leaf whose only claim it is gets restated no-claim through
+  `set-frontmatter`, then `drop-claim-edges`, `drop-inbound-edges`, and `drop-claim-node`, which
+  deletes the entry, its marker and its id in every leaf. That last op refuses, writing nothing,
+  while any edge still names the node, where it would empty a leaf's `claims`, and while any line
+  under `kb-root/` still names it — each named as `path:line`, prose for you to edit by hand before
+  calling again. The inbound edges you drop were dependents' warrants: re-point each one that still
+  holds onto the claim that replaces it, or the dependent is left resting on nothing.
 - **`strengthens` / `supports`** edges (from `exp-`/`sup-` nodes) respect the `exp-`
   design/originate/control gate (re-analyses of outside data are `sup-`/`clm-`, never `exp-`).
 

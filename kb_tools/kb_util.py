@@ -333,6 +333,9 @@ OP_SET_FRONTMATTER = "set-frontmatter"
 OP_MARK_CLAIM_IN_LEAF = "mark-claim-in-leaf"
 OP_SET_ON_POINT_FRACTION = "set-on-point-fraction"
 OP_RESOLVE_DEMOTED = "resolve-demoted"
+OP_DROP_CLAIM_EDGES = "drop-claim-edges"
+OP_DROP_INBOUND_EDGES = "drop-inbound-edges"
+OP_DROP_CLAIM_NODE = "drop-claim-node"
 
 #: The write ops, in the order they are declared in and the order a renderer
 #: iterating the write surface meets them.
@@ -350,6 +353,9 @@ WRITE_OPS: tuple[str, ...] = (
     OP_MARK_CLAIM_IN_LEAF,
     OP_SET_ON_POINT_FRACTION,
     OP_RESOLVE_DEMOTED,
+    OP_DROP_CLAIM_EDGES,
+    OP_DROP_INBOUND_EDGES,
+    OP_DROP_CLAIM_NODE,
 )
 
 # The metadata surface's one read-only op. Kept out
@@ -1878,6 +1884,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_values_option(resolve_demoted)
     resolve_demoted.set_defaults(handler=_handle_write_op)
+
+    drop_claim_edges_help = _write_op_help(
+        "remove a claim's outgoing depends-on or references bullets, or both when no edge-class is "
+        "named, each with its continuation lines; demoted rows are resolve-demoted's to remove, and an "
+        "entry already without them is left untouched."
+    )
+    drop_claim_edges = add_parser(
+        OP_DROP_CLAIM_EDGES,
+        help=drop_claim_edges_help,
+        description=_described(drop_claim_edges_help, OP_DROP_CLAIM_EDGES),
+    )
+    _add_values_option(drop_claim_edges)
+    drop_claim_edges.set_defaults(handler=_handle_write_op)
+
+    drop_inbound_edges_help = _write_op_help(
+        "remove every register entry's depends-on and references bullets naming one claim, each with "
+        "its continuation lines; an entry naming no such bullet is left untouched."
+    )
+    drop_inbound_edges = add_parser(
+        OP_DROP_INBOUND_EDGES,
+        help=drop_inbound_edges_help,
+        description=_described(drop_inbound_edges_help, OP_DROP_INBOUND_EDGES),
+    )
+    _add_values_option(drop_inbound_edges)
+    drop_inbound_edges.set_defaults(handler=_handle_write_op)
+
+    drop_claim_node_help = _write_op_help(
+        "delete a claim node whole — its register entry, its marker and claims entry in every leaf, and "
+        "other entries' demoted rows naming it; refused while any edge or other line still names it, or "
+        "where a leaf's claims list would empty, which is set-frontmatter's no-claim decision."
+    )
+    drop_claim_node = add_parser(
+        OP_DROP_CLAIM_NODE,
+        help=drop_claim_node_help,
+        description=_described(drop_claim_node_help, OP_DROP_CLAIM_NODE),
+    )
+    _add_values_option(drop_claim_node)
+    drop_claim_node.set_defaults(handler=_handle_write_op)
 
     # The metadata surface's one read-only op. It takes --values like the write ops
     # — an excerpt is prose, and prose travels in a file — and its help line

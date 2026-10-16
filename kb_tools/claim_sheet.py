@@ -2,7 +2,7 @@
 
 :func:`load` reads the index through :func:`kb_cmd.index.load` — nothing else of
 it — plus the H1s of ``entry-point.md`` and each volume's ``index.md``, and the
-unmarked build record beside ``kb-root/`` for each ``depends`` edge's
+unmarked and cull build records beside ``kb-root/`` for each ``depends`` edge's
 provenance.
 :func:`compose_sheet`, :func:`compose_digest` and :func:`compose_volume_sheet`
 turn that into DOT text and touch neither the disk nor a binary, so composition
@@ -395,20 +395,17 @@ def _claim_kinds(kb_root: Path, index: kb_index.Index) -> tuple[dict[str, str], 
 
 
 def load(kb_root: Path) -> SheetInput:
-    """Read the sheets' input: ``kb_root``'s ``.index/``, the H1s that title it, the unmarked record beside it.
+    """Read the sheets' input: ``kb_root``'s ``.index/``, the H1s, the unmarked and cull records beside it.
 
-    A ``depends`` edge whose pair the unmarked record answered "points" is
-    inferred, every other one cited, and every one cited where the record is
-    absent. A ``demoted`` row is drawn as a cut under its own origin, cited
-    where the row carries no ``inferred`` one. No ``references`` row is drawn.
-    A record that does not read raises its own ``kb_pipeline`` error.
+    A ``depends`` edge the build found with no mark (``kb_pipeline.inferred_links``)
+    is inferred, every other one cited. A ``demoted`` row is drawn as a cut under
+    its own origin, cited where the row carries no ``inferred`` one. No
+    ``references`` row is drawn. A record that does not read raises its own
+    ``kb_pipeline`` error.
     """
     index = kb_index.load(kb_root / kb_util.INDEX_DIRNAME)
-    unmarked = kb_pipeline.read_unmarked(kb_root.parent)
-    inferred = (
-        {pair for pair, entry in unmarked.pairs.items() if entry.letter == kb_pipeline.UNMARKED_POINTS_LETTER}
-        if unmarked
-        else set()
+    is_inferred = kb_pipeline.inferred_links(
+        kb_pipeline.read_unmarked(kb_root.parent), kb_pipeline.read_cull(kb_root.parent)
     )
 
     claim_kinds, fallbacks = _claim_kinds(kb_root, index)
@@ -433,7 +430,7 @@ def load(kb_root: Path) -> SheetInput:
     ):
         provenance = None
         if relation == "depends":
-            provenance = INFERRED if (source, target) in inferred else CITED
+            provenance = INFERRED if is_inferred(source, target) else CITED
         elif relation == "demoted":
             provenance = INFERRED if origin == INFERRED else CITED
         edges.append(SheetEdge(source, target, relation, provenance))
@@ -1007,7 +1004,7 @@ def render(kb_root: Path) -> Outcome:
     """
     try:
         sheet = load(kb_root)
-    except kb_pipeline.UnmarkedRecordError as unreadable:
+    except (kb_pipeline.UnmarkedRecordError, kb_pipeline.CullRecordError) as unreadable:
         return Outcome(failed=True, lines=(f"FAIL: [refresh-sheet] {unreadable}",))
     except kb_load.FormatRefusal as refused:
         return Outcome(

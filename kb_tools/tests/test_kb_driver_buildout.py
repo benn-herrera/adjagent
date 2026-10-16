@@ -616,6 +616,49 @@ def test_a_run_that_will_call_no_model_needs_no_server(
     assert fake.recorded[-1] == stages[-1]
 
 
+def test_a_letter_ask_row_left_to_walk_refuses_an_environment_naming_no_decision_model(
+    repo: Path, tmp_path: Path, templates: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    distilled(repo)
+    monkeypatch.delenv(liaison_tools.DECISION_MODEL_ENV)
+    fake = FakeLedger(recorded=RECORDED_THROUGH_3A_PREDECESSOR)
+    script = overview_script()
+
+    result = drive(
+        repo_root=repo,
+        tmp_path=tmp_path,
+        templates=templates,
+        script=script,
+        fake=fake,
+        stages=("depends-attributed", "phase-3a", *META_STAGES),
+    )
+
+    assert result.exit_code == baton.EXIT_ENVIRONMENT
+    assert liaison_tools.DECISION_MODEL_ENV in result.detail[0]
+    assert fake.gate_steps == [] and script.calls == []
+    assert fake.recorded == list(RECORDED_THROUGH_3A_PREDECESSOR)
+
+
+def test_a_walk_whose_one_model_call_is_the_overview_needs_no_decision_model(
+    repo: Path, tmp_path: Path, templates: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    distilled(repo)
+    monkeypatch.delenv(liaison_tools.DECISION_MODEL_ENV)
+    fake = FakeLedger(recorded=RECORDED_THROUGH_3A_PREDECESSOR)
+
+    result = drive(
+        repo_root=repo,
+        tmp_path=tmp_path,
+        templates=templates,
+        script=overview_script(),
+        fake=fake,
+        stages=("phase-3a", *META_STAGES),
+    )
+
+    assert result.exit_code == baton.EXIT_OK, result.detail
+    assert fake.recorded[-1] == META_STAGES[-1]
+
+
 # ---------------------------------------------------------------------------
 # What a resume re-spends: the boundary is the whole of the answer
 #

@@ -100,6 +100,7 @@ transient failure of that query is not retried.
   environment variable. `read_api_key` reads it from a key file by the rule API Key Handling
   states, returning nothing for a missing file or an invalid key. The transport rules above hold for every request it makes: no redirect is followed,
   and `validate_base_url` is the https-or-loopback check, its http opt-in the caller's argument.
+  `OPENER` is the opener that refuses redirects, for a caller's own request to hold the same rule.
 - **The reply's reading is shared with the command.** `reassemble_stream` gives the stdout
   contract's text, `reassemble_content` the content text alone whatever tool call rode beside it,
   and `classify_reply` complete, incomplete or empty by the same `finish_reason` rule as exits 0, 3

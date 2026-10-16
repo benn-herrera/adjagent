@@ -6,7 +6,8 @@ Nothing here spells a heading, a marker, a bullet or a frontmatter key. That is
 what makes it safe for a later wave to hand a model a *title* and never a
 heading.
 
-**Five passes, and the order is forced by the ops' own preconditions.**
+**The declared pass lands in five passes, and the order is forced by the ops'
+own preconditions.**
 
 1. ``insert-claim-entry``, every entry edge-free — a batch cannot name one of
    its own members as a target, because ids are minted by the write itself.
@@ -19,12 +20,20 @@ heading.
    not there.
 3. ``add-build-edges``, one batch carrying every edge — :func:`write_edges`.
    Every target exists by now, so no ordering among edges is needed and none is
-   imposed. It lands twice over a build's three invocations: the declared pass's
-   off-graph edges here, and the discovered pass's dependency attribution
-   between claims from there.
+   imposed. It lands twice in a build: the declared pass's off-graph edges
+   here, and dependency attribution between claims from ``depends-attributed``.
 4. ``mark-claim-in-leaf``, one entry per id on each document declaring two or
    more. Must follow pass 2: the op refuses a marker whose id is not in the
    document's own declaration.
+
+**Three writers follow the declared pass.** :func:`land_leaf` adds claims to one
+leaf per call, for the node pass and the equations stage. :func:`issue_culls`
+removes the claims the co-linearity cull culls: a leaf left hosting none is
+restated no-claim through ``set-frontmatter``, then ``drop-claim-edges``,
+``drop-inbound-edges`` and ``drop-claim-node``, in the order the last op's
+refusals force. :func:`demote_cycles` is dependency attribution's one cut, after
+its edges are written: every ``depends`` edge on a cycle, through
+``demote-claim-edge``.
 
 **The values file is the one thing this module composes, and it is proven.** The
 transport is TOML, which is a format with a parser, so a hand-composed file is a
@@ -44,15 +53,14 @@ id gets written.
 
 import re
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from types import MappingProxyType
 
 from .. import kb_index_lib, kb_schema
 from ..kb_write import ops, render
-from . import endcap
+from . import attribute, endcap
 from .assemble import WORKS_REGISTER, Plan, register_for, register_title
 from .report import FACT, PASS, ClaimGraphError, Finding
 
@@ -302,15 +310,21 @@ def prose_rationale(document: str) -> str:
 _CARRIED_FRONTMATTER: tuple[str, ...] = ("path-stable", "experiments")
 
 
-def _frontmatter(text: str, *, document: str, kind: str, claims: Sequence[str]) -> dict:
-    """One ``set-frontmatter`` entry: the claims this writer owns, and every carried attribute as it stands."""
+def _frontmatter(
+    text: str, *, document: str, kind: str, claims: Sequence[str] = (), no_claim: str | None = None
+) -> dict:
+    """One ``set-frontmatter`` entry: the declaration this writer owns — ``claims``, or ``no_claim`` where it is
+    given — and every carried attribute as it stands."""
     fields = kb_index_lib.parse_frontmatter(text) or {}
     entry: dict[str, object] = {"document": document, "kind": kind}
     for key in _CARRIED_FRONTMATTER:
         value = fields.get(key)
         if value:
             entry[key] = Prose(value) if isinstance(value, str) else tuple(value)
-    entry["claims"] = tuple(claims)
+    if no_claim is None:
+        entry["claims"] = tuple(claims)
+    else:
+        entry["no-claim"] = Prose(no_claim)
     return entry
 
 
@@ -419,22 +433,20 @@ def write_edges(
     scratch: Path,
     name: str = "pass-3-add-depends-on",
     references: Sequence[tuple[str, str]] = (),
-    demoted: Mapping[tuple[str, str], str] = MappingProxyType({}),
 ) -> list[Finding]:
     """Pass 3 — every authored edge in one batch, through ``add-build-edges``.
 
     One values entry per *source*, because the op's transport is keyed that way:
     the entry being written is the source, and its lists name the referents it
     consumes and the ones it merely names. Every target already exists, so no
-    ordering among the edges is needed and none is imposed.
+    ordering among the edges is needed and none is imposed. The edges may close
+    cycles; :func:`demote_cycles` cuts them after.
 
-    ``references`` are the cross-references the narrowing could not direct
-    (:mod:`attribute`). A reference ``demoted`` names is a ``depends`` edge the
-    cycle breaking cut (:func:`classify.cuts`), and lands in the ``demoted``
-    list with its origin instead. All three ride the same op and the same batch
-    because they are the same entry's outgoing edges written into the same
-    register entry; splitting them would put one claim's edges in several
-    all-or-nothing batches, so a refusal in one would leave the others landed.
+    ``references`` are the pairs classified *mention* (:mod:`classify`). Both
+    ride the same op and the same batch because they are the same entry's
+    outgoing edges written into the same register entry; splitting them would
+    put one claim's edges in several all-or-nothing batches, so a refusal in one
+    would leave the others landed.
 
     **A work target's applicability is not supplied and that is the value.** The
     op renders the pending literal for a ``depends-on`` table carrying no
@@ -454,34 +466,105 @@ def write_edges(
     for source, target in edges:
         depends_by_source.setdefault(source, []).append(target)
     references_by_source: dict[str, list[str]] = {}
-    demoted_by_source: dict[str, list[tuple[str, str]]] = {}
     for source, target in references:
-        if (source, target) in demoted:
-            demoted_by_source.setdefault(source, []).append((target, demoted[(source, target)]))
-        else:
-            references_by_source.setdefault(source, []).append(target)
+        references_by_source.setdefault(source, []).append(target)
 
     batch: list[Mapping[str, object]] = []
-    for source in sorted({*depends_by_source, *references_by_source, *demoted_by_source}):
+    for source in sorted({*depends_by_source, *references_by_source}):
         entry: dict[str, object] = {"id": source}
         if source in depends_by_source:
             entry["depends-on"] = tuple({"id": target} for target in depends_by_source[source])
         if source in references_by_source:
             entry["references"] = tuple({"id": target} for target in references_by_source[source])
-        if source in demoted_by_source:
-            entry["demoted"] = tuple({"id": target, "origin": origin} for target, origin in demoted_by_source[source])
         batch.append(entry)
     path = _values_path(scratch, name.removeprefix("pass-"))
     path.write_text(_compose(batch), encoding="utf-8")
     _landed(_call(ops.add_build_edges, kb_root=kb_root, values_file=path), "pass-3")
-    cut = sum(len(targets) for targets in demoted_by_source.values())
     return [
         Finding(
             PASS,
             name,
             f"{len(edges)} dependency edges across {len(depends_by_source)} claims, "
-            f"{len(references) - cut} references across {len(references_by_source)} claims, "
-            f"{cut} demoted across {len(demoted_by_source)} claims",
+            f"{len(references)} references across {len(references_by_source)} claims",
+        )
+    ]
+
+
+def demote_cycles(*, inferred: Callable[[str, str], bool], kb_root: Path, scratch: Path) -> list[Finding]:
+    """Every ``depends`` edge between claims lying on a cycle of the registers as they stand, demoted through
+    ``demote-claim-edge`` in one batch.
+
+    Each cut's origin is ``inferred`` where ``inferred`` holds for it (:func:`kb_pipeline.inferred_links`),
+    ``cited`` otherwise. The finding names every cut.
+    """
+    state = kb_index_lib.discover_kb(kb_root, diagnostic_stream=None)
+    edges = [
+        (entry.id, edge.target)
+        for entry in state.claim_entries
+        for edge in entry.depends_on
+        if edge.relation == "depends" and edge.target_kind == "claim"
+    ]
+    cut = attribute.cycle_edges(edges)
+    if not cut:
+        return [Finding(PASS, "stage-D-ring", "no depends edge lay on a cycle, so none was demoted")]
+    cited, inferred_origin = kb_schema.DEMOTED_ORIGINS
+    origins = {(source, target): inferred_origin if inferred(source, target) else cited for source, target in cut}
+    path = _values_path(scratch, "ring-demote-claim-edge")
+    path.write_text(
+        _compose([{"id": source, "target": target, "origin": origin} for (source, target), origin in origins.items()]),
+        encoding="utf-8",
+    )
+    _landed(_call(ops.demote_claim_edge, kb_root=kb_root, values_file=path), "stage-D-ring")
+    return [
+        Finding(
+            PASS,
+            "stage-D-ring",
+            f"{len(cut)} depends edges lay on a cycle and are demoted: "
+            + ", ".join(f"{source} -> {target} (origin {origin})" for (source, target), origin in origins.items()),
+        )
+    ]
+
+
+#: A culled claim's removal, in the order the ops' refusals force: ``drop-claim-node`` refuses a node any
+#: edge still names.
+_CULL_OPS = (
+    ("drop-claim-edges", ops.drop_claim_edges),
+    ("drop-inbound-edges", ops.drop_inbound_edges),
+    ("drop-claim-node", ops.drop_claim_node),
+)
+
+
+def issue_culls(culls: Sequence[str], *, reason: str, kb_root: Path, scratch: Path) -> list[Finding]:
+    """Remove each claim of ``culls``, in order, through ``drop-claim-edges``, ``drop-inbound-edges`` and
+    ``drop-claim-node``.
+
+    ``drop-claim-node`` refuses to empty a leaf's ``claims`` list, that being a no-claim decision, so each leaf
+    whose ``claims`` hold the culled claim alone — read fresh for each claim, an earlier cull having shortened
+    the list — is first restated no-claim with ``reason`` through ``set-frontmatter``. A refusal stops the issue.
+    """
+    restated = 0
+    for node_id in culls:
+        for document, text in kb_index_lib.document_texts(kb_root).items():
+            fields = kb_index_lib.parse_frontmatter(text) or {}
+            if list(fields.get("claims") or ()) != [node_id]:
+                continue
+            path = _values_path(scratch, f"cull-{node_id}-0-set-frontmatter-{document.replace('/', '_')}")
+            path.write_text(
+                _compose([_frontmatter(text, document=document, kind=fields["kind"], no_claim=reason)]),
+                encoding="utf-8",
+            )
+            _landed(_call(ops.set_frontmatter, kb_root=kb_root, values_file=path), f"cull-{node_id}-frontmatter")
+            restated += 1
+        for step, (name, op) in enumerate(_CULL_OPS, start=1):
+            path = _values_path(scratch, f"cull-{node_id}-{step}-{name}")
+            path.write_text(_compose([{"id": node_id}]), encoding="utf-8")
+            _landed(_call(op, kb_root=kb_root, values_file=path), f"cull-{node_id}-{name}")
+    return [
+        Finding(
+            PASS,
+            "cull-issue",
+            f"{len(culls)} claims removed through {', '.join(name for name, _ in _CULL_OPS)}; "
+            f"{restated} leaves restated no-claim",
         )
     ]
 

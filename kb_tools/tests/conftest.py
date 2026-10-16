@@ -98,5 +98,6 @@ def no_reader_server(monkeypatch: pytest.MonkeyPatch) -> None:
         liaison_tools.MODEL_ENV,
         liaison_tools.KEY_FILE_ENV,
         liaison_tools.ALLOW_HTTP_ENV,
+        liaison_tools.DECISION_MODEL_ENV,
     ):
         monkeypatch.delenv(variable, raising=False)

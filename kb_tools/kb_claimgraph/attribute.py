@@ -1,11 +1,12 @@
 """Stage D's narrowing: every edge candidate, classed and drafted. Mechanical throughout.
 
 **The candidate set is narrowed mechanically, and a model adds to it only by
-judging a pair a mechanical shortlist proposed** (:mod:`unmarked`).
+judging a pair a mechanical shortlist proposed** (:mod:`unmarked`); claims
+consecutive in one leaf join it by rule (:func:`order.adjacent_links`).
 What this module returns is one :class:`Candidate` per ordered pair, whatever
 harvested it — a cross-reference anchor, a hand-written name
-(:mod:`hand_named`), or a pair the unmarked-reference ask answered yes
-(:mod:`unmarked`) — carrying the relations its class may be offered and the
+(:mod:`hand_named`), or a link of the cull record no marked pair joins
+(:func:`orient_links`) — carrying the relations its class may be offered and the
 draft a build with no reader writes. :mod:`classify` asks about each one.
 Over stage B's cross-reference anchors, each end of a reference is attributed to
 a claim where a rule settles it, and left open where none does:
@@ -46,8 +47,8 @@ a final assertion; the alternative to a rule that sometimes misfires is not a
 correct rule but no rule and no result, and a claim recorded as depending on
 nothing is itself a wrong answer, arrived at silently and prompting nobody to
 revisit it. What stays unacceptable is being provably wrong inside a mechanical
-constraint — an edge naming an id that does not exist, or one closing a cycle —
-and both of those are checked below, before anything is written. The rulings
+constraint — an edge naming an id that does not exist, or one left closing a
+cycle — and both of those are checked before the stage's gate. The rulings
 each narrowing replaced are kept beside it, because the question was reconsidered
 rather than overlooked.
 
@@ -274,10 +275,13 @@ classified as a dependency is written as one and not also as a reference
 **Point 6 is satisfied by the check and not by abstention.** SPEC.md warns that
 a consumer taking cross-references as dependency edges would import the author's
 own cycles into a graph that must stay acyclic. That is a reason to check, and
-the check runs here over the drafts before any question is asked and in
-:mod:`classify` over the classified set before anything is written.
+the check runs once, after the stage has written every edge its answers make:
+every ``depends`` edge on a cycle of the written graph is demoted
+(:func:`write.demote_cycles`) before the stage's refresh and verify. Nothing
+cuts earlier, so a ring among containment's drafts is drafted and asked like any
+other pair.
 
-**A ring among the settled edges costs its own edges and not the build.** The
+**A ring costs its own edges and not the build.** The
 cycle proves that the edges on it cannot all be dependencies. It does not prove
 that the corpus reasons circularly — four results whose proofs cite one another
 are far more likely to be a single argument carried across several statements,
@@ -286,7 +290,7 @@ containment reads as direction-bearing and which is not a dependency — and it
 proves nothing whatever about the paper's other edges, so stopping the stage
 discards a whole graph over one ring and leaves every claim in the paper
 recorded as resting on nothing. Each edge on a ring is therefore cut
-(:func:`cycle_edges`) and the rest of the settled edges stand; a cut is recorded
+(:func:`cycle_edges`) and the rest stand; a cut is recorded
 as a ``demoted`` edge, which keeps the relationship, marks it as a dependency
 the build cut, and gates nothing. Measured over a 50-paper arXiv sweep with no model reachable, three
 papers carried such a ring — two 4-cycles and a 2-cycle — and each took its
@@ -304,12 +308,11 @@ dropped. This is what separates the ruling from the three the corpus reversed
 above: those traded a fact for silence, and this trades a direction for a
 weaker, true statement.
 
-**A demoted pair is drafted *mention*, and classified like any other.** What the
-ring refuses is the *set* of directions containment read, not any one reading,
-so the draft gives up only the direction; the question of what each pair is
-stays open and is asked. A pair that keeps its draft — no reader, or no offered
-letter after the re-ask — lands as ``demoted`` (:func:`classify.cuts`); one a
-model answered writes what the answer says.
+**An inferred link is a candidate where no marked pair joins its claims.** The
+cull record's links carry no direction (:mod:`cull`), so :func:`orient_links`
+gives each one: from its later claim in reading order to its earlier, an
+equation node always the target. A link whose two claims a reference or a
+hand-written name already reached, either way round, is left to that harvest.
 
 **The class is a fact about the pair, never about its harvest.** A provenance
 whose source end proof containment settled offers *supported by* and *mention*:
@@ -337,7 +340,7 @@ from types import MappingProxyType
 
 from .. import kb_pipeline
 from ..kb_write import render
-from . import equation_sites, hand_named, prose
+from . import equation_sites, hand_named, label, order, prose
 from .graph import AuthoredGraph, ClaimNode
 from .inventory import (
     NOT_A_CLAIM_TARGET,
@@ -387,11 +390,16 @@ class Relation(StrEnum):
 
 
 class Harvest(StrEnum):
-    """What found a candidate. Counted on the report, and read by nothing else."""
+    """What found a candidate. Counted on the report, and read by nothing else.
+
+    The last three are an inferred link's, as the cull record names them (:class:`kb_pipeline.LinkHarvest`).
+    """
 
     REFERENCE = "reference"
     HAND_NAMED = "hand-named"
     UNMARKED = "unmarked"
+    ADJACENT = "adjacent"
+    CULLED = "culled"
 
 
 class CandidateClass(StrEnum):
@@ -432,8 +440,8 @@ class Candidate:
     """One ordered pair, whatever harvested it: the source's text names the target.
 
     ``offered`` is in :class:`Relation`'s order. ``passages`` are the pair's
-    own — the paragraph of each anchor or mention that produced it
-    (:func:`_reference_line`), sorted and deduplicated.
+    own — the paragraph of each anchor or mention that produced it, within the
+    body (:func:`_reference_line`), sorted and deduplicated.
     """
 
     source: ClaimNode
@@ -719,6 +727,8 @@ def _reference_line(tree: Tree, document: str, line: int) -> str:
 
     ``line`` is 0-based in the document's marker-stripped, unquoted numbering:
     an anchor's own line, or a hand-written mention's (:class:`hand_named.HandNamed`).
+    The passage never reaches above the body's first line (:func:`label.body_start`,
+    below the frontmatter and the up-link line), and a reference above it has none.
 
     **A paragraph rather than a physical line, because the wrap is pandoc's.**
     The built markdown is hard-wrapped near 72 columns, so a physical line is a
@@ -759,11 +769,13 @@ def _reference_line(tree: Tree, document: str, line: int) -> str:
     where the blank line separating two quoted paragraphs is written ``>``: read
     quoted, that line is not blank and the run swallows the whole quote.
     """
-    lines = unquote(strip_markers(tree.documents[document].text)).splitlines()
-    if line >= len(lines):
+    page = unquote(strip_markers(tree.documents[document].text))
+    lines = page.splitlines()
+    first = label.body_start(page)
+    if line < first or line >= len(lines):
         return ""
     start = line
-    while start > 0 and lines[start - 1].strip():
+    while start > first and lines[start - 1].strip():
         start -= 1
     end = line + 1
     while end < len(lines) and lines[end].strip():
@@ -798,6 +810,20 @@ def cycle_edges(edges: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]
     return tuple(sorted({(source, target) for source, target in edges if source in onward[target]}))
 
 
+def orient_links(
+    links: Iterable[kb_pipeline.CullLink], graph: AuthoredGraph, positions: Mapping[str, order.Position]
+) -> tuple[tuple[tuple[str, str], Harvest], ...]:
+    """Each link as an ordered pair with its harvest: from its later claim in reading order to its earlier, a tie
+    by id, except that an equation node is always the target."""
+    oriented = []
+    for link in links:
+        target, source = order.shown_order((link.a, link.b), positions)
+        if graph.nodes[source].equation is not None and graph.nodes[target].equation is None:
+            source, target = target, source
+        oriented.append(((source, target), Harvest(link.harvest.value)))
+    return tuple(oriented)
+
+
 @dataclass(frozen=True)
 class Attribution:
     """What the narrowing produced: every candidate, classed and drafted.
@@ -808,12 +834,7 @@ class Attribution:
     ``routes`` counts the pairs drafted *supported by* by the target-end rule
     that resolved each, which is what the build's own log carries in place of a
     marker on the edge: an edge authored here is an ordinary ``depends`` edge and
-    nothing in the KB distinguishes it from one a person wrote. ``demoted`` is
-    out of it, those pairs being drafted *mention*.
-
-    ``demoted`` is the pairs containment settled that a ring took the direction
-    off — carried separately so the report can name them and
-    :func:`classify.cuts` can land those that keep their draft as ``demoted``.
+    nothing in the KB distinguishes it from one a person wrote.
 
     ``word_dropped`` is the pairs an anchor would have opened had the word
     before it not named a kind no premise relation can hold
@@ -830,7 +851,6 @@ class Attribution:
 
     candidates: tuple[Candidate, ...]
     routes: Mapping[str, int]
-    demoted: tuple[tuple[str, str], ...] = ()
     word_dropped: tuple[tuple[str, str], ...] = ()
     own_equations: tuple[tuple[str, str], ...] = ()
 
@@ -863,25 +883,27 @@ def narrow(
     graph: AuthoredGraph,
     inventory: Inventory,
     record: kb_pipeline.NodePassRecord | None = None,
-    unmarked: Iterable[tuple[str, str]] = (),
+    inferred: Iterable[tuple[tuple[str, str], Harvest]] = (),
 ) -> Attribution:
     """Every edge candidate the corpus states, classed and drafted.
 
     Deterministic and total: nothing is sampled and nothing is dropped
     silently. Three harvests: stage B's anchors, read end by end,
-    :func:`hand_named.harvest`, and ``unmarked``. A pair any of them reaches is
+    :func:`hand_named.harvest`, and ``inferred``. A pair any of them reaches is
     one candidate, unless it is a claim and one of its own equations
-    (:attr:`Attribution.own_equations`).
+    (:attr:`Attribution.own_equations`). A pair containment directed is drafted
+    *supported by*, every other *mention*.
 
     ``record`` is the node pass's, whose verdicts decide the source end of a
     reference in readable prose (:func:`_source_end`). ``None`` is a record
     judging nothing, every such reference unjudged.
 
-    ``unmarked`` is the ordered pairs the unmarked-reference ask answered yes
-    (:func:`unmarked.found`). Each is classed as an undirected provenance of
-    its pair, drafted *mention*, and its passage is the source claim's own
-    body (:func:`hand_named.bodies`) — a prose claim's paragraph, a block
-    claim's block — the yes having been about that claim's text.
+    ``inferred`` is the cull record's links as :func:`orient_links` directs
+    them. A link whose two claims the first two harvests reached either way
+    round is left to them; every other is classed as an undirected provenance
+    of its pair, and its passage is the source claim's own body
+    (:func:`hand_named.bodies`) — a prose claim's paragraph, a block claim's
+    block — the finding having been about that claim's text.
     """
     blocks = by_document(inventory.blocks)
     fences = by_document(inventory.fences)
@@ -972,32 +994,32 @@ def narrow(
             harvest=Harvest.HAND_NAMED,
         )
 
-    yeses = tuple(unmarked)
-    if yeses:
-        # The yes was about the source claim's own text, so that text is its
+    links = tuple(inferred)
+    if links:
+        marked = {order.link(*pair) for pair in reached}
+        # The finding was about the source claim's own text, so that text is its
         # passage. A claim no body reaches is shown to classification by its
         # title (`classify.statements`) and gets no passage here.
         own_text: dict[str, str] = {}
         for node, _, _, body in hand_named.bodies(tree, graph, inventory):
             own_text.setdefault(node.id, render.collapse_prose(body))
-        for source, target in yeses:
+        for (source, target), harvest in links:
+            if order.link(source, target) in marked:
+                continue
             offered = OFFERED[_class_of(directed=False, target=graph.nodes[target])]
-            reach((source, target), offered=offered, passage=own_text.get(source), harvest=Harvest.UNMARKED)
+            reach((source, target), offered=offered, passage=own_text.get(source), harvest=harvest)
 
     stated = equation_sites.own_equations(tree, graph, inventory).intersection(reached)
-    demoted = cycle_edges(sorted(settled))
-    on_ring = set(demoted)
     routes: dict[str, int] = {}
-    for pair, name in settled.items():
-        if pair not in on_ring:
-            routes[name] = routes.get(name, 0) + 1
+    for name in settled.values():
+        routes[name] = routes.get(name, 0) + 1
 
     candidates = tuple(
         Candidate(
             source=graph.nodes[pair[0]],
             target=graph.nodes[pair[1]],
             offered=tuple(relation for relation in Relation if relation in found.offered),
-            draft=Relation.SUPPORTED_BY if pair in settled and pair not in on_ring else Relation.MENTION,
+            draft=Relation.SUPPORTED_BY if pair in settled else Relation.MENTION,
             passages=tuple(sorted(found.passages)),
             harvests=frozenset(found.harvests),
         )
@@ -1007,7 +1029,6 @@ def narrow(
     return Attribution(
         candidates=candidates,
         routes=routes,
-        demoted=demoted,
         word_dropped=tuple(sorted(unopened - set(reached))),
         own_equations=tuple(sorted(stated)),
     )

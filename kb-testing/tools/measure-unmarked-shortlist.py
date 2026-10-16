@@ -8,7 +8,8 @@ a positional argument:
 
 Inputs:
   every kb-root handed     node counts by kind, sources, existing candidates, and the asks each K
-                           implies (per-source top-K, and all-pairs) — the ask arithmetic per corpus;
+                           of a ranking implies (per-source top-K, and all-pairs) — the ask
+                           arithmetic per corpus;
   the kb-root under ModernCorp/
                            the shortlist itself, ranked four ways (below);
   .claude-temp/pristine-compare/edges.tsv
@@ -20,19 +21,27 @@ What "reached" means here: some ordered pair (s, t) with s among a miss's ours_s
 its ours_targets is on s's shortlist. Reached is the ceiling C7 can deliver on that miss — not that
 a reader would answer yes, and not that the text carries the relationship.
 
-The shortlist, per source claim s (every node that is not a minted equation): every other node t of
-the build, less every pair whose unordered form is already an edge candidate (attribute.narrow over the
-node-pass record), ranked by cosine of TF-IDF vectors, ties to the lower target id. Four rankings:
+The ranking curves, per source claim s (every node that is not a minted equation): every other node t
+of the build, less the links the stage keeps out of every pool — every pair whose unordered form is
+already an edge candidate (attribute.narrow over the node-pass record) and every adjacency link
+(order.adjacent_links) — ranked by cosine of TF-IDF vectors, ties to the lower target id, and read
+at each K of KS. Four rankings:
   c9/statement        compare-to-pristine's tokens over each node's statement (classify.statements)
   c9/statement+leaf   source side adds its whole leaf; targets stay statements
   wm/statement        the production ranking, kb_tools.kb_claimgraph.shortlist.rank: words
-                      (kb_write.ops.canonical_form) plus maths symbols, statement only
-The stage's own shortlist (kb_tools.kb_claimgraph.unmarked.plan, at shortlist.K, whose pools also
-leave out each source's own equations, equation_sites.own_equations) is reported beside
-the wm/statement figure at that K the previous run's misses.tsv held, naming every miss whose reach
-moved — so a re-run after a change to the build or the toolchain says what the change moved.
+                      (kb_write.ops.canonical_form) plus maths symbols, statement only — what the
+                      stage's wildcard slots draw on
   wm/statement+leaf   shortlist's tokens and weighting, source side adds its leaf
 IDF is computed over the target statements only, so the leaf context adds no term a target lacks.
+
+The stage's own shortlist is kb_tools.kb_claimgraph.unmarked.plan recomputed over the ModernCorp tree
+— not the record of the plan the build ran — at its slot counts: shortlist.PROXIMITY_K proximity
+slots (nearest targets in the source's own paper, by order.claim_positions) then shortlist.WILDCARD_K
+wildcard slots (best by shortlist.rank, less the proximity picks), over the same pools, which also
+leave out each source's own equations (equation_sites.own_equations). Its reach per miss lands in
+misses.tsv's stage columns, and the summary sets it beside the previous run's stage columns, naming
+every miss whose reach moved — so a re-run after a change to the build or the toolchain says what the
+change moved.
 
 Embedding rankings, each asked for by a trailing ``--embed <model>=<templates>`` (repeatable):
   <model>/<templates>  one vector per statement from the server's embeddings endpoint, the source's
@@ -71,10 +80,12 @@ from kb_tools import kb_pipeline
 from kb_tools.kb_claimgraph import (
     attribute,
     classify,
+    conform,
     equation_sites,
     graph,
     hand_named,
     inventory,
+    order,
     shortlist,
     tree,
     unmarked,
@@ -90,7 +101,8 @@ UNMARKED = "unmarked — needs reading"
 KS = (1, 2, 3, 5, 8, 10, 15, 20, 30, 50)
 #: Measured per-call cost at concurrency 1 (the ModernCorp letter-ask build of 2026-10-03).
 SECONDS_PER_ASK = 3.1
-PRODUCTION = "wm/statement"
+#: misses.tsv's columns for the stage's own shortlist: reached forward, reached either way ("yes" or empty).
+STAGE_COLUMNS = ("stage fwd", "stage either")
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -113,6 +125,8 @@ class Build:
 
     def __init__(self, kb_root: Path):
         documents = tree.read(kb_root)
+        # The stage's entry condition: reading order needs the down-links to form the tree it checks.
+        conform.pass_two_gate(documents)
         sites = inventory.scan(documents)
         authored = graph.read(documents, sites)
         statement = classify.statements(documents, authored, sites)
@@ -133,14 +147,17 @@ class Build:
             for path, document in documents.documents.items()
         }
         self.sources = [nid for nid, kind in self.kind.items() if kind != "equation"]
-        self.candidate_pairs = [candidate.pair for candidate in narrowed.candidates]
-        self.excluded = {frozenset(pair) for pair in self.candidate_pairs}
         self.candidates = len(narrowed.candidates)
         self.own_equations = equation_sites.own_equations(documents, authored, sites)
+        self.positions = order.claim_positions(documents, authored, sites)
+        marked = {order.link(*candidate.pair) for candidate in narrowed.candidates}
+        self.adjacent = order.adjacent_links(authored, self.positions, marked)
+        #: The links no pool holds, as the stage builds them: the marked pairs and the adjacency links.
+        self.excluded = marked | set(self.adjacent)
 
     def pool(self, source: str) -> list[str]:
-        """Every target the shortlist may offer ``source``: any other node, less pairs already candidates."""
-        return [t for t in self.nodes if t != source and frozenset((source, t)) not in self.excluded]
+        """Every target the shortlist may offer ``source``: any other node, less the excluded links."""
+        return [t for t in self.nodes if t != source and order.link(source, t) not in self.excluded]
 
 
 # --- tokens and vectors ---------------------------------------------------------------
@@ -168,7 +185,7 @@ def rankings(build: Build, tokenize, *, with_leaf: bool) -> dict[str, dict[str, 
 
 def production_ranking(build: Build) -> dict[str, dict[str, int]]:
     """wm/statement: the stage's own ranking, as the 1-based rank of every pool target per source."""
-    ordered = shortlist.rank(build.statement, sources=build.sources, candidate_pairs=build.candidate_pairs)
+    ordered = shortlist.rank(build.statement, sources=build.sources, candidate_pairs=build.excluded)
     return {source: {t: rank for rank, t in enumerate(targets, start=1)} for source, targets in ordered.items()}
 
 
@@ -332,43 +349,58 @@ def best(ranked: dict[str, dict[str, int]], sources: list[str], targets: list[st
     return min(found) if found else (None, "")
 
 
-def previous_reach(k: int) -> dict[str, tuple[bool, bool]]:
-    """Per miss, whether the previous run's misses.tsv had the production variant reaching it at ``k``."""
+def previous_reach() -> dict[str, tuple[bool, bool]]:
+    """Per miss, whether the previous run's misses.tsv had the stage's own shortlist reaching it, forward and
+    either way."""
     path = OUT / "misses.tsv"
     if not path.exists():
         return {}
     lines = path.read_text(encoding="utf-8").splitlines()
     header = lines[0].split("\t")
-    if f"{PRODUCTION} fwd" not in header:
+    if STAGE_COLUMNS[0] not in header:
         return {}
     reach = {}
     for line in lines[1:]:
         row = dict(zip(header, line.split("\t")))
-        forward, backward = (row[f"{PRODUCTION} {col}"] for col in ("fwd", "rev"))
-        within = [bool(rank) and int(rank) <= k for rank in (forward, backward)]
-        reach[row["edge"]] = (within[0], any(within))
+        reach[row["edge"]] = (row[STAGE_COLUMNS[0]] == "yes", row[STAGE_COLUMNS[1]] == "yes")
     return reach
 
 
-def stage_lines(ours: Build, measured: list[dict[str, object]], previous: dict[str, tuple[bool, bool]]) -> list[str]:
-    """The stage's own shortlist's reach at shortlist.K, beside the previous run's figure, naming moved misses."""
-    k = shortlist.K
-    planned = set(
-        unmarked.plan(ours.nodes, ours.statement, candidate_pairs=ours.candidate_pairs, own=ours.own_equations).pairs
+def stage_plan(ours: Build) -> unmarked.Shortlist:
+    """The stage's own shortlist over this tree, planned as the stage plans it."""
+    return unmarked.plan(
+        ours.nodes, ours.statement, positions=ours.positions, excluded=ours.excluded, own=ours.own_equations
     )
-    now = {}
-    for miss in measured:
-        sources, targets = miss["ends"]
-        forward = any((s, t) in planned for s in sources for t in targets)
-        now[miss["edge"]] = (forward, forward or any((t, s) in planned for s in sources for t in targets))
-    lines = ["", f"## The stage's shortlist (unmarked.plan) at K = {k}: misses reached, forward / either", ""]
-    lines.append(f"  production: {sum(f for f, _ in now.values())} / {sum(e for _, e in now.values())}")
+
+
+def stage_reach(planned: unmarked.Shortlist, ends: tuple[list[str], list[str]]) -> tuple[bool, bool]:
+    """Whether some (match of A, match of B) pair is planned forward, and whether one is planned either way."""
+    pairs = set(planned.pairs)
+    sources, targets = ends
+    forward = any((s, t) in pairs for s in sources for t in targets)
+    return forward, forward or any((t, s) in pairs for s in sources for t in targets)
+
+
+def stage_lines(
+    ours: Build,
+    planned: unmarked.Shortlist,
+    measured: list[dict[str, object]],
+    previous: dict[str, tuple[bool, bool]],
+) -> list[str]:
+    """The stage's own shortlist's reach at its slot counts, beside the previous run's, naming moved misses."""
+    slots = f"{shortlist.PROXIMITY_K} proximity + {shortlist.WILDCARD_K} wildcard slots"
+    now = {miss["edge"]: miss["stage"] for miss in measured}
+    lines = [
+        "",
+        f"## The stage's own shortlist (unmarked.plan over this tree, {slots}, marked pairs, adjacency links and "
+        "own equations left out; recomputed, not the record of the plan the build ran)",
+        "",
+        f"  {len(planned.pairs)} pairs planned ({hours(len(planned.pairs))} h), {len(ours.adjacent)} adjacency links",
+        f"  misses reached, forward / either: {sum(f for f, _ in now.values())} / {sum(e for _, e in now.values())}",
+    ]
     if not previous:
-        return lines + [f"  previous run: no misses.tsv with a {PRODUCTION} column to compare against"]
-    lines.append(
-        f"  previous run's {PRODUCTION} at K = {k}: "
-        f"{sum(f for f, _ in previous.values())} / {sum(e for _, e in previous.values())}"
-    )
+        return lines + ["  previous run: no misses.tsv with a stage column to compare against"]
+    lines.append(f"  previous run: {sum(f for f, _ in previous.values())} / {sum(e for _, e in previous.values())}")
     moved = [edge for edge in sorted(now.keys() | previous.keys()) if now.get(edge) != previous.get(edge)]
     lines.append(
         "  misses that moved: "
@@ -482,7 +514,8 @@ def main(argv: list[str]) -> int:
         lines += ["", "no ModernCorp kb-root among the arguments: no shortlist measured"]
     else:
         measured = misses()
-        previous = previous_reach(shortlist.K)
+        previous = previous_reach()
+        planned = stage_plan(ours)
         ranked = {name: ranking(ours) for name, ranking in VARIANTS.items()}
         embedders, skipped = embedders_served(arguments.embed)
         cosines = {}
@@ -507,8 +540,14 @@ def main(argv: list[str]) -> int:
                 backward, _ = best(ranked[name], [t for t in targets if ours.kind.get(t) != "equation"], sources)
                 miss[name] = (forward, backward)
                 row += ["" if forward is None else str(forward), "" if backward is None else str(backward), pair]
+            miss["stage"] = stage_reach(planned, miss["ends"])
+            row += ["yes" if reached else "" for reached in miss["stage"]]
             miss_rows.append(row)
-        header = ["edge", "locality"] + [f"{name} {col}" for name in ranked for col in ("fwd", "rev", "best-pair")]
+        header = (
+            ["edge", "locality"]
+            + [f"{name} {col}" for name in ranked for col in ("fwd", "rev", "best-pair")]
+            + list(STAGE_COLUMNS)
+        )
         (OUT / "misses.tsv").write_text(
             "\n".join(["\t".join(header)] + ["\t".join(row) for row in miss_rows]) + "\n", encoding="utf-8"
         )
@@ -542,7 +581,7 @@ def main(argv: list[str]) -> int:
             "\n".join(["K\tvariant\tforward\teither"] + ["\t".join(row) for row in curve_rows]) + "\n",
             encoding="utf-8",
         )
-        lines += stage_lines(ours, measured, previous)
+        lines += stage_lines(ours, planned, measured, previous)
         if cosines:
             lines += ["", "## Could a cosine threshold replace a fixed K? (embedding variants)"]
         for name, scores in cosines.items():

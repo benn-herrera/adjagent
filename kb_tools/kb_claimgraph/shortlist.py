@@ -1,9 +1,10 @@
-"""The unmarked-reference shortlist: every claim node ranked against every other by what their statements share.
+"""The unmarked-reference shortlist's wildcard ranking: every claim node ranked against every other by what their
+statements share.
 
 Mechanical, and the draft an ask judges rather than a verdict: a similarity score
-is not evidence that one claim's text points at another. For each source the
-pool is every other node, less every pair whose unordered form is already an
-edge candidate (``attribute.narrow``) — that pair is asked about already.
+is not evidence that one claim continues the argument another is part of. For each source the
+ranking leaves out every pair whose unordered form it is handed as excluded — a marked
+pair or an adjacency link, which no ask is needed to find.
 
 The ranking is cosine similarity of TF-IDF vectors, sublinear term frequency
 and smoothed IDF, with the IDF taken over the target statements; ties go to the
@@ -22,8 +23,10 @@ from .. import kb_links
 from ..kb_write import ops
 from .inventory import math_fence_extents
 
-#: How many of a source's best-ranked targets are asked about.
-K = 5
+#: A source's slots: this many of its nearest targets in its own paper, then this many of its best-ranked
+#: targets anywhere, less the proximity picks (:func:`unmarked.plan`).
+PROXIMITY_K = 3
+WILDCARD_K = 2
 
 #: Words too common to tell two claims apart, and the LaTeX control words the fold leaves behind.
 STOPWORDS = frozenset("""the and for that this with from are is be as by of to in on at or an it its not no
@@ -107,8 +110,3 @@ def rank(
         )
         ranked[source] = [target for _, target in scored]
     return ranked
-
-
-def top_k(ranked: Mapping[str, Sequence[str]], k: int = K) -> dict[str, list[str]]:
-    """Each source's first ``k`` targets of :func:`rank`, or all of them where it has fewer."""
-    return {source: list(targets[:k]) for source, targets in ranked.items()}

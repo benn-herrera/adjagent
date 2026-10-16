@@ -1,4 +1,4 @@
-"""A loopback chat-completions server for the suites that make a chat call, and nothing else.
+"""A loopback model server for the suites that make a chat or decision call, and nothing else.
 
 It records every request and answers with a scripted SSE stream or HTTP status,
 torn down as ``liaison_tools/tests/_stub_server.py`` does — no test needs a
@@ -11,7 +11,7 @@ file sets) by importing ``server_fixture`` and ``served_fixture``;
 import http.server
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from kb_tools.inference import liaison_tools
 from liaison_tools.tests._stub_server import POLL_INTERVAL_SECONDS
 
 SERVED_MODEL = "local-model"
+SERVED_DECISION_MODEL = "local-decision-model"
 TOKEN = "stub-token"
 
 USAGE = {"prompt_tokens": 7718, "completion_tokens": 1, "prompt_tokens_details": {"cached_tokens": 7711}}
@@ -51,17 +52,21 @@ LETTER_A = sse(
 class StubServer:
     """What the stub answers, and every request it was sent.
 
-    Each request takes the next ``(status, body)`` off ``script`` while it
-    holds any, and ``status`` and ``body`` after that.
+    Each request is answered by ``route`` where one is set, given the request's
+    path and decoded body; otherwise it takes the next ``(status, body)`` off
+    ``script`` while that holds any, and ``status`` and ``body`` after that.
     """
 
     status: int = 200
     body: bytes = LETTER_A
     script: list[tuple[int, bytes]] = field(default_factory=list)
+    route: Callable[[str, dict[str, object]], tuple[int, bytes]] | None = None
     requests: list[dict[str, object]] = field(default_factory=list)
     port: int = 0
 
-    def answer(self) -> tuple[int, bytes]:
+    def answer(self, path: str, body: dict[str, object]) -> tuple[int, bytes]:
+        if self.route is not None:
+            return self.route(path, body)
         return self.script.pop(0) if self.script else (self.status, self.body)
 
 
@@ -72,10 +77,11 @@ def server_fixture() -> Iterator[StubServer]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            request = json.loads(raw)
             stub.requests.append(
-                {"path": self.path, "authorization": self.headers.get("Authorization"), "body": json.loads(raw)}
+                {"path": self.path, "authorization": self.headers.get("Authorization"), "body": request}
             )
-            status, body = stub.answer()
+            status, body = stub.answer(self.path, request)
             self.send_response(status)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -93,7 +99,7 @@ def server_fixture() -> Iterator[StubServer]:
 
 
 def name_server(monkeypatch: pytest.MonkeyPatch, *, port: int, key_dir: Path) -> None:
-    """The environment a ``reaper-*.env`` file sets, naming a loopback port: its root with ``/v1``, a model, a key file.
+    """The environment a ``reaper-*.env`` file sets, naming a loopback port: its root with ``/v1``, both models, a key file.
 
     Naming a server contacts nothing, so a suite whose calls a fake answers
     names one on any port to pass the environment check a run makes first.
@@ -102,6 +108,7 @@ def name_server(monkeypatch: pytest.MonkeyPatch, *, port: int, key_dir: Path) ->
     key_file.write_text(f"\n  {TOKEN}  \n", encoding="utf-8")
     monkeypatch.setenv(liaison_tools.BASE_URL_ENV, f"http://127.0.0.1:{port}/v1")
     monkeypatch.setenv(liaison_tools.MODEL_ENV, SERVED_MODEL)
+    monkeypatch.setenv(liaison_tools.DECISION_MODEL_ENV, SERVED_DECISION_MODEL)
     monkeypatch.setenv(liaison_tools.KEY_FILE_ENV, str(key_file))
 
 

@@ -150,6 +150,7 @@ def _inputs_in(body: str) -> BuildInputs | None:
             bibliographies.append(line.removeprefix(f"{BIBLIOGRAPHY_BODY_FIELD} "))
     return BuildInputs(tuple(roots), tuple(bibliographies)) if roots else None
 
+
 # Where the claim graph's node pass keeps its build state, repo-root-relative
 # and tracked, on the charter's placement and for its reasons: never under
 # kb-root/, which holds only what the finished KB is, and never under scratch,
@@ -175,8 +176,8 @@ def _read_record(repo_root: Path, stem: str) -> object | None:
 # --- the node-pass record ---------------------------------------------------
 #
 # Written only by `kb_claimgraph`'s `claims-declared` and `claims-discovered`
-# invocations and read by those two, `equations-minted`, `references-found` and
-# `depends-attributed`.
+# invocations and read by those two, `equations-minted`, `references-found`,
+# `claims-culled` and `depends-attributed`.
 # Its reader and writer live here because `kb_claimgraph` imports this module
 # and not the reverse. This module stores verdicts; it never interprets one.
 
@@ -434,7 +435,8 @@ def read_classification(repo_root: Path) -> ClassificationRecord | None:
 # Written empty by `claims-declared`, beside the classification record and for
 # its reason; then written and read by `references-found`, which plans its
 # shortlist into it before the first ask and lands each source group's letters
-# as the group completes. A stop mid-stage keeps every ask already answered.
+# as the group completes, and read by `claims-culled`. A stop mid-stage keeps
+# every ask already answered.
 # This module stores letters; it never interprets one.
 
 UNMARKED_RELPATH = kb_load.record_path(Path(), kb_load.UNMARKED_STEM).as_posix()
@@ -447,7 +449,7 @@ UNMARKED_ABOUT = (
 )
 
 
-#: The letter the unmarked record stores for "the source claim's text points at the candidate".
+#: The letter the unmarked record stores for "the source claim continues the argument the candidate is part of".
 UNMARKED_POINTS_LETTER = "A"
 
 
@@ -497,6 +499,159 @@ def read_unmarked(repo_root: Path) -> UnmarkedRecord | None:
     except (KeyError, TypeError, ValueError) as error:
         path = kb_load.record_path(repo_root, kb_load.UNMARKED_STEM)
         raise UnmarkedRecordError(f"{path} does not read as an unmarked record: {error!r}") from error
+
+
+# --- the cull record --------------------------------------------------------
+#
+# Written empty by `claims-declared`, beside the classification and unmarked
+# records and for their reason; then written once by `claims-culled`, after its
+# culls are issued. Its schema is shared with kbase, which writes and reads the
+# same file. This module stores verdicts; it never interprets one.
+
+CULL_RELPATH = kb_load.record_path(Path(), kb_load.CULL_STEM).as_posix()
+
+CULL_ABOUT = (
+    "The claim-graph co-linearity cull's build record: every co-linearity ask, keyed by its two claim ids in "
+    "id order, with the pass that asked it, its verdict (a-adds-nothing, b-adds-nothing or distinct) and how it "
+    "was reached, sorted by pass then pair; every culled claim with the claim it was culled into, sorted by id; "
+    "and every inferred link that survived the cull, undirected, keyed by its two claim ids in id order with the "
+    "harvest that found it, sorted by pair. It joins to the tree at this build's own boundary commits, not to a "
+    "KB a maintainer later edits."
+)
+
+#: The co-linearity passes an entry may record.
+CULL_PASSES = (1, 2)
+
+
+class CullVerdict(StrEnum):
+    """A co-linearity ask's verdict over the link a–b."""
+
+    A_ADDS_NOTHING = "a-adds-nothing"
+    B_ADDS_NOTHING = "b-adds-nothing"
+    DISTINCT = "distinct"
+
+
+class LinkHarvest(StrEnum):
+    """What found an inferred link the cull kept."""
+
+    UNMARKED = "unmarked"
+    ADJACENT = "adjacent"
+    #: A culled end's re-pointing onto its root produced it.
+    CULLED = "culled"
+
+
+@dataclass(frozen=True)
+class CullEntry:
+    """One co-linearity ask over the link ``a``–``b``, ``a`` before ``b`` in id order.
+
+    An entry records an ask that was made, so ``outcome`` is never :attr:`ClassifyOutcome.DRAFTED`.
+    """
+
+    a: str
+    b: str
+    pass_number: int
+    verdict: CullVerdict
+    outcome: ClassifyOutcome
+
+
+@dataclass(frozen=True)
+class Cull:
+    """One culled claim and the claim it was culled into."""
+
+    culled: str
+    into: str
+
+
+@dataclass(frozen=True)
+class CullLink:
+    """One inferred link ``a``–``b``, ``a`` before ``b`` in id order, carrying no direction."""
+
+    a: str
+    b: str
+    harvest: LinkHarvest
+
+
+@dataclass(frozen=True)
+class CullRecord:
+    entries: tuple[CullEntry, ...] = ()
+    culls: tuple[Cull, ...] = ()
+    links: tuple[CullLink, ...] = ()
+
+
+class CullRecordError(ValueError):
+    """The record on disk does not read as one."""
+
+
+def write_cull(repo_root: Path, record: CullRecord) -> None:
+    """Land ``record`` whole through the toolchain's one atomic writer: entries by pass then pair, culls by id,
+    links by pair.
+    """
+    payload = {
+        "about": CULL_ABOUT,
+        "entries": [
+            {"a": e.a, "b": e.b, "pass": e.pass_number, "verdict": e.verdict.value, "outcome": e.outcome.value}
+            for e in sorted(record.entries, key=lambda e: (e.pass_number, e.a, e.b))
+        ],
+        "culls": [{"id": c.culled, "into": c.into} for c in sorted(record.culls, key=lambda c: c.culled)],
+        "links": [
+            {"a": link.a, "b": link.b, "harvest": link.harvest.value}
+            for link in sorted(record.links, key=lambda link: (link.a, link.b))
+        ],
+    }
+    _write_record(repo_root, kb_load.CULL_STEM, payload)
+
+
+def _cull_entry_of(raw: Mapping[str, object]) -> CullEntry:
+    pass_number = raw["pass"]
+    if type(pass_number) is not int or pass_number not in CULL_PASSES:
+        raise ValueError(f"pass {pass_number!r} is not one of {CULL_PASSES}")
+    outcome = ClassifyOutcome(raw["outcome"])
+    if outcome is ClassifyOutcome.DRAFTED:
+        raise ValueError(f"outcome {outcome.value!r} is not an ask's")
+    return CullEntry(
+        a=raw["a"],  # type: ignore[arg-type]
+        b=raw["b"],  # type: ignore[arg-type]
+        pass_number=pass_number,
+        verdict=CullVerdict(raw["verdict"]),
+        outcome=outcome,
+    )
+
+
+def read_cull(repo_root: Path) -> CullRecord | None:
+    """The record, or ``None`` where no declared pass has written one."""
+    try:
+        raw = _read_record(repo_root, kb_load.CULL_STEM)
+        if raw is None:
+            return None
+        return CullRecord(
+            entries=tuple(_cull_entry_of(row) for row in raw["entries"]),  # type: ignore[index]
+            culls=tuple(Cull(culled=row["id"], into=row["into"]) for row in raw["culls"]),  # type: ignore[index]
+            links=tuple(
+                CullLink(a=row["a"], b=row["b"], harvest=LinkHarvest(row["harvest"]))
+                for row in raw["links"]  # type: ignore[index]
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        path = kb_load.record_path(repo_root, kb_load.CULL_STEM)
+        raise CullRecordError(f"{path} does not read as a cull record: {error!r}") from error
+
+
+def inferred_links(unmarked: UnmarkedRecord | None, cull: CullRecord | None) -> Callable[[str, str], bool]:
+    """Whether a ``depends`` edge source → target was found with no mark.
+
+    It was where the unmarked record answers (source, target) :data:`UNMARKED_POINTS_LETTER` in that
+    direction, or where the cull record's links hold its pair either way round. An absent record finds
+    nothing.
+    """
+    pairs = unmarked.pairs if unmarked else {}
+    found = {pair for pair, entry in pairs.items() if entry.letter == UNMARKED_POINTS_LETTER}
+    for link in cull.links if cull else ():
+        found |= {(link.a, link.b), (link.b, link.a)}
+
+    def is_inferred(source: str, target: str) -> bool:
+        return (source, target) in found
+
+    return is_inferred
 
 
 class PipelineError(RuntimeError):
@@ -831,6 +986,35 @@ def _check_references_found(ctx: CheckContext) -> CoverageReport:
     )
 
 
+def _check_claims_culled(ctx: CheckContext) -> CoverageReport:
+    """The co-linearity cull's handover: the cull record stands, and no claim it culls is still authored.
+
+    The declared pass writes the record with every list empty, which is what a build spending no inference
+    hands on; a culled claim the register or a leaf still names is a removal that did not land, and
+    attribution would draw edges over a node the record says is gone.
+    """
+    record = read_cull(ctx.repo_root)
+    authored = kb_index_lib.scan_authored_ids(kb_util.kb_root(ctx.repo_root)) if record else {}
+    standing = () if record is None else tuple(cull.culled for cull in record.culls if cull.culled in authored)
+    detail = (
+        "no cull record stands, so no declared pass wrote one"
+        if record is None
+        else f"{len(standing)} culled claim(s) still authored: {', '.join(standing[:5])}"
+    )
+    return CoverageReport.declared(
+        (
+            CoverageUnit(
+                id="cull-record",
+                source=str(ctx.repo_root / CULL_RELPATH),
+                satisfied=record is not None and not standing,
+                asserts_own_work=False,
+                detail=detail,
+            ),
+        ),
+        degenerate=True,
+    )
+
+
 def _check_verify_gates(ctx: CheckContext) -> CoverageReport:
     """The build-time check (``kb_util.run_build_verify``), green. Three stages share it, each for its own reason.
 
@@ -1071,9 +1255,9 @@ class ClaimgraphInvocation:
     """Which ``kb_claimgraph`` invocation a stage is, as its own command line spells it.
 
     **The table that used to exist nowhere.** ``--pass 1 --scope block-hosted``,
-    ``--pass 1 --scope full``, ``--pass 1 --scope equations``, ``--pass 2 --scope unmarked``
-    and ``--pass 2`` are five stages of this pipeline, and until this declaration the pairing lived in two
-    places that
+    ``--pass 1 --scope full``, ``--pass 1 --scope equations``, ``--pass 2 --scope unmarked``,
+    ``--pass 2 --scope cull`` and ``--pass 2`` are six stages of this pipeline, and until this declaration the
+    pairing lived in two places that
     could not see each other: the driver composed the flags from pass numbers
     of its own, and the tool parsed them back into a branch of its own. Both
     read this now, in opposite directions — :attr:`flags` composes and
@@ -1098,13 +1282,15 @@ CLAIMGRAPH_SCOPE_BLOCK_HOSTED = "block-hosted"
 CLAIMGRAPH_SCOPE_FULL = "full"
 CLAIMGRAPH_SCOPE_EQUATIONS = "equations"
 CLAIMGRAPH_SCOPE_UNMARKED = "unmarked"
+CLAIMGRAPH_SCOPE_CULL = "cull"
 
-# The five claim-graph invocations, named before the table so the stage that
+# The six claim-graph invocations, named before the table so the stage that
 # declares one and the flags composed from it are one value.
 _DECLARED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_BLOCK_HOSTED)
 _DISCOVERED_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_FULL)
 _EQUATIONS_INVOCATION = ClaimgraphInvocation(which_pass=1, scope=CLAIMGRAPH_SCOPE_EQUATIONS)
 _UNMARKED_INVOCATION = ClaimgraphInvocation(which_pass=2, scope=CLAIMGRAPH_SCOPE_UNMARKED)
+_CULLED_INVOCATION = ClaimgraphInvocation(which_pass=2, scope=CLAIMGRAPH_SCOPE_CULL)
 _ATTRIBUTED_INVOCATION = ClaimgraphInvocation(which_pass=2)
 
 
@@ -1130,14 +1316,17 @@ class Stage:
     inference and the unit asserts that work is there nothing left to assert
     (:func:`_excused`).
 
-    ``claimgraph_invocation`` is set on the five stages ``kb_claimgraph`` runs
+    ``claimgraph_invocation`` is set on the six stages ``kb_claimgraph`` runs
     and on no other — the mapping between this vocabulary and that tool's
     command line, read from both ends.
 
-    ``mints_nodes`` marks a stage that may add a node to the claim graph. The
-    stages that do form one contiguous run, and ``kb_index_lib.scan_authored_ids``
-    keeps the same keys across every stage after it: the node set is fixed
-    before any edge is drawn over it.
+    ``mints_nodes`` marks a stage that may add a node to the claim graph, and
+    ``culls_nodes`` one that may remove one, its edges going with it through the
+    drop ops. The node set is fixed before any edge is drawn over it: the
+    minting stages form one contiguous run, the cull follows them, and
+    ``kb_index_lib.scan_authored_ids``' keys change across ``claims-culled`` and
+    across no stage after it — attribution draws its edges over the set fixed at
+    that boundary.
     """
 
     id: str
@@ -1149,6 +1338,7 @@ class Stage:
     work_is_inference: bool = False
     claimgraph_invocation: ClaimgraphInvocation | None = None
     mints_nodes: bool = False
+    culls_nodes: bool = False
 
 
 # The frozen vocabulary. Ids are a cross-team contract — templates elsewhere
@@ -1220,6 +1410,14 @@ STAGES: tuple[Stage, ...] = (
         coverage=_check_references_found,
         work_is_inference=True,
         claimgraph_invocation=_UNMARKED_INVOCATION,
+    ),
+    Stage(
+        "claims-culled",
+        "co-linear claims culled",
+        coverage=_check_claims_culled,
+        work_is_inference=True,
+        claimgraph_invocation=_CULLED_INVOCATION,
+        culls_nodes=True,
     ),
     Stage(
         "depends-attributed",
@@ -1730,9 +1928,7 @@ def start_build(repo_root: Path, charter: str, inputs: BuildInputs = BuildInputs
     if refusal is not None:
         return _refuse(recorded, stage, report, refusal)
     _report_vacuous_units(report)
-    _record(
-        repo_root, stage, note=f"{CHARTER_BODY_FIELD} {charter}" if charter else NO_CHARTER_BODY, inputs=inputs
-    )
+    _record(repo_root, stage, note=f"{CHARTER_BODY_FIELD} {charter}" if charter else NO_CHARTER_BODY, inputs=inputs)
     _print_report(recorded_stages(repo_root))
     return EXIT_OK
 

@@ -15,8 +15,9 @@ than a rule per door. A repeated ``--source`` replaces the configured list
 outright rather than extending it: a merge would leave no way to say "these
 sources and not the file's".
 
-**Nothing here names the server a model call goes to, or its model.** Every
-call is ``inference.call_chat``, which reads both from the environment the run
+**Nothing here names the server a model call goes to, or its model.** The
+driver's own call is ``inference.call_chat`` and a claim-graph letter ask
+``inference.call_decision``, and each reads both from the environment the run
 is launched from; a section or key that once named a CLI command, a permission
 mode or a total call bound is refused as unknown, like any other nothing reads.
 

@@ -6,15 +6,22 @@ Document-Tree Contract can replace the current front end without this package
 noticing, and reaching behind that contract for a fact the tree does not carry
 would destroy that property for one build's convenience.
 
-**Four pipelines, and they are separate because inference is the part that
+**Six pipelines, and they are separate because inference is the part that
 needs repeating.** :mod:`build` is the declared graph — what the author marked
 explicitly, mechanical end to end and always correct. :mod:`discover` is the
 node pass, minting the claims every leaf's prose states and judging each
 paragraph of it that holds a reference; :mod:`equations` mints the referenced
-equations the references that still count name; :mod:`depends` attributes the
+equations the references that still count name; :mod:`unmarked` asks after
+references made with no mark; :mod:`cull` removes the prose
+claims a linked claim already states; :mod:`depends` attributes the
 dependencies between them. Each extends its predecessor's output additively
-rather than rebuilding it, and the node set is fixed once :mod:`equations` ends.
+rather than rebuilding it, and the node set is fixed once :mod:`cull` ends.
 A failed or improved inferential pass must not cost the mechanical work.
+
+**Every inference is a letter ask** (:mod:`letters`): one decision from a
+closed set of offered letters, put as one decision request to the server's
+``systemone`` endpoint (:func:`ask.ask_without_tools`), re-asked once where the
+answer names no offered letter and otherwise given its stated default.
 
 The stages, in order:
 
@@ -33,14 +40,17 @@ The stages, in order:
   through :mod:`ask` and is bounded by single occurrence against the document
   itself and by verdict completeness against its obligated paragraphs.
 * **D, :mod:`attribute`** — dependency attribution over the graph
-  :mod:`graph` reads back. Its narrowing settles an edge wherever containment
-  directs one and asks nobody, so that half runs and is recorded even where no
-  model is reachable (``--no-inference``); the pairs it leaves open are what is
-  asked through :mod:`ask`, bounded by set membership and acyclicity, and what
-  a run with nobody to ask leaves open and unrecorded.
+  :mod:`graph` reads back, after the cull. Its candidates are every pair the
+  text marks, directed as marked, and every link of the cull record no marked
+  pair joins, directed from its later claim in reading order to its earlier.
+  Each is drafted mechanically — *supported by* where containment directs it,
+  *mention* otherwise — and asked once (:mod:`classify`); a run with nobody to
+  ask (``--no-inference``) writes every draft, so no candidate goes unrecorded.
 * **E, :mod:`assemble`** — arrangement. No new fact enters.
 * **F, :mod:`write`** — the write passes, through the write API and nothing
-  else.
+  else: the declared pass's, the later passes' claims, the cull's removals,
+  and attribution's edges, cycles included, after which every ``depends`` edge
+  on a cycle is demoted — the build's one cut.
 * **G, :mod:`gate`** — refresh, then the build-time check, in-process. Exits
   on the return codes.
 

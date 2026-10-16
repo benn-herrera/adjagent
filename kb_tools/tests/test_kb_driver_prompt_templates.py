@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from kb_tools import kb_util
+from kb_tools.kb_claimgraph import ask
 from kb_tools.kb_driver import prompt_templates, runlog, steps
 
 #: A caller's constant pool, stood in for the way the bodies below are. The
@@ -47,19 +48,17 @@ CONSTANTS = {
 
 FRAGMENT_FIXTURES = {
     # The one registered fragment slot, stood in for under its registered name
-    # for the same reason as the alternatives below.
-    "reader-system.tmpl.md": (
+    # for the same reason as the alternative below.
+    "overview-system.tmpl.md": (
         "End with: VERDICT: critical=<n> warning=<n> note=<n>\n\n"
         "Return the counts as JSON where a tool asks for them:\n\n"
         '{"critical": 0, "warning": 0, "note": 0}\n\n'
         "Record the counts with @!values-flag!@ <your file>.\n"
     ),
-    # The caller-selected alternatives, stood in for under their registered
-    # names: which file an alternative slot resolves to is the registry's, so a
-    # fixture that renamed them would be exercising a route nothing takes.
-    "letter-correction.tmpl.md": "\n\n## A previous answer failed\n\n@!dyn.returned!@",
-    "classify-options-three.tmpl.md": "Answer A, B or C for:\n\n- @!dyn.candidate!@",
-    "classify-options-two.tmpl.md": "Answer A or C.",
+    # The caller-selected alternative, stood in for under its registered name:
+    # which file an alternative slot resolves to is the registry's, so a fixture
+    # that renamed it would be exercising a route nothing takes.
+    "overview-correction.tmpl.md": "\n\n## A previous answer failed\n\n@!dyn.returned!@",
 }
 
 SPLICING_FIXTURE = "fixture-review.single.tmpl.md"
@@ -67,11 +66,11 @@ CONSTANTS_FIXTURE = "fixture-design.single.tmpl.md"
 ALTERNATIVE_FIXTURE = "fixture-ask.single.tmpl.md"
 
 STEP_FIXTURES = {
-    ALTERNATIVE_FIXTURE: "Read @!dyn.document!@.\n\n@!classify-options!@\n\nAnswer.@!correction!@",
+    ALTERNATIVE_FIXTURE: "Read @!dyn.document!@.\n\nAnswer.@!passage-correction!@",
     SPLICING_FIXTURE: (
         "Review the documents named below.\n\n"
         "Charter: @!dyn.charter!@\n\nDocuments:\n@!dyn.documents!@\n\n"
-        "@!reader-system!@\n"
+        "@!overview-system!@\n"
     ),
     CONSTANTS_FIXTURE: (
         "Design the taxonomy from the charter at @!dyn.charter!@.\n\n@!layout-paths!@\n\n@!pending-rule!@\n"
@@ -187,11 +186,11 @@ def test_a_caller_handing_prose_to_an_alternative_slot_reads_as_the_same_mistake
     """The shape the claim-graph asks had before routing: the chosen body's prose, in a slot dict."""
     directory = _templates(tmp_path)
 
-    with pytest.raises(runlog.BoundaryError, match="the composer fills: correction"):
+    with pytest.raises(runlog.BoundaryError, match="the composer fills: passage-correction"):
         prompt_templates.render(
             ALTERNATIVE_FIXTURE,
-            slots={"document": "vol/one.md", "correction": "\n\n## A previous answer failed\n\nno such label"},
-            alternatives={"classify-options": "classify-options-two", "correction": None},
+            slots={"document": "vol/one.md", "passage-correction": "\n\n## A previous answer failed\n\nno such label"},
+            alternatives={"passage-correction": None},
             directory=directory,
         )
 
@@ -217,11 +216,13 @@ def test_an_unused_supplied_slot_fails_composition(tmp_path: Path) -> None:
 # stop holding the first time someone added a slot to a fragment.
 
 
-@pytest.mark.parametrize("inner", ["reader-system", "correction"])
+@pytest.mark.parametrize("inner", ["overview-system", "passage-correction"])
 def test_a_fragment_whose_body_names_an_expandable_slot_is_refused(tmp_path: Path, inner: str) -> None:
-    directory = _templates(tmp_path, fragments_extra={"reader-system.tmpl.md": f"End with a verdict.\n\n@!{inner}!@\n"})
+    directory = _templates(
+        tmp_path, fragments_extra={"overview-system.tmpl.md": f"End with a verdict.\n\n@!{inner}!@\n"}
+    )
 
-    complaint = rf"@!reader-system!@ resolves to .*whose body names @!{inner}!@"
+    complaint = rf"@!overview-system!@ resolves to .*whose body names @!{inner}!@"
 
     with pytest.raises(runlog.BoundaryError, match=complaint):
         prompt_templates.render(
@@ -232,15 +233,16 @@ def test_a_fragment_whose_body_names_an_expandable_slot_is_refused(tmp_path: Pat
         )
 
 
-@pytest.mark.parametrize("inner", ["reader-system", "classify-options"])
+@pytest.mark.parametrize("inner", ["overview-system", "passage-correction"])
 def test_an_alternative_whose_body_names_an_expandable_slot_is_refused(tmp_path: Path, inner: str) -> None:
-    directory = _templates(tmp_path, fragments_extra={"letter-correction.tmpl.md": f"\n\nCorrection:\n\n@!{inner}!@"})
+    directory = _templates(tmp_path, fragments_extra={"overview-correction.tmpl.md": f"\n\nCorrection:\n\n@!{inner}!@"})
 
-    with pytest.raises(runlog.BoundaryError, match=rf"@!correction!@ resolves to .*whose body names @!{inner}!@"):
+    complaint = rf"@!passage-correction!@ resolves to .*whose body names @!{inner}!@"
+    with pytest.raises(runlog.BoundaryError, match=complaint):
         prompt_templates.render(
             ALTERNATIVE_FIXTURE,
             slots={"document": "vol/one.md"},
-            alternatives={"classify-options": "classify-options-two", "correction": "letter-correction"},
+            alternatives={"passage-correction": "overview-correction"},
             directory=directory,
         )
 
@@ -248,47 +250,31 @@ def test_an_alternative_whose_body_names_an_expandable_slot_is_refused(tmp_path:
 # --- the caller-selected alternatives ---------------------------------------
 
 
-def test_a_caller_names_an_alternative_and_the_composer_resolves_it(tmp_path: Path) -> None:
-    """The choice travels, never the prose: the caller names one and supplies its slot's value."""
-    directory = _templates(tmp_path)
-
-    brief = prompt_templates.render(
-        ALTERNATIVE_FIXTURE,
-        slots={"document": "vol/one.md", "candidate": "clm-bbbbbb"},
-        alternatives={"classify-options": "classify-options-three", "correction": None},
-        directory=directory,
-    )
-
-    assert brief == "Read vol/one.md.\n\nAnswer A, B or C for:\n\n- clm-bbbbbb\n\nAnswer."
-
-
-def test_the_choice_that_is_no_choice_fills_the_slot_with_nothing(tmp_path: Path) -> None:
-    """``None`` is a registered answer where the slot's absence is itself one."""
+def test_a_caller_names_an_alternative_and_the_composer_resolves_it_or_fills_nothing(tmp_path: Path) -> None:
+    """The choice travels, never the prose; ``None`` is a registered answer where the slot's absence is itself one."""
     directory = _templates(tmp_path)
 
     chosen, absent = (
         prompt_templates.render(
             ALTERNATIVE_FIXTURE,
             slots={"document": "vol/one.md", **extra},
-            alternatives={"classify-options": "classify-options-two", "correction": correction},
+            alternatives={"passage-correction": correction},
             directory=directory,
         )
-        for correction, extra in (("letter-correction", {"returned": "the locator names no label"}), (None, {}))
+        for correction, extra in (("overview-correction", {"returned": "the locator names no label"}), (None, {}))
     )
 
+    assert absent == "Read vol/one.md.\n\nAnswer."
     assert chosen == absent + "\n\n## A previous answer failed\n\nthe locator names no label"
 
 
 @pytest.mark.parametrize(
     ("alternatives", "complaint"),
     [
-        ({"classify-options": "classify-options-three"}, "no alternative chosen for slot"),
-        (
-            {"classify-options": "classify-options-three", "correction": None, "verdict": "letter-correction"},
-            "does not declare",
-        ),
-        ({"classify-options": "letter-correction", "correction": None}, "takes one of"),
-        ({"classify-options": "classify-options-two", "correction": "no-such-fragment"}, "takes one of"),
+        ({}, "no alternative chosen for slot"),
+        ({"passage-correction": None, "verdict": "overview-correction"}, "does not declare"),
+        ({"passage-correction": "overview-system"}, "takes one of"),
+        ({"passage-correction": "no-such-fragment"}, "takes one of"),
     ],
 )
 def test_a_choice_the_slot_does_not_register_is_refused(
@@ -350,6 +336,94 @@ def test_a_marker_whose_name_is_not_a_slot_name_is_refused(tmp_path: Path, body:
 
 
 # ---------------------------------------------------------------------------
+# Questions
+# ---------------------------------------------------------------------------
+
+LETTERS = {"letter-yes": "A", "letter-no": "B", "letter-maybe": "C"}
+
+CHOICE_QUESTION = """\
+# A comment line, and a literal block per text.
+type: choice
+instructions: |-
+  Which one?
+  Pick a letter.
+criteria:
+  "@!letter-yes!@": |-
+    yes: it does.
+  "@!letter-no!@": |-
+    no: it does not.
+"""
+
+NOUL_QUESTION = """\
+type: noul
+true-letter: "@!letter-yes!@"
+instructions: |-
+  Does it?
+criteria:
+  "true": |-
+    it does.
+  "false": |-
+    it does not.
+"""
+
+
+def _question(tmp_path: Path, body: str) -> Path:
+    directory = tmp_path / "prompt-templates"
+    path = directory / prompt_templates.QUESTIONS_DIRNAME / f"fixture{prompt_templates.QUESTION_SUFFIX}"
+    path.parent.mkdir(parents=True)
+    path.write_text(body, encoding="utf-8")
+    return directory
+
+
+def test_a_choice_question_loads_with_its_letters_filled_and_its_texts_chomped(tmp_path: Path) -> None:
+    directory = _question(tmp_path, CHOICE_QUESTION)
+
+    question = prompt_templates.load_question("fixture", constants=LETTERS, offered=("A", "B"), directory=directory)
+
+    assert question == prompt_templates.Question(
+        type="choice",
+        instructions="Which one?\nPick a letter.",
+        criteria={"A": "yes: it does.", "B": "no: it does not."},
+        true_letter=None,
+    )
+
+
+def test_a_noul_question_names_the_offered_letter_its_true_stands_for(tmp_path: Path) -> None:
+    directory = _question(tmp_path, NOUL_QUESTION)
+
+    question = prompt_templates.load_question("fixture", constants=LETTERS, offered=("A", "B"), directory=directory)
+
+    assert (question.type, question.true_letter, dict(question.criteria)) == (
+        "noul",
+        "A",
+        {"true": "it does.", "false": "it does not."},
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "offered", "complaint"),
+    [
+        (CHOICE_QUESTION, ("A", "B", "C"), "want the offered"),
+        (CHOICE_QUESTION, ("A",), "want the offered"),
+        (NOUL_QUESTION, ("B", "C"), "true-letter 'A' is none of the offered"),
+        (NOUL_QUESTION.replace('"false"', '"no"'), ("A", "B"), "want \\('true', 'false'\\)"),
+        (CHOICE_QUESTION.replace("choice", "score"), ("A", "B"), "question type 'score'"),
+        (CHOICE_QUESTION.replace("letter-no", "letter-never"), ("A", "B"), "unfilled slot\\(s\\): letter-never"),
+        (CHOICE_QUESTION.replace("letter-no", "dyn.no"), ("A", "B"), "unfilled slot\\(s\\): dyn.no"),
+        (CHOICE_QUESTION.replace("|-", ">-", 1), ("A", "B"), "not a question file"),
+    ],
+    ids=["choice-more", "choice-fewer", "true-not-offered", "noul-keys", "type", "constant", "dynamic", "folded"],
+)
+def test_a_question_its_offered_letters_do_not_fit_is_refused(
+    tmp_path: Path, body: str, offered: tuple[str, ...], complaint: str
+) -> None:
+    directory = _question(tmp_path, body)
+
+    with pytest.raises(runlog.BoundaryError, match=complaint):
+        prompt_templates.load_question("fixture", constants=LETTERS, offered=offered, directory=directory)
+
+
+# ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
 
@@ -383,8 +457,46 @@ def test_the_fixture_set_lints_clean(tmp_path: Path) -> None:
 
 
 def test_the_shipped_template_directory_lints_clean() -> None:
-    """The same guard aimed at ``prompt-templates/`` — the bodies a run dispatches."""
-    assert prompt_templates.lint(prompt_templates.template_paths(), prohibited=steps.TEMPLATE_PROHIBITIONS) == []
+    """The same guard aimed at ``prompt-templates/`` — the bodies a run dispatches and the questions it asks."""
+    shipped = prompt_templates.template_paths()
+
+    assert {path.parent.name for path in shipped if path.name.endswith(prompt_templates.QUESTION_SUFFIX)} == {
+        prompt_templates.QUESTIONS_DIRNAME
+    }, "the sweep reaches the question files"
+    assert prompt_templates.lint(shipped, prohibited=steps.TEMPLATE_PROHIBITIONS, constants=ask.LETTER_SLOTS) == []
+
+
+@pytest.mark.parametrize(
+    ("body", "finding"),
+    [
+        (CHOICE_QUESTION.replace("letter-no", "letter-never"), "no composer constant fills: letter-never"),
+        (CHOICE_QUESTION.replace("letter-no", "dyn.no"), "no composer constant fills: dyn.no"),
+        (CHOICE_QUESTION.replace("@!letter-no!@", "@!letter-no"), "stray slot delimiter"),
+        (CHOICE_QUESTION.replace("Pick a letter.", "Then depends-attributed runs."), "depends-attributed"),
+    ],
+    ids=["unknown-constant", "dynamic-slot", "stray-delimiter", "prohibited"],
+)
+def test_a_question_file_naming_what_no_constant_fills_is_a_lint_finding(
+    tmp_path: Path, body: str, finding: str
+) -> None:
+    directory = _question(tmp_path, body)
+
+    findings = prompt_templates.lint(
+        prompt_templates.template_paths(directory), prohibited=steps.TEMPLATE_PROHIBITIONS, constants=LETTERS
+    )
+
+    assert [line for line in findings if line.startswith("fixture.question.yaml") and finding in line], findings
+
+
+def test_a_question_file_naming_only_constants_lints_clean(tmp_path: Path) -> None:
+    directory = _question(tmp_path, CHOICE_QUESTION)
+
+    assert (
+        prompt_templates.lint(
+            prompt_templates.template_paths(directory), prohibited=steps.TEMPLATE_PROHIBITIONS, constants=LETTERS
+        )
+        == []
+    )
 
 
 def test_every_shipped_fragment_is_registered_exactly_once_and_every_registration_ships() -> None:

@@ -30,7 +30,8 @@ UPDATE_REMEDY = "update kb_tools"
 NODE_PASS_STEM = "kb-build-node-pass"
 CLASSIFICATION_STEM = "kb-build-classification"
 UNMARKED_STEM = "kb-build-unmarked"
-RECORD_STEMS: tuple[str, ...] = (NODE_PASS_STEM, CLASSIFICATION_STEM, UNMARKED_STEM)
+CULL_STEM = "kb-build-cull"
+RECORD_STEMS: tuple[str, ...] = (NODE_PASS_STEM, CLASSIFICATION_STEM, UNMARKED_STEM, CULL_STEM)
 
 _YAML_SUFFIX = ".yaml"
 

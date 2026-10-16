@@ -42,6 +42,7 @@ store walk cannot decode and asserts the ladder holds — exit 2, the file named
 never a traceback and never an rc outside the three the ladder defines.
 """
 
+import argparse
 import ast
 import dataclasses
 import inspect
@@ -296,6 +297,18 @@ class _KbCase(unittest.TestCase):
                 id = "clm-ee5555"
                 target = "clm-aa1111"
                 action = "restore"
+                """,
+            "drop-claim-edges": """
+                [[entry]]
+                id = "clm-bb2222"
+                """,
+            "drop-inbound-edges": """
+                [[entry]]
+                id = "clm-aa1111"
+                """,
+            "drop-claim-node": """
+                [[entry]]
+                id = "clm-ee5555"
                 """,
         }[op]
 
@@ -721,6 +734,356 @@ class TestDemotedEdges(_KbCase):
         self.assert_refused(result, "entry[2].target")
         self.assertIn("entry 1", result.report[0].detail)
         self.assertEqual(self.tree(), before)
+
+
+# ---------------------------------------------------------------------------
+# The drops and the build's ring cut
+#
+# The fixture as above: clm-bb2222 depends on clm-aa1111; clm-ee5555 rests on
+# work-nobody2026 and carries the cut clm-ee5555 → clm-aa1111 (origin cited);
+# part1/leaf.md claims clm-aa1111 and clm-ee5555 and stages sup-cc3333's
+# fan-out onto clm-bb2222.
+# ---------------------------------------------------------------------------
+
+
+class _EdgeCase(_KbCase):
+    def record(self, node_id: str) -> kb_index_lib.ClaimEntry:
+        return next(e for e in kb_index_lib.parse_claim_quality_file(self.register, self.kb_root) if e.id == node_id)
+
+    def ids(self) -> list[str]:
+        return [e.id for e in kb_index_lib.parse_claim_quality_file(self.register, self.kb_root)]
+
+    def tree(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in sorted(self.kb_root.rglob("*")) if path.is_file()}
+
+    def entry_block(self, node_id: str) -> str:
+        """``node_id``'s entry from its heading to the next rule."""
+        text = self.register.read_text(encoding="utf-8")
+        start = text.rindex("\n## ", 0, text.index(f"<!-- id: {node_id} -->")) + 1
+        end = text.find("\n---", start)
+        return text[start : end if end >= 0 else len(text)]
+
+    def assert_written(self, result: ops.Result) -> None:
+        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
+        self.assertTrue(result.written, result.lines())
+
+    def assert_unchanged(self, result: ops.Result, before: dict[Path, bytes]) -> None:
+        self.assertEqual(result.exit_code, ops.ExitCode.WRITTEN, result.lines())
+        self.assertEqual(result.written, ())
+        self.assertIn((kb_util.FACT, "unchanged"), [(item.status, item.name) for item in result.report])
+        self.assertEqual(self.tree(), before)
+
+    def assert_reissue_is_unchanged(self, op: str, text: str) -> None:
+        before = self.tree()
+        self.assert_unchanged(self.run_op(op, text), before)
+
+    def assert_refused_whole(self, result: ops.Result, name: str, before: dict[Path, bytes]) -> None:
+        self.assert_refused(result, name)
+        self.assertEqual(self.tree(), before)
+
+
+class TestDropClaimEdges(_EdgeCase):
+    """Both lists, or the one named; continuation lines and emptied headers go; ``demoted`` is refused."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        added = self.run_op(
+            "add-depends-on",
+            '[[entry]]\nid = "clm-bb2222"\n  [[entry.references]]\n  id = "clm-ee5555"\n' '  context = "a contrast"\n',
+        )
+        assert added.ok, added.lines()
+
+    def test_no_edge_class_drops_both_lists_and_their_headers(self):
+        others = {node_id: self.entry_block(node_id) for node_id in ("clm-aa1111", "clm-ee5555")}
+        self.assert_written(self.run_op("drop-claim-edges", '[[entry]]\nid = "clm-bb2222"\n'))
+        record = self.record("clm-bb2222")
+        self.assertEqual((record.depends_on, record.references), ((), ()))
+        block = self.entry_block("clm-bb2222")
+        self.assertNotIn("- depends-on:", block)
+        self.assertNotIn("- references:", block)
+        self.assertEqual({node_id: self.entry_block(node_id) for node_id in others}, others)
+        self.assert_reissue_is_unchanged("drop-claim-edges", '[[entry]]\nid = "clm-bb2222"\n')
+
+    def test_a_named_class_drops_that_list_alone(self):
+        self.assert_written(
+            self.run_op("drop-claim-edges", '[[entry]]\nid = "clm-bb2222"\nedge-class = "references"\n')
+        )
+        record = self.record("clm-bb2222")
+        self.assertEqual([e.target for e in record.depends_on], ["clm-aa1111"])
+        self.assertEqual(record.references, ())
+        self.assert_reissue_is_unchanged(
+            "drop-claim-edges", '[[entry]]\nid = "clm-bb2222"\nedge-class = "references"\n'
+        )
+
+    def test_an_absent_list_stands(self):
+        self.assert_reissue_is_unchanged("drop-claim-edges", '[[entry]]\nid = "clm-aa1111"\n')
+
+    def test_a_bulletless_header_goes(self):
+        text = self.register.read_text(encoding="utf-8")
+        head, _, tail = text.partition("<!-- id: clm-aa1111 -->")
+        staged = head + "<!-- id: clm-aa1111 -->" + tail.replace("- solidity:", "- references:\n- solidity:", 1)
+        self.register.write_text(staged, encoding="utf-8")
+        self.assert_written(
+            self.run_op("drop-claim-edges", '[[entry]]\nid = "clm-aa1111"\nedge-class = "references"\n')
+        )
+        self.assertNotIn("- references:", self.entry_block("clm-aa1111"))
+        self.assert_reissue_is_unchanged(
+            "drop-claim-edges", '[[entry]]\nid = "clm-aa1111"\nedge-class = "references"\n'
+        )
+
+    def test_a_header_still_holding_text_stands(self):
+        text = self.register.read_text(encoding="utf-8")
+        staged = text.replace("- depends-on:\n", "- depends-on:\n  carried over from the draft\n", 1)
+        self.assertNotEqual(staged, text)
+        self.register.write_text(staged, encoding="utf-8")
+        self.assert_written(
+            self.run_op("drop-claim-edges", '[[entry]]\nid = "clm-bb2222"\nedge-class = "depends-on"\n')
+        )
+        self.assertEqual(self.record("clm-bb2222").depends_on, ())
+        self.assertIn("- depends-on:\n  carried over from the draft\n", self.entry_block("clm-bb2222"))
+
+    def test_demoted_is_refused_as_a_value(self):
+        before = self.tree()
+        result = self.run_op("drop-claim-edges", '[[entry]]\nid = "clm-ee5555"\nedge-class = "demoted"\n')
+        self.assert_refused_whole(result, "entry[1].edge-class", before)
+
+
+class TestDropInboundEdges(_EdgeCase):
+    """Every register entry naming the claim loses those bullets; nothing else moves."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        for op, text in (
+            (
+                "add-depends-on",
+                '[[entry]]\nid = "clm-ee5555"\n  [[entry.references]]\n  id = "clm-aa1111"\n',
+            ),
+            (
+                "insert-support-entry",
+                '[[entry]]\nregister = "part1/claim-quality.md"\ntitle = "Resting Support"\nrigor = 0.5\n'
+                'rationale = "Rests on the anchor."\n  [[entry.depends-on]]\n  id = "clm-aa1111"\n',
+            ),
+        ):
+            result = self.run_op(op, text)
+            assert result.ok, result.lines()
+        self.support = result.minted[0]
+
+    def test_every_depends_on_and_references_bullet_naming_the_claim_goes(self):
+        anchor = self.entry_block("clm-aa1111")
+        self.assert_written(self.run_op("drop-inbound-edges", '[[entry]]\nid = "clm-aa1111"\n'))
+        self.assertEqual(self.record("clm-bb2222").depends_on, ())
+        self.assertNotIn("- depends-on:", self.entry_block("clm-bb2222"))
+        citing = self.record("clm-ee5555")
+        self.assertEqual(citing.references, ())
+        self.assertEqual([e.target for e in citing.depends_on], ["work-nobody2026"])
+        # A cut is not an inbound edge this op removes.
+        self.assertEqual([e.target for e in citing.demoted], ["clm-aa1111"])
+        support = kb_index_lib.parse_support_quality_entries(self.register, self.kb_root)[self.support]
+        self.assertEqual(support["depends_on"], ())
+        self.assertEqual(self.entry_block("clm-aa1111"), anchor)
+        self.assert_reissue_is_unchanged("drop-inbound-edges", '[[entry]]\nid = "clm-aa1111"\n')
+
+    def test_a_claim_nothing_names_writes_nothing(self):
+        self.assert_reissue_is_unchanged("drop-inbound-edges", '[[entry]]\nid = "clm-bb2222"\n')
+
+    def test_an_unresolvable_claim_is_refused(self):
+        before = self.tree()
+        result = self.run_op("drop-inbound-edges", '[[entry]]\nid = "clm-999999"\n')
+        self.assert_refused_whole(result, "id=clm-999999", before)
+
+
+class TestDemoteClaimEdge(_EdgeCase):
+    """The build's ring cut: a depends edge becomes a demoted row of its own entry, carrying its origin."""
+
+    def demote(self, node_id: str, target: str, origin: str, context: str = "") -> ops.Result:
+        text = f'[[entry]]\nid = "{node_id}"\ntarget = "{target}"\norigin = "{origin}"\n'
+        if context:
+            text += f'context = "{context}"\n'
+        return ops.BUILD_OPS["demote-claim-edge"].run(kb_root=self.kb_root, values_file=self.values_file(text))
+
+    def test_it_is_bound_by_no_surface(self):
+        self.assertNotIn("demote-claim-edge", ops.OPS)
+        self.assertNotIn("demote-claim-edge", kb_util.WRITE_OPS)
+        action = next(a for a in kb_util.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+        self.assertNotIn("demote-claim-edge", action.choices)
+
+    def test_a_depends_edge_becomes_a_demoted_row_carrying_its_origin(self):
+        self.assert_written(self.demote("clm-bb2222", "clm-aa1111", "inferred", "a ring"))
+        record = self.record("clm-bb2222")
+        self.assertEqual(record.depends_on, ())
+        self.assertEqual(
+            [(e.target, e.origin, e.context) for e in record.demoted], [("clm-aa1111", "inferred", "a ring")]
+        )
+        block = self.entry_block("clm-bb2222")
+        self.assertNotIn("- depends-on:", block)
+        self.assertLess(block.index("- demoted:"), block.index("- solidity:"))
+        before = self.tree()
+        self.assert_unchanged(self.demote("clm-bb2222", "clm-aa1111", "inferred", "a ring"), before)
+
+    def test_a_standing_row_drops_the_depends_bullet_still_beside_it(self):
+        added = self.run_op(
+            "add-depends-on", '[[entry]]\nid = "clm-ee5555"\n  [[entry.depends-on]]\n  id = "clm-aa1111"\n'
+        )
+        self.assertTrue(added.ok, added.lines())
+        self.assert_written(self.demote("clm-ee5555", "clm-aa1111", "cited"))
+        record = self.record("clm-ee5555")
+        self.assertEqual([e.target for e in record.depends_on], ["work-nobody2026"])
+        self.assertEqual([(e.target, e.origin) for e in record.demoted], [("clm-aa1111", "cited")])
+
+    def test_a_row_standing_with_the_other_origin_is_refused(self):
+        before = self.tree()
+        self.assert_refused_whole(self.demote("clm-ee5555", "clm-aa1111", "inferred"), "origin=inferred", before)
+
+    def test_a_pair_with_neither_edge_is_refused(self):
+        before = self.tree()
+        self.assert_refused_whole(self.demote("clm-aa1111", "clm-bb2222", "cited"), "target=clm-bb2222", before)
+
+    def test_an_origin_outside_the_vocabulary_is_refused_as_a_value(self):
+        before = self.tree()
+        self.assert_refused_whole(self.demote("clm-bb2222", "clm-aa1111", "guessed"), "entry[1].origin", before)
+
+
+class TestDropClaimNode(_EdgeCase):
+    """The node goes whole; what still names it refuses the call, and a leaf's last claim is set-frontmatter's."""
+
+    _DROP = '[[entry]]\nid = "clm-ee5555"\n'
+
+    def leaf(self, rel: str = "part1/leaf.md") -> kb_index_lib.LeafRecord:
+        return kb_index_lib.parse_leaf(self.kb_root / rel, self.kb_root)
+
+    def test_the_entry_the_marker_and_the_claims_entry_go(self):
+        marked = self.run_op(
+            "mark-claim-in-leaf",
+            f'[[entry]]\ndocument = "part1/leaf.md"\nid = "clm-ee5555"\nlocator = "{_LOCATOR}"\n',
+        )
+        self.assertTrue(marked.ok, marked.lines())
+        anchor = self.entry_block("clm-aa1111")
+        self.assert_written(self.run_op("drop-claim-node", self._DROP))
+        self.assertNotIn("clm-ee5555", self.register.read_text(encoding="utf-8"))
+        self.assertEqual(self.ids(), ["clm-aa1111", "clm-bb2222"])
+        self.assertIn("work-nobody2026", kb_index_lib.scan_authored_ids(self.kb_root))
+        self.assertEqual(self.entry_block("clm-aa1111"), anchor)
+        self.assertTrue(store.take_census(self.register, self.kb_root).consistent)
+        text = (self.kb_root / "part1/leaf.md").read_text(encoding="utf-8")
+        self.assertNotIn("clm-ee5555", text)
+        self.assertIn(_LOCATOR, text)
+        self.assertEqual(self.leaf().claims, ("clm-aa1111",))
+        self.assert_reissue_is_unchanged("drop-claim-node", self._DROP)
+
+    def test_the_rule_between_the_surviving_entries_stands(self):
+        for values_text in (self.valid_values("insert-claim-entry"), None):
+            with self.subTest(dropped="middle entry" if values_text else "last entry"):
+                self.setUp()
+                if values_text:
+                    self.assertTrue(self.run_op("insert-claim-entry", values_text).ok)
+                self.assert_written(self.run_op("drop-claim-node", self._DROP))
+                text = self.register.read_text(encoding="utf-8")
+                self.assertNotIn("\n---\n\n---\n", text)
+                self.assertNotRegex(text, r"[^\n]\n## ")
+                self.assertFalse(text.rstrip().endswith("---"))
+
+    def test_an_edge_still_naming_the_node_refuses(self):
+        before = self.tree()
+        self.assert_refused_whole(
+            self.run_op("drop-claim-node", '[[entry]]\nid = "clm-aa1111"\n'), "id=clm-aa1111", before
+        )
+
+    def test_a_support_edge_still_naming_the_node_refuses(self):
+        inserted = self.run_op(
+            "insert-support-entry",
+            '[[entry]]\nregister = "part1/claim-quality.md"\ntitle = "Resting Support"\nrigor = 0.5\n'
+            'rationale = "Rests on the citing claim."\n  [[entry.depends-on]]\n  id = "clm-ee5555"\n',
+        )
+        self.assertTrue(inserted.ok, inserted.lines())
+        before = self.tree()
+        self.assert_refused_whole(self.run_op("drop-claim-node", self._DROP), "id=clm-ee5555", before)
+
+    def test_emptying_a_leafs_claims_refuses(self):
+        (self.kb_root / "part1/solo.md").write_text(
+            _document(render.FrontmatterValues(kind="leaf", claims=("clm-ee5555",))), encoding="utf-8"
+        )
+        before = self.tree()
+        self.assert_refused_whole(self.run_op("drop-claim-node", self._DROP), "part1/solo.md", before)
+
+    def test_the_nodes_one_call_drops_from_a_leaf_count_together(self):
+        (self.kb_root / "part1/two.md").write_text(
+            _document(render.FrontmatterValues(kind="leaf", claims=("clm-bb2222", "clm-ee5555"))), encoding="utf-8"
+        )
+        before = self.tree()
+        result = self.run_op("drop-claim-node", self._DROP + '\n[[entry]]\nid = "clm-bb2222"\n')
+        self.assert_refused_whole(result, "part1/two.md", before)
+
+    def test_a_leaf_restated_no_claim_loses_the_marker_still_in_its_prose(self):
+        (self.kb_root / "part1/solo.md").write_text(
+            _document(render.FrontmatterValues(kind="leaf", claims=("clm-ee5555",))), encoding="utf-8"
+        )
+        for op, text in (
+            (
+                "mark-claim-in-leaf",
+                f'[[entry]]\ndocument = "part1/solo.md"\nid = "clm-ee5555"\nlocator = "{_LOCATOR}"\n',
+            ),
+            (
+                "set-frontmatter",
+                '[[entry]]\ndocument = "part1/solo.md"\nkind = "leaf"\nno-claim = "restated before the drop"\n',
+            ),
+        ):
+            result = self.run_op(op, text)
+            self.assertTrue(result.ok, result.lines())
+        self.assertIn(
+            render.render_tier2_marker("clm-ee5555"), (self.kb_root / "part1/solo.md").read_text(encoding="utf-8")
+        )
+        self.assert_written(self.run_op("drop-claim-node", self._DROP))
+        text = (self.kb_root / "part1/solo.md").read_text(encoding="utf-8")
+        self.assertNotIn("clm-ee5555", text)
+        self.assertIn(_LOCATOR, text)
+        self.assertEqual(self.leaf("part1/solo.md").no_claim_reason, "restated before the drop")
+
+    def test_another_entrys_demoted_row_naming_the_node_goes(self):
+        before = self.entry_block("clm-aa1111")
+        planted = ops.BUILD_OPS["add-build-edges"].run(
+            kb_root=self.kb_root,
+            values_file=self.values_file(
+                '[[entry]]\nid = "clm-aa1111"\n  [[entry.demoted]]\n  id = "clm-ee5555"\n  origin = "inferred"\n'
+            ),
+        )
+        self.assertTrue(planted.ok, planted.lines())
+        self.assertNotEqual(self.entry_block("clm-aa1111"), before)
+        self.assert_written(self.run_op("drop-claim-node", self._DROP))
+        self.assertEqual(self.entry_block("clm-aa1111"), before)
+
+    def test_a_remaining_mention_refuses_naming_its_line(self):
+        plain = self.kb_root / "part1/plain.md"
+        text = plain.read_text(encoding="utf-8")
+        staged = text.replace(_LOCATOR, f"{_LOCATOR}, as clm-ee5555 shows", 1)
+        plain.write_text(staged, encoding="utf-8")
+        line = next(n for n, row in enumerate(staged.splitlines(), start=1) if "clm-ee5555" in row)
+        before = self.tree()
+        result = self.run_op("drop-claim-node", self._DROP)
+        self.assert_refused_whole(result, "id=clm-ee5555", before)
+        self.assertIn(f"part1/plain.md:{line}", result.report[0].detail)
+
+    def test_a_mention_inside_code_does_not_refuse(self):
+        plain = self.kb_root / "part1/plain.md"
+        plain.write_text(plain.read_text(encoding="utf-8") + "\nThe id `clm-ee5555` in code.\n", encoding="utf-8")
+        self.assert_written(self.run_op("drop-claim-node", self._DROP))
+
+    def test_refreshs_roll_ups_are_not_a_mention(self):
+        (self.kb_root / "part1/index.md").write_text(
+            "---\nkind: index\nsubtree-claims: [clm-aa1111, clm-ee5555]\n---\n# Part 1\n", encoding="utf-8"
+        )
+        self.assert_written(self.run_op("drop-claim-node", self._DROP))
+
+    def test_a_reissue_removes_whatever_of_the_node_still_stands(self):
+        self.assert_written(self.run_op("drop-claim-node", self._DROP))
+        plain = self.kb_root / "part1/plain.md"
+        clean = plain.read_text(encoding="utf-8")
+        plain.write_text(
+            clean.replace(_LOCATOR, f"{_LOCATOR} {render.render_tier2_marker('clm-ee5555')}", 1), encoding="utf-8"
+        )
+        result = self.run_op("drop-claim-node", self._DROP)
+        self.assert_written(result)
+        self.assertEqual(result.written, ("part1/plain.md",))
+        self.assertEqual(plain.read_text(encoding="utf-8"), clean)
 
 
 # ---------------------------------------------------------------------------

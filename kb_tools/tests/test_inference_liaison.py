@@ -4,6 +4,7 @@ Every call runs against the loopback stub in ``_chat_stub``; the environment a
 test reads is set per test, after ``conftest.no_reader_server`` cleared it.
 """
 
+import hashlib
 import json
 import socket
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 from kb_tools import inference
 from kb_tools.inference import liaison_tools
 from kb_tools.tests._chat_stub import (  # noqa: F401 - fixtures
+    SERVED_DECISION_MODEL,
     SERVED_MODEL,
     TOKEN,
     USAGE,
@@ -30,6 +32,29 @@ def _call(
     return inference.call_chat(system_prompt=system_prompt, prompt=prompt, timeout_seconds=5, capture_path=capture_path)
 
 
+QUESTION = inference.DecisionQuestion(
+    key="eq-12",
+    type="choice",
+    instructions="Which letter?",
+    criteria={"A": "the first", "B": "the second"},
+)
+STATE = "## The claim\n\nA secret-ish state text.\n"
+ANSWERED = {
+    "model": SERVED_DECISION_MODEL,
+    "id": "an-unknown-key",
+    "answers": {"eq-12": {"type": "choice", "choice": "B", "confidence": 0.9, "extra": 1}},
+    "usage": {"input_tokens": 812, "output_tokens": 3},
+}
+
+
+def _decide(capture: Path | None = None) -> inference.DecisionReply:
+    return inference.call_decision(STATE, QUESTION, model=SERVED_DECISION_MODEL, timeout_seconds=5, capture=capture)
+
+
+def _body(obj: object) -> bytes:
+    return json.dumps(obj).encode("utf-8")
+
+
 # --- what is refused before any request ---------------------------------------------
 
 
@@ -45,7 +70,7 @@ def test_an_empty_system_prompt_or_prompt_is_refused_before_any_request(
 
 def test_with_no_api_base_url_the_check_and_the_call_refuse_naming_it(server: StubServer) -> None:
     with pytest.raises(ValueError, match=liaison_tools.BASE_URL_ENV):
-        inference.check_environment()
+        inference.check_environment(chat=True, decision=False)
     with pytest.raises(ValueError, match=liaison_tools.BASE_URL_ENV):
         _call()
 
@@ -59,11 +84,39 @@ def test_a_server_with_no_model_or_no_key_file_is_refused_by_name_before_any_req
     monkeypatch.delenv(unset)
 
     with pytest.raises(ValueError, match=unset):
-        inference.check_environment()
+        inference.check_environment(chat=True, decision=False)
     with pytest.raises(ValueError, match=unset):
         _call()
 
     assert served.requests == []
+
+
+def test_the_decision_model_is_required_only_where_the_check_asks_for_it(
+    served: StubServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert inference.check_environment(chat=False, decision=True).decision_model == SERVED_DECISION_MODEL
+    monkeypatch.delenv(liaison_tools.DECISION_MODEL_ENV)
+
+    assert inference.check_environment(chat=True, decision=False).decision_model is None
+    with pytest.raises(ValueError, match=liaison_tools.DECISION_MODEL_ENV):
+        inference.check_environment(chat=False, decision=True)
+    with pytest.raises(ValueError, match=liaison_tools.DECISION_MODEL_ENV):
+        _decide()
+
+    assert served.requests == []
+
+
+def test_the_chat_model_is_required_only_where_the_check_asks_for_it(
+    served: StubServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run whose calls left are decision calls alone needs no chat model."""
+    monkeypatch.delenv(liaison_tools.MODEL_ENV)
+    served.body = _body(ANSWERED)
+
+    assert inference.check_environment(chat=False, decision=True).model is None
+    with pytest.raises(ValueError, match=liaison_tools.MODEL_ENV):
+        inference.check_environment(chat=True, decision=True)
+    assert _decide().outcome is inference.Outcome.OK
 
 
 @pytest.mark.parametrize(
@@ -113,7 +166,7 @@ def test_http_to_another_host_needs_allow_http_set_to_one(served: StubServer, mo
 
 
 def test_the_checked_environment_never_shows_the_key(served: StubServer) -> None:
-    checked = inference.check_environment()
+    checked = inference.check_environment(chat=True, decision=False)
 
     assert (checked.model, checked.token) == (SERVED_MODEL, TOKEN)
     assert TOKEN not in repr(checked)
@@ -249,3 +302,120 @@ def test_retried_attempts_share_one_capture_reasoning_counts_over_all_and_the_la
 
     assert stats.reasoning_attempts == 1
     assert (stats.duration_ms, stats.prompt_tokens) == (4, 7718)
+
+
+# --- the decision call --------------------------------------------------------------
+
+
+def test_a_decision_request_is_the_state_and_one_keyed_question_and_nothing_else(served: StubServer) -> None:
+    served.body = _body(ANSWERED)
+
+    reply = _decide()
+
+    (request,) = served.requests
+    assert request["path"] == "/v1/systemone", "API_BASE_URL already carries /v1"
+    assert request["authorization"] == f"Bearer {TOKEN}"
+    assert request["body"] == {
+        "model": SERVED_DECISION_MODEL,
+        "state": STATE,
+        "questions": {
+            "eq-12": {
+                "type": "choice",
+                "instructions": "Which letter?",
+                "criteria": {"A": "the first", "B": "the second"},
+            }
+        },
+    }
+    assert reply == inference.DecisionReply(
+        inference.Outcome.OK, answers=ANSWERED["answers"], input_tokens=812, output_tokens=3
+    )
+
+
+def test_an_answer_left_unanswered_is_not_refused(served: StubServer) -> None:
+    served.body = _body({"answers": {}})
+
+    assert _decide() == inference.DecisionReply(inference.Outcome.OK)
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (429, b'{"error": "later"}'),
+        (500, b'{"error": "out of memory"}'),
+        (503, b""),
+        (200, b"not json"),
+        (200, b'{"answers": ["A"]}'),
+        (200, b'{"answers": {"eq-12": "B"}}'),
+    ],
+    ids=["429", "500", "503", "undecodable", "answers-not-an-object", "answer-not-an-object"],
+)
+def test_the_retry_class_is_a_transport_failure_and_is_not_retried_here(
+    status: int, body: bytes, served: StubServer
+) -> None:
+    served.status, served.body = status, body
+
+    assert _decide().outcome is inference.Outcome.TRANSPORT_FAILURE
+    assert len(served.requests) == 1, "the call retries nothing"
+
+
+def test_an_unreachable_decision_server_is_a_transport_failure(
+    served: StubServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(liaison_tools.BASE_URL_ENV, f"http://127.0.0.1:{_unused_port()}/v1")
+
+    assert _decide().outcome is inference.Outcome.TRANSPORT_FAILURE
+
+
+@pytest.mark.parametrize("status", [400, 401, 404, 422])
+def test_any_other_4xx_is_refused(status: int, served: StubServer) -> None:
+    served.status, served.body = status, b'{"error": "bad request"}'
+
+    assert _decide() == inference.DecisionReply(inference.Outcome.REFUSED)
+
+
+def test_an_answer_under_a_key_that_was_not_asked_is_refused(served: StubServer) -> None:
+    served.body = _body({"answers": {**ANSWERED["answers"], "eq-13": {"type": "choice", "choice": "A"}}})
+
+    assert _decide() == inference.DecisionReply(inference.Outcome.REFUSED)
+
+
+def test_a_decision_capture_holds_each_attempt_and_its_reader_gives_the_last_ones_figures(
+    served: StubServer, tmp_path: Path
+) -> None:
+    capture = tmp_path / "d.capture.jsonl"
+    answered = _body(ANSWERED)
+    served.script = [(503, b"busy"), (200, answered)]
+
+    _decide(capture)
+    _decide(capture)
+
+    text = capture.read_text(encoding="utf-8")
+    first, second = (json.loads(line) for line in text.splitlines())
+    digest = hashlib.sha256(STATE.encode("utf-8")).hexdigest()
+    assert (first["type"], first["model"], first["state_sha256"]) == (
+        inference.DECISION_RECORD,
+        SERVED_DECISION_MODEL,
+        digest,
+    )
+    assert (first["status"], first["outcome"], first["body"]) == (503, "transport-failure", "busy")
+    assert (second["outcome"], second["body"]) == ("ok", answered.decode("utf-8")), "the body verbatim"
+    assert "secret-ish" not in text and TOKEN not in text and str(served.port) not in text
+    stats = inference.read_decision_capture(capture)
+    assert stats == inference.CaptureStats(
+        duration_ms=second["duration_ms"],
+        prompt_tokens=812,
+        completion_tokens=3,
+        cached_tokens=None,
+        reasoning_attempts=0,
+    )
+
+
+def test_a_decision_body_with_no_usage_leaves_its_counts_unreported(served: StubServer, tmp_path: Path) -> None:
+    capture = tmp_path / "d.capture.jsonl"
+    served.body = _body({"answers": ANSWERED["answers"]})
+
+    reply = _decide(capture)
+
+    assert (reply.input_tokens, reply.output_tokens) == (None, None)
+    stats = inference.read_decision_capture(capture)
+    assert (stats.prompt_tokens, stats.completion_tokens) == (None, None)

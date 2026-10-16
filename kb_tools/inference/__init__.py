@@ -1,22 +1,28 @@
-"""On-demand inference for any tooling that wants some: one tool-less chat call.
+"""On-demand inference for any tooling that wants some: one tool-less chat call, or one decision call.
 
-:mod:`liaison_tools` holds the whole of it — :func:`call_chat`, the
-environment check every call runs (:func:`check_environment`), how a call ended
-(:class:`Outcome`), and the one reader of the capture a call writes
-(:func:`read_capture`). It knows nothing about a KB and parses nothing in the
-reply, and it retries nothing: policy of every kind — retry, a re-ask, where a
-bound's value comes from — is the caller's. It is tested against a loopback
-stub server, so nothing here needs a reachable model.
+:mod:`liaison_tools` holds the whole of it — :func:`call_chat` and
+:func:`call_decision`, the environment check every call runs
+(:func:`check_environment`), how a call ended (:class:`Outcome`), and the one
+reader of each capture a call writes (:func:`read_capture`,
+:func:`read_decision_capture`). It knows nothing about a KB and parses nothing
+in a chat reply, and it retries nothing: policy of every kind — retry, a
+re-ask, where a bound's value comes from — is the caller's. It is tested
+against a loopback stub server, so nothing here needs a reachable model.
 """
 
 from .liaison_tools import (
+    DECISION_RECORD,
     REQUEST_RECORD,
     CaptureStats,
     ChatEnvironment,
+    DecisionQuestion,
+    DecisionReply,
     Outcome,
     call_chat,
+    call_decision,
     check_environment,
     read_capture,
+    read_decision_capture,
 )
 
 #: The logger tree this package writes to. It attaches no handler of its own —
@@ -26,12 +32,17 @@ from .liaison_tools import (
 LOGGER_NAME = __name__
 
 __all__ = [
+    "DECISION_RECORD",
     "LOGGER_NAME",
     "REQUEST_RECORD",
     "CaptureStats",
     "ChatEnvironment",
+    "DecisionQuestion",
+    "DecisionReply",
     "Outcome",
     "call_chat",
+    "call_decision",
     "check_environment",
     "read_capture",
+    "read_decision_capture",
 ]

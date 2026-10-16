@@ -12,14 +12,13 @@ The consuming repository is stood up the way a consumer's is: the real runner
 snippet, imported by the line the installer writes, over the installed package.
 """
 
-import re
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, refresh_kb_metadata, verify_kb_metadata
+from kb_tools import kb_index_lib, kb_pipeline, kb_util, refresh_kb_metadata, verify_kb_metadata
 from kb_tools.inference import liaison_tools
 from kb_tools.kb_claimgraph import __main__ as cli
 from kb_tools.kb_claimgraph import (
@@ -29,21 +28,22 @@ from kb_tools.kb_claimgraph import (
     classify,
     conform,
     depends,
+    gate,
     graph,
     inventory,
     letters,
+    order,
     report,
     tree,
-    unmarked,
     write,
 )
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.kb_driver import prompt_templates
 from kb_tools.kb_write import render
+from kb_tools.tests import _chat_stub
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
-
 
 # ---------------------------------------------------------------------------
 # A five-leaf corpus: one claim each in three leaves, two in a fourth, none in
@@ -229,9 +229,10 @@ class FakeReader:
         return {(self._titles[question.group], self._titles[question.item]) for question in self.questions}
 
 
-def _closing_letters(prompt: str) -> set[str]:
-    """The letters a classify prompt's closing question names, past the candidate's statement."""
-    return set(re.findall(r"\b[A-Z]\b", prompt.rsplit("````````````", maxsplit=1)[1]))
+def _question_letters(question: letters.LetterQuestion) -> set[str]:
+    """The letters the question a classify ask is put with keys its criteria by."""
+    name = ask.question_name(question.kind, question.offered)
+    return set(prompt_templates.load_question(name, constants=ask.LETTER_SLOTS, offered=question.offered).criteria)
 
 
 # ---------------------------------------------------------------------------
@@ -697,7 +698,7 @@ def test_each_class_is_offered_its_own_letters_on_the_composed_prompt(declared: 
         reader=reader,
         repo_root=tmp_path,
     )
-    offered = {(q.group, q.item): (q.offered, _closing_letters(q.prompt)) for q in reader.questions}
+    offered = {(q.group, q.item): (q.offered, _question_letters(q)) for q in reader.questions}
 
     two, three = ("A", "C"), ("A", "B", "C")
     assert offered[(ids["Beta lemma"], ids["Gamma two"])] == (two, set(two))
@@ -723,15 +724,13 @@ def test_each_class_is_offered_its_own_letters_on_the_composed_prompt(declared: 
         repo_root=tmp_path / "equation",
     )
     (question,) = equation_reader.questions
-    assert question.offered == two and _closing_letters(question.prompt) == set(two)
+    assert question.offered == two and _question_letters(question) == set(two)
 
 
 #: Fixture templates for the classify ask, standing in for the working ones so
 #: the goldens below pin the composer and move with nothing a wording edit
-#: touches. They carry every slot kind the working template does: per-call
-#: ``dyn.`` slots, composer-filled letters, the ``classify-options`` alternative
-#: in both its letter sets, and the ``correction`` alternative — every
-#: alternative's fragment ending without a newline.
+#: touches. They carry every slot kind the working state template does: the
+#: per-call ``dyn.`` slots, and nothing else.
 _FIXTURE_TEMPLATES = {
     ask.LETTER_TEMPLATES[letters.Kind.CLASSIFY]: (
         "Source @!dyn.claim-line!@\n"
@@ -741,13 +740,7 @@ _FIXTURE_TEMPLATES = {
         "Candidate @!dyn.candidate-line!@\n"
         "@!dyn.candidate-text!@\n"
         "Cited in @!dyn.candidate-passages!@.\n"
-        "@!classify-options!@@!correction!@\n"
     ),
-    prompt_templates.ALTERNATIVES["classify-options-three"]: (
-        "Answer @!letter-supported-by!@, @!letter-in-support-of!@ or @!letter-mention!@."
-    ),
-    prompt_templates.ALTERNATIVES["classify-options-two"]: "Answer @!letter-supported-by!@ or @!letter-mention!@.",
-    prompt_templates.ALTERNATIVES[ask.LETTER_CORRECTION]: "\n\nAgain; it read:\n@!dyn.returned!@\nOne letter.",
 }
 
 #: One group: a claim candidate offered all three letters, and an equation
@@ -782,40 +775,27 @@ P1: vol/a.md:7: By Lemma 2 the map contracts.
 P2: vol/a.md:9: with $k$ as in (3).
 Candidate """
 
-#: Each candidate names its own passages by the group's numbers, and its closing
-#: line names exactly the letters it is offered.
+#: Each candidate names its own passages by the group's numbers.
 _GOLDEN_ITEMS = (
     """\
 - `clm-bbbbbb` — Lemma 2 (stated in `vol/b.md`: **Lemma 2**.)
 **Lemma 2**. The map is a contraction.
-Cited in P1.
-Answer A, B or C.""",
+Cited in P1.""",
     """\
 - `clm-cccccc` — Equation (3) (stated in `vol/b.md`)
 $$ k = \\sup |f'| $$
-Cited in P1, P2.
-Answer A or C.""",
+Cited in P1, P2.""",
 )
 
-#: A re-ask is the first ask with the correction after the question, carrying
-#: what came back stripped.
-_GOLDEN_CORRECTION = """
 
-Again; it read:
-I would say B, probably.
-One letter."""
-
-
-@pytest.mark.parametrize("returned", [None, "  I would say B, probably.\n"], ids=["first-ask", "re-ask"])
 @pytest.mark.parametrize("candidate", [0, 1], ids=["three-letters", "two-letters"])
 def test_the_classify_ask_composes_byte_for_byte_from_fixture_templates(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, candidate: int, returned: str | None
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, candidate: int
 ):
     compose_from_fixture_templates(monkeypatch, tmp_path, _FIXTURE_TEMPLATES)
     entry = ask.classify_asks(_GOLDEN_GROUP, _GOLDEN_CANDIDATES)[candidate]
 
-    correction = "" if returned is None else _GOLDEN_CORRECTION
-    assert entry.compose(returned) == _GOLDEN_PREFIX + _GOLDEN_ITEMS[candidate] + correction + "\n"
+    assert entry.compose() == _GOLDEN_PREFIX + _GOLDEN_ITEMS[candidate] + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -905,44 +885,101 @@ def _record_unmarked(declared: Path, letters_by_title: dict[tuple[str, str], str
     return ids
 
 
-def test_an_unmarked_yes_is_a_candidate_offered_its_class_s_letters_drafted_mention(declared: Path):
-    """Only ``A`` yields; the candidate it yields is classed by its pair, its passage the source's own text.
+_Link = kb_pipeline.LinkHarvest
 
-    Delta states its result and points at Beta's nowhere in markup, so the
-    pair is no candidate until the record says the text points there.
-    """
-    ids = _record_unmarked(
+
+def _record_cull(declared: Path, links: list[tuple[str, str, kb_pipeline.LinkHarvest]]) -> dict[str, str]:
+    """Land a cull record whose links join each ``(title, title)`` pair, held in id order as the record holds them."""
+    _, _, authored = _read(declared)
+    ids = _titles(authored)
+    kb_pipeline.write_cull(
         declared,
-        {
-            ("Delta result", "Beta lemma"): ask.UnmarkedLetter.POINTS,
-            ("Beta lemma", "Delta result"): ask.UnmarkedLetter.DOES_NOT,
-            ("Delta result", "Gamma two"): None,
-        },
+        kb_pipeline.CullRecord(
+            links=tuple(
+                kb_pipeline.CullLink(*sorted((ids[first], ids[second])), harvest=harvest)
+                for first, second, harvest in links
+            )
+        ),
     )
+    return ids
+
+
+def _narrowed_with_links(declared: Path) -> attribute.Attribution:
+    """The narrowing as ``depends.build`` runs it, over the cull record on disk."""
     documents, sites, authored = _read(declared)
-    before = attribute.narrow(documents, authored, sites)
-    yes = (ids["Delta result"], ids["Beta lemma"])
-    assert yes not in _pairs(before)
+    record = kb_pipeline.read_cull(declared)
+    links = () if record is None else record.links
+    positions = order.claim_positions(documents, authored, sites)
+    return attribute.narrow(documents, authored, sites, inferred=attribute.orient_links(links, authored, positions))
 
-    after = attribute.narrow(documents, authored, sites, unmarked=unmarked.found(kb_pipeline.read_unmarked(declared)))
 
-    assert _pairs(after) == _pairs(before) | {yes}
-    found = _candidate(after, *yes)
+def test_a_link_no_marked_pair_joins_is_a_candidate_from_its_later_claim_to_its_earlier(declared: Path):
+    """Delta follows Beta in reading order and nothing marks the pair: Delta → Beta, offered three, drafted mention.
+
+    Alpha and Beta are already a marked pair, so their link adds nothing from the link's side — neither a second
+    provenance nor the reverse pair.
+    """
+    ids = _record_cull(
+        declared, [("Beta lemma", "Delta result", _Link.ADJACENT), ("Alpha result", "Beta lemma", _Link.UNMARKED)]
+    )
+    before = _narrowed(declared)[1]
+    linked = (ids["Delta result"], ids["Beta lemma"])
+    assert linked not in _pairs(before)
+
+    after = _narrowed_with_links(declared)
+
+    assert _pairs(after) == _pairs(before) | {linked}
+    found = _candidate(after, *linked)
     assert set(found.offered) == attribute.OFFERED[attribute.CandidateClass.CLAIM_TO_CLAIM]
     assert found.draft is attribute.Relation.MENTION
-    assert found.harvests == {attribute.Harvest.UNMARKED}
+    assert found.harvests == {attribute.Harvest.ADJACENT}
     (passage,) = found.passages
     assert "Delta stands on its own." in passage, "the claim's own text"
     assert "Section 1" not in passage, "and not the prose around it"
-    defaulted_pair = _candidate(after, ids["Delta result"], ids["Gamma two"])
-    assert defaulted_pair.harvests == {attribute.Harvest.REFERENCE}, "a default adds no provenance"
+    marked = _candidate(after, ids["Alpha result"], ids["Beta lemma"])
+    assert marked.harvests == {attribute.Harvest.REFERENCE}, "a link a marked pair joins is left to that harvest"
 
 
-def test_an_unmarked_yes_answered_b_writes_target_to_source_and_is_counted_by_harvest(
-    declared: Path
+def _node(node_id: str, *, equation: str | None = None) -> graph.ClaimNode:
+    return graph.ClaimNode(
+        id=node_id, document="vol/s.md", title=node_id, locator=None, identifier=None, equation=equation
+    )
+
+
+@pytest.mark.parametrize(
+    "a, b, at, equations, oriented",
+    [
+        # b is later in reading order: it is the source.
+        ("a", "b", {"a": (0, 1), "b": (0, 5)}, (), ("b", "a")),
+        # a is later, in a later document.
+        ("a", "b", {"a": (1, 0), "b": (0, 9)}, (), ("a", "b")),
+        # tied in reading order: the higher id is the later.
+        ("a", "b", {"a": (0, 3), "b": (0, 3)}, (), ("b", "a")),
+        # the equation is earlier: already the target.
+        ("a", "b", {"a": (0, 1), "b": (0, 5)}, ("a",), ("b", "a")),
+        # the equation is later: it is the target all the same.
+        ("a", "b", {"a": (0, 1), "b": (0, 5)}, ("b",), ("a", "b")),
+        # two equations: reading order decides.
+        ("a", "b", {"a": (0, 1), "b": (0, 5)}, ("a", "b"), ("b", "a")),
+    ],
+    ids=["later-is-source", "later-document", "tie-by-id", "equation-earlier", "equation-later", "two-equations"],
+)
+def test_a_link_runs_from_its_later_claim_to_its_earlier_and_an_equation_is_always_the_target(
+    a, b, at, equations, oriented
 ):
-    """The yes is classified like any candidate: *in support of* lands Beta → Delta in Beta's entry."""
-    ids = _record_unmarked(declared, {("Delta result", "Beta lemma"): ask.UnmarkedLetter.POINTS})
+    nodes = {node_id: _node(node_id, equation="eq:x" if node_id in equations else None) for node_id in (a, b)}
+    positions = {node_id: order.Position(*place) for node_id, place in at.items()}
+
+    ((pair, harvest),) = attribute.orient_links(
+        [kb_pipeline.CullLink(a=a, b=b, harvest=_Link.CULLED)], graph.AuthoredGraph(nodes=nodes), positions
+    )
+
+    assert (pair, harvest) == (oriented, attribute.Harvest.CULLED)
+
+
+def test_a_link_answered_b_writes_target_to_source_and_is_counted_by_harvest(declared: Path):
+    """The link is classified like any candidate: *in support of* lands Beta → Delta in Beta's entry."""
+    ids = _record_cull(declared, [("Beta lemma", "Delta result", _Link.UNMARKED)])
     reader = FakeReader(declared, {("Delta result", "Beta lemma"): ask.ClassifyLetter.IN_SUPPORT_OF})
 
     outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
@@ -984,15 +1021,30 @@ def _plant_a_mutual_prose_reference(declared: Path) -> None:
     )
 
 
-def test_a_classified_two_cycle_demotes_both_edges_with_their_origins_and_names_them(declared: Path, capsys):
+@pytest.mark.parametrize(
+    "yes, linked, origins",
+    [
+        # The unmarked record answers one direction alone: that cut is inferred, the other cited.
+        (True, False, ("inferred", "cited")),
+        # A cull link holds the pair, which counts either way round.
+        (False, True, ("inferred", "inferred")),
+        # Neither record finds the pair.
+        (False, False, ("cited", "cited")),
+    ],
+    ids=["unmarked-yes-one-way", "cull-link-both-ways", "no-record"],
+)
+def test_a_classified_two_cycle_is_written_then_both_edges_demoted_with_their_origins(
+    declared: Path, capsys, yes: bool, linked: bool, origins: tuple[str, str]
+):
     """Two answers that cannot both be dependencies: both directions go, both relationships stay as cuts.
 
-    The unmarked record answered yes for one direction alone, so that cut is
-    ``inferred`` and the other ``cited``; ``kb-verify`` lists each as a finding
-    and passes.
+    The origin is the origin rule's: an unmarked yes in the direction written, or a cull link either way round.
+    ``kb-verify`` lists each cut as a finding and passes.
     """
     _plant_a_mutual_prose_reference(declared)
-    ids = _record_unmarked(declared, {("Alpha result", "Beta lemma"): ask.UnmarkedLetter.POINTS})
+    ids = _record_unmarked(declared, {("Alpha result", "Beta lemma"): ask.UnmarkedLetter.POINTS} if yes else {})
+    if linked:
+        _record_cull(declared, [("Alpha result", "Beta lemma", _Link.UNMARKED)])
     alpha_to_beta, beta_to_alpha = (ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])
     supported = ask.ClassifyLetter.SUPPORTED_BY
     reader = FakeReader(
@@ -1004,9 +1056,9 @@ def test_a_classified_two_cycle_demotes_both_edges_with_their_origins_and_names_
     assert not outcome.failed, outcome.lines()
     ring = {alpha_to_beta, beta_to_alpha}
     assert ring.isdisjoint(_register_edges(declared)) and ring.isdisjoint(_register_references(declared))
-    assert _register_demoted(declared) == {alpha_to_beta: "inferred", beta_to_alpha: "cited"}
-    verdict = next(line for line in outcome.lines() if "stage-D-classify" in line)
-    assert "2 classified edges lay on a cycle and are recorded as demoted" in verdict
+    assert _register_demoted(declared) == dict(zip((alpha_to_beta, beta_to_alpha), origins, strict=True))
+    verdict = next(line for line in outcome.lines() if "stage-D-ring" in line)
+    assert "2 depends edges lay on a cycle and are demoted" in verdict
     assert all(f"{source} -> {target}" in verdict for source, target in ring)
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
@@ -1096,52 +1148,51 @@ def test_the_demoted_set_is_a_property_of_the_edges_and_not_of_their_order():
     assert forward == attribute.cycle_edges(sorted(edges, key=lambda edge: edge[1]))
 
 
-_OUTCOME = kb_pipeline.ClassifyOutcome
-
-
 @pytest.mark.parametrize(
-    "pair, relation, outcome, on_ring, cycle_cut, yes, origin",
+    "links, origins",
     [
-        # A depends edge a cycle of the classified set cut, its pair a yes as written.
-        (("a", "b"), attribute.Relation.SUPPORTED_BY, _OUTCOME.ANSWERED, False, True, {("a", "b")}, "inferred"),
-        # The same, with the yes only in the other direction: the direction is the pair's.
-        (("a", "b"), attribute.Relation.SUPPORTED_BY, _OUTCOME.ANSWERED, False, True, {("b", "a")}, "cited"),
-        # A ring pair that kept its drafted mention for want of a reader.
-        (("c", "d"), attribute.Relation.MENTION, _OUTCOME.DRAFTED, True, False, set(), "cited"),
-        # A ring pair that kept it after the re-ask, its pair a yes.
-        (("c", "d"), attribute.Relation.MENTION, _OUTCOME.DEFAULTED, True, False, {("c", "d")}, "inferred"),
-        # A ring pair a model answered mention: the answer's record, no cut.
-        (("c", "d"), attribute.Relation.MENTION, _OUTCOME.ANSWERED, True, False, set(), None),
-        # A ring pair a model answered supported-by and no cycle took: a depends edge, no cut.
-        (("c", "d"), attribute.Relation.SUPPORTED_BY, _OUTCOME.REASKED, True, False, set(), None),
-        # A drafted mention off the ring: a reference, no cut.
-        (("e", "f"), attribute.Relation.MENTION, _OUTCOME.DRAFTED, False, False, set(), None),
+        # No cull record: the yes a → b is inferred; c → b is b → c only in reverse, so b → c is cited.
+        ((), ("inferred", "cited", "cited")),
+        # The links a–c and b–c are inferred either way round.
+        ((("a", "c"), ("b", "c")), ("inferred", "inferred", "inferred")),
     ],
-    ids=[
-        "cycle-inferred",
-        "cycle-yes-reversed",
-        "ring-drafted",
-        "ring-defaulted-inferred",
-        "ring-answered-mention",
-        "ring-answered-supported",
-        "off-ring-mention",
-    ],
+    ids=["no-cull-record", "cull-links-either-way"],
 )
-def test_cuts_are_the_cycle_s_edges_and_the_ring_pairs_that_kept_their_draft(
-    pair, relation, outcome, on_ring, cycle_cut, yes, origin
+def test_the_ring_row_demotes_every_edge_on_a_cycle_with_the_origin_rule_s_origin(
+    declared: Path, links: tuple[tuple[str, str], ...], origins: tuple[str, str, str]
 ):
-    classified = classify.Classification(
-        relations={pair: relation},
-        outcomes={pair: outcome},
-        edges=(),
-        references=(pair,),
-        demoted=(pair,) if cycle_cut else (),
-        asks=(),
+    """kbase's ring row: over a written 3-cycle a → b → c → a every edge leaves depends-on for a demoted row of its
+    own entry, and the gate over the tree as the row left it holds."""
+    _, _, authored = _read(declared)
+    ids = _titles(authored)
+    names = {"a": "Alpha result", "b": "Beta lemma", "c": "Delta result"}
+    ring = [(ids[names[s]], ids[names[t]]) for s, t in (("a", "b"), ("b", "c"), ("c", "a"))]
+    kb = declared / "kb-root"
+    write.write_edges(ring, kb_root=kb, scratch=_scratch(declared))
+    _record_unmarked(
+        declared,
+        {(names["a"], names["b"]): ask.UnmarkedLetter.POINTS, (names["c"], names["b"]): ask.UnmarkedLetter.POINTS},
+    )
+    if links:
+        _record_cull(declared, [(names[x], names[y], _Link.ADJACENT) for x, y in links])
+
+    findings = write.demote_cycles(
+        inferred=kb_pipeline.inferred_links(kb_pipeline.read_unmarked(declared), kb_pipeline.read_cull(declared)),
+        kb_root=kb,
+        scratch=_scratch(declared),
     )
 
-    cut = classify.cuts((pair,) if on_ring else (), classified, yes)
+    assert [finding.status for finding in findings] == [report.PASS]
+    assert not ({*ring} & _register_edges(declared))
+    assert _register_demoted(declared) == dict(zip(ring, origins, strict=True))
+    assert not any(finding.status == report.FAIL for finding in gate.run(declared)), "the gate holds"
 
-    assert dict(cut) == ({} if origin is None else {pair: origin})
+
+def test_the_ring_row_with_no_cycle_demotes_nothing(declared: Path):
+    findings = write.demote_cycles(inferred=lambda *_: True, kb_root=declared / "kb-root", scratch=_scratch(declared))
+
+    assert [(finding.status, finding.check) for finding in findings] == [(report.PASS, "stage-D-ring")]
+    assert _register_demoted(declared) == {}
 
 
 def _plant_a_mutual_proof_cycle(declared: Path) -> None:
@@ -1167,12 +1218,12 @@ def _plant_a_mutual_proof_cycle(declared: Path) -> None:
         )
 
 
-def test_a_containment_ring_drafts_mention_and_is_still_asked(declared: Path, tmp_path: Path):
-    """Two proofs each proving what the other rests on: the ring cannot all be dependencies.
+def test_a_containment_ring_is_drafted_supported_by_and_asked_offered_two_letters(declared: Path, tmp_path: Path):
+    """Two proofs each proving what the other rests on: the narrowing cuts nothing.
 
-    That is not proof the corpus reasons circularly, and it says nothing about
-    the paper's other pairs — so the ring's drafts become *mention*, the rest
-    stand, and each ring pair is put to a reader like any other candidate.
+    Each ring pair is drafted *supported by* as containment directed it, and put
+    to a reader like any other candidate, *in support of* withheld; only the
+    stage's one cut, after the write, takes a cycle's edges.
     """
     _plant_a_mutual_proof_cycle(declared)
 
@@ -1181,16 +1232,17 @@ def test_a_containment_ring_drafts_mention_and_is_still_asked(declared: Path, tm
     ring = {(ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])}
     narrowed = attribute.narrow(documents, authored, sites)
 
-    assert set(narrowed.demoted) == ring
-    assert set(narrowed.edges) == _settled(ids), "the drafts off the ring are untouched"
-    assert ring <= set(narrowed.references)
-    assert attribute.cycle_edges(narrowed.edges) == ()
+    assert set(narrowed.edges) == _settled(ids) | ring
+    assert attribute.cycle_edges(narrowed.edges) == tuple(sorted(ring))
 
     reader = FakeReader(declared)
     classify.classify(
         narrowed.candidates, graph=authored, statement=lambda node: node.title, reader=reader, repo_root=tmp_path
     )
-    assert ring <= {(q.group, q.item) for q in reader.questions}
+    asked = {(q.group, q.item): q for q in reader.questions}
+    assert ring <= set(asked)
+    two = {ask.ClassifyLetter.SUPPORTED_BY, ask.ClassifyLetter.MENTION}
+    assert all(_question_letters(asked[pair]) == two for pair in ring)
 
 
 # ---------------------------------------------------------------------------
@@ -1230,6 +1282,68 @@ def test_the_discovered_pass_runs_end_to_end_against_a_fake_reader(declared: Pat
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
     assert verify_kb_metadata.main(["--kb-root", str(kb)]) == 0
+
+
+def test_every_link_is_asked_once_and_the_ring_the_answers_close_is_cut_after_the_write(declared: Path):
+    """kbase's ``TestDependsAsksEveryLinkOnce``, over this corpus.
+
+    The cull record links Beta–Delta and Gamma one–Gamma two, which no marked pair joins, and Alpha–Beta, which
+    one does. Each unjoined link is asked once, from its later claim to its earlier, offered all three letters; the
+    joined one is not asked from the link's side. *In support of* on Delta → Beta writes Beta → Delta. The answers
+    close Alpha → Beta → Gamma two → Gamma one → Alpha through two pairs containment directed, which are drafted and
+    offered *supported by*: the ring is written, then every edge on it is demoted — inferred where a link holds the
+    pair, cited where only the markup does.
+    """
+    _record_cull(
+        declared,
+        [
+            ("Alpha result", "Beta lemma", _Link.UNMARKED),
+            ("Beta lemma", "Delta result", _Link.ADJACENT),
+            ("Gamma one", "Gamma two", _Link.ADJACENT),
+        ],
+    )
+    supported, in_support = ask.ClassifyLetter.SUPPORTED_BY, ask.ClassifyLetter.IN_SUPPORT_OF
+    reader = FakeReader(
+        declared,
+        {
+            ("Alpha result", "Beta lemma"): supported,
+            ("Beta lemma", "Gamma two"): supported,
+            ("Gamma two", "Gamma one"): supported,
+            ("Gamma one", "Alpha result"): supported,
+            ("Delta result", "Beta lemma"): in_support,
+        },
+    )
+
+    outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=reader)
+
+    assert not outcome.failed, outcome.lines()
+    _, _, authored = _read(declared)
+    ids = _titles(authored)
+    alpha, beta, g1, g2, delta = (
+        ids[t] for t in ("Alpha result", "Beta lemma", "Gamma one", "Gamma two", "Delta result")
+    )
+    asked = {(q.group, q.item): q for q in reader.questions}
+    linked = {(delta, beta), (g2, g1)}
+    assert set(asked) == _settled(ids) | _open(ids) | linked, "each link once, the joined one from the markup's side"
+    assert len(reader.questions) == len(asked), "no pair asked twice"
+    three = set(ask.ClassifyLetter)
+    two = {supported, ask.ClassifyLetter.MENTION}
+    assert {pair: _question_letters(asked[pair]) for pair in (*linked, (beta, g2), (g1, alpha))} == {
+        (delta, beta): three,
+        (g2, g1): three,
+        (beta, g2): two,
+        (g1, alpha): two,
+    }
+
+    assert _register_edges(declared) == {(beta, delta)}, "in support of runs target to source; the ring is cut"
+    assert _register_demoted(declared) == {
+        (alpha, beta): "inferred",
+        (beta, g2): "cited",
+        (g2, g1): "inferred",
+        (g1, alpha): "cited",
+    }
+    line = next(line for line in outcome.lines() if "stage-D-ring" in line)
+    assert "4 depends edges lay on a cycle and are demoted" in line
 
 
 def test_a_run_over_a_tree_the_declared_pass_never_wrote_asks_nobody_and_authors_no_edge(consumer: Path):
@@ -1360,18 +1474,18 @@ def test_a_ring_among_the_settled_pairs_costs_its_own_edges_and_not_the_paper(de
     graph at all for the paper — the ring's edges are the only ones it may cost.
     """
     _plant_a_mutual_proof_cycle(declared)
-    ids, narrowed = _narrowed(declared)
+    ids, _ = _narrowed(declared)
     ring = {(ids["Alpha result"], ids["Beta lemma"]), (ids["Beta lemma"], ids["Alpha result"])}
 
     outcome = depends.build(kb_root=declared / "kb-root", repo_root=declared, scratch=_scratch(declared), reader=None)
 
     assert not outcome.failed, outcome.lines()
     assert _register_edges(declared) == _settled(ids)
-    assert _register_demoted(declared) == dict.fromkeys(ring, "cited"), "no unmarked yes: each cut is cited"
+    assert _register_demoted(declared) == dict.fromkeys(ring, "cited"), "no record finds the pair: each cut is cited"
     assert ring.isdisjoint(_register_references(declared)), "a cut lands as demoted and never as a reference"
-    line = next(line for line in outcome.lines() if "stage-D-containment-ring" in line)
-    assert "2 pairs containment directed lay on a cycle" in line
-    assert all(f"{source} -> {target}" in line for source, target in narrowed.demoted)
+    line = next(line for line in outcome.lines() if "stage-D-ring" in line)
+    assert "2 depends edges lay on a cycle and are demoted" in line
+    assert all(f"{source} -> {target}" in line for source, target in ring)
 
     kb = declared / "kb-root"
     assert refresh_kb_metadata.main(["--kb-root", str(kb)]) == 0
@@ -1429,3 +1543,15 @@ def test_a_run_spending_inference_with_no_server_named_exits_naming_the_variable
     err = capsys.readouterr().err
     assert liaison_tools.BASE_URL_ENV in err
     assert "Traceback" not in err
+
+
+def test_a_run_spending_inference_with_no_decision_model_named_exits_naming_it(
+    declared: Path, tmp_path: Path, monkeypatch, capsys
+):
+    _chat_stub.name_server(monkeypatch, port=9, key_dir=tmp_path)
+    monkeypatch.delenv(liaison_tools.DECISION_MODEL_ENV)
+    monkeypatch.chdir(declared)
+
+    assert cli.main(["--pass", "2"]) == cli.EXIT_USAGE
+
+    assert liaison_tools.DECISION_MODEL_ENV in capsys.readouterr().err

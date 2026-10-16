@@ -1,9 +1,10 @@
 # claim-graph-sheet — the claim-graph sheets' input and their DOT goldens
 
 `kb_tools/claim_sheet.py` reads a KB root's `.index/`, the H1s of `entry-point.md` and each
-volume's `index.md`, the leaves hosting its claims, and the unmarked-reference build record beside
-`kb-root/`. This directory is such a repository: `kb-root/` holds the index, the title documents and
-two leaves and nothing else of a KB (no registers), and the build record sits beside it.
+volume's `index.md`, the leaves hosting its claims, and the unmarked-reference and cull build
+records beside `kb-root/`. This directory is such a repository: `kb-root/` holds the index, the title
+documents and two leaves and nothing else of a KB (no registers), and the unmarked record sits beside
+it; it holds no cull record, which finds nothing where absent.
 `test_claim_sheet.py` loads it, composes the sheets and byte-compares them with the three goldens
 here. `kb_load.read_index` finding no line in `.index/` that is not a record is the check that
 they stay well-formed. Every file is in KB metadata format `1.0.0`.

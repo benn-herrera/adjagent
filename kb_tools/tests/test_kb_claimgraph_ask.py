@@ -1,7 +1,7 @@
-"""Letter asks: the reader against a stub server, the templates' shape, and the stage's decisions.
+"""Letter asks: the reader against a stub server, the templates' and questions' shape, and the stage's decisions.
 
 The reader checks run the production :func:`ask.ask_without_tools` against the
-loopback stub in ``_chat_stub`` and read the request it sent and the stats it
+loopback stub in ``_chat_stub`` and read the request it sent and the reply it
 returned. Everything above the reader runs against a fixed
 :class:`~kb_tools.kb_claimgraph.letters.LetterReader`, because a check that
 needs a model to be reachable is a check that does not run.
@@ -9,7 +9,6 @@ needs a model to be reachable is a check that does not run.
 
 import functools
 import json
-import re
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -23,14 +22,12 @@ from kb_tools.kb_claimgraph.graph import ClaimNode
 from kb_tools.kb_claimgraph.report import ClaimGraphError
 from kb_tools.kb_driver import prompt_templates
 from kb_tools.tests._chat_stub import (  # noqa: F401 - fixtures
-    SERVED_MODEL,
-    USAGE,
+    SERVED_DECISION_MODEL,
     StubServer,
-    chunk,
     served_fixture,
     server_fixture,
-    sse,
 )
+from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 
 LEAF = ask.ParagraphGroup(
     document="vol/section-2.md",
@@ -72,6 +69,12 @@ CANDIDATES = (
         (ask.ClassifyLetter.SUPPORTED_BY, ask.ClassifyLetter.MENTION),
     ),
 )
+LINKED = (
+    ask.ColinearItem(
+        "clm-bbbbbb", SOURCE, "**Theorem 1**. The map has a unique fixed point.\n", TARGETS[0], "**Lemma 2**. Again."
+    ),
+    ask.ColinearItem("clm-cccccc", SOURCE, "**Theorem 1**. The map has a unique fixed point.", TARGETS[1], "$$ k $$"),
+)
 
 
 def _group_asks(kind: letters.Kind) -> tuple[letters.LetterItem, ...]:
@@ -79,30 +82,63 @@ def _group_asks(kind: letters.Kind) -> tuple[letters.LetterItem, ...]:
         letters.Kind.PARAGRAPH: lambda: ask.paragraph_asks(LEAF, PARAGRAPHS),
         letters.Kind.CLASSIFY: lambda: ask.classify_asks(SOURCE_GROUP, CANDIDATES),
         letters.Kind.UNMARKED: lambda: ask.unmarked_asks(UNMARKED_GROUP, SHORTLISTED),
+        letters.Kind.COLINEAR: lambda: ask.colinear_asks(LINKED),
     }[kind]()
 
 
 # --- the reader, against a stub server -----------------------------------------
 
 
-def _question(prompt: str = "judge this\n") -> letters.LetterQuestion:
-    return letters.LetterQuestion(letters.Kind.PARAGRAPH, "vol/one.md", "S1", prompt, tuple(ask.ParagraphLetter))
+def _question(
+    prompt: str = "judge this\n", *, kind: letters.Kind = letters.Kind.PARAGRAPH, offered: Sequence[str] = ("A", "B")
+) -> letters.LetterQuestion:
+    return letters.LetterQuestion(kind, "vol/one.md", "S1", prompt, tuple(offered), 1)
 
 
-def test_a_claim_graph_ask_is_one_tool_less_call_under_the_reader_system_fragment(served: StubServer) -> None:
-    fragment = prompt_templates.render(prompt_templates.FRAGMENTS[ask.READER_SYSTEM], slots={})
+def _answers(answers: Mapping[str, object], usage: Mapping[str, int] | None = None) -> bytes:
+    usage = {"input_tokens": 812, "output_tokens": 1} if usage is None else usage
+    return json.dumps({"model": SERVED_DECISION_MODEL, "answers": answers, "usage": usage}).encode("utf-8")
 
-    reply = ask.ask_without_tools(_question("judge this\n"))
 
-    assert (reply.text, reply.confidence) == ("A", None)
+def _shipped_question(kind: letters.Kind, offered: Sequence[str]) -> prompt_templates.Question:
+    return prompt_templates.load_question(ask.question_name(kind, offered), constants=ask.LETTER_SLOTS, offered=offered)
+
+
+@pytest.mark.parametrize(
+    ("kind", "offered", "answer", "confidence"),
+    [
+        (letters.Kind.PARAGRAPH, ("A", "B"), {"type": "noul", "noul": 0.25}, {"A": 0.25, "B": 0.75}),
+        (
+            letters.Kind.CLASSIFY,
+            ("A", "C"),
+            {"type": "choice", "choice": "C", "confidence": 0.9, "probabilities": {"A": 0.1, "C": 0.9}},
+            {"A": 0.1, "C": 0.9},
+        ),
+    ],
+    ids=["noul", "choice"],
+)
+def test_a_claim_graph_ask_is_one_decision_request_with_the_kind_s_question_under_the_item(
+    served: StubServer,
+    kind: letters.Kind,
+    offered: tuple[str, ...],
+    answer: dict[str, object],
+    confidence: dict[str, float],
+) -> None:
+    served.body = _answers({"S1": answer})
+
+    reply = ask.ask_without_tools(_question("the state\n", kind=kind, offered=offered))
+
+    assert (reply.text, reply.confidence) == ("", confidence)
     (request,) = served.requests
-    body = request["body"]
-    assert body["model"] == SERVED_MODEL
-    assert body["messages"] == [
-        {"role": "system", "content": fragment},
-        {"role": "user", "content": "judge this\n"},
-    ]
-    assert "tools" not in body
+    asked = _shipped_question(kind, offered)
+    assert request["path"] == "/v1" + liaison_tools.DECISION_PATH
+    assert request["body"] == {
+        "model": SERVED_DECISION_MODEL,
+        "state": "the state\n",
+        "questions": {"S1": {"type": asked.type, "instructions": asked.instructions, "criteria": dict(asked.criteria)}},
+    }
+    sent = request["body"]["questions"]["S1"]["criteria"]
+    assert list(sent) == sorted(sent), "criteria go on the wire in key order, as kbase's encoder writes a map"
 
 
 def test_with_no_server_named_the_ask_is_refused_naming_the_variable(server: StubServer) -> None:
@@ -112,15 +148,24 @@ def test_with_no_server_named_the_ask_is_refused_naming_the_variable(server: Stu
     assert server.requests == []
 
 
-@pytest.mark.parametrize(
-    ("status", "body"),
-    [(500, b'{"error": {"message": "out of memory"}}'), (200, sse(chunk({"content": "A"}), done=False))],
-    ids=["http-error", "no-done"],
-)
-def test_a_call_that_never_completes_raises_ask_error_after_the_transport_attempts(
-    status: int, body: bytes, served: StubServer
+def test_a_letter_ask_needs_the_decision_model_and_not_the_chat_model(
+    served: StubServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    served.status, served.body = status, body
+    served.body = _answers({"S1": {"type": "noul", "noul": 1.0}})
+    monkeypatch.delenv(liaison_tools.MODEL_ENV)
+
+    assert ask.ask_without_tools(_question()).confidence == {"A": 1.0, "B": 0.0}
+
+    monkeypatch.delenv(liaison_tools.DECISION_MODEL_ENV)
+    with pytest.raises(ValueError, match=liaison_tools.DECISION_MODEL_ENV):
+        ask.ask_without_tools(_question())
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_a_call_that_never_completes_raises_ask_error_after_the_transport_attempts(
+    status: int, served: StubServer
+) -> None:
+    served.status, served.body = status, b'{"error": {"message": "out of memory"}}'
 
     with pytest.raises(ask.AskError, match="transport-failure"):
         ask.ask_without_tools(_question())
@@ -128,51 +173,92 @@ def test_a_call_that_never_completes_raises_ask_error_after_the_transport_attemp
     assert len(served.requests) == ask.TRANSPORT_ATTEMPTS
 
 
-#: An inference server aborting a request: its error message as the reply text,
-#: a stream reaching ``[DONE]``, and no token read or written.
-_ABORTED = sse(
-    chunk({"content": "[Error: Request aborted: limit exceeded.]"}, "stop"),
-    {"choices": [], "usage": {"prompt_tokens": 0, "completion_tokens": 0}},
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [(400, b'{"error": "bad question"}'), (200, _answers({"S2": {"type": "noul", "noul": 0.5}}))],
+    ids=["4xx", "unasked-key"],
 )
+def test_a_refused_call_raises_ask_error_without_a_re_issue(status: int, body: bytes, served: StubServer) -> None:
+    served.status, served.body = status, body
 
-_ANSWERED_B = sse(
-    chunk({"content": "B"}, "stop"), {"choices": [], "usage": {"prompt_tokens": 7578, "completion_tokens": 1}}
-)
-
-
-def test_a_server_error_returned_as_reply_text_raises_ask_error(served: StubServer) -> None:
-    served.body = _ABORTED
-
-    with pytest.raises(ask.AskError, match="no token read or written"):
+    with pytest.raises(ask.AskError, match="refused"):
         ask.ask_without_tools(_question())
 
-    assert len(served.requests) == ask.TRANSPORT_ATTEMPTS
-
-
-def test_a_server_error_is_re_issued_and_the_answer_that_follows_is_the_reply(served: StubServer) -> None:
-    served.script = [(200, _ABORTED), (200, _ANSWERED_B)]
-
-    reply = ask.ask_without_tools(_question())
-
-    assert reply.text == "B"
-    assert reply.stats is not None
-    assert (reply.stats.prompt_tokens, reply.stats.output_tokens) == (7578, 1)
-    assert len(served.requests) == 2
-
-
-def test_a_cut_off_reply_completes_and_is_left_to_the_letter_parse(served: StubServer) -> None:
-    served.body = sse(chunk({"content": "The answer is"}, "length"), {"choices": [], "usage": USAGE})
-
-    reply = ask.ask_without_tools(_question())
-
-    assert reply.text == "The answer is"
     assert len(served.requests) == 1
 
 
-def test_a_reply_that_streamed_reasoning_is_counted_in_the_record(served: StubServer, tmp_path: Path) -> None:
-    served.body = sse(
-        chunk({"reasoning_content": "We need"}), chunk({"content": "B"}, "stop"), {"choices": [], "usage": USAGE}
+def test_a_retry_class_failure_is_re_issued_identically_and_the_answer_that_follows_is_the_reply(
+    served: StubServer,
+) -> None:
+    served.script = [(503, b""), (200, _answers({"S1": {"type": "noul", "noul": 0.9}}, {"input_tokens": 7578}))]
+
+    reply = ask.ask_without_tools(_question())
+
+    assert reply.confidence == pytest.approx({"A": 0.9, "B": 0.1})
+    assert reply.stats is not None
+    assert (reply.stats.prompt_tokens, reply.stats.output_tokens) == (7578, None)
+    first, second = served.requests
+    assert first["body"] == second["body"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "offered", "confidence"),
+    [
+        (
+            {"type": "choice", "choice": "B", "confidence": 0.6, "probabilities": {"A": 0.4, "B": 0.6}},
+            "AB",
+            {"A": 0.4, "B": 0.6},
+        ),
+        ({"type": "choice", "choice": "B", "confidence": 0.6}, "AB", {"B": 0.6}),
+        ({"type": "choice", "choice": "B"}, "AB", {"B": 0.0}),
+        ({"type": "choice"}, "AB", None),
+        ({"type": "noul", "noul": 0.8}, "AB", {"A": 0.8, "B": pytest.approx(0.2)}),
+        ({"type": "noul", "noul": 0.8}, "ABC", {"A": 0.8}),
+        ({"type": "noul", "noul": 1.5}, "AB", None),
+        ({"type": "noul"}, "AB", {"A": 0.0, "B": 1.0}),
+        ({"type": "noul", "noul": "0.5"}, "AB", None),
+        ({"type": "noul", "noul": True}, "AB", None),
+        ({"type": "score", "score": 0.5}, "AB", None),
+        (None, "AB", None),
+    ],
+    ids=[
+        "choice-probabilities",
+        "choice-confidence",
+        "choice-alone",
+        "choice-nothing",
+        "noul",
+        "noul-over-three",
+        "noul-out-of-range",
+        "noul-absent-is-a-confident-false",
+        "noul-a-string",
+        "noul-not-a-number",
+        "unknown-type",
+        "no-answer",
+    ],
+)
+def test_an_answer_maps_to_a_confidence_over_the_letters(
+    answer: dict[str, object] | None, offered: str, confidence: dict[str, float] | None
+) -> None:
+    assert ask.answer_confidence(answer, true_letter="A", offered=tuple(offered)) == confidence
+
+
+def test_a_noul_answer_with_its_figure_omitted_decides_the_false_letter(served: StubServer) -> None:
+    """An encoder omitting empty fields drops the figure of exactly a confident false, so absence is not unread."""
+    served.body = _answers({"S1-S2": {"type": "noul"}})
+
+    (item,) = _ask_paragraphs(ask.ask_without_tools, PARAGRAPHS[:1]).items
+
+    assert (item.letter, item.outcome, len(item.calls)) == (
+        ask.ParagraphLetter.NOT_A_CLAIM,
+        letters.AskOutcome.ANSWERED,
+        1,
     )
+
+
+def test_an_unanswered_question_is_re_asked_identically_with_its_ordinal_and_defaults(
+    served: StubServer, tmp_path: Path
+) -> None:
+    served.body = _answers({})
     reader = functools.partial(ask.ask_without_tools, captures=tmp_path / "captures")
 
     record = letters.ask_group(
@@ -183,15 +269,15 @@ def test_a_reply_that_streamed_reasoning_is_counted_in_the_record(served: StubSe
         record_dir=tmp_path / "records",
     )
 
-    (call,) = record.items[0].calls
-    assert call.stats is not None
-    assert (call.stats.thinking_blocks, call.stats.prompt_tokens, call.stats.cache_read_input_tokens) == (1, 7718, 7711)
-    assert call.stats.output_tokens == 1 and call.stats.duration_api_ms is not None
+    (item,) = record.items
+    assert (item.letter, item.outcome, len(item.calls)) == (None, letters.AskOutcome.DEFAULTED, 2)
+    first, second = served.requests
+    assert first["body"] == second["body"]
+    captures = sorted(path.name for path in (tmp_path / "captures").iterdir())
+    assert [name.rsplit("-", 1)[1] for name in captures] == ["1.capture.jsonl", "2.capture.jsonl"]
+    assert item.calls[0].stats is not None and item.calls[0].stats.prompt_tokens == 812
     path = letters.group_record_path(tmp_path / "records", kind=letters.Kind.PARAGRAPH, group=LEAF.document)
-    written = json.loads(path.read_text(encoding="utf-8"))
-    assert written["items"][0]["calls"][0]["stats"]["thinking_blocks"] == 1
-    assert written["items"][0]["letter"] == "B"
-    assert len(list((tmp_path / "captures").iterdir())) == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["items"][0]["outcome"] == "defaulted"
 
 
 # --- the templates: every per-item slot last, every group's prefix shared ------
@@ -208,8 +294,7 @@ def test_every_per_item_slot_sits_after_every_group_slot(kind: letters.Kind) -> 
     ]
 
     assert set(item_slots) <= set(slots)
-    assert group_slots
-    last_group = max(source.rindex(f"@!{slot}!@") for slot in group_slots)
+    last_group = max((source.rindex(f"@!{slot}!@") for slot in group_slots), default=-1)
     first_item = min(source.index(f"@!{slot}!@") for slot in item_slots)
     assert last_group < first_item
 
@@ -228,7 +313,7 @@ def _question_opening(kind: letters.Kind) -> str:
 @pytest.mark.parametrize("kind", list(letters.Kind))
 def test_two_asks_of_one_group_differ_only_after_the_question_opens(kind: letters.Kind) -> None:
     opening = _question_opening(kind)
-    first, second = (entry.compose(None) for entry in _group_asks(kind)[:2])
+    first, second = (entry.compose() for entry in _group_asks(kind)[:2])
 
     boundary = first.index(f"\n{opening}\n") + len(opening) + 2
 
@@ -236,25 +321,47 @@ def test_two_asks_of_one_group_differ_only_after_the_question_opens(kind: letter
     assert first != second
 
 
-@pytest.mark.parametrize("kind", list(letters.Kind))
-def test_a_re_ask_is_the_first_prompt_with_the_correction_after_the_question(kind: letters.Kind) -> None:
-    entry = _group_asks(kind)[0]
-    first = entry.compose(None)
+#: Every (kind, offered letters) an ask can put: every letter of the paragraph,
+#: unmarked and colinear asks, and each classify offer the question table names.
+_OFFERS = (
+    (letters.Kind.PARAGRAPH, tuple(ask.ParagraphLetter)),
+    (letters.Kind.UNMARKED, tuple(ask.UnmarkedLetter)),
+    (letters.Kind.COLINEAR, tuple(ask.ColinearLetter)),
+    *(
+        (letters.Kind.CLASSIFY, tuple(letter for letter in ask.ClassifyLetter if letter in offer))
+        for offer in ask.CLASSIFY_QUESTIONS
+    ),
+)
 
-    reask = entry.compose("I would say the answer is probably the first one")
 
-    assert first.endswith("\n")
-    assert reask.startswith(first.removesuffix("\n"))
-    assert "I would say the answer is probably the first one" in reask[len(first) - 1 :]
+@pytest.mark.parametrize(
+    ("kind", "offered"), _OFFERS, ids=lambda value: "".join(value) if isinstance(value, tuple) else value
+)
+def test_every_offer_an_ask_can_put_loads_a_shipped_question_keyed_by_it(
+    kind: letters.Kind, offered: tuple[str, ...]
+) -> None:
+    """A choice question's criteria are the offered letters; a noul question's true letter is one of them."""
+    asked = _shipped_question(kind, offered)
+
+    if asked.type == prompt_templates.NOUL:
+        assert len(offered) == 2 and asked.true_letter in offered
+    else:
+        assert set(asked.criteria) == set(offered)
 
 
-@pytest.mark.parametrize("candidate", CANDIDATES, ids=lambda candidate: candidate.target.id)
-def test_a_classify_question_closes_naming_exactly_the_letters_it_offers(candidate: ask.ClassifyItem) -> None:
-    (entry,) = ask.classify_asks(SOURCE_GROUP, [candidate])
-    closing = entry.compose(None).rsplit("````````````", maxsplit=1)[1]
+def test_every_shipped_question_is_one_an_ask_can_put() -> None:
+    """A question no offer reaches is never loaded, so nothing else would meet its defects."""
+    directory = prompt_templates.PROMPT_TEMPLATES_DIR / prompt_templates.QUESTIONS_DIRNAME
+    shipped = {path.name.removesuffix(prompt_templates.QUESTION_SUFFIX) for path in directory.iterdir()}
 
-    assert set(entry.offered) == set(candidate.offered)
-    assert set(re.findall(r"\b[A-Z]\b", closing)) == set(entry.offered)
+    assert shipped == {ask.question_name(kind, offered) for kind, offered in _OFFERS}
+
+
+def test_a_state_names_no_letter() -> None:
+    """The letters reach only the question; a state template spelling a letter slot is a second definition."""
+    for kind, name in ask.LETTER_TEMPLATES.items():
+        slots = prompt_templates.slots_of(prompt_templates.load(name), source=name)
+        assert all(slot.startswith(prompt_templates.DYNAMIC_PREFIX) for slot in slots), kind
 
 
 def test_an_unmarked_ask_is_named_by_its_target_and_offered_both_letters() -> None:
@@ -264,9 +371,41 @@ def test_an_unmarked_ask_is_named_by_its_target_and_offered_both_letters() -> No
     assert all(entry.offered == ("A", "B") for entry in asks)
 
 
+def test_a_colinear_ask_is_named_by_its_key_and_offered_all_three_letters() -> None:
+    asks = ask.colinear_asks(LINKED)
+
+    assert [entry.item for entry in asks] == ["clm-bbbbbb", "clm-cccccc"]
+    assert all(entry.offered == ("A", "B", "C") for entry in asks)
+
+
+#: A fixture colinear template, standing in for the working one so the golden
+#: below pins the composer and moves with nothing a wording edit touches.
+_COLINEAR_FIXTURE = {
+    ask.LETTER_TEMPLATES[letters.Kind.COLINEAR]: (
+        "First @!dyn.first-line!@\n@!dyn.first-text!@\nSecond @!dyn.second-line!@\n@!dyn.second-text!@\n"
+    ),
+}
+
+_COLINEAR_GOLDEN = """\
+First - `clm-aaaaaa` — Theorem 1 (stated in `vol/a.md`: **Theorem 1**.)
+**Theorem 1**. The map has a unique fixed point.
+Second - `clm-bbbbbb` — Lemma 2 (stated in `vol/b.md`: **Lemma 2**.)
+**Lemma 2**. Again.
+"""
+
+
+def test_the_colinear_ask_composes_byte_for_byte_from_a_fixture_template(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The first claim before the second, each statement's trailing newlines trimmed."""
+    compose_from_fixture_templates(monkeypatch, tmp_path, _COLINEAR_FIXTURE)
+
+    assert ask.colinear_asks(LINKED[:1])[0].compose() == _COLINEAR_GOLDEN
+
+
 def test_a_group_numbers_its_passages_once() -> None:
     """Which of them each candidate names is in the classify pins, ``test_kb_claimgraph_pass2.py``."""
-    lemma, equation = (entry.compose(None) for entry in ask.classify_asks(SOURCE_GROUP, CANDIDATES))
+    lemma, equation = (entry.compose() for entry in ask.classify_asks(SOURCE_GROUP, CANDIDATES))
 
     numbered = "P1: vol/a.md:7: By Lemma 2 the map contracts.\nP2: vol/a.md:9: with $k$ as in (3)."
     assert numbered in lemma and numbered in equation
@@ -306,7 +445,7 @@ def test_the_strict_parse_takes_exactly_one_offered_letter(text: str, letter: st
     assert letters.decide(letters.Reply(text), tuple(ask.ParagraphLetter)) == letter
 
 
-def test_a_malformed_reply_is_re_asked_once_with_the_correction_then_defaults() -> None:
+def test_a_malformed_reply_is_re_asked_once_identically_with_its_ordinal_then_defaults() -> None:
     reader = FixedReader({"S1-S2": ["Probably A.", "It states a result, so A"]})
 
     record = _ask_paragraphs(reader, PARAGRAPHS[:1])
@@ -314,8 +453,8 @@ def test_a_malformed_reply_is_re_asked_once_with_the_correction_then_defaults() 
     (item,) = record.items
     assert (item.letter, item.outcome) == (None, letters.AskOutcome.DEFAULTED)
     first, second = reader.questions
-    assert second.prompt.startswith(first.prompt.removesuffix("\n"))
-    assert "Probably A." in second.prompt[len(first.prompt) - 1 :]
+    assert (first.attempt, second.attempt) == (1, 2)
+    assert second.prompt == first.prompt
     assert [call.reply for call in item.calls] == ["Probably A.", "It states a result, so A"]
 
 
@@ -395,7 +534,7 @@ def test_the_record_holds_the_prefix_once_and_each_call_its_tail() -> None:
     record = _ask_paragraphs(FixedReader({"S1-S2": ["A"], "S3": ["A"], "S4": ["B"]}))
 
     for entry, item in zip(ask.paragraph_asks(LEAF, PARAGRAPHS), record.items, strict=True):
-        assert record.prefix + item.calls[0].tail == entry.compose(None)
+        assert record.prefix + item.calls[0].tail == entry.compose()
     assert record.prefix.endswith(f"\n{_question_opening(letters.Kind.PARAGRAPH)}\n\n")
 
 

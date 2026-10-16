@@ -89,22 +89,37 @@ surface binds, :data:`READ_OPS` is the one op that reads to verify and prints,
 and :data:`BUILD_OPS` is what only the build issues, bound by no surface. They
 are disjoint, and their union is exactly :data:`values.OP_FIELDS`' key set.
 
-**Seven in-package reaches, all deliberate, all for one reason**: the alternative
+**Ten in-package reaches, all deliberate, all for one reason**: the alternative
 to each is a second copy of a rule that already has exactly one owner, which is
-where drift starts. :class:`store._Refused` is caught around
-:func:`store.resolve_target` so step 2 runs in its stated place without a second
-implementation of the containment rule; store's two fold-break patterns bound
-the depends-on bullet insert rather than a re-typed key list;
-``render._format_score`` renders a rigor value's text;
-``kb_index_lib._declared_node_ids`` is what decides which frontmatter entries
-declare a node; ``kb_index_lib._SUPPORTS_PAIR_RE`` is what decides where a staged
-fan-out block ends; and ``kb_index_lib._parse_depends_on_line`` is what says
-which edge a rendered depends-on bullet *is*, which is the question
-:func:`_reader_target` has to answer to tell a new edge from one already there;
-``kb_index_lib._parse_demoted_line`` answers the same of a demoted bullet for
-:func:`_drop_demoted`.
-Each is the same reach ``store`` itself makes into ``kb_index_lib``'s compiled
-patterns, for the same reason.
+where drift starts.
+
+1. :class:`store._Refused` is caught around :func:`store.resolve_target`, so
+   step 2 runs in its stated place without a second implementation of the
+   containment rule.
+2. ``store._fold_break_for`` gives the fold-break pattern for an entry's kind,
+   which bounds the bullet insert and the bullet drop rather than a re-typed
+   key list.
+3. ``render._format_score`` renders a rigor value's text, and an
+   applicability's.
+4. ``kb_index_lib._declared_node_ids`` decides which frontmatter entries
+   declare a node.
+5. ``kb_index_lib._SUPPORTS_PAIR_RE`` decides where a staged fan-out block
+   ends.
+6. ``kb_index_lib._parse_depends_on_line`` says which edge a rendered
+   depends-on bullet *is* — the question :func:`_reader_target` answers to tell
+   a new edge from one already there — and which target a depends-on bullet
+   names for :func:`_drop_list_bullets`.
+7. ``kb_index_lib._parse_references_line`` answers the same of a references
+   bullet for :func:`_drop_list_bullets`.
+8. ``kb_index_lib._parse_demoted_line`` answers the same of a demoted bullet
+   for :func:`_drop_list_bullets`.
+9. ``kb_index_lib._depends_on_bullet_head`` says which target a depends-on
+   bullet's head names, for ``set-applicability``'s splice.
+10. ``kb_index_lib._APPLICABILITY_IN_PAREN_RE`` finds and replaces the
+    ``(applicability …)`` annotation on that bullet.
+
+Each is the same kind of reach ``store`` itself makes into ``kb_index_lib``'s
+compiled patterns, for the same reason.
 
 **The leaf-writing ops carry their own readback.** ``store``'s proof
 surface is register-shaped — :class:`store.ExpectedEntry` carries a register
@@ -483,8 +498,8 @@ def _contained(kb_root: Path, rel_path: str, *, key: str) -> Path:
     """Step 2, in its stated place: resolve ``rel_path`` inside ``kb-root/``.
 
     ``store.resolve_target`` is the containment rule's one implementation and it
-    signals with store's internal refusal type; catching it here is the reach
-    the module docstring names. Re-running the check inside
+    signals with store's internal refusal type; catching it here is the first
+    in-package reach the module docstring names. Re-running the check inside
     :func:`store.apply_edits` is not redundancy to be optimized away — it is the
     boundary check standing at the boundary, which is where it belongs.
 
@@ -836,6 +851,12 @@ LEAF_PROOF_COVERAGE: Mapping[str, ProofCoverage] = {
         compared=frozenset({"id", "claim", "fraction"}),
         excluded={},
     ),
+    # Proven as an absence: the id's marker and claims entry gone from each
+    # leaf, and its entry gone from its register.
+    "drop-claim-node": ProofCoverage(
+        compared=frozenset({"id"}),
+        excluded={},
+    ),
 }
 
 
@@ -1085,17 +1106,26 @@ def _add_bullets(addition: "_EdgeAddition", *, section: str) -> Callable[[str], 
     return splice
 
 
-def _drop_demoted(node_id: str, targets: frozenset[str]) -> Callable[[str], str]:
-    """Delete the ``- demoted:`` bullets of ``node_id``'s entry naming any of ``targets``.
+#: Each list's bullet reader: what target a bullet of it names, as the register's reader answers.
+_BULLET_READERS: Mapping[str, Callable[[str, str], Sequence[kb_index_lib.DependsOnEdge]]] = {
+    "depends-on": kb_index_lib._parse_depends_on_line,
+    "references": kb_index_lib._parse_references_line,
+    "demoted": kb_index_lib._parse_demoted_line,
+}
 
-    Each goes with its continuation lines, and the list's header goes too where
-    no bullet is left; an entry with no such list comes back untouched, the
-    expectation being read off the same baseline. Which target a bullet names
-    is the reader's answer (``kb_index_lib._parse_demoted_line``), for
-    :func:`_reader_target`'s reason.
+
+def _drop_list_bullets(node_id: str, section: str, targets: frozenset[str] | None = None) -> Callable[[str], str]:
+    """Delete bullets of ``node_id``'s ``- <section>:`` list: every one, or those naming any of ``targets``.
+
+    Each goes with its continuation lines, and the header goes where neither
+    bullet nor other text is left, so a re-issue finds the list as this left
+    it. An entry with no such list, or none of whose bullets match, comes back
+    untouched. Which target a bullet names is the reader's answer
+    (:data:`_BULLET_READERS`), for :func:`_reader_target`'s reason.
     """
     break_re = store._fold_break_for(node_id)
-    header = "- demoted:"
+    header = f"- {section}:"
+    read = _BULLET_READERS[section]
 
     def splice(document: str) -> str:
         entry = next((e for e in store.locate_entries(document) if e.node_id == node_id), None)
@@ -1113,17 +1143,108 @@ def _drop_demoted(node_id: str, targets: frozenset[str]) -> Callable[[str], str]
             end -= 1
 
         kept: list[str] = []
-        dropping = False
+        bullets = 0
+        dropped = dropping = False
         for line in lines[head + 1 : end]:
             if line != line.lstrip() and line.lstrip().startswith("- "):
-                named = {edge.target for edge in kb_index_lib._parse_demoted_line(line, node_id)}
-                dropping = bool(named & targets)
+                dropping = targets is None or bool({edge.target for edge in read(line, node_id)} & targets)
+                bullets += not dropping
+            dropped = dropped or dropping
             if not dropping:
                 kept.append(line)
-        remaining = any(line != line.lstrip() and line.lstrip().startswith("- ") for line in kept)
-        return store.splice_lines(document, start=head, end=end, lines=[lines[head], *kept] if remaining else [])
+        if bullets or any(line.strip() for line in kept):
+            return store.splice_lines(document, start=head + 1, end=end, lines=kept) if dropped else document
+        return store.splice_lines(document, start=head, end=end, lines=[])
 
     return splice
+
+
+def _entry_start(entry: kb_index_lib.RegisterEntry) -> int:
+    return entry.marker_line if entry.heading_line is None else entry.heading_line
+
+
+def _drop_entry_block(node_id: str) -> Callable[[str], str]:
+    """Delete ``node_id``'s whole register entry, with the rule and blank lines that lead it.
+
+    The block runs from its heading back over the separating ``---`` and blank
+    lines above it, and forward to the next entry's own leading separator, or
+    the file's end; the next entry keeps its separator, so no two entries end up
+    abutting. Frontmatter is never reached.
+    """
+
+    def splice(document: str) -> str:
+        located = kb_index_lib.locate_register_entries(document)
+        at = next((i for i, e in enumerate(located) if e.node_id == node_id), None)
+        if at is None:
+            raise store.SpliceError(f"no canonical entry for {node_id} in this register")
+        lines = document.splitlines()
+        start = _entry_start(located[at])
+        end = next((_entry_start(e) for e in located[at + 1 :] if _entry_start(e) > start), len(lines))
+        if end < len(lines):
+            while end > start + 1 and lines[end - 1].strip() in ("", "---"):
+                end -= 1
+        block = kb_index_lib.find_frontmatter(document)
+        floor = 0 if block is None else len(document[: block.end].splitlines())
+        while start > floor and lines[start - 1].strip() in ("", "---"):
+            start -= 1
+        return store.splice_lines(document, start=start, end=end, lines=[])
+
+    return splice
+
+
+def _drop_leaf_claim(node_id: str) -> Callable[[str], str]:
+    """Remove ``node_id``'s claim-quality marker from every line carrying it, and its ``claims:`` entry.
+
+    A line the marker leaves without prose goes with it. The ``claims:`` list is
+    re-rendered only where it names the id, so a leaf that does not is left
+    byte-identical there.
+    """
+    marker = render.render_tier2_marker(node_id)
+
+    def splice(document: str) -> str:
+        if marker in document:
+            kept = []
+            for line in document.splitlines(keepends=True):
+                if marker in line:
+                    line = line.replace(f" {marker}", "").replace(marker, "")
+                    if not line.strip():
+                        continue
+                kept.append(line)
+            document = "".join(kept)
+        claims = tuple((kb_index_lib.parse_frontmatter(document) or {}).get("claims") or ())
+        if node_id not in claims:
+            return document
+        return store.replace_or_insert_frontmatter_field(
+            document, field="claims", ids=[c for c in claims if c != node_id], anchor_key="kind"
+        )
+
+    return splice
+
+
+def _claim_node_prover(node_id: str) -> Prover:
+    """The leaf read back with neither the marker nor the claims entry, and no ``claims: []`` without ``no-claim``."""
+    marker = render.render_tier2_marker(node_id)
+
+    def prove(path: Path, kb_root: Path) -> list[str]:
+        text = path.read_text(encoding="utf-8")
+        fields = kb_index_lib.parse_frontmatter(text) or {}
+        claims = tuple(fields.get("claims") or ())
+        wrong = []
+        if marker in kb_index_lib.strip_frontmatter(text):
+            wrong.append("claim-quality marker")
+        if node_id in claims or ("claims" in fields and not claims and "no-claim" not in fields):
+            wrong.append("claims")
+        return wrong
+
+    return prove
+
+
+def _entry_dropped_prover(node_id: str) -> Prover:
+    def prove(path: Path, kb_root: Path) -> list[str]:
+        held = {entry.id for entry in kb_index_lib.parse_claim_quality_file(path, kb_root)}
+        return ["register entry"] if node_id in held else []
+
+    return prove
 
 
 def _chained(*splices: Callable[[str], str]) -> Callable[[str], str]:
@@ -1931,6 +2052,53 @@ def resolve_demoted(*, kb_root: Path, values_file: Path) -> Result:
     return _execute("resolve-demoted", kb_root=kb_root, values_file=values_file, plan=_plan_resolve_demoted)
 
 
+def drop_claim_edges(*, kb_root: Path, values_file: Path) -> Result:
+    """Remove a claim's outgoing ``depends-on`` or ``references`` bullets, or both where no class is named.
+
+    Each bullet goes with its continuation lines, and a list's header where
+    neither bullet nor other text is left; an absent list stands. ``demoted``
+    is refused at step 1: a cut is ``resolve-demoted``'s to remove. An entry
+    already without the lists asked is left as it stands, so a re-issue writes
+    nothing.
+    """
+    return _execute("drop-claim-edges", kb_root=kb_root, values_file=values_file, plan=_plan_drop_claim_edges)
+
+
+def drop_inbound_edges(*, kb_root: Path, values_file: Path) -> Result:
+    """Remove, from every register entry holding one, each ``depends-on`` or ``references`` bullet naming ``id``.
+
+    Claim and support entries alike; headers go as ``drop-claim-edges``' do,
+    and an entry naming no such bullet stands, so a re-issue writes nothing.
+    """
+    return _execute("drop-inbound-edges", kb_root=kb_root, values_file=values_file, plan=_plan_drop_inbound_edges)
+
+
+def demote_claim_edge(*, kb_root: Path, values_file: Path) -> Result:
+    """Turn ``id``'s ``depends`` edge naming ``target`` into a ``demoted`` row of the same entry carrying ``origin``.
+
+    The build's ring cut, in :data:`BUILD_OPS`. Where the row already stands
+    with that origin, a ``depends`` bullet still beside it is removed and
+    otherwise the pair is left as it stands; a row standing with the other
+    origin is refused naming both, and so is a pair with neither a ``depends``
+    bullet nor a ``demoted`` row.
+    """
+    return _execute("demote-claim-edge", kb_root=kb_root, values_file=values_file, plan=_plan_demote_claim_edge)
+
+
+def drop_claim_node(*, kb_root: Path, values_file: Path) -> Result:
+    """Delete claim nodes whole: register entry, leaf markers and ``claims`` entries, and demoted rows naming them.
+
+    Refused, writing nothing, where any entry's ``depends-on`` or
+    ``references`` still names a node; where the call would empty a leaf's
+    ``claims`` list, the nodes it drops from that leaf counted together; and
+    where, the removals composed, any line under ``kb-root/`` still names a
+    node, each named as ``path:line``, refresh's roll-ups excepted. A re-issue
+    removes whatever of a node still stands and writes nothing where nothing
+    does.
+    """
+    return _execute("drop-claim-node", kb_root=kb_root, values_file=values_file, plan=_plan_drop_claim_node)
+
+
 def set_frontmatter(*, kb_root: Path, values_file: Path) -> Result:
     """Replace or insert a document's whole frontmatter.
 
@@ -2472,7 +2640,7 @@ def _plan_resolve_demoted(ctx: _Context, entries: Sequence[values.Entry]) -> lis
 def _resolution_intent(resolution: _DemotedResolution) -> _Intent:
     """One entry's demoted bullets dropped and its restored ones added, proven as the record less and plus them."""
     restored = tuple(resolution.restore)
-    splices = [_drop_demoted(resolution.node_id, frozenset(resolution.drop))]
+    splices = [_drop_list_bullets(resolution.node_id, "demoted", frozenset(resolution.drop))]
     if restored:
         addition = _EdgeAddition(node_id=resolution.node_id, requested=restored, new=restored)
         splices.append(_add_bullets(addition, section="depends-on"))
@@ -2488,6 +2656,299 @@ def _resolution_intent(resolution: _DemotedResolution) -> _Intent:
         )
 
     return _Intent(path=resolution.path, target=resolution.target, splice=_chained(*splices), expect_current=expect)
+
+
+@dataclass(frozen=True)
+class _HeldEdges:
+    """One register entry's outgoing edge targets, per list."""
+
+    node_id: str
+    register: str
+    depends_on: frozenset[str]
+    references: frozenset[str]
+    demoted: frozenset[str]
+
+    def names(self, node_id: str) -> bool:
+        return node_id in self.depends_on or node_id in self.references
+
+
+def _held_edges(ctx: _Context) -> list[_HeldEdges]:
+    """Every claim and support entry of every register, read with no known-id filter.
+
+    Unfiltered so that an edge naming a node whose entry is already gone still
+    shows: that edge is exactly what a drop must refuse over.
+    """
+    held: list[_HeldEdges] = []
+    for rel in sorted({r.register_path for r in ctx.inventory.values() if r.register_path is not None}):
+        path = ctx.kb_root / rel
+        for claim in kb_index_lib.parse_claim_quality_file(path, ctx.kb_root):
+            held.append(
+                _HeldEdges(
+                    node_id=claim.id,
+                    register=rel,
+                    depends_on=frozenset(e.target for e in claim.depends_on),
+                    references=frozenset(e.target for e in claim.references),
+                    demoted=frozenset(e.target for e in claim.demoted),
+                )
+            )
+        for sup_id, raw in kb_index_lib.parse_support_quality_entries(path, ctx.kb_root).items():
+            depends = frozenset(e.target for e in raw["depends_on"])  # type: ignore[attr-defined]
+            held.append(_HeldEdges(sup_id, rel, depends, frozenset(), frozenset()))
+    return held
+
+
+def _list_drop_intent(
+    ctx: _Context, *, node_id: str, rel: str, sections: Sequence[str], targets: frozenset[str] | None = None
+) -> _Intent:
+    """One entry's bullets dropped from ``sections`` — every one, or those naming ``targets`` — proven as the record less them."""
+
+    def expect(read: _RegisterRead) -> tuple[store.ExpectedEntry, ...]:
+        current = _current_entry(read, node_id)
+        kept = {
+            _SECTION_FIELDS[section]: tuple(
+                edge
+                for edge in getattr(current, _SECTION_FIELDS[section])
+                if targets is not None and edge.target not in targets
+            )
+            for section in sections
+        }
+        return (replace(current, **kept),)
+
+    return _Intent(
+        path=rel,
+        target=_contained(ctx.kb_root, rel, key="id"),
+        splice=_chained(*(_drop_list_bullets(node_id, section, targets) for section in sections)),
+        expect_current=expect,
+    )
+
+
+def _moves_its_file(intent: _Intent) -> bool:
+    """Whether ``intent``'s splice changes its file as it stands: a plan's test for an entry already as asked.
+
+    A splice that cannot find its site is kept, for ``store`` to run again and
+    refuse located.
+    """
+    document = intent.target.read_text(encoding="utf-8")
+    try:
+        return intent.splice(document) != document
+    except store.SpliceError:
+        return True
+
+
+def _plan_drop_claim_edges(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+    sections: dict[str, list[str]] = {}
+    for entry in entries:
+        node_id = str(entry.values["id"])
+        _resolve(ctx, node_id, key="id", needs_register=True)
+        edge_class = entry.values.get("edge-class")
+        wanted = sections.setdefault(node_id, [])
+        wanted += [s for s in ((str(edge_class),) if edge_class else values.DROP_EDGE_CLASSES) if s not in wanted]
+    intents = (
+        _list_drop_intent(ctx, node_id=node_id, rel=str(ctx.inventory[node_id].register_path), sections=wanted)
+        for node_id, wanted in sections.items()
+    )
+    return [intent for intent in intents if _moves_its_file(intent)]
+
+
+def _plan_drop_inbound_edges(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+    targets = [str(entry.values["id"]) for entry in entries]
+    for target in targets:
+        _resolve(ctx, target, key="id", needs_register=True)
+    naming: dict[tuple[str, str], set[str]] = {}
+    for edges in _held_edges(ctx):
+        for target in targets:
+            if edges.names(target):
+                naming.setdefault((edges.node_id, edges.register), set()).add(target)
+    return [
+        _list_drop_intent(ctx, node_id=node_id, rel=rel, sections=values.DROP_EDGE_CLASSES, targets=frozenset(named))
+        for (node_id, rel), named in naming.items()
+    ]
+
+
+def _plan_demote_claim_edge(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+    """Each cut grouped by its source entry: the new demoted row per target, ``None`` where the row stands already."""
+    cuts: dict[str, dict[str, render.DependsOnTarget | None]] = {}
+    claims: dict[str, kb_index_lib.ClaimEntry] = {}
+    for entry in entries:
+        node_id, target, origin = (str(entry.values[key]) for key in ("id", "target", "origin"))
+        record = _resolve(ctx, node_id, key="id", needs_register=True)
+        _resolve(ctx, target, key="target", needs_register=True)
+        if target in cuts.get(node_id, {}):
+            raise _Refused(
+                f"entry[{entry.index}].target",
+                f"names {node_id} → {target}, which an earlier entry already names; a pair is cut once per batch",
+                restore="restore: drop one of the two entries, then re-run",
+            )
+        if node_id not in claims:
+            path = ctx.kb_root / str(record.register_path)
+            claims.update({claim.id: claim for claim in kb_index_lib.parse_claim_quality_file(path, ctx.kb_root)})
+        current = claims.get(node_id)
+        if current is None:
+            raise _Refused(
+                f"id={node_id}",
+                f"has no canonical entry in {record.register_path} that the production parser returns",
+                restore=f"restore: correct id, or repair {node_id}'s entry, then re-run",
+            )
+        depends = any(edge.target == target for edge in current.depends_on)
+        standing = next((edge for edge in current.demoted if edge.target == target), None)
+        if standing is not None:
+            if standing.origin != origin:
+                raise _Refused(
+                    f"origin={origin}",
+                    f"{node_id}'s demoted row naming {target} stands with origin {standing.origin}, not {origin}",
+                    restore="restore: resolve the standing row with resolve-demoted, then re-run",
+                )
+            if depends:
+                cuts.setdefault(node_id, {})[target] = None
+            continue
+        if not depends:
+            raise _Refused(
+                f"target={target}",
+                f"{node_id} carries neither a depends-on bullet nor a demoted row naming {target}; this op demotes "
+                f"an existing edge and does not add a demoted row",
+                restore="restore: add the edge with add-depends-on, or correct target, then re-run",
+            )
+        cuts.setdefault(node_id, {})[target] = render.DependsOnTarget(
+            target=target,
+            title=ctx.title_of(target),
+            context=entry.values.get("context"),  # type: ignore[arg-type]
+            origin=origin,
+        )
+    return [_cut_intent(ctx, node_id, rows) for node_id, rows in cuts.items()]
+
+
+def _cut_intent(ctx: _Context, node_id: str, rows: Mapping[str, render.DependsOnTarget | None]) -> _Intent:
+    """``node_id``'s depends bullets naming ``rows``' targets dropped and its new demoted rows added."""
+    rel = str(ctx.inventory[node_id].register_path)
+    added = tuple(row for row in rows.values() if row is not None)
+    splices = [_drop_list_bullets(node_id, "depends-on", frozenset(rows))]
+    if added:
+        splices.append(_add_bullets(_EdgeAddition(node_id=node_id, requested=added, new=added), section="demoted"))
+
+    def expect(read: _RegisterRead) -> tuple[store.ExpectedEntry, ...]:
+        current = _current_entry(read, node_id)
+        return (
+            replace(
+                current,
+                depends_on=tuple(edge for edge in current.depends_on if edge.target not in rows),
+                demoted=current.demoted + tuple(store.ExpectedEdge(t.target, t.context, None, t.origin) for t in added),
+            ),
+        )
+
+    return _Intent(
+        path=rel, target=_contained(ctx.kb_root, rel, key="id"), splice=_chained(*splices), expect_current=expect
+    )
+
+
+def _plan_drop_claim_node(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
+    ids = tuple(dict.fromkeys(str(entry.values["id"]) for entry in entries))
+    dropping = frozenset(ids)
+    held = _held_edges(ctx)
+    for node_id in ids:
+        naming = [edges.node_id for edges in held if edges.names(node_id)]
+        if naming:
+            raise _Refused(
+                f"id={node_id}",
+                f"is still named by the depends-on or references of {', '.join(naming)}, and dropping the node "
+                f"would strand those edges",
+                restore="restore: run drop-claim-edges and drop-inbound-edges first, then re-run",
+            )
+    leaves = [
+        (path, leaf)
+        for path in kb_index_lib.kb_files(ctx.kb_root)
+        if (leaf := kb_index_lib.parse_leaf(path, ctx.kb_root)) is not None
+    ]
+    for _, leaf in leaves:
+        if leaf.claims and set(leaf.claims) <= dropping:
+            raise _Refused(
+                leaf.path,
+                f"claims only {', '.join(leaf.claims)}, which this call drops, and an empty claims list is a "
+                f"no-claim decision set-frontmatter makes, not this op's",
+                restore=f"restore: restate {leaf.path} as no-claim with set-frontmatter, then re-run",
+            )
+
+    intents: list[_Intent] = []
+    for node_id in ids:
+        record = ctx.inventory.get(node_id)
+        if record is not None and record.register_path is not None:
+            rel = record.register_path
+            intents.append(
+                _Intent(
+                    path=rel,
+                    target=_contained(ctx.kb_root, rel, key="id"),
+                    splice=_drop_entry_block(node_id),
+                    prove=_entry_dropped_prover(node_id),
+                    subject=f"{rel}:{node_id}",
+                    claim_delta=-1,
+                )
+            )
+        marker = render.render_tier2_marker(node_id)
+        for path, leaf in leaves:
+            if node_id in leaf.claims or marker in path.read_text(encoding="utf-8"):
+                intents.append(
+                    _Intent(
+                        path=leaf.path,
+                        target=_contained(ctx.kb_root, leaf.path, key="id"),
+                        splice=_drop_leaf_claim(node_id),
+                        prove=_claim_node_prover(node_id),
+                        subject=f"{leaf.path}:{node_id}",
+                    )
+                )
+    for edges in held:
+        if edges.node_id not in dropping and edges.demoted & dropping:
+            intents.append(
+                _list_drop_intent(
+                    ctx, node_id=edges.node_id, rel=edges.register, sections=("demoted",), targets=dropping
+                )
+            )
+    _refuse_remaining_mentions(ctx, intents, ids)
+    return intents
+
+
+def _without_rollups(text: str) -> str:
+    """``text`` with refresh's frontmatter roll-ups blanked, every line kept where it was."""
+    for name, _ in _DERIVED_FRONTMATTER_FIELDS:
+        found = store.frontmatter_key_span(text, name)
+        if found is not None:
+            _, start, end = found
+            text = store.edit_frontmatter_lines(
+                text, lambda lines, start=start, end=end: [*lines[:start], *[""] * (end - start), *lines[end:]]
+            )
+    return text
+
+
+def _refuse_remaining_mentions(ctx: _Context, intents: Sequence[_Intent], ids: Sequence[str]) -> None:
+    """Refuse where, ``intents`` composed, any line under ``kb-root/`` still names one of ``ids``.
+
+    Once the node is gone such a line names an unknown id. Code spans and
+    fences are blanked first, as every id reader of a document blanks them, and
+    refresh's roll-ups are not read: the next refresh rewrites them. A splice
+    that cannot find its site skips the check, ``store`` refusing it located.
+    """
+    grouped: dict[Path, list[_Intent]] = {}
+    for intent in intents:
+        grouped.setdefault(intent.target, []).append(intent)
+    composed: dict[Path, str] = {}
+    for target, group in grouped.items():
+        try:
+            composed[target] = _chain([intent.splice for intent in group])(target.read_text(encoding="utf-8"))
+        except store.SpliceError:
+            return
+    named = re.compile(rf"\b(?:{'|'.join(map(re.escape, ids))})\b")
+    found: list[tuple[str, str]] = []
+    for path in kb_links.iter_markdown_files(ctx.kb_root):
+        text = composed[path] if path in composed else path.read_text(encoding="utf-8")
+        rel = path.relative_to(ctx.kb_root).as_posix()
+        for number, line in enumerate(kb_links.strip_code(_without_rollups(text)).split("\n"), start=1):
+            found += [(match.group(0), f"{rel}:{number}") for match in named.finditer(line)]
+    if found:
+        raise _Refused(
+            f"id={found[0][0]}",
+            f"is still named at {', '.join(f'{at} ({node_id})' for node_id, at in found)}, a mention this op does "
+            f"not remove, and once the node is gone each would name an unknown id",
+            restore="restore: remove each mention — through the op that wrote it, or by hand where it was "
+            "authored — then re-run",
+        )
 
 
 def _plan_set_frontmatter(ctx: _Context, entries: Sequence[values.Entry]) -> list[_Intent]:
@@ -2849,8 +3310,8 @@ def _execute_locked(op: str, *, root: Path, values_file: Path, plan) -> Result:
         ctx = _open_store(root)
         edits = _batch(plan(ctx, parsed.entries), kb_root=root)
         if not edits:
-            # Reachable only from `resolve-demoted`, the one plan that skips an
-            # entry already as asked; every other plan edits or refuses.
+            # Reachable only from the plans that skip an entry already as asked
+            # — `resolve-demoted`, `demote-claim-edge` and the three drops.
             return Result(
                 op=op,
                 exit_code=ExitCode.WRITTEN,
@@ -3299,14 +3760,19 @@ OPS: Mapping[str, Op] = {
         Op("mark-claim-in-leaf", mark_claim_in_leaf),
         Op("set-on-point-fraction", set_on_point_fraction),
         Op("resolve-demoted", resolve_demoted),
+        Op("drop-claim-edges", drop_claim_edges),
+        Op("drop-inbound-edges", drop_inbound_edges),
+        Op("drop-claim-node", drop_claim_node),
     )
 }
 
 #: The build's write surface — ops only the build issues, in-process. No
 #: surface binds one: a ``demoted`` edge is the build's cycle breaking's alone
-#: to create, so ``add-build-edges`` is in no ``kb_util`` subcommand and no
-#: runner target.
-BUILD_OPS: Mapping[str, Op] = {op.name: op for op in (Op("add-build-edges", add_build_edges),)}
+#: to create, so ``add-build-edges`` and ``demote-claim-edge`` are in no
+#: ``kb_util`` subcommand and no runner target.
+BUILD_OPS: Mapping[str, Op] = {
+    op.name: op for op in (Op("add-build-edges", add_build_edges), Op("demote-claim-edge", demote_claim_edge))
+}
 
 #: The read surface — a **sibling** registry, deliberately not a row of
 #: :data:`OPS`. Everything keyed off the write registry is a statement

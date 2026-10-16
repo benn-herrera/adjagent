@@ -1112,14 +1112,17 @@ _ARTIFACTS = {
 def _lay_down_artifacts(repo: Path, *, only: set[str] | None = None) -> None:
     """Create the build artifacts the postconditions check for.
 
-    The node-pass and unmarked records among them, written by their own writers
-    rather than typed: the one lists no leaf, so none is left unread, and the
-    other plans an empty shortlist, so no pair is left unasked.
+    The node-pass, unmarked and cull records among them, written by their own
+    writers rather than typed: the first lists no leaf, so none is left unread,
+    the second plans an empty shortlist, so no pair is left unasked, and the
+    third culls nothing.
     """
     if (only is None or kb_pipeline.NODE_PASS_RELPATH in only) and not (repo / kb_pipeline.NODE_PASS_RELPATH).exists():
         kb_pipeline.write_node_pass(repo, kb_pipeline.NodePassRecord())
     if (only is None or kb_pipeline.UNMARKED_RELPATH in only) and not (repo / kb_pipeline.UNMARKED_RELPATH).exists():
         kb_pipeline.write_unmarked(repo, kb_pipeline.UnmarkedRecord().with_plan(()))
+    if (only is None or kb_pipeline.CULL_RELPATH in only) and not (repo / kb_pipeline.CULL_RELPATH).exists():
+        kb_pipeline.write_cull(repo, kb_pipeline.CullRecord())
     for relpath, content in _ARTIFACTS.items():
         if only is not None and relpath not in only:
             continue
@@ -1155,6 +1158,7 @@ def test_show_status_exposes_the_frozen_stage_vocabulary_in_order(tmp_path: Path
         "claims-discovered",
         "equations-minted",
         "references-found",
+        "claims-culled",
         "depends-attributed",
         "phase-3a",
         "overview-drafted",
@@ -2046,7 +2050,8 @@ _PARTIAL_COVERAGE: dict[str, Callable[[Path], None]] = {
     "claims-declared": _a_document_without_its_metadata_block,
     "claims-discovered": _a_leaf_the_node_pass_never_read,
     "references-found": _a_shortlisted_pair_never_asked,
-    # The node set's close, the head's exit and the tail's entry are one gate,
+    "claims-culled": _remove(kb_pipeline.CULL_RELPATH),
+    # The last mint, the head's exit and the tail's entry are one gate,
     # so each fails the same way.
     "equations-minted": _break_a_link,
     "depends-attributed": _break_a_link,

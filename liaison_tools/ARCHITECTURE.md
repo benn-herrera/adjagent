@@ -22,8 +22,9 @@ and `relay-driver.py` composes the same two helpers into a separate, scripted lo
 
 ## Wire Transport Internals (`openai_chat.py`, `post-openai.py`)
 
-**One opener, redirects refused.** `_OPENER = urllib.request.build_opener(_NoRedirectHandler)` is
-the single `urllib` opener every request in the module goes through.
+**One opener, redirects refused.** `OPENER = urllib.request.build_opener(_NoRedirectHandler)` is
+the single `urllib` opener every request in the module goes through, public so a caller's own
+request holds the same rule.
 `_NoRedirectHandler.redirect_request` raises `RedirectRefused` unconditionally rather than following
 a `3xx` — the mechanism behind SPEC's "redirects are never followed" guarantee, because `urllib`'s
 default handler copies request headers, `Authorization` included, to the redirect target.

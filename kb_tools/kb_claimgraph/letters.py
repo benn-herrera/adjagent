@@ -1,19 +1,20 @@
 """Letter asks: one decision per ask, answered with one letter from a closed set the build offers.
 
 **The stage owns every decision; the reader owns only the call.** A
-:class:`LetterReader` takes a :class:`LetterQuestion` — a composed prompt and
-the letters it offers — and returns a :class:`Reply`: the text that came back,
-and, from a reader that can give one, a probability per label. What the reply
-*means* is :func:`decide`'s, the one re-ask and the default are
+:class:`LetterReader` takes a :class:`LetterQuestion` — a composed prompt, the
+letters it offers and which attempt it is — and returns a :class:`Reply`: a
+probability per label from a reader that gives one, or the text that came back.
+What the reply *means* is :func:`decide`'s, the one re-ask and the default are
 :func:`ask_group`'s, and the record is this module's. A reader raises
 :class:`~.ask.AskError` where its call never completed, and that is the only
 thing that stops a group: a reply that carries no offered letter is re-asked
 once and then left without one, for the caller to give its stated default.
 
 **What prompts say is not here.** :mod:`ask` composes every kind and hands each
-item over as a :class:`LetterItem` whose ``compose`` turns "what came back last
-time" (``None`` on a first ask) into the prompt. The re-ask is therefore the
-first prompt with a correction after its question, sharing its whole prefix.
+item over as a :class:`LetterItem` whose ``compose`` gives the prompt. The
+re-ask is the identical question with attempt ordinal 2, which is all that
+tells the two apart: a deterministic model answers it identically and the item
+defaults.
 
 **A group shares a prefix, so its first ask runs alone.** The server prefills
 and caches the group's context on that call, and the rest run with
@@ -45,22 +46,24 @@ DEFAULT_READER_CONCURRENCY = 4
 
 
 class Kind(StrEnum):
-    """The letter asks: a paragraph of the node pass, an edge candidate of classification, an unmarked pair."""
+    """The letter asks: a node-pass paragraph, a classify candidate, an unmarked pair, a co-linearity cull's linked pair."""
 
     PARAGRAPH = "paragraph"
     CLASSIFY = "classify"
     UNMARKED = "unmarked"
+    COLINEAR = "colinear"
 
 
 @dataclass(frozen=True)
 class LetterQuestion:
-    """One ask as a reader receives it. ``group`` and ``item`` name it; ``prompt`` is all it says."""
+    """One ask as a reader receives it. ``group``, ``item`` and ``attempt`` (1, or 2 on the re-ask) name it."""
 
     kind: Kind
     group: str
     item: str
     prompt: str
     offered: tuple[str, ...]
+    attempt: int
 
 
 @dataclass(frozen=True)
@@ -114,11 +117,11 @@ class AskOutcome(StrEnum):
 
 @dataclass(frozen=True)
 class LetterItem:
-    """One item of a group: its name, its letters, and its prompt given what came back last time."""
+    """One item of a group: its name, its letters, and its prompt."""
 
     item: str
     offered: tuple[str, ...]
-    compose: Callable[[str | None], str]
+    compose: Callable[[], str]
 
 
 @dataclass(frozen=True)
@@ -183,15 +186,16 @@ def _call(reader: LetterReader, question: LetterQuestion) -> _Call:
 
 
 def _resolve(reader: LetterReader, *, kind: Kind, group: str, entry: LetterItem) -> tuple[_Call, ...]:
-    """An item's calls: the first ask, and the one re-ask where it carried no offered letter."""
+    """An item's calls: the first ask, and the one identical re-ask where it carried no offered letter."""
+    prompt = entry.compose()
 
-    def question(returned: str | None) -> LetterQuestion:
-        return LetterQuestion(kind, group, entry.item, entry.compose(returned), entry.offered)
+    def question(attempt: int) -> LetterQuestion:
+        return LetterQuestion(kind, group, entry.item, prompt, entry.offered, attempt)
 
-    first = _call(reader, question(None))
+    first = _call(reader, question(1))
     if first.letter is not None:
         return (first,)
-    return (first, _call(reader, question(first.reply.text)))
+    return (first, _call(reader, question(2)))
 
 
 def _shared_prefix(prompts: Sequence[str]) -> str:

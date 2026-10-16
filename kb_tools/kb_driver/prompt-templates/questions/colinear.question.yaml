@@ -1,0 +1,25 @@
+# The co-linearity ask's question over three offered letters: the second
+# claim adds nothing to the first, the first adds nothing to the second, or
+# each is a step of its own. The criteria are exhaustive and mutually
+# exclusive, two claims that each add nothing to the other falling under the
+# first letter, and the offered letters reach it only as composer constants.
+type: choice
+instructions: |-
+  Does one of the two claims add nothing to the other, or is each a step of its own? A step is what
+  a claim adds to the argument: a conclusion, a construction, an estimate, or an application of a
+  result. Compare only what each claim states. If the two claims each add nothing the other does
+  not state, choose second adds nothing.
+criteria:
+  "@!letter-second-adds-nothing!@": |-
+    second adds nothing: the second claim states no step that the first claim does not already
+    state. For example, the second claim restates, paraphrases or glosses the first, motivates it,
+    or comments on it — each only where it states no step of its own.
+  "@!letter-first-adds-nothing!@": |-
+    first adds nothing: the second claim states a step that the first does not, and the first
+    claim states no step that the second does not already state. For example, the first claim
+    announces, motivates or sketches the result the second states — each only where it states no
+    step of its own.
+  "@!letter-distinct!@": |-
+    distinct: each claim states a step that the other does not. For example, the two claims state
+    different results, or one applies or extends the other — each only where both claims keep a
+    step of their own.

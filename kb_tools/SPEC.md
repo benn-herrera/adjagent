@@ -180,12 +180,12 @@ numbering is fixed and is what other documents and code cite by point number.
    **That is an obligation to check, not a prohibition on deriving an edge.** A consumer may derive
    a dependency edge from a cross-reference where something other than the reference itself supplies
    the direction — a reference inside a proof runs from the claim that proof establishes, the
-   containment being part of the markup — provided it proves the result acyclic before it writes it,
-   and never stores a cycle it finds as a dependency graph. Containment supplies that direction *for
-   the draft*: where a classification runs, a proof-contained pair is asked whether it is *supported
-   by* or a *mention*, and never *in support of*. Where those edges go instead, and why a
-   cycle costs them and nothing else, is the `references` class's (Claim-Graph Nodes and Edges,
-   below). What is forbidden is importing this edge set unchecked, which is what would make the
+   containment being part of the markup — provided the result is acyclic before the stage that writes
+   it ends, and it never leaves a cycle it finds standing as a dependency graph. Containment supplies
+   that direction *for the draft*: where a classification runs, a proof-contained pair is asked
+   whether it is *supported by* or a *mention*, and never *in support of*. Where a cycle's edges go
+   instead, and why a cycle costs them and nothing else, is the `references` class's (Claim-Graph
+   Nodes and Edges, below). What is forbidden is importing this edge set unchecked, which is what would make the
    acyclicity the claim graph guarantees a property of the source rather than of the consumer.
 7. Every internal link resolves, and every rewritten anchor lands on the node that held the label it
    targets. A label that cannot be resolved renders as the raw label text rather than as a broken
@@ -478,6 +478,15 @@ by the author's own cross-references — an equation nobody cites is scaffolding
 and a reference in prose judged not a claim does not count. No prefix is added: `kb_schema.ID_KINDS`
 is untouched and the out-of-scope ruling below is unengaged.
 
+**A prose claim that states no step a linked claim does not is not kept.** Where a link — a marked
+pair, an unmarked-reference yes or two claims consecutive in one leaf — joins it to a claim that
+already states what it states, the build removes it, culled into that claim, with every edge naming
+it; a block claim or an equation node is never removed this way. A leaf whose only claim it was is
+restated no-claim with the reason "This document's claim states nothing that another claim in the
+KB does not already state; that claim stands for both in the claim graph." The removal comes before
+any edge between claims is drawn, so the node set every such edge is drawn over is the one left
+after it, and the removed claim's links reach the claim it was culled into (the cull record, below).
+
 **Its identity is the label, and the title is what carries it** — the only authored field a `clm-`
 entry offers that a formula sealed inside a maths fence can reach, since it holds neither a block's
 own display line nor a Tier-2 marker's line to be found by. **It is terminal, as a `work-` node is,
@@ -549,8 +558,9 @@ than an observation:
   and its source is the claim whose body carries the mention. A claim whose text points at another
   claim's result with neither cross-reference markup nor a printed name — by description, by
   restatement, or in that claim's own notation — is a reference too, **where a build's reading finds
-  it**: the build proposes such pairs mechanically, asks of each whether the source's text points at
-  the target, and records a candidate only for a yes, its source the claim whose text was read. A
+  it**: the build proposes such pairs mechanically, asks of each whether the source claim continues
+  the argument the target is part of, read leniently, and records a link only for a yes, carrying
+  no direction until a candidate (below) gives it one. A
   reference the markup or a printed name carries is neither inferred nor asked about. A reference in
   prose judged not a claim has no source claim and yields no edge; in prose never judged, the source
   is every claim its document hosts. A reference the page
@@ -563,14 +573,13 @@ than an observation:
   other mutually builds.
 
   **A ring of derived dependency edges lands beside this class, as `demoted`.** Where a build
-  directs edges — by the containment rule point 6 admits, or by classifying them (below) — and the
-  directed set closes a cycle, every edge on that cycle is recorded as a `demoted` edge instead,
-  carrying its origin — `inferred` where the unmarked-reference record answered yes for the pair in
-  the direction written, `cited` otherwise — and the build carries on; nothing is asked again about
-  the cycle. A containment-directed pair the ring took the direction off is drafted *mention*, and
-  lands as `demoted` where it keeps that draft — no reader, or no offered letter after the re-ask —
-  and as whatever a reader answered otherwise. The cycle proves those edges cannot all be
-  dependencies; it proves nothing about any other edge the corpus yielded, so producing no graph
+  directs edges — by the containment rule point 6 admits, or by classifying them (below) — it
+  writes every edge the classification makes, cycles included; then every `depends` edge lying on a
+  cycle is recorded as a `demoted` edge instead, carrying its origin — `inferred` where the build
+  found the edge with no mark (below), `cited` otherwise — and the build carries on; nothing is
+  asked again about the cycle, and nothing is cut before the edges are written. The cycle proves
+  those edges cannot all be dependencies; it proves nothing about any other edge the corpus
+  yielded, so producing no graph
   for that document spends a whole paper on one ring and records every claim in it as resting on
   nothing. The relationship each demoted edge states is kept — the author did write one claim's
   identifier inside another's proof — and only the direction claim is given up, which is the half
@@ -578,7 +587,7 @@ than an observation:
   where no evidence separates its members, so keeping some would assert a discrimination nothing in
   the corpus supports. **A build reports every demotion, naming the edges**, a corpus whose derived
   edges are acyclic and one that lost a ring being otherwise the same passing build. Only the build
-  writes a `demoted` edge, through an op no runner target and no `kb_util` subcommand exposes.
+  writes a `demoted` edge, through ops no runner target and no `kb_util` subcommand exposes.
   `kb-verify` lists every `demoted` edge as a finding, not a failure, and fails one whose origin is
   missing or not `cited`/`inferred`; `resolve-demoted` removes one or restores it to `depends`,
   refusing a restore that would close a cycle (The Write API's Contract, below).
@@ -589,17 +598,28 @@ than an observation:
   to write.
 
 **Every edge candidate is classified *mention*, *supported by* or *in support of*.** A candidate is
-an ordered pair of claims whose source names its target, however the build found it; a claim and an
-equation whose labelled fence lies inside that claim's own body are no candidate, since the claim
-states it. It is offered
-only what the graph can carry: a pair whose target is a minted equation node is never offered *in
+an ordered pair of claims: every pair the text marks — a cross-reference or a printed name — directed
+as the text marks it, and every link of the cull record (below) whose two claims no marked pair
+joins either way round, directed from its later claim in reading order to its earlier, an equation
+node always the target. A claim and an equation whose labelled fence lies inside that claim's own
+body are no candidate, since the claim states it. Each candidate is asked once, and offered only
+what the graph can carry: a pair whose target is a minted equation node is never offered *in
 support of*, an edge from a node no edge may originate at being provably wrong, and nor is a pair
 containment directs, a proof of one claim citing another that rests on the first being circular
 unless it is a mention. *Mention* is a `references` edge source → target; *supported by* is a
 `depends` edge source → target and *in support of* a `depends` edge target → source, and either
-dependency is recorded with no `references` edge beside it. A build that cannot classify a candidate
-records its mechanical draft: *supported by* where containment directs the pair and no ring refuses
-it, *mention* everywhere else.
+dependency is recorded with no `references` edge beside it. A candidate whose ask yields no
+readable answer after the re-ask, and every candidate of a build that cannot classify, takes its
+mechanical draft: *supported by* where containment directs the pair, *mention* everywhere else.
+
+**A `depends` edge was found with no mark, or the text marks it.** An edge source → target was
+found with no mark where the unmarked-reference record answers (source, target) yes in that
+direction, or where the cull record's `links` hold its pair either way round; an absent record
+finds nothing. Both are build records beside `kb-root/`, with the node-pass and classification
+records: the unmarked record `kb-build-unmarked.yaml` and the cull record `kb-build-cull.yaml`,
+each committed with `kb-root/` at every stage boundary. The declared pass writes the cull record
+with every list empty; the co-linearity cull writes it once, after its removals, and a build
+spending no inference leaves it so.
 
 **`depends` and `strengthens` differ temporally, not computationally.** Both resolve in the single
 pass of `kb_index_lib.compute_solidity_full`; neither has a computation of its own. What separates
@@ -714,8 +734,8 @@ of each volume that holds a node.** The KB-root bucket is not a volume, so a KB 
 one volume carries the root sheet alone, and a volume holding no node has no sheet and no digest
 box. All are derived views that `refresh` draws on every run and no verifier reads. They come from
 `.index/`, the titles the entry point and each volume index carry, the leaves that host the claims,
-and the unmarked-reference build record beside `kb-root/` (`kb-build-unmarked.yaml`). Nobody
-authors any of them, and a hand edit lasts until the next refresh. The two root sheets link to each
+and, of the build records beside `kb-root/`, only the unmarked record and the cull record's links,
+for each `depends` edge's provenance. Nobody authors any of them, and a hand edit lasts until the next refresh. The two root sheets link to each
 other.
 
 **The full sheet draws every node, and every edge a reader can rest on.** Each volume is a cluster
@@ -730,9 +750,9 @@ marker by rule (Claim-Graph Nodes and Edges, above) and are always read by their
 links to its canonical path and anchor, and its tooltip carries its full title. Each premise
 relation is drawn with the premise below what rests on it.
 
-**A `depends` edge is drawn as cited or inferred, and a cut as cut.** An edge is *inferred* where
-the unmarked build record answered that the claim's text points at the other with no mark, and
-*cited* otherwise, absent records included. A `demoted` row is *cut*: drawn red dotted, heavier
+**A `depends` edge is drawn as cited or inferred, and a cut as cut.** An edge source → target is
+*inferred* where the build found it with no mark (Claim-Graph Nodes and Edges, above) and *cited*
+otherwise. A `demoted` row is *cut*: drawn red dotted, heavier
 where its origin is `cited`, marked as no premise and outside the layering, under the legend row
 "cut from depends: part of a circle (cited / inferred)". A `references` edge is not drawn, because
 it asserts nothing about what rests on what (Edge classes, above). Those three words are the only
@@ -872,13 +892,34 @@ annotation and the leaf-references footer at their canonical placeholder identit
 derived line byte-untouched. These ops author, `refresh` derives, and `kb-verify`'s freshness gate
 is what says the two agree.
 
-**`resolve-demoted` is the one op over a cut.** It takes `id`, `target` and `action` (`remove` or
+**`resolve-demoted` is the one public op over a cut; the build's `demote-claim-edge` makes one.**
+It takes `id`, `target` and `action` (`remove` or
 `restore`) per entry: `remove` deletes the pair's `demoted` edge, `restore` rewrites it as a
 `depends` edge. A restore that would close a cycle — the batch's earlier restores counted — is
 refused naming the path, a restore of a pair holding neither a `demoted` nor a `depends` edge is
 refused, and so is a batch naming one pair twice; a pair already as asked is left as it stands, so a
-re-issue writes nothing. The report names each edge resolved. The op that writes a `demoted` edge
-is the build's own and no `kb_util` subcommand reaches it.
+re-issue writes nothing. The report names each edge resolved. `demote-claim-edge` turns an entry's
+existing `depends` edge into a `demoted` row of the same entry carrying the origin the build computed
+for the pair; where that row already stands with that origin it removes a `depends` edge still
+standing beside it and otherwise leaves the pair as it stands; it refuses a row standing with the
+other origin, naming both, and a pair with neither a `depends` edge nor a `demoted` row. It and
+`add-build-edges` are the build's own, and no `kb_util` subcommand reaches either.
+
+**Three ops take a claim out of the graph.** `drop-claim-edges` removes a claim entry's outgoing
+`depends-on` or `references` bullets — the class named or, where none is, both — each with its
+continuation lines, and a list's header where neither bullet nor other text is left; an absent list
+stands, and the `demoted` class is refused, a cut being `resolve-demoted`'s to remove.
+`drop-inbound-edges` removes, from every register entry holding one, each `depends-on` or
+`references` bullet naming the claim, the same way; an entry naming no such bullet stands.
+`drop-claim-node` deletes the node: its register entry, its marker from every leaf carrying it (a
+leaf restated no-claim included), its id from every leaf claiming it, and every other entry's
+`demoted` row naming it. It refuses, writing nothing, where any entry's `depends-on` or `references`
+still names the node — `drop-claim-edges` and `drop-inbound-edges` come first; where the call would
+empty a leaf's `claims` list, the nodes one call drops from a leaf counted together, that being a
+no-claim decision `set-frontmatter` makes; and where, the removals composed, any line under
+`kb-root/` still names the node, each such line named as `path:line`, refresh's own roll-ups
+excepted. A re-issue of any of the three removes whatever still stands and writes nothing where
+nothing does.
 
 **One op reads instead of writing: `render-citation`.** Over the same `--values` transport it prints
 the sanctioned authority-citation string — `["<excerpt>"](<path>#<anchor>)` — after reading the
@@ -911,16 +952,23 @@ records every boundary itself. Nothing in this contract, and no artifact this to
 admits a second controller — human or agent — standing between an invocation and the driver's own
 step table; a build has exactly one process directing it, from `start` through its last stage.
 
-**Every model call a build makes is one tool-less chat-completions request** to the server its
-environment names — `API_BASE_URL`, `MODEL`, `API_KEY_FILE` and `ALLOW_HTTP`, in `liaison_tools`'
-env format — whether the driver makes it or a tool the driver invokes does. Nothing a build runs
-spawns a process to obtain a model's answer, and no call is offered a tool, so everything a call
-judges is in its prompt. OpenAI chat-completions is a given interface, observed against a local oMLX
-server serving `Qwen3.8-Flash-Next` (2026-10-04; its stream reports no server version). **A build
+**The overview call is one tool-less chat-completions request** to the server its environment
+names — `API_BASE_URL`, `MODEL` (the chat model), `API_KEY_FILE` and `ALLOW_HTTP`, in
+`liaison_tools`' env format. **Every claim-graph letter ask is one decision request** to the same
+server's `systemone` endpoint (`API_BASE_URL` + `/systemone`), naming `DECISION_MODEL`, the
+decision model, and carrying the composed state and one closed-set question (`choice` or `noul`)
+whose answer is probabilities over the offered letters — no reply text is parsed, and the request
+carries no system message. Whether the driver makes a call or a tool the driver invokes does, nothing
+a build runs spawns a process to obtain a model's answer, and no call is offered a tool, so
+everything a call judges is in its request. OpenAI chat-completions is a given interface, observed
+against a local oMLX server serving `Qwen3.8-Flash-Next` (2026-10-04; its stream reports no server
+version); the decision endpoint's wire shape is kbase's (`internal/model/decision.go`). **A build
 that will spend inference refuses, before the first stage it walks, when its environment does not
-name a server**: exit 14, naming the variable and never its value. A resume is checked the same way,
-and a build spending no inference, or with no stage left to walk that calls a model, needs no
-server.
+name a server**: exit 14, naming the variable and never its value. Each model is required by what
+the stages left to walk will call: `MODEL` where the overview call is left, `DECISION_MODEL` where a
+claim-graph letter ask is, and a build missing the one it needs is refused the same way. A resume is
+checked the same way, and a build spending no inference, or with no stage left to walk that calls a
+model, needs no server.
 
 **A build has exactly two modes, fresh and resume, and resume is never configured.** Which one an
 invocation performs is read off the ledger itself — recorded stages mean resume, none mean fresh —
@@ -1028,7 +1076,8 @@ validation gate over what it wrote is what holds it there.
 **Every claim-graph inference is one decision, answered by one label from a closed set the build
 offers.** An answer that is not one of the offered labels is asked once more; otherwise the item
 takes its stated default and is recorded as defaulted — a paragraph stays unjudged, an edge
-candidate takes its mechanical draft, and a pair proposed as an unmarked reference is not one. Only
+candidate takes its mechanical draft, a pair proposed as an unmarked reference is not one, and two
+linked claims asked whether either adds nothing both keep. Only
 a call that does not complete stops a stage: no answer
 arrived, and defaulting every item after it would present a model that is not answering as a
 finished run.

@@ -2,17 +2,16 @@
 
 Invoked through `just replay-claimgraph-asks` (kb-testing/justfile), with the
 local-inference env file sourced into the environment and PYTHONPATH at an
-installed toolchain's agents directory: the reader and its ``reader-system``
-fragment are that toolchain's, and the server and model are the env file's,
-the way a build's are.
+installed toolchain's agents directory: the reader and its question files are
+that toolchain's, and the server and decision model are the env file's, the way
+a build's are.
 
 Each ``--record`` is a group record ``letters.ask_group`` wrote. The replay puts
-the record's own prompts — its prefix and each call's tail — through
+the record's own states — its prefix and each item's first call's tail — through
 ``ask.ask_without_tools`` by way of ``letters.ask_group``, so the scheduling is
 the build's: the first item alone, then ``KB_READER_CONCURRENCY`` asks in
-flight, set from each ``--concurrency`` level in turn. A re-ask the replay
-needs and the record does not hold re-issues the item's first prompt; the
-summary counts those.
+flight, set from each ``--concurrency`` level in turn. A re-ask repeats the
+item's state; the summary counts the re-asks the record does not hold.
 
 Per level, under ``--out/<record-stem>/w<N>/``: the replay's own group record
 and each call's captured stream. On stdout, one tab-separated line per call,
@@ -64,10 +63,9 @@ class Level:
     replayed: letters.GroupRecord
 
 
-def _recorded_prompt(prefix: str, calls: Sequence[Mapping[str, object]], returned: str | None) -> str:
-    """The prompt the record holds for this call: the first, or the re-ask where it holds one."""
-    call = calls[1] if returned is not None and len(calls) > 1 else calls[0]
-    return prefix + str(call["tail"])
+def _recorded_prompt(prefix: str, calls: Sequence[Mapping[str, object]]) -> str:
+    """The state the record holds for the item: its first call's, which a re-ask repeats."""
+    return prefix + str(calls[0]["tail"])
 
 
 def _items(record: Mapping[str, object]) -> tuple[letters.LetterItem, ...]:

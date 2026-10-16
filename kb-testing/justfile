@@ -928,7 +928,7 @@ kb-driver-kill:
 # no reinstall — and launches the same `kb_driver run`, which picks up from the
 # ledger (the fixture's `kb-build: <stage>` commits). It refuses a fixture with
 # no installed toolchain or no such commit, since there is then nothing to resume.
-[doc("restage a hand-staged fixture (or, with a leading --resume, skip staging and continue from its ledger), then launch a with-inference kb_driver build over it detached (pid file, console log and run dir under KB_DRIVER_LIVE_DIR, so kb-driver-harvest/-kill apply) and return; env_file (required) is sourced into the driver's environment only and names the server every model call of the build goes to, in liaison_tools' format (API_BASE_URL, MODEL, API_KEY_FILE, ALLOW_HTTP); sources are the fixture's top-level .tex files holding \\documentclass, or exactly the files a leading --sources=a.tex,b.tex names (relative to dir, in that order, each holding \\documentclass); dir and env_file are absolute or relative to the directory just was invoked from, env_file ~ expanded; usage: kb-driver-fixture dir env_file [--resume] [--sources=a.tex,b.tex,...] [stage-fixture flags] [-- kb_driver run flags], e.g. `kb-driver-fixture test-data/transient/ModernCorp ~/.config/reaper-qwen3.8-flash-next.env --family=qwen3`")]
+[doc("restage a hand-staged fixture (or, with a leading --resume, skip staging and continue from its ledger), then launch a with-inference kb_driver build over it detached (pid file, console log and run dir under KB_DRIVER_LIVE_DIR, so kb-driver-harvest/-kill apply) and return; env_file (required) is sourced into the driver's environment only and names the server every model call of the build goes to, in liaison_tools' format (API_BASE_URL, API_KEY_FILE, ALLOW_HTTP), and its two models: MODEL, the chat model the overview call names, and DECISION_MODEL, the decision model every claim-graph letter ask names, each required only where a stage left to walk makes that call; sources are the fixture's top-level .tex files holding \\documentclass, or exactly the files a leading --sources=a.tex,b.tex names (relative to dir, in that order, each holding \\documentclass); dir and env_file are absolute or relative to the directory just was invoked from, env_file ~ expanded; usage: kb-driver-fixture dir env_file [--resume] [--sources=a.tex,b.tex,...] [stage-fixture flags] [-- kb_driver run flags], e.g. `kb-driver-fixture test-data/transient/ModernCorp ~/.config/reaper-qwen3.8-flash-next.env --family=qwen3`")]
 kb-driver-fixture dir env_file *args: _venv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1099,13 +1099,13 @@ measure-kb-roots script *args: _venv
 
 
 # The project whose installed toolchain replays recorded claim-graph asks:
-# PYTHONPATH at its installed agents directory, so the reader and its system
-# prompt are that install's. The toolchain must carry
+# PYTHONPATH at its installed agents directory, so the reader and its question
+# files are that install's. The toolchain must carry
 # kb_claimgraph/letters.py. Override it on the command line:
 # `just -f kb-testing/justfile ASK_REPLAY_FIXTURE=<dir> replay-claimgraph-asks ...`.
 ASK_REPLAY_FIXTURE := justfile_directory() / "test-data" / "transient" / "ModernCorp"
 
-[doc("replay recorded claim-graph letter-ask groups (records letters.ask_group wrote) through ASK_REPLAY_FIXTURE's installed production reader; env_file is the build's env file, whose API_* part (liaison_tools format: API_BASE_URL, MODEL, API_KEY_FILE, ALLOW_HTTP) the replay uses (absolute, or relative to the directory just was invoked from, ~ expanded), sourced into the replay's environment only and never printed; one line per call and a W_eff summary per level on stdout, replay records under .claude-temp/ask-replay/; trailing args forward (--concurrency 1 4 8, --record PATH, --out DIR)")]
+[doc("replay recorded claim-graph letter-ask groups (records letters.ask_group wrote) through ASK_REPLAY_FIXTURE's installed production reader; env_file is the build's env file, whose server and decision model (liaison_tools format: API_BASE_URL, DECISION_MODEL, API_KEY_FILE, ALLOW_HTTP) the replay uses, each recorded state put to /systemone with its kind's question (absolute, or relative to the directory just was invoked from, ~ expanded), sourced into the replay's environment only and never printed; one line per call and a W_eff summary per level on stdout, replay records under .claude-temp/ask-replay/; trailing args forward (--concurrency 1 4 8, --record PATH, --out DIR)")]
 replay-claimgraph-asks env_file record *args: _venv
     #!/usr/bin/env bash
     set -euo pipefail

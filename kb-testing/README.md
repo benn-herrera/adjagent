@@ -5,8 +5,11 @@ Integration testing harness and fixtures for kb- commands, agents, and kb_tools.
 ## Pointing a build at your own endpoint
 
 Every model call a build makes is one request to the server its environment names, in
-`liaison_tools`' env format: `API_BASE_URL` (the API root, `/v1` included), `MODEL`, `API_KEY_FILE`
-(the file holding the key) and, for plaintext http to a host that is not loopback, `ALLOW_HTTP=1`.
+`liaison_tools`' env format: `API_BASE_URL` (the API root, `/v1` included), `API_KEY_FILE` (the file
+holding the key) and, for plaintext http to a host that is not loopback, `ALLOW_HTTP=1`; and the two
+models — `MODEL`, the chat model the overview call names (`/chat/completions`), and
+`DECISION_MODEL`, the decision model every claim-graph letter ask names (`/systemone`). A run
+requires each model only where a stage left to walk makes its call.
 No config key names a server or a model, and a `[claude]` section is refused at load like any other
 section nothing reads. A run with a model call left to walk refuses an environment that names no
 server before its first stage, naming the missing variable; a `--no-inference` run needs none. Keep
@@ -22,9 +25,9 @@ ran `just` from, so `just -f kb-testing/justfile ...` from the repository root t
 with-inference build over it detached and returns. A leading `--resume` skips staging and relaunches
 over the fixture as it stands, so the driver continues from its ledger; it refuses a fixture with no
 installed toolchain or no `kb-build:` ledger commit. The env file is sourced into the driver's
-environment only and is never printed. It names the server every model call of the build goes to, in
-the `liaison_tools` variables above. Sources are the fixture's top-level `.tex` files that hold
-`\documentclass`, unless a leading `--sources=<a.tex>,<b.tex>,...` (either order with `--resume`)
+environment only and is never printed. It names the server every model call of the build goes to,
+and both models, in the `liaison_tools` variables above. Sources are the fixture's top-level `.tex`
+files that hold `\documentclass`, unless a leading `--sources=<a.tex>,<b.tex>,...` (either order with `--resume`)
 names exactly the files to build, relative to `dir` and in that order; it refuses an empty list, a
 duplicate, and a file that is missing or holds no `\documentclass`. With `--resume` the named subset
 goes to the driver as given; the ledger is the driver's concern. For example,

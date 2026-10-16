@@ -1,17 +1,18 @@
 # ACTIVE_PLAN.md — kb_tools adopts kbase's decision endpoint, cull stage, shortlist, cycle cut and write ops
 
-**Status: active; nothing dispatched.** D1 and D3 are decided (§3); no dispatch is authorized
-yet. kbase at
-commit `c6e9a95` (2026-10-12) is the reference, and every quotation below is from it. If kbase has
-moved past `c6e9a95`, the plan is re-taken before the first dispatch. kbase
+**Status: complete.** Items 1 (`4e9adc1`), 2 (`6aef453`), 3 (`3d75495`), 4 (`33555f7`), 5
+(`81d4813`), 6 (`8f11492`), 7 (`30e6ebd`), 8 (`259ebb7`), 9 (`d0840e5`) and 10 (the documents
+and §4's proof tests) landed. D1 and D3 are decided (§3). kbase at
+commit `5aab244` (2026-10-15) is the reference, and every quotation below holds at it. If kbase has
+moved past `5aab244`, the plan is re-taken before the first dispatch. kbase
 SPEC §2 fixes the roles: kb_tools' KB contract is what both toolchains build to; for the inference
 layer, the tool interface and maintenance-op behaviour kbase is the canonical design and kb_tools
 tracks it.
 
-The work is one surface in nine items (§2), each its own commit. Items 1 and 2 are the largest
+The work is one surface in ten items (§2), each its own commit. Items 1 and 2 are the largest
 change: every claim-graph letter ask leaves the chat-completions path for one decision request to
 the server's `systemone` endpoint, and the templates split into the state a question is asked over
-and the question itself. Items 3, 4 and 6 need neither; items 5, 7 and 8 need item 2.
+and the question itself. Items 3, 4, 6 and 9 need neither; items 5, 7 and 8 need item 2.
 
 ## 1. The difference set
 
@@ -467,7 +468,7 @@ grep -n 'RECORD_STEMS' kb_tools/kb_load.py                 → kb_load.py:33 (th
 grep -n '_RECORD_STEMS_0_9_0' kb_tools/kb_migrate.py       → kb_migrate.py:34, frozen with 0.9.0
 grep -rn 'kb-build-cull' kb_tools --include='*.py'         → (nothing)
 grep -n 'UNMARKED_POINTS_LETTER' kb_tools/kb_pipeline.py   → kb_pipeline.py:451
-grep -n 'inferred = (' kb_tools/claim_sheet.py             → claim_sheet.py:407
+grep -n 'inferred = (' kb_tools/claim_sheet.py             → claim_sheet.py:408
 ```
 
 ### 1.5 The shortlist: adjacency links, proximity slots, wildcard slots
@@ -545,7 +546,7 @@ before any edge is drawn:
 
 ```
 grep -n '"references-found",\|"depends-attributed",' kb_tools/kb_pipeline.py → 1218, 1225
-grep -n 'ids.index("depends-attributed") - 1' kb_tools/tests/test_kb_pipeline.py → :501
+grep -n 'ids.index("depends-attributed") - 1' kb_tools/tests/test_kb_pipeline.py → :503
 grep -n 'the node set is fixed' kb_tools/kb_pipeline.py                        → :1139
 grep -n 'claimgraph_invocation=' kb_tools/kb_pipeline.py     → the per-stage invocations
 ```
@@ -583,6 +584,26 @@ grep -n 'read_unmarked' kb_tools/kb_claimgraph/depends.py      → depends.py:19
 grep -n 'def write_edges' kb_tools/kb_claimgraph/write.py   → write.py:415 (demoted parameter)
 ```
 
+### 1.8 A reference's passage stops at the body's first line
+
+**kbase.** `internal/claimgraph/attribute.go` `referenceLine`: "The passage never reaches above
+the body's first line, and a reference above it has none." It takes the page's lines with
+`pageBody` (`classify.go`), "pageLines with the index of the first line of the body, below the
+frontmatter and the up-link line", returns `""` where `line < first`, and walks back to the
+paragraph's start no further than `first`. `first` is `label.go` `bodyStart`. A paragraph that runs
+straight on from the up-link line now gets its own lines only; a reference on the up-link or
+frontmatter line gets no passage. The passages fill the classify state's `@!dyn.reference-lines!@`.
+
+**kb_tools today.** `kb_claimgraph/attribute.py` `_reference_line` walks back to line 0, with no
+lower bound; the body start already exists as `kb_claimgraph/label.py` `_body_start`, mirroring
+`bodyStart`:
+
+```
+grep -n 'def _reference_line' kb_tools/kb_claimgraph/attribute.py   → attribute.py:717
+grep -n 'while start > 0' kb_tools/kb_claimgraph/attribute.py       → attribute.py:766
+grep -n '^def _body_start' kb_tools/kb_claimgraph/label.py          → label.py:159
+```
+
 ## 2. The work, in order
 
 Each item lands as its own commit with its tests and the document edits it invalidates;
@@ -612,9 +633,11 @@ the text is kbase's. Stdlib only.
    stub HTTP server in-test; the three outcome classes; the unasked-key refusal; the environment
    refusals; the capture round trip.
 
-2. **Questions, the composer and the reader.** Order: the prompt-engineer copies the five
-   question files byte for byte into `kb_driver/prompt-templates/questions/` and the three state
-   templates of §1.2 over the three template files; then the coder: `kb_yaml` gains the literal
+2. **Questions, the composer and the reader.** Order: the prompt-engineer copies the four
+   question files of the existing kinds (`paragraph`, `unmarked`, `classify-three`,
+   `classify-two`; `colinear`'s is item 5's, its letter slots arriving there) byte for byte into
+   `kb_driver/prompt-templates/questions/` and the three state templates of §1.2 over the three
+   template files; then the coder: `kb_yaml` gains the literal
    block scalar (`|`, `|-`, `|+`; content by indentation; the writer unchanged) so the files parse
    as written, the one addition the dialect needs — if a later file needs more, a vendored parser
    replaces `kb_yaml` whole rather than widening it again (D1);
@@ -633,14 +656,26 @@ the text is kbase's. Stdlib only.
    `letters.decide` is already the argmax. `kb_driver/call.py` keeps the overview call on
    `call_chat`. The composed-prompt goldens are re-pinned to the state texts; the record shapes
    (`kb_pipeline.ClassifyOutcome`, the unmarked and node-pass records) do not change. Then the
-   prompt-engineer reviews one composed request per kind as served. Done when a
-   `--through references-found` build against a stub server shows every letter ask on
-   `/systemone` and the overview call on `/chat/completions`.
+   prompt-engineer reviews one composed request per kind as served. The documents this item makes
+   false land with it: `kb_tools/CONVENTIONS.md`'s "A model call is
+   `inference.liaison_tools.call_chat` and nothing else", `kb_tools/ARCHITECTURE.md`'s "every call
+   is `inference.call_chat`", and the replay `[doc]` string in `kb-testing/justfile`
+   (`replay-claimgraph-asks`', naming the env's `MODEL`), and the roles of `DECISION_MODEL` and
+   `MODEL` (letter asks; overview call) in `kb_tools/SPEC.md`, `kb-testing/README.md` and the
+   `kb-driver-fixture` `[doc]` string, which item 1 states only as a requirement. `check_environment(decision=True)` still requires
+   `MODEL` after item 1; whether a run whose only model calls left are letter asks needs it is
+   settled here by what the run will call. Done when a build against a stub server shows every
+   letter ask on `/systemone` and the overview call on `/chat/completions` (the overview call is
+   made at `overview-drafted`, after `references-found`, so the walk runs past it).
 
 3. **The four write ops.** `kb_write/values.py` `OP_FIELDS` gains the four rows of §1.3;
    `kb_write/ops.py` gains the three public ops in `OPS` and `demote-claim-edge` in `BUILD_OPS`,
    with the semantics and refusals of §1.3, `origin` a required value; `kb_util.py` gains the
-   three `OP_*` tokens, their place in the token tuple and the CLI binding (`kb_util.py:1407`).
+   three `OP_*` tokens, their place in the token tuple (the tuple ending `OP_RESOLVE_DEMOTED,`)
+   and a subparser block each, shaped as `resolve-demoted`'s (`grep -n 'OP_RESOLVE_DEMOTED'
+   kb_tools/kb_util.py` → :335 the token, :352 the tuple, :1877 the subparser); dispatch needs no
+   edit, since
+   `_handle_write_op` looks the op up in `write_ops.OPS`.
    The op surface test of §1.3 is the gate. `kb_tools/SPEC.md` "The Write API's Contract" gains
    the three public ops and its sentence at line 875 becomes "`resolve-demoted` is the one public
    op over a cut; the build's `demote-claim-edge` makes one"; `kb_tools/ARCHITECTURE.md` "The
@@ -653,13 +688,15 @@ the text is kbase's. Stdlib only.
    change. `kb_pipeline.py` gains `CullRecord` with the shape of §1.4, read and written like the
    three records, and the declared pass (`claims-declared`) writes it with every list empty.
    `kb_pipeline.inferred_links(unmarked, cull) -> Callable[[str, str], bool]` is the origin rule,
-   the yes letter `kb_pipeline.UNMARKED_POINTS_LETTER`; `claim_sheet.py`'s inline set (line 407)
+   the yes letter `kb_pipeline.UNMARKED_POINTS_LETTER`; `claim_sheet.py`'s inline set (line 408)
    is replaced by a call, and item 8's cut calls it. Tests: the record round-trips through
    `kb_yaml`; an absent record finds nothing; a cull link counts both ways and an unmarked yes
    one way.
 
 5. **The co-linearity ask kind.** Order: the prompt-engineer copies `colinear.tmpl.md` and
-   `questions/colinear.question.yaml` of §1.2 byte for byte; the coder adds
+   `questions/colinear.question.yaml` of §1.2 byte for byte from kbase's
+   `internal/asks/prompt-templates/` — both files end without a trailing newline, which the code blocks
+   above cannot show; the coder adds
    `ask.ColinearLetter` with `A`/`B`/`C`, `LETTER_SLOTS` entries `letter-second-adds-nothing`,
    `letter-first-adds-nothing`, `letter-distinct`, a `ColinearItem` (key, first and second claim
    with their statements, in reading order) and `colinear_asks`, with a golden; provenance is
@@ -679,11 +716,13 @@ the text is kbase's. Stdlib only.
    `references-found` and `depends-attributed`, `work_is_inference=True` with the stage still
    walked under `--no-inference`, its `claimgraph_invocation` and coverage check (the record
    present, its `culls` all absent from the register); `kb_claimgraph/__main__.py` gains the
-   entry; `kb_driver/steps.py` gains its steps; `tests/test_kb_pipeline.py:501` asserts the new
+   entry; `kb_driver/steps.py` gains its steps; `tests/test_kb_pipeline.py:503` asserts the new
    adjacency. `kb_claimgraph/cull.py` holds the pure planner (targets, roots, final culls over
-   §1.6's rules), the issue through the three drop ops with the no-claim restatement and its fixed
+   §1.6's rules) — including the letter-to-verdict mapping by id of §1.2, which kbase does inline
+   in `cull.go`'s ask loop and item 5 therefore left here, with the `p<pass>-<id>` group names and
+   the reading-order grouping — the issue through the three drop ops with the no-claim restatement and its fixed
    reason, and the record written once after the issue. The invariant "the node set is fixed
-   before any edge is drawn over it" (`kb_pipeline.py:1139`, its test at line 384) is restated in
+   before any edge is drawn over it" (`kb_pipeline.py:1139`, its test at line 385) is restated in
    code comment, test and `kb_tools/ARCHITECTURE.md`: the node set is fixed at `claims-culled`'s
    boundary, before attribution draws its edges; the cull removes nodes with their edges through
    the drop ops, and `kb_index_lib.scan_authored_ids`' keys change across it. Tests: planner
@@ -699,9 +738,19 @@ the text is kbase's. Stdlib only.
    `demote-claim-edge` with its origin from `kb_pipeline.inferred_links`. Retired in the same
    change: `classify.cuts`' ring parameter and the in-memory cut, `Attribution.demoted`,
    `write.write_edges`' `demoted` parameter. `add-build-edges` keeps its `demoted` field as op
-   vocabulary shared with kbase, and no build caller passes it.
+   vocabulary shared with kbase, and no build caller passes it. `kb_tools/SPEC.md`'s "demoted"
+   bullet, which says a cut's origin reads the unmarked record alone, becomes the origin rule.
 
-9. **The documents.** `kb_tools/SPEC.md` "The Driver's Contract": the chat-completions sentence
+9. **The passage lower bound.** `kb_claimgraph/attribute.py` `_reference_line` takes the body
+   start as `label.py`'s `_body_start` computes it, over the same marker-stripped, unquoted text
+   (`_body_start` is private to `label.py` and nothing outside imports it today: `grep -rn
+   '_body_start' kb_tools --include='*.py'` → label.py only; making it shared is the coder's call
+   under `kb_tools/CONVENTIONS.md`), returns `""` for a
+   line above it, and walks back no further than it (§1.8). Tests mirror kbase's
+   `attribute_test.go` additions: a paragraph running on from the up-link line yields its own lines
+   only; a reference on the up-link or frontmatter line yields no passage.
+
+10. **The documents.** `kb_tools/SPEC.md` "The Driver's Contract": the chat-completions sentence
    becomes two, the overview call on chat completions and the letter asks on `systemone`, with
    `DECISION_MODEL` beside `MODEL`; "Claim-Graph Nodes and Edges" gains the origin rule and the
    cull record among the build records, no further. `kb_tools/ARCHITECTURE.md`: the Module
@@ -722,7 +771,8 @@ the text is kbase's. Stdlib only.
   YAML than that, kb_tools vendors a parser and retires `kb_yaml`'s reader whole; the partial
   parser is not widened a second time.
 - **D3, where provenance lives: one sentence in `kb_tools/ARCHITECTURE.md` "The Driver"**,
-  naming the two kbase-origin files and the eight kbase-authored ones at `c6e9a95`. A template has
+  naming the two kbase-origin files and the seven kbase-authored ones at `5aab244` (kbase
+  `internal/asks/provenance.yaml`: three state templates, four question files). A template has
   no comment syntax, so nothing goes in the files; a manifest waits for a second consumer.
 
 ## 4. Proof

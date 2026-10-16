@@ -1,0 +1,21 @@
+# The paragraph ask's question: does the paragraph state a result of its own?
+# Derived from kb_tools' paragraph.tmpl.md: the per-option bullets are the
+# criteria, the closing question the instructions, and the offered letters
+# reach it only as composer constants, as they reach the state template. The
+# criteria are keyed true/false — a noul answer is one P(true) figure — and
+# true-letter names the offered letter whose criterion "true" is.
+type: noul
+true-letter: "@!letter-claim!@"
+instructions: |-
+  Does this paragraph state a result of its own?
+criteria:
+  "true": |-
+    states a result: the paragraph itself asserts a theorem, a relation it
+    derives, a bound, a condition under which something holds, or a conclusion
+    it draws from an argument. A result stated in plain prose counts, and one
+    sentence asserting it is enough.
+  "false": |-
+    states none: motivation, signposting, a recap — the paragraph retells a
+    result without stating or deriving it here — notation, a definition, or
+    narrative. A notation table or a section preamble states no result of its
+    own.

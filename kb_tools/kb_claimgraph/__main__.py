@@ -17,7 +17,7 @@ import sys
 from functools import partial
 
 from .. import __version__, inference, kb_load, kb_pipeline, kb_util
-from . import ask, conform, depends, discover, equations, unmarked
+from . import ask, conform, cull, depends, discover, equations, unmarked
 from .build import build
 
 #: The scope vocabulary, read from the stage table rather than declared twice.
@@ -66,10 +66,13 @@ _EQUATIONS_MINTED = kb_pipeline.claimgraph_stage(
 _REFERENCES_FOUND = kb_pipeline.claimgraph_stage(
     which_pass=2, scope=kb_pipeline.CLAIMGRAPH_SCOPE_UNMARKED
 ).id  # type: ignore[union-attr]
+_CLAIMS_CULLED = kb_pipeline.claimgraph_stage(
+    which_pass=2, scope=kb_pipeline.CLAIMGRAPH_SCOPE_CULL
+).id  # type: ignore[union-attr]
 _DEPENDS_ATTRIBUTED = kb_pipeline.claimgraph_stage(which_pass=2, scope=None).id  # type: ignore[union-attr]
 
 #: The stages whose whole work is a reading a model performs: no part of them asks nobody.
-_READING_ONLY = (_CLAIMS_DISCOVERED, _REFERENCES_FOUND)
+_READING_ONLY = (_CLAIMS_DISCOVERED, _REFERENCES_FOUND, _CLAIMS_CULLED)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             "'full' runs the node pass over every leaf the block-hosted run recorded unread, spending one letter "
             "ask per paragraph it reads; 'equations' mints the referenced equations nothing else holds, "
             "mechanically, once the node pass has judged the prose. Pass 2: 'unmarked' asks of each shortlisted "
-            "pair of claims whether the source's text points at the target with no cross-reference; with no "
+            "pair of claims with no cross-reference between them whether the source continues the argument the "
+            "target is part of; 'cull' asks of each linked pair with a prose claim whether either adds nothing to "
+            "the other, and removes the prose claims that do; with no "
             "scope, pass 2 classifies every edge candidate and writes the edges"
         ),
     )
@@ -108,8 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "spend no model call: run only the part of this invocation that asks nobody anything. Pass 2 "
             "records the edges containment settles and leaves the pairs it did not as open and unrecorded; "
-            "the declared pass is mechanical already and is unchanged by it; claim discovery and the "
-            "unmarked-reference asks have no such part and are refused"
+            "the declared pass is mechanical already and is unchanged by it; claim discovery, the "
+            "unmarked-reference asks and the co-linearity cull have no such part and are refused"
         ),
     )
     arguments = parser.parse_args(argv)
@@ -183,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     reader = partial(ask.ask_without_tools, captures=asks)
     if stage.id in (_DEPENDS_ATTRIBUTED, *_READING_ONLY) and not arguments.no_inference:
         try:
-            inference.check_environment()
+            inference.check_environment(chat=False, decision=True)
         except ValueError as refusal:
             print(f"{stage.display} spends inference, and the environment names no server: {refusal}", file=sys.stderr)
             return EXIT_USAGE
@@ -198,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif stage.id == _REFERENCES_FOUND:
         report = unmarked.build(kb_root=kb_root, repo_root=repo_root, reader=reader, record_dir=asks)
+    elif stage.id == _CLAIMS_CULLED:
+        report = cull.build(kb_root=kb_root, repo_root=repo_root, scratch=scratch, reader=reader, record_dir=asks)
     elif stage.id == _CLAIMS_DISCOVERED:
         report = discover.build(kb_root=kb_root, repo_root=repo_root, scratch=scratch, reader=reader, record_dir=asks)
     elif stage.id == _EQUATIONS_MINTED:

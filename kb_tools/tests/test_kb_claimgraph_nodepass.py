@@ -674,7 +674,7 @@ def test_a_reference_nobody_judged_keeps_today_s_rule(declared: Path):
 
 
 # ---------------------------------------------------------------------------
-# 6 — the node set is fixed when equations-minted ends
+# 6 — the minting stages move the node set; attribution does not
 # ---------------------------------------------------------------------------
 
 
@@ -718,6 +718,19 @@ def _git(repo: Path, *args: str) -> str:
         text=True,
         check=True,
     ).stdout
+
+
+def test_the_declared_pass_writes_the_cull_record_empty_into_its_boundary_commit(consumer: Path):
+    shutil.rmtree(consumer / ".git")
+    _git(consumer, "init", "-q")
+    _git(consumer, "add", "-A")
+    _git(consumer, "commit", "-qm", "tree")
+
+    _declare(consumer)
+    kb_pipeline._record(consumer, kb_pipeline.stage_by_id("claims-declared"))
+
+    assert kb_pipeline.read_cull(consumer) == kb_pipeline.CullRecord()
+    assert kb_pipeline.CULL_RELPATH in _git(consumer, "show", "--name-only", "--format=", "HEAD").split()
 
 
 def test_the_record_lands_in_the_node_pass_boundary_commit_and_stands_after_the_last(consumer: Path):

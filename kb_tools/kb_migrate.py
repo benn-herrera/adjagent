@@ -28,9 +28,9 @@ _V1_0_0 = "1.0.0"
 _ENTRY_POINT_PATH = f"{kb_schema.KB_DIRNAME}/{kb_schema.ENTRY_POINT_FILENAME}"
 _INDEX_DIR = f"{kb_schema.KB_DIRNAME}/{kb_schema.INDEX_DIRNAME}"
 
-# The 0.9.0 format's build records, frozen with that format: equal to `kb_load.RECORD_STEMS` today
-# by coincidence, not derivation, since the current record set may grow without changing what a
-# 0.9.0 KB held.
+# The 0.9.0 format's build records, frozen with that format and not derived from
+# `kb_load.RECORD_STEMS`: the current record set has grown past it without changing what a 0.9.0
+# KB held.
 _RECORD_STEMS_0_9_0 = ("kb-build-node-pass", "kb-build-classification", "kb-build-unmarked")
 
 _CURRENT_SUFFIX = ".yaml"

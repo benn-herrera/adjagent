@@ -1,0 +1,33 @@
+# The unmarked ask's question: does the source claim continue the argument
+# the candidate claim is part of? Derived from kb_tools' unmarked.tmpl.md:
+# the definition of "continues the argument" and the boundary cases are the
+# criteria, the closing question the instructions, and the offered letters
+# reach it only as composer constants.
+# The criteria are keyed true/false — a noul answer is one P(true) figure —
+# and true-letter names the offered letter whose criterion "true" is.
+type: noul
+true-letter: "@!letter-points!@"
+instructions: |-
+  Does the source claim continue the argument the candidate claim is part
+  of? Answer true if it does, false if it does not.
+criteria:
+  "true": |-
+    The source claim continues the argument the candidate claim is part of:
+    it builds on the candidate claim, applies it, or carries the same line of
+    reasoning forward. Read this leniently — capture here is generous, and
+    sharper judgment happens later. The connection may be loose, implicit or
+    roughly stated: the candidate claim may be where a result the source
+    claim uses or assumes is set out, where a condition or quantity it names
+    by description ("the bound above", "this estimate", "the condition of
+    the previous section") is set out, or where notation is introduced that
+    the source claim then works with.
+  "false": |-
+    does not continue it: the source claim is not part of the same argument
+    as the candidate claim. Answer false when the source claim stands apart
+    from the candidate claim's line of reasoning — as when any of these
+    holds:
+    - The two claims share only a subject or notation.
+    - The source claim merely mentions the candidate claim's subject — a
+      passing nod, color, an aside — without the source claim's own
+      reasoning building on or drawing from that mention.
+    - Each claim states a result of its own; neither builds on the other.

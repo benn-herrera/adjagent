@@ -34,7 +34,6 @@ from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, refresh_kb_m
 from kb_tools.kb_claimgraph import ask, discover, graph, identify, inventory, label, letters, tree
 from kb_tools.kb_claimgraph.assemble import BLOCKLESS_REASON
 from kb_tools.kb_claimgraph.build import build
-from kb_tools.kb_driver import prompt_templates
 from kb_tools.kb_write import ops, render
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
@@ -415,19 +414,12 @@ def test_each_leaf_s_ask_record_lands_where_the_stage_is_told(declared: Path, tm
 
 #: Fixture templates for the paragraph ask, standing in for the working ones so
 #: the goldens below pin the composer and move with nothing a wording edit
-#: touches. They carry every slot kind the working template does: per-call
-#: ``dyn.`` slots, composer-filled letters, and the ``correction`` alternative,
-#: whose fragment ends without a newline.
+#: touches. They carry every slot kind the working state template does: the
+#: per-call ``dyn.`` slots, and nothing else.
 _FIXTURE_TEMPLATES = {
     ask.LETTER_TEMPLATES[letters.Kind.PARAGRAPH]: (
-        "Letters @!letter-claim!@ and @!letter-not-a-claim!@.\n"
-        "In @!dyn.document!@:\n"
-        "@!dyn.body!@\n"
-        "Item @!dyn.paragraph!@:\n"
-        "@!dyn.paragraph-text!@\n"
-        "Answer @!letter-claim!@ or @!letter-not-a-claim!@.@!correction!@\n"
+        "In @!dyn.document!@:\n@!dyn.body!@\nItem @!dyn.paragraph!@:\n@!dyn.paragraph-text!@\n"
     ),
-    prompt_templates.ALTERNATIVES[ask.LETTER_CORRECTION]: "\n\nAgain; it read:\n@!dyn.returned!@\nOne letter.",
 }
 
 _GOLDEN_LEAF = ask.ParagraphGroup(
@@ -442,7 +434,6 @@ _GOLDEN_PARAGRAPHS = (
 #: Every ask of the leaf opens with these bytes: the group's slots, filled once
 #: and identically, end before the first item slot.
 _GOLDEN_PREFIX = """\
-Letters A and B.
 In vol/one.md:
 # One
 
@@ -454,33 +445,21 @@ Item """
 _GOLDEN_ITEMS = (
     """\
 S1:
-S1: It contracts whenever $\\frac{1}{2} k < 1$.
-Answer A or B.""",
+S1: It contracts whenever $\\frac{1}{2} k < 1$.""",
     """\
 S2:
-S2: Notation.
-Answer A or B.""",
+S2: Notation.""",
 )
 
-#: A re-ask is the first ask with the correction after the question, carrying
-#: what came back stripped.
-_GOLDEN_CORRECTION = """
 
-Again; it read:
-I would say B, probably.
-One letter."""
-
-
-@pytest.mark.parametrize("returned", [None, "  I would say B, probably.\n"], ids=["first-ask", "re-ask"])
 @pytest.mark.parametrize("index", [0, 1], ids=["S1", "S2"])
 def test_the_paragraph_ask_composes_byte_for_byte_from_fixture_templates(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, index: int, returned: str | None
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, index: int
 ):
     compose_from_fixture_templates(monkeypatch, tmp_path, _FIXTURE_TEMPLATES)
     entry = ask.paragraph_asks(_GOLDEN_LEAF, _GOLDEN_PARAGRAPHS)[index]
 
-    correction = "" if returned is None else _GOLDEN_CORRECTION
-    assert entry.compose(returned) == _GOLDEN_PREFIX + _GOLDEN_ITEMS[index] + correction + "\n"
+    assert entry.compose() == _GOLDEN_PREFIX + _GOLDEN_ITEMS[index] + "\n"
 
 
 # ---------------------------------------------------------------------------

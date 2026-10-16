@@ -1,7 +1,9 @@
 """The KB YAML dialect: the one reader and writer of every YAML byte in a KB.
 
 The dialect is the subset kbase writes (block mappings and lists, plain and double-quoted scalars,
-flow lists of scalars, `[]` and `{}`), and the writer is byte-equal to kbase's — yaml.v3 v3.0.5
+flow lists of scalars, `[]` and `{}`), and the reader takes one construct more: the literal block
+scalar (`|`, `|-`, `|+`, content by indentation), which kbase's question files hold and no KB byte
+does. The writer is byte-equal to kbase's — yaml.v3 v3.0.5
 under `SetIndent(2)` with kbase's string rule — for equal values of the kinds kbase's golden pairs
 hold. A `float` with an integral value is the exception: it is written as Python spells it (`1.0`),
 and whether kbase writes `1` instead is unpinned until kbase supplies a golden holding one.
@@ -354,46 +356,113 @@ class _Line:
 
 
 class _Lines:
-    """The text's significant lines: blank lines and whole-line comments skipped."""
+    """The text's significant lines, read one at a time: blank lines and whole-line comments skipped.
+
+    Read lazily because a literal block scalar's lines are content, not structure: a blank line or
+    one opening with `#` inside it belongs to the scalar, so the block is taken raw before the
+    cursor reaches it.
+    """
 
     def __init__(self, text: str) -> None:
-        self._lines: list[_Line] = []
-        seen_content = False
-        for number, raw in enumerate(text.split("\n"), start=1):
-            line = raw[:-1] if raw.endswith("\r") else raw
+        raw = text.split("\n")
+        # The text's final line break ends a line; it does not open one.
+        self._broken_end = text.endswith("\n")
+        if self._broken_end:
+            raw.pop()
+        self._raw = [line[:-1] if line.endswith("\r") else line for line in raw]
+        self._next = 0
+        self._pending: _Line | None = None
+        self._seen_content = False
+
+    def _fill(self) -> None:
+        while self._pending is None and self._next < len(self._raw):
+            number = self._next + 1
+            line = self._raw[self._next]
+            self._next += 1
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            for ch in line:
-                if ch in _BREAKS:
-                    raise KbYamlError(number, f"a line break (U+{ord(ch):04X}) inside a line")
+            _refuse_breaks(line, number)
             indent = len(line) - len(line.lstrip(" "))
             if line[indent : indent + 1] == "\t":
                 raise KbYamlError(number, "a tab in indentation")
             if _is_document_marker(line):
-                if line == _FENCE and not seen_content:
-                    seen_content = True
+                if line == _FENCE and not self._seen_content:
+                    self._seen_content = True
                     continue
                 raise KbYamlError(number, "a document marker inside a document")
-            seen_content = True
-            self._lines.append(_Line(number, indent, line[indent:].rstrip(_BLANKS)))
-        self._at = 0
+            self._seen_content = True
+            self._pending = _Line(number, indent, line[indent:].rstrip(_BLANKS))
 
     def at_end(self) -> bool:
-        return self._at >= len(self._lines)
+        self._fill()
+        return self._pending is None
 
     def peek(self) -> _Line:
-        return self._lines[self._at]
+        self._fill()
+        if self._pending is None:
+            raise IndexError("no line left")
+        return self._pending
 
     def take(self) -> _Line:
-        line = self._lines[self._at]
-        self._at += 1
+        line = self.peek()
+        self._pending = None
         return line
 
     def reopen(self, line: _Line) -> None:
         """Push back the remainder of a line, opened at its own column (`- k: v`, `: k: v`)."""
-        self._at -= 1
-        self._lines[self._at] = line
+        self._pending = line
+
+    def take_block(self, parent_indent: int) -> tuple[list[str], bool]:
+        """The raw lines of a block scalar whose header was the last line taken, and whether the last ends in a break.
+
+        The block runs while a line is blank or indented past `parent_indent` at least as far as its
+        first non-blank line; content indentation is that line's.
+        """
+        assert self._pending is None, "a block scalar is read straight after its header line"
+        start = self._next
+        content_indent: int | None = None
+        while self._next < len(self._raw):
+            line = self._raw[self._next]
+            if line.strip(" "):
+                indent = len(line) - len(line.lstrip(" "))
+                if content_indent is None:
+                    if indent <= parent_indent:
+                        break
+                    content_indent = indent
+                elif indent < content_indent:
+                    break
+                _refuse_breaks(line, self._next + 1)
+            self._next += 1
+        block = self._raw[start : self._next]
+        if content_indent is not None:
+            block = [line[content_indent:] for line in block]
+        return block, self._broken_end or self._next < len(self._raw)
+
+
+def _refuse_breaks(line: str, number: int) -> None:
+    for ch in line:
+        if ch in _BREAKS:
+            raise KbYamlError(number, f"a line break (U+{ord(ch):04X}) inside a line")
+
+
+# A literal block scalar's header: `|`, then at most a chomping indicator, then at most a comment.
+_LITERAL_HEADER_RE = re.compile(r"\|([-+]?)(?:[ \t]+#.*)?")
+
+
+def _parse_literal(lines: _Lines, chomp: str, parent_indent: int) -> str:
+    """A literal block scalar's text, its final line breaks chomped: `-` strips, `+` keeps, none keeps one."""
+    block, last_broken = lines.take_block(parent_indent)
+    content = len(block)
+    while content and not block[content - 1].strip(" "):
+        content -= 1
+    text = "\n".join(block[:content])
+    if chomp == "-":
+        return text
+    breaks = len(block) - content - (0 if last_broken else 1) + (1 if content else 0)
+    if chomp == "+":
+        return text + "\n" * breaks
+    return text + "\n" if content and breaks else text
 
 
 def _is_document_marker(line: str) -> bool:
@@ -455,6 +524,9 @@ def _parse_opened(lines: _Lines, line: _Line, indent: int) -> object:
     rest = line.content[1:].lstrip(_BLANKS)
     if not rest:
         return _parse_nested(lines, line, indent)
+    literal = _LITERAL_HEADER_RE.fullmatch(rest)
+    if literal:
+        return _parse_literal(lines, literal.group(1), indent)
     column = line.indent + len(line.content) - len(rest)
     if _is_list_item(rest) or _is_complex_key(rest) or _opens_mapping(rest, line.number):
         lines.reopen(_Line(line.number, column, rest))
@@ -470,6 +542,9 @@ def _parse_value(lines: _Lines, line: _Line, rest: str, indent: int) -> object:
         if not lines.at_end() and lines.peek().indent == indent and _is_list_item(lines.peek().content):
             return _parse_list(lines, indent)
         return _parse_nested(lines, line, indent)
+    literal = _LITERAL_HEADER_RE.fullmatch(rest)
+    if literal:
+        return _parse_literal(lines, literal.group(1), indent)
     value = _parse_inline(rest, line.number)
     _refuse_continuation(lines, indent)
     return value

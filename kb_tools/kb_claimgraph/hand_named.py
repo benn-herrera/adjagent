@@ -141,6 +141,12 @@ def _block_claims(graph: AuthoredGraph, inventory: Inventory) -> Iterator[tuple[
             yield node, block.start, block.end
 
 
+def prose_claims(graph: AuthoredGraph, inventory: Inventory) -> frozenset[str]:
+    """Every claim that is neither an equation node nor a claim-bearing block's claim."""
+    in_blocks = {node.id for node, _, _ in _block_claims(graph, inventory)}
+    return frozenset(node.id for node in graph.nodes.values() if node.equation is None and node.id not in in_blocks)
+
+
 def printed_claims(
     graph: AuthoredGraph, inventory: Inventory, vocabulary: Vocabulary
 ) -> Mapping[tuple[str, str], tuple[ClaimNode, ...]]:
@@ -151,15 +157,14 @@ def printed_claims(
     titled *Lemma 2 implies the bound* names a lemma rather than being one.
     """
     joined: dict[tuple[str, str], list[ClaimNode]] = {}
-    in_blocks = set()
     for node, _, _ in _block_claims(graph, inventory):
-        in_blocks.add(node.id)
         printed = PRINTED_NAME_RE.match(node.locator or "")
         key = vocabulary.label(printed.group(1)) if printed is not None else None
         if key is not None:
             joined.setdefault(key, []).append(node)
+    in_prose = prose_claims(graph, inventory)
     for node in graph.nodes.values():
-        if node.equation is None and node.id not in in_blocks:
+        if node.id in in_prose:
             key = vocabulary.label(node.title)
             if key is not None:
                 joined.setdefault(key, []).append(node)
@@ -181,14 +186,13 @@ def bodies(tree: Tree, graph: AuthoredGraph, inventory: Inventory) -> Iterator[t
             lines[document] = unquote(strip_markers(tree.documents[document].text)).splitlines()
         return lines[document]
 
-    in_blocks = set()
     for node, start, end in _block_claims(graph, inventory):
-        in_blocks.add(node.id)
         yield node, node.document, start, "\n".join(text_of(node.document)[start:end])
 
+    claims = prose_claims(graph, inventory)
     in_prose: dict[str, list[ClaimNode]] = {}
     for node in graph.nodes.values():
-        if node.equation is None and node.id not in in_blocks:
+        if node.id in claims:
             in_prose.setdefault(node.document, []).append(node)
     for document, nodes in sorted(in_prose.items()):
         leaf = prose.readable(tree.documents[document], inventory)

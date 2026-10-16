@@ -71,7 +71,8 @@ def test_refresh_lands_an_older_kb_in_the_current_format_then_refreshes_it(tmp_p
     assert list(fields)[-1] == kb_schema.FORMAT_KEY and fields[kb_schema.FORMAT_KEY] == kb_schema.FORMAT_VERSION
     # Refresh derives the index and the entry point's aggregates; the leaves and
     # the build records it does not own stand exactly as the conversion wrote them.
-    for relative in ("kb-root/a.md", "kb-root/b/c.md", *(f"{stem}.yaml" for stem in kb_load.RECORD_STEMS)):
+    records = (f"{stem}.yaml" for stem in kb_load.RECORD_STEMS if (_CURRENT / f"{stem}.yaml").is_file())
+    for relative in ("kb-root/a.md", "kb-root/b/c.md", *records):
         assert (repo / relative).read_bytes() == (_CURRENT / relative).read_bytes(), relative
     assert kb_load.open_kb(repo / "kb-root") == kb_load.KbFormat(version=kb_schema.FORMAT_VERSION, current=True)
 

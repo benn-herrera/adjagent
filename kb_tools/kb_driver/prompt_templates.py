@@ -64,14 +64,22 @@ resolved body declares join the required set and are filled from these same
 sources, and a resolved body naming a fragment or an alternative slot of its own
 is refused.
 
+**A decision question is loaded as a template is** (:func:`load_question`):
+``questions/<name>.question.yaml`` beside the state template it is asked over,
+its slots filled from the constants pool alone and the result read through
+:mod:`kb_tools.kb_yaml`, then held to the letters its caller offers.
+
 Stdlib only.
 """
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import NoReturn
 
+from .. import kb_yaml
 from . import runlog
 
 _log = runlog.logger("prompt_templates")
@@ -89,6 +97,16 @@ TEMPLATE_SUFFIX = ".tmpl.md"
 #: below — one resolved by the composer, one chosen by a caller — and the
 #: correspondence is checked in both directions rather than asserted.
 FRAGMENTS_DIRNAME = "fragments"
+
+#: Where a decision question lives, beside the state template it is asked over:
+#: ``questions/<name>.question.yaml``, in the KB's YAML dialect (:mod:`kb_yaml`).
+QUESTIONS_DIRNAME = "questions"
+QUESTION_SUFFIX = ".question.yaml"
+CHOICE = "choice"
+NOUL = "noul"
+QUESTION_TYPES = (CHOICE, NOUL)
+#: A noul question's criteria keys: its answer is one P(true) figure.
+NOUL_CRITERIA = ("true", "false")
 
 #: A slot name: letter-led lower-case segments joined by single hyphens.
 SLOT_NAME = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
@@ -113,10 +131,9 @@ _DELIMITER = re.compile(r"@!|!@")
 # loads the file and supplies the rendered body.
 #
 # A system prompt is named by no template: the caller renders it whole and hands
-# it to `inference.call_chat` — `reader-system` for a claim-graph ask
-# (`kb_claimgraph.ask`), and a calling row's `steps.Step.system` for the
-# driver's own calls.
-FRAGMENT_SLOTS: tuple[str, ...] = ("reader-system", "overview-system")
+# it to `inference.call_chat` — a calling row's `steps.Step.system` for the
+# driver's own calls. A claim-graph letter ask has none.
+FRAGMENT_SLOTS: tuple[str, ...] = ("overview-system",)
 
 #: The caller-selected alternatives, by the slot each is a choice for. A template
 #: carries an ordinary bare slot that knows nothing about the choice, and the
@@ -125,17 +142,11 @@ FRAGMENT_SLOTS: tuple[str, ...] = ("reader-system", "overview-system")
 #: chooses. ``None`` is a registered choice where the slot's absence is itself an
 #: answer: a first ask carries no correction, and the slot fills with nothing.
 #:
-#: ``correction`` is the re-ask of a letter ask, after the question.
-#: ``classify-options`` is the classify ask's closing question, naming the
-#: letters it admits: all three, or the two a candidate that cannot be *in
-#: support of* is offered. Both are :mod:`kb_tools.kb_claimgraph.ask`'s.
 #: ``passage-correction`` is the re-ask of the overview passage, after the
 #: question, naming the lines a passage may not hold — the step table's
 #: (``steps.Step.correction``).
 ALTERNATIVE_SLOTS: Mapping[str, tuple[str | None, ...]] = MappingProxyType(
     {
-        "correction": (None, "letter-correction"),
-        "classify-options": ("classify-options-three", "classify-options-two"),
         "passage-correction": (None, "overview-correction"),
     }
 )
@@ -178,18 +189,18 @@ _NO_CHOICES: Mapping[str, str | None] = MappingProxyType({})
 
 
 def template_paths(directory: Path = PROMPT_TEMPLATES_DIR) -> tuple[Path, ...]:
-    """Every ``*.tmpl.md`` under ``directory``, fragments included, sorted. Empty is a legal answer.
+    """Every ``*.tmpl.md`` and ``*.question.yaml`` under ``directory``, fragments included, sorted. Empty is legal.
 
-    The fragments are in because every sweep over the shipped bodies — the lint
-    below, and the checks over what a model is shown — asks a question about
-    prose, and a fragment's prose reaches a model exactly as a template's does.
-    Nothing is made dispatchable by being listed here: a row dispatches the
-    template its own ``template`` field names, and the step table names no
-    fragment.
+    The fragments and the questions are in because every sweep over the shipped
+    bodies — the lint below, and the checks over what a model is shown — asks a
+    question about prose, and a fragment's or a question's prose reaches a model
+    exactly as a template's does. Nothing is made dispatchable by being listed
+    here: a row dispatches the template its own ``template`` field names, and
+    the step table names no fragment and no question.
     """
     if not directory.is_dir():
         return ()
-    return tuple(sorted(directory.rglob(f"*{TEMPLATE_SUFFIX}")))
+    return tuple(sorted([*directory.rglob(f"*{TEMPLATE_SUFFIX}"), *directory.rglob(f"*{QUESTION_SUFFIX}")]))
 
 
 def load(name: str, *, directory: Path = PROMPT_TEMPLATES_DIR) -> str:
@@ -365,6 +376,79 @@ def render(
     return _fill(text, filled)
 
 
+# --- questions --------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Question:
+    """A decision question as its file states it, its constants filled.
+
+    ``criteria`` is keyed by the offered letters for a ``choice`` question and
+    by ``"true"``/``"false"`` for a ``noul`` one, whose ``true_letter`` is the
+    offered letter ``"true"`` stands for; a ``choice`` question has none.
+    """
+
+    type: str
+    instructions: str
+    criteria: Mapping[str, str]
+    true_letter: str | None
+
+
+def _question_file(name: str) -> str:
+    return f"{QUESTIONS_DIRNAME}/{name}{QUESTION_SUFFIX}"
+
+
+def load_question(
+    name: str, *, constants: Mapping[str, str], offered: Sequence[str], directory: Path = PROMPT_TEMPLATES_DIR
+) -> Question:
+    """Load one question file, its ``@!…!@`` slots filled from ``constants``, held to the letters ``offered``.
+
+    A question takes no caller data, so every slot it spells is a constant. A
+    ``choice`` question's criteria must be keyed by exactly the offered letters;
+    a ``noul`` question's by ``"true"`` and ``"false"``, its ``true-letter`` one
+    of the offered. Anything else is a defect between the question file and the
+    code that offers its letters (exit 15).
+    """
+    source = _question_file(name)
+    text = load(source, directory=directory)
+    unfilled = sorted(field for field in slots_of(text, source=source) if field not in constants)
+    if unfilled:
+        _refuse_question(source, f"unfilled slot(s): {', '.join(unfilled)}")
+    try:
+        value = kb_yaml.parse(_fill(text, constants))
+    except kb_yaml.KbYamlError as error:
+        _refuse_question(source, f"not a question file: {error}")
+    if not isinstance(value, dict):
+        _refuse_question(source, "not a question file: not a mapping")
+    kind, instructions, criteria = value.get("type"), value.get("instructions"), value.get("criteria")
+    if kind not in QUESTION_TYPES:
+        _refuse_question(source, f"question type {kind!r}, want one of {', '.join(QUESTION_TYPES)}")
+    if not (
+        isinstance(instructions, str)
+        and isinstance(criteria, dict)
+        and all(isinstance(guidance, str) for guidance in criteria.values())
+    ):
+        _refuse_question(source, "a question carries instructions and criteria, every criterion its guidance text")
+    true_letter = None
+    if kind == NOUL:
+        if set(criteria) != set(NOUL_CRITERIA):
+            _refuse_question(source, f"a noul question's criteria are keyed {sorted(criteria)}, want {NOUL_CRITERIA}")
+        true_letter = value.get("true-letter")
+        if true_letter not in offered:
+            _refuse_question(source, f"its true-letter {true_letter!r} is none of the offered {list(offered)}")
+    elif set(criteria) != set(offered):
+        _refuse_question(source, f"its criteria are keyed {sorted(criteria)}, want the offered {sorted(offered)}")
+    return Question(
+        type=kind, instructions=instructions, criteria=MappingProxyType(dict(criteria)), true_letter=true_letter
+    )
+
+
+def _refuse_question(source: str, detail: str) -> NoReturn:
+    message = f"{source}: {detail}"
+    runlog.require(False, message, template=source)
+    raise runlog.BoundaryError(message)  # unreached: `require` has raised it
+
+
 def persist(briefs_dir: Path, *, seq: int, step_id: str, text: str) -> Path:
     """Write the composed brief to ``<run-dir>/briefs/<seq>-<step>.md``.
 
@@ -383,17 +467,21 @@ def persist(briefs_dir: Path, *, seq: int, step_id: str, text: str) -> Path:
 # --- the template lint -------------------------------------------------------
 
 
-def lint(paths: Iterable[Path], *, prohibited: Mapping[str, re.Pattern[str]]) -> list[str]:
-    """Static check over template files. An empty list is a pass.
+def lint(
+    paths: Iterable[Path], *, prohibited: Mapping[str, re.Pattern[str]], constants: Mapping[str, str] = _NO_VALUES
+) -> list[str]:
+    """Static check over template and question files. An empty list is a pass.
 
-    Two findings, in file order: a template spelling something ``prohibited``
+    Three findings, in file order: a file spelling something ``prohibited``
     names — the driver's own business (a stage id, the record verb, the
-    ledger's op flag) or a metadata marker the write API alone composes; and a
-    template carrying a delimiter that does not parse as a slot.
+    ledger's op flag) or a metadata marker the write API alone composes; a file
+    carrying a delimiter that does not parse as a slot; and a question file
+    naming a slot that is not one of ``constants`` — a question takes no caller
+    data, so every slot it spells is a constant (:func:`load_question`).
 
-    ``prohibited`` is injected rather than imported, and the finding reports
-    the label rather than a reason: both vocabularies are the caller's, and
-    this module holds neither stage nor metadata knowledge.
+    ``prohibited`` and ``constants`` are injected rather than imported, and the
+    finding reports the label rather than a reason: every vocabulary here is the
+    caller's, and this module holds no stage, metadata or letter knowledge.
     """
     findings: list[str] = []
     for path in paths:
@@ -405,7 +493,11 @@ def lint(paths: Iterable[Path], *, prohibited: Mapping[str, re.Pattern[str]]) ->
                 if pattern.search(line)
             ]
         try:
-            slots_of(text, source=path.name)
+            fields = slots_of(text, source=path.name)
         except runlog.BoundaryError as exc:
             findings.append(f"{path.name}: {exc}")
+            continue
+        unknown = [field for field in fields if field not in constants]
+        if path.name.endswith(QUESTION_SUFFIX) and unknown:
+            findings.append(f"{path.name}: names slot(s) no composer constant fills: {', '.join(unknown)}")
     return findings

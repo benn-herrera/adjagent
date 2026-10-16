@@ -40,9 +40,10 @@ root.
   the work is good enough is reintroducing that failure, not a smaller version of it.
 - **No prompt reaches a model from a heredoc or an in-code string.** Every prompt is a template
   under `kb_driver/prompt-templates/`, rendered with its slots filled — every ask, its system prompt
-  and its re-ask included. A prompt assembled from string literals is a model-facing artifact that
-  does not look like one: it never lands in a diff as prose, it is never read end to end, and it
-  never goes to the prompt-engineer, because nothing about it says "document". This is a scar.
+  and its re-ask included — and every decision question a file under its `questions/`. A prompt
+  assembled from string literals is a model-facing artifact that does not look like one: it never
+  lands in a diff as prose, it is never read end to end, and it never goes to the prompt-engineer,
+  because nothing about it says "document". This is a scar.
   `kb_claimgraph`'s claim-identification ask carried an answer format whose central rule — that a
   prose block's two markers carry one number — was stated nowhere in it and demonstrated only at
   block 1, where the two numbers are both `1` and the rule is invisible; the seat got it wrong on
@@ -50,10 +51,12 @@ root.
   The same ask requested a `no-claim` reason as "one sentence saying so", which nothing checks
   beyond non-emptiness and which is written into a document's frontmatter permanently. Neither had
   been read as a prompt by anyone.
-- **A model call is `inference.liaison_tools.call_chat` and nothing else; a system prompt is a
-  fragment, never an agent definition.** A call that spawns a process, or one whose system prompt is
-  an agent-set seat's definition, is the CLI path this package deleted: its bounds, its tool set and
-  its model were the CLI's and the definition's, not anything the build states.
+- **A model call is `inference.liaison_tools.call_chat` or `call_decision` and nothing else; a
+  system prompt is a fragment, never an agent definition.** The overview call is the chat call, every
+  claim-graph letter ask the decision call, which carries no system prompt at all. A call that
+  spawns a process, or one whose system prompt is an agent-set seat's definition, is the CLI path
+  this package deleted: its bounds, its tool set and its model were the CLI's and the definition's,
+  not anything the build states.
 - **`prompt-templates/` holds what is dispatched; `prompt-templates/fragments/` holds what is
   spliced.** Which one a new file is, is settled by where it goes and by nothing else — no prefix,
   no suffix, no list to read. Every file under `fragments/` is registered in exactly one of
@@ -61,6 +64,15 @@ root.
   template named its slot or a caller rendered it whole) or `ALTERNATIVE_NAMES` (a caller picked
   it), and `tests/test_kb_driver_prompt_templates.py` checks that correspondence both ways — so a
   fragment nobody registered fails rather than sitting unreachable.
+- **A question file or a kbase-origin template is kbase's bytes.** Every file under
+  `prompt-templates/questions/`, and each template ARCHITECTURE.md's provenance sentence names
+  kbase-origin, changes only by adopting kbase's change to it, byte for byte — a final newline's
+  absence included — and never by an edit made here, however small. A wording improved here is a
+  fork: the next adoption overwrites it, or a merge carries it on unseen. A change you want lands in
+  kbase first. What is checked is a question file's parsed values:
+  `tests/test_kb_yaml.py::test_a_shipped_question_file_reads_to_kbase_s_text` pins each to kbase's
+  text, and an adoption changes that test with the file. Nothing checks a template's bytes, or a
+  question file's raw bytes — its comments and its final newline.
 - **A caller-selected alternative ends without a newline; the template it fills supplies every line
   break around it.** Every alternative a caller can pick — the set
   `prompt_templates.ALTERNATIVE_SLOTS` registers — is spliced into a slot sitting inside a line
@@ -74,7 +86,10 @@ root.
   it with a stored copy is a checksum of the wording: every prompt edit breaks it and it guards no
   behaviour. A test over the working templates checks structure only: every slot filled, the slot
   order, the shared prefix. No test asserts a prompt's prose; what a test may key on is the
-  offered letters, the slot set, the system fragment and the closing line's letters.
+  offered letters, the slot set, the system fragment and a question's type, criteria keys and true
+  letter. A question file is the exception: its text is kbase's, adopted rather than authored here
+  (the bytes rule above), so a test pins its parsed text to kbase's, and that pin is what makes an
+  edit made here visible. An edit to it is meant to break the test.
 - **A `dyn.` slot the caller supplies under one alternative lives in that alternative's fragment and
   nowhere else.** Composition refuses an unsupplied slot and an unused value alike.
 - **A register holds four entry kinds, and `RegisterEntry.kind` is where you learn which.** `clm`,

@@ -1,0 +1,24 @@
+# The classify ask's question over three offered letters: supported by,
+# in support of, mention. Derived from kb_tools' classify.tmpl.md and its
+# classify-options-three fragment: the per-option bullets are the criteria,
+# the fragment's framing the instructions, and the offered letters reach it
+# only as composer constants.
+type: choice
+instructions: |-
+  Does the source claim need the candidate claim, does the candidate claim
+  need the source claim, or neither? Decide from what the two claims state
+  and what the passages say one does with the other. That a passage points
+  at the candidate claim without saying why, or does not point at it at all,
+  is not evidence for any of the answers.
+criteria:
+  "@!letter-supported-by!@": |-
+    supported by: the source claim needs the candidate claim to be true. The
+    source claim's statement or its proof uses the candidate claim as a
+    premise or a step.
+  "@!letter-in-support-of!@": |-
+    in support of: the candidate claim needs the source claim to be true. The
+    source claim is a premise or a step for the candidate claim.
+  "@!letter-mention!@": |-
+    mention: neither needs the other. The source claim borrows a method from
+    the candidate claim, refers the reader to it, compares itself with it, or
+    recaps it.

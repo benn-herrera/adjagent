@@ -20,20 +20,18 @@ Stages, in order:
 * **:mod:`graph`** — the authored claim graph, read back off the tree's own
   declarations and registers.
 * **D, :mod:`attribute`** — the narrowing: every edge candidate, from a
-  reference, a hand-written name, or a pair the unmarked record holds answered
-  yes (:func:`unmarked.found`, read and never recomputed), classed and
-  drafted, with the drafts that
-  lie on a containment ring drafted *mention*. Its harvest completes for the
-  whole corpus before the first ask.
+  reference, a hand-written name, or a link of the cull record no marked pair
+  joins (read and never recomputed, and none where no cull record stands),
+  directed by :func:`attribute.orient_links`, classed and drafted. Its harvest
+  completes for the whole corpus before the first ask.
 * **:mod:`classify`** — one letter ask per candidate, grouped by source, each
-  group recorded as it lands; then every ``depends`` edge on a cycle of the
-  classified set is cut, and every cut — those and the ring pairs that kept
-  their drafted *mention* — lands as a ``demoted`` record carrying its origin
-  (:func:`classify.cuts`). Inference reaches it through an
+  group recorded as it lands. Inference reaches it through an
   injected :class:`~.letters.LetterReader`, which is why this pipeline takes a
   reader rather than building one.
 * **F′, :func:`write.write_edges`** — pass 3 of the write path, one
-  ``add-build-edges`` batch.
+  ``add-build-edges`` batch carrying every edge the answers make, cycles
+  included; then :func:`write.demote_cycles`, every ``depends`` edge on a cycle
+  demoted, its origin by :func:`kb_pipeline.inferred_links`.
 * **G, :mod:`gate`** — refresh, then the build-time check, in-process. Exits
   on the return codes.
 
@@ -43,8 +41,8 @@ takes the candidate's draft, and only a call that never completes stops it.
 
 **Only the asking is conditional.** ``reader=None`` is a run with no model
 reachable, and every stage above still runs: such a run writes every
-candidate's draft — *supported by* where containment directed the pair and no
-ring refused it, *mention* everywhere else — so no relationship the corpus
+candidate's draft — *supported by* where containment directed the pair,
+*mention* everywhere else — so no relationship the corpus
 states goes unrecorded. The report says which run it was, because a candidate
 drafted and one a model answered write the same record.
 """
@@ -52,7 +50,7 @@ drafted and one a model answered write the same record.
 from pathlib import Path
 
 from .. import kb_pipeline
-from . import attribute, classify, conform, gate, graph, inventory, letters, tree, unmarked, write
+from . import attribute, classify, conform, gate, graph, inventory, letters, order, tree, write
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
 
@@ -111,26 +109,15 @@ def _candidate_findings(narrowed: attribute.Attribution) -> list[Finding]:
             f"{len(narrowed.word_dropped)} candidate pairs never opened: the word before the anchor names a "
             f"section, a figure or another kind no premise relation can hold, and nothing else reaches them",
         ),
-        Finding(
-            FACT,
-            "stage-D-containment-ring",
-            (
-                "no pair containment directed lay on a cycle"
-                if not narrowed.demoted
-                else f"{len(narrowed.demoted)} pairs containment directed lay on a cycle and are drafted mention, "
-                f"landing as demoted where they keep that draft: "
-                + ", ".join(f"{source} -> {target}" for source, target in narrowed.demoted)
-            ),
-        ),
     ]
 
 
 def _classification_findings(classified: classify.Classification, *, asked: bool) -> list[Finding]:
-    """What the candidates were classified as, how each answer was reached, and what a cycle cost.
+    """What the candidates were classified as and how each answer was reached.
 
-    Every figure is stated in the zero form, and every defaulted candidate and
-    every demoted edge is named, a defaulted candidate and a demoted edge being
-    indistinguishable from any other record once written.
+    Every figure is stated in the zero form, and every defaulted candidate is
+    named, a defaulted candidate being indistinguishable from any other record
+    once written.
     """
     outcomes = classified.outcomes
     defaulted = sorted(pair for pair, outcome in outcomes.items() if outcome is kb_pipeline.ClassifyOutcome.DEFAULTED)
@@ -153,21 +140,12 @@ def _classification_findings(classified: classify.Classification, *, asked: bool
             ),
         ),
         Finding(FACT, "stage-D-asks", letters.AskTotals.of(classified.asks).detail()),
-    ]
-    findings.append(
         Finding(
             PASS,
             "stage-D-classify",
-            f"{len(classified.edges)} dependency edges and {len(classified.references)} references, acyclic "
-            f"before the write; "
-            + (
-                "no classified edge lay on a cycle, so none was demoted"
-                if not classified.demoted
-                else f"{len(classified.demoted)} classified edges lay on a cycle and are recorded as demoted "
-                f"instead: " + ", ".join(f"{source} -> {target}" for source, target in classified.demoted)
-            ),
-        )
-    )
+            f"{len(classified.edges)} dependency edges and {len(classified.references)} references",
+        ),
+    ]
     return findings
 
 
@@ -195,7 +173,7 @@ def build(
                 f"in prose is read off its verdicts, and the declared pass is what writes it",
             )
         unmarked_record = kb_pipeline.read_unmarked(repo_root)
-        yeses = () if unmarked_record is None else unmarked.found(unmarked_record)
+        cull_record = kb_pipeline.read_cull(repo_root)
         documents = tree.read(kb_root)
         state = conform.pass_two_gate(documents)
         report.findings.append(
@@ -206,7 +184,11 @@ def build(
         authored = graph.read(documents, sites)
         report.findings += _census_findings(state, authored, sites)
 
-        narrowed = attribute.narrow(documents, authored, sites, record, unmarked=yeses)
+        links = () if cull_record is None else cull_record.links
+        positions = order.claim_positions(documents, authored, sites)
+        narrowed = attribute.narrow(
+            documents, authored, sites, record, inferred=attribute.orient_links(links, authored, positions)
+        )
         report.findings += _candidate_findings(narrowed)
 
         classified = classify.classify(
@@ -220,11 +202,10 @@ def build(
         report.findings += _classification_findings(classified, asked=reader is not None)
 
         report.findings += write.write_edges(
-            classified.edges,
-            kb_root=kb_root,
-            scratch=scratch,
-            references=classified.references,
-            demoted=classify.cuts(narrowed.demoted, classified, yeses),
+            classified.edges, kb_root=kb_root, scratch=scratch, references=classified.references
+        )
+        report.findings += write.demote_cycles(
+            inferred=kb_pipeline.inferred_links(unmarked_record, cull_record), kb_root=kb_root, scratch=scratch
         )
     except ClaimGraphError as error:
         report.findings.append(error.finding())

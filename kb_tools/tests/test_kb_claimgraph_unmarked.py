@@ -27,12 +27,12 @@ from kb_tools.kb_claimgraph import (
     graph,
     inventory,
     letters,
-    shortlist,
+    order,
     tree,
     unmarked,
 )
 from kb_tools.kb_claimgraph.build import build
-from kb_tools.kb_driver import prompt_templates, steps
+from kb_tools.kb_driver import steps
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._fixture_templates import compose_from_fixture_templates
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
@@ -110,15 +110,23 @@ def declared(declared_build: Path, tmp_path: Path) -> Path:
 
 @dataclass(frozen=True)
 class _Inputs:
-    """What the shortlist is a function of: the node set, every node's statement, and the pairs left out of it."""
+    """What the shortlist is a function of: the node set, every node's statement and position, and the pairs
+    left out of it."""
 
     authored: graph.AuthoredGraph
     statements: dict[str, str]
+    positions: dict[str, order.Position]
     candidates: list[tuple[str, str]]
     own: frozenset[tuple[str, str]]
 
-    def plan(self) -> unmarked.Shortlist:
-        return unmarked.plan(self.authored.nodes, self.statements, candidate_pairs=self.candidates, own=self.own)
+    def plan(self, *, own: frozenset[tuple[str, str]] | None = None) -> unmarked.Shortlist:
+        return unmarked.plan(
+            self.authored.nodes,
+            self.statements,
+            positions=self.positions,
+            excluded={order.link(*pair) for pair in self.candidates},
+            own=self.own if own is None else own,
+        )
 
 
 def _read(repo: Path) -> _Inputs:
@@ -130,6 +138,7 @@ def _read(repo: Path) -> _Inputs:
     return _Inputs(
         authored=authored,
         statements={node_id: statement(node) for node_id, node in authored.nodes.items()},
+        positions=order.claim_positions(documents, authored, sites),
         candidates=[candidate.pair for candidate in narrowed.candidates],
         own=equation_sites.own_equations(documents, authored, sites),
     )
@@ -174,12 +183,13 @@ def test_the_shortlist_is_the_same_twice_and_over_a_permuted_node_order(declared
     inputs = _read(declared)
     first = inputs.plan()
 
-    order = list(inputs.authored.nodes)
-    random.Random(7).shuffle(order)
+    shuffled = list(inputs.authored.nodes)
+    random.Random(7).shuffle(shuffled)
     permuted = unmarked.plan(
-        {node_id: inputs.authored.nodes[node_id] for node_id in reversed(order)},
-        {node_id: inputs.statements[node_id] for node_id in order},
-        candidate_pairs=list(reversed(inputs.candidates)),
+        {node_id: inputs.authored.nodes[node_id] for node_id in reversed(shuffled)},
+        {node_id: inputs.statements[node_id] for node_id in shuffled},
+        positions={node_id: inputs.positions[node_id] for node_id in shuffled},
+        excluded=[order.link(*pair) for pair in reversed(inputs.candidates)],
         own=inputs.own,
     )
 
@@ -188,19 +198,14 @@ def test_the_shortlist_is_the_same_twice_and_over_a_permuted_node_order(declared
     assert first.pairs
 
 
-def test_a_cross_volume_target_earlier_in_reading_order_is_shortlisted(
-    declared: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I14: no locality bound enters the pool — at K = 1 the zombie theorem's one target is in the other volume."""
-    monkeypatch.setattr(shortlist, "K", 1)
+def test_a_cross_volume_target_is_reached_by_a_wildcard_slot_alone(declared: Path) -> None:
+    """The zombie theorem's paper fills one proximity slot of three; the other volume's escape theorem is its
+    wildcard, the growth lemma being a candidate already."""
     ids = _ids(declared)
-    inputs = _read(declared)
 
-    planned = inputs.plan()
+    planned = _read(declared).plan()
 
-    assert (ids[_ZOMBIE], ids[_ESCAPE]) in planned.pairs
-    assert inputs.authored.nodes[ids[_ESCAPE]].document.startswith("alpha/")
-    assert len(planned.pairs) == len(planned.sources)
+    assert planned.picks[ids[_ZOMBIE]] == unmarked.Picks(proximity=(ids[_CAPITAL],), wildcard=(ids[_ESCAPE],))
 
 
 def test_a_pair_already_a_candidate_is_shortlisted_neither_way_round(declared: Path) -> None:
@@ -212,9 +217,80 @@ def test_a_pair_already_a_candidate_is_shortlisted_neither_way_round(declared: P
 
     assert (ids[_ZOMBIE], ids[_GROWTH]) not in planned.pairs
     assert (ids[_GROWTH], ids[_ZOMBIE]) not in planned.pairs
-    assert planned.excluded == 2
-    # Four claims, each pool every other node: twelve ordered pairs less the two excluded.
+    # Four claims, each pool every other node and five slots: twelve ordered pairs less the two excluded.
     assert len(planned.pairs) == 10
+
+
+def _nodes(*nodes: tuple[str, str, str | None]) -> dict[str, graph.ClaimNode]:
+    return {
+        node_id: graph.ClaimNode(node_id, document, node_id, None, None, equation=equation)
+        for node_id, document, equation in nodes
+    }
+
+
+#: Two papers' claims: p holds a directory s of two documents and a directory t of one, q a document alone.
+#: clm-z sits before clm-s in their document though its id sorts after; clm-e is an equation node. clm-s and
+#: clm-z state the same thing, clm-q most of it, clm-c1 a word of it, and the rest nothing of it.
+_PAPERS = _nodes(
+    ("clm-z", "p/s/a.md", None),
+    ("clm-s", "p/s/a.md", None),
+    ("clm-e", "p/s/a.md", "eq:e"),
+    ("clm-a1", "p/s/a.md", None),
+    ("clm-b1", "p/s/b.md", None),
+    ("clm-c1", "p/t/c.md", None),
+    ("clm-q", "q/x.md", None),
+)
+_PAPER_STATEMENTS = {
+    "clm-z": "contraction operator bound holds",
+    "clm-s": "contraction operator bound holds",
+    "clm-e": "zebra",
+    "clm-a1": "gadgets alpha",
+    "clm-b1": "gizmos beta",
+    "clm-c1": "contraction widgets",
+    "clm-q": "contraction operator bound",
+}
+_PAPER_POSITIONS = {
+    "clm-z": order.Position(1, 5),
+    "clm-s": order.Position(1, 10),
+    "clm-e": order.Position(1, 20),
+    "clm-a1": order.Position(1, 30),
+    "clm-b1": order.Position(2, 5),
+    "clm-c1": order.Position(3, 5),
+    "clm-q": order.Position(4, 5),
+}
+
+
+def _plan_papers(*, excluded=(), own=()) -> unmarked.Shortlist:
+    return unmarked.plan(
+        _PAPERS, _PAPER_STATEMENTS, positions=_PAPER_POSITIONS, excluded=set(excluded), own=frozenset(own)
+    )
+
+
+def test_proximity_slots_go_by_locality_then_places_apart_and_wildcards_by_cosine_less_them() -> None:
+    """A tie in places apart goes to the earlier claim whatever the ids; another paper is never near and is
+    reached by a wildcard. A minted equation is a target and never a source, and a pair both ends pick is
+    planned both ways."""
+    planned = _plan_papers()
+
+    assert planned.sources == ("clm-a1", "clm-b1", "clm-c1", "clm-q", "clm-s", "clm-z")
+    assert planned.picks["clm-s"] == unmarked.Picks(("clm-z", "clm-e", "clm-a1"), ("clm-q", "clm-c1"))
+    assert planned.picks["clm-b1"] == unmarked.Picks(("clm-a1", "clm-e", "clm-s"), ("clm-c1", "clm-q"))
+    assert planned.picks["clm-q"] == unmarked.Picks((), ("clm-s", "clm-z"))
+    for source, target in (("clm-s", "clm-q"), ("clm-s", "clm-z")):
+        assert {(source, target), (target, source)} <= set(planned.pairs)
+
+
+def test_an_excluded_link_leaves_both_pools_and_an_own_equation_its_source_s() -> None:
+    """A marked pair or an adjacency link is out of both its ends' pools, a source's own equation out of its
+    own; a proximity slot the source's paper cannot fill stays empty though another paper's claim is in the
+    pool."""
+    planned = _plan_papers(
+        excluded={order.link("clm-z", "clm-s"), order.link("clm-s", "clm-a1")}, own={("clm-s", "clm-e")}
+    )
+
+    assert planned.picks["clm-s"] == unmarked.Picks(("clm-b1", "clm-c1"), ("clm-q",))
+    assert planned.picks["clm-z"] == unmarked.Picks(("clm-e", "clm-a1", "clm-b1"), ("clm-q", "clm-c1"))
+    assert planned.picks["clm-a1"] == unmarked.Picks(("clm-e", "clm-z", "clm-b1"), ("clm-c1", "clm-q"))
 
 
 _FORMULA = "T_{esc} \\approx \\frac{c}{\\lambda_+} \\ln \\frac{L}{\\sigma_{eff}}"
@@ -276,11 +352,8 @@ def equations_build(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         yield repo
 
 
-def test_a_source_s_own_equation_leaves_its_pool_and_one_minted_elsewhere_stays(
-    equations_build: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_source_s_own_equation_leaves_its_pool_and_one_minted_elsewhere_stays(equations_build: Path) -> None:
     """The claim states ``eq:own`` rather than pointing at it; ``eq:other`` matches it as strongly and stays."""
-    monkeypatch.setattr(shortlist, "K", 2)
     inputs = _read(equations_build)
     (claim,) = [node.id for node in inputs.authored.hosted_by("vol/growth.md")]
     own_equation = inputs.authored.equation_node("vol/growth.md", "eq:own")
@@ -288,15 +361,13 @@ def test_a_source_s_own_equation_leaves_its_pool_and_one_minted_elsewhere_stays(
     assert own_equation is not None and other_equation is not None
     own, other = (claim, own_equation.id), (claim, other_equation.id)
 
-    unexcluded = unmarked.plan(
-        inputs.authored.nodes, inputs.statements, candidate_pairs=inputs.candidates, own=frozenset()
-    )
+    unexcluded = inputs.plan(own=frozenset())
     planned = inputs.plan()
 
     assert inputs.own == {own}
     assert {own, other} <= set(unexcluded.pairs)
-    assert other in planned.pairs and own not in planned.pairs
-    assert planned.own_equations == 1 and len(planned.pairs) == len(unexcluded.pairs)
+    assert other in planned.pairs
+    assert set(unexcluded.pairs) - set(planned.pairs) == {own}
 
 
 def _equation_candidates(repo: Path) -> tuple[attribute.Attribution, dict[str, str]]:
@@ -378,17 +449,16 @@ def test_a_stop_after_group_k_resumes_asking_from_group_k_plus_one(declared: Pat
     assert any(f"{held} held by the record already" in line for line in lines), lines
 
 
-def test_an_answer_from_an_earlier_plan_stays_in_the_record(declared: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_answer_from_an_earlier_plan_stays_in_the_record(declared: Path) -> None:
     """An answer is a fact about the text: a pair the current plan does not hold keeps its letter."""
     ids = _ids(declared)
-    earlier = (ids[_ZOMBIE], ids[_CAPITAL])
+    earlier = (ids[_ZOMBIE], ids[_GROWTH])
     kb_pipeline.write_unmarked(
         declared,
         kb_pipeline.UnmarkedRecord().with_entries(
             {earlier: kb_pipeline.CandidateEntry(("A", "B"), "A", kb_pipeline.ClassifyOutcome.ANSWERED)}
         ),
     )
-    monkeypatch.setattr(shortlist, "K", 1)
 
     _run(declared, PairReader())
 
@@ -437,8 +507,7 @@ def test_a_scope_no_stage_of_pass_two_declares_is_refused(declared: Path, monkey
 
 #: Fixture templates for the unmarked ask, standing in for the working one so
 #: the goldens below pin the composer and move with nothing a wording edit
-#: touches: every group slot, the composer-filled letters, the per-item slots
-#: last, and the ``correction`` alternative ending without a newline.
+#: touches: every group slot, then the per-item slots last.
 _FIXTURE_TEMPLATES = {
     ask.LETTER_TEMPLATES[letters.Kind.UNMARKED]: (
         "Leaf @!dyn.document!@\n"
@@ -447,9 +516,7 @@ _FIXTURE_TEMPLATES = {
         "@!dyn.claim-text!@\n"
         "Candidate @!dyn.candidate-line!@\n"
         "@!dyn.candidate-text!@\n"
-        "Answer @!letter-points!@ or @!letter-does-not-point!@.@!correction!@\n"
     ),
-    prompt_templates.ALTERNATIVES[ask.LETTER_CORRECTION]: "\n\nAgain; it read:\n@!dyn.returned!@\nOne letter.",
 }
 
 _GOLDEN_GROUP = ask.UnmarkedGroup(
@@ -480,28 +547,18 @@ Candidate """
 _GOLDEN_TAILS = (
     """\
 - `clm-eeeeee` — Escape rate (stated in `alpha/escape.md`: **Theorem 1** (Escape rate).)
-**Theorem 1** (Escape rate). The escape rate falls.
-Answer A or B.""",
+**Theorem 1** (Escape rate). The escape rate falls.""",
     """\
 - `clm-qqqqqq` — Equation (2) (stated in `alpha/escape.md`)
-$$ \\lambda_c = e^{-\\Delta} $$
-Answer A or B.""",
+$$ \\lambda_c = e^{-\\Delta} $$""",
 )
 
-_GOLDEN_CORRECTION = """
 
-Again; it read:
-It does, A.
-One letter."""
-
-
-@pytest.mark.parametrize("returned", [None, "  It does, A.\n"], ids=["first-ask", "re-ask"])
 @pytest.mark.parametrize("item", [0, 1], ids=["claim-target", "equation-target"])
 def test_the_unmarked_ask_composes_byte_for_byte_from_fixture_templates(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, item: int, returned: str | None
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, item: int
 ) -> None:
     compose_from_fixture_templates(monkeypatch, tmp_path, _FIXTURE_TEMPLATES)
     entry = ask.unmarked_asks(_GOLDEN_GROUP, _GOLDEN_ITEMS)[item]
 
-    correction = "" if returned is None else _GOLDEN_CORRECTION
-    assert entry.compose(returned) == _GOLDEN_PREFIX + _GOLDEN_TAILS[item] + correction + "\n"
+    assert entry.compose() == _GOLDEN_PREFIX + _GOLDEN_TAILS[item] + "\n"

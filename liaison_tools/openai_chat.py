@@ -84,8 +84,9 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise RedirectRefused(req.full_url, code, newurl)
 
 
-# The one opener every request in this module goes through.
-_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+#: The one opener every request goes through — this module's, and a caller's
+#: own request that must hold the same no-redirect rule.
+OPENER = urllib.request.build_opener(_NoRedirectHandler)
 
 
 class Reply(Enum):
@@ -304,7 +305,7 @@ def list_models(base_url: str, token: str) -> list[str]:
         f"{base_url}/models",
         headers={"Authorization": f"Bearer {token}"},
     )
-    with _OPENER.open(req, timeout=30) as resp:
+    with OPENER.open(req, timeout=30) as resp:
         body = resp.read().decode("utf-8")
     obj = json.loads(body)
     return [m["id"] for m in obj.get("data", [])]
@@ -325,7 +326,7 @@ def post_embeddings(
         method="POST",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
     )
-    with _OPENER.open(req, timeout=timeout_seconds) as resp:
+    with OPENER.open(req, timeout=timeout_seconds) as resp:
         data = json.loads(resp.read().decode("utf-8")).get("data", [])
     vectors = [item["embedding"] for item in sorted(data, key=lambda item: item["index"])]
     if len(vectors) != len(texts):
@@ -440,7 +441,7 @@ def post_chat_streaming(
     debug_sink = sys.stderr if debug_response else None
 
     try:
-        with _OPENER.open(req, timeout=timeout_seconds) as resp:
+        with OPENER.open(req, timeout=timeout_seconds) as resp:
             line_iter = (line.decode("utf-8", errors="replace") for line in resp)
             chunks, status = demux_sse(
                 line_iter,

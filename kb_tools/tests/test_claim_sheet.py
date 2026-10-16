@@ -22,6 +22,7 @@ from kb_tools.tests._stamped_kb import write_index, write_stamped_kb
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "claim-graph-sheet"
 KB = FIXTURE / "kb-root"
 
+
 @pytest.fixture(scope="module")
 def sheet() -> claim_sheet.SheetInput:
     return claim_sheet.load(KB)
@@ -156,7 +157,7 @@ def test_reduction_reads_and_drops_depends_alone(other: claim_sheet.SheetEdge) -
 
 
 # ---------------------------------------------------------------------------
-# Provenance: the unmarked record for depends, the row's origin for a cut
+# Provenance: the unmarked and cull records for depends, the row's origin for a cut
 # ---------------------------------------------------------------------------
 
 
@@ -205,6 +206,30 @@ def test_a_record_beside_a_kb_not_named_kb_root_fails_refresh_with_a_line_not_a_
         f"FAIL: [refresh-sheet] the build records beside {renamed} are not read for it: "
         f"kb-root: {renamed.parent / 'kb-root' / 'entry-point.md'}: {renamed.parent / 'kb-root'} has no entry-point.md"
     ]
+
+
+def test_a_cull_link_draws_its_depends_edge_inferred_whichever_end_it_names_first(tmp_path: Path) -> None:
+    """``clm-aaa003 → clm-aaa002`` is cited by the fixture; the link names its ends the other way round."""
+    kb = _copy_repo(tmp_path)
+    link = kb_pipeline.CullLink(a="clm-aaa002", b="clm-aaa003", harvest=kb_pipeline.LinkHarvest.ADJACENT)
+    before = {(edge.source, edge.target): edge.provenance for edge in claim_sheet.load(kb).edges}
+
+    kb_pipeline.write_cull(kb.parent, kb_pipeline.CullRecord(links=(link,)))
+    after = {(edge.source, edge.target): edge.provenance for edge in claim_sheet.load(kb).edges}
+
+    assert before[("clm-aaa003", "clm-aaa002")] == claim_sheet.CITED
+    assert after == {**before, ("clm-aaa003", "clm-aaa002"): claim_sheet.INFERRED}
+
+
+def test_an_unreadable_cull_record_fails_the_render(tmp_path: Path) -> None:
+    kb = _copy_repo(tmp_path)
+    (kb.parent / kb_pipeline.CULL_RELPATH).write_text("about: x\nentries: []\nculls: []\n", encoding="utf-8")
+
+    outcome = claim_sheet.render(kb)
+
+    assert outcome.failed
+    assert len(outcome.lines) == 1 and outcome.lines[0].startswith("FAIL: [refresh-sheet] ")
+    assert kb_pipeline.CULL_RELPATH in outcome.lines[0]
 
 
 def test_the_classification_record_is_not_read(tmp_path: Path, sheet: claim_sheet.SheetInput) -> None:

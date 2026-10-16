@@ -29,7 +29,9 @@ same, because a run with a model call left to walk refuses one that names none
 before its first stage.
 """
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,11 +42,13 @@ from types import MappingProxyType
 
 import pytest
 
-from kb_tools import install_location, kb_index_lib, kb_pipeline, kb_readme, kb_util
-from kb_tools.kb_claimgraph import tree
+from kb_tools import install_location, kb_index_lib, kb_pipeline, kb_readme, kb_schema, kb_util
+from kb_tools.inference import liaison_tools
+from kb_tools.kb_claimgraph import label, tree
 from kb_tools.kb_driver import barriers, baton, call, config, prompt_templates, run, runlog, steps
 from kb_tools.tests import _chat_stub
 from kb_tools.tests import _fake_model as fake_model
+from kb_tools.tests._chat_stub import server_fixture  # noqa: F401 - fixture
 
 _PKG_PARENT = install_location.current().agents_dir
 
@@ -218,7 +222,11 @@ def test_the_head_walks_a_repository_that_holds_only_its_sources(lamb: tuple[Pat
     consumer, result = lamb
 
     assert result.exit_code == baton.EXIT_OK, result.detail
-    assert kb_pipeline.recorded_stages(consumer) == set(kb_pipeline.STAGE_IDS)
+    recorded = kb_pipeline.recorded_stages(consumer)
+    assert recorded == set(kb_pipeline.STAGE_IDS)
+    assert len(recorded) == 11
+    assert "claims-culled" in recorded
+    assert kb_pipeline.read_cull(consumer) == kb_pipeline.CullRecord(), "the cull record as the declared pass wrote it"
     assert kb_util.document_tree_present(consumer)
     assert (kb_util.kb_root(consumer) / kb_util.INDEX_DIRNAME).is_dir()
     assert kb_util.targets_installed(consumer)
@@ -226,6 +234,25 @@ def test_the_head_walks_a_repository_that_holds_only_its_sources(lamb: tuple[Pat
         ["git", "status", "--porcelain"], cwd=consumer, capture_output=True, text=True, check=True
     ).stdout
     assert status.strip() == ""
+
+
+def test_the_cull_record_stands_unchanged_in_every_boundary_commit_from_the_declared_pass_on(
+    lamb: tuple[Path, run.Result],
+) -> None:
+    """Written at ``claims-declared`` and carried, the same blob, through every boundary after it."""
+    consumer, _ = lamb
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=consumer, capture_output=True, text=True, check=True).stdout.strip()
+
+    blobs = {}
+    for stage in kb_pipeline.STAGE_IDS[kb_pipeline.STAGE_IDS.index("claims-declared") :]:
+        (boundary,) = git(
+            "log", "--fixed-strings", f"--grep={kb_pipeline.LEDGER_PREFIX} {stage} |", "--format=%H"
+        ).split()
+        blobs[stage] = git("rev-parse", f"{boundary}:{kb_pipeline.CULL_RELPATH}")
+
+    assert len(set(blobs.values())) == 1, blobs
 
 
 def test_a_subtitled_title_does_not_fail_the_build(lamb: tuple[Path, run.Result]) -> None:
@@ -424,3 +451,107 @@ def test_the_resume_spends_its_inference_on_the_rows_the_first_invocation_left(r
     overview = (kb_util.kb_root(resumption.consumer) / kb_pipeline.OVERVIEW_DOC).read_text(encoding="utf-8")
 
     assert DRAFT_PASSAGE in overview
+
+
+# ---------------------------------------------------------------------------
+# Where each model call goes: the letter asks to the decision endpoint, the
+# overview to chat completions
+#
+# The one walk here that spends its inference over the wire, into the loopback
+# stub rather than into a fake: the claim-graph stages call their reader in a
+# subprocess, where no fake reaches, and what the property is about is the
+# request each call puts on the wire.
+# ---------------------------------------------------------------------------
+
+_DECISION_PATH = "/v1" + liaison_tools.DECISION_PATH
+_CHAT_PATH = "/v1/chat/completions"
+
+
+def _answer_every_call(path: str, body: dict[str, object]) -> tuple[int, bytes]:
+    """Every noul question true and every choice question its first criterion; the overview call the draft."""
+    if path == _CHAT_PATH:
+        return 200, _chat_stub.sse(
+            _chat_stub.chunk({"content": DRAFT_PASSAGE}, "stop"), {"choices": [], "usage": _chat_stub.USAGE}
+        )
+    questions = body["questions"]
+    assert isinstance(questions, dict)
+    answers = {
+        key: (
+            {"type": "noul", "noul": 1.0}
+            if question["type"] == prompt_templates.NOUL
+            else {"type": "choice", "choice": min(question["criteria"]), "confidence": 1.0}
+        )
+        for key, question in questions.items()
+    }
+    usage = {"input_tokens": 100, "output_tokens": 1}
+    return 200, json.dumps({"model": _chat_stub.SERVED_DECISION_MODEL, "answers": answers, "usage": usage}).encode()
+
+
+#: What an ask's item key is: a paragraph ask's label range, or the id of the claim a classify,
+#: unmarked or colinear ask is about.
+_ITEM_KEY_RE = re.compile(rf"{label.LABEL_PREFIX}\d+(?:-{label.LABEL_PREFIX}\d+)?|{kb_schema.id_body('clm')}")
+
+
+def _assert_one_question_under_its_item_s_key(request: Mapping[str, object]) -> None:
+    """The request carries the state and one question, keyed by an item its state shows."""
+    body = request["body"]
+    assert isinstance(body, dict)
+    assert set(body) == {"model", "state", "questions"}, body.keys()
+    assert body["model"] == _chat_stub.SERVED_DECISION_MODEL
+    ((key, question),) = body["questions"].items()
+    assert set(question) == {"type", "instructions", "criteria"}
+    assert _ITEM_KEY_RE.fullmatch(key), key
+    assert key in body["state"], key
+
+
+def test_every_letter_ask_is_a_decision_request_and_the_overview_a_chat_request(
+    server: _chat_stub.StubServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A build ``--through references-found`` puts every letter ask to ``/systemone``; the rest adds the one chat call.
+
+    Each decision request is the composed state and one question under its
+    item's key, and nothing else: no system message.
+    """
+    server.route = _answer_every_call
+    _chat_stub.name_server(monkeypatch, port=server.port, key_dir=tmp_path)
+    consumer = _make_fresh_consumer(tmp_path / "consumer", corpus=_LAMB, files=(*LAMB_SOURCES, "lamb.bib"))
+
+    bounded = _walk_head(
+        consumer,
+        tmp_path / "runs",
+        stages=kb_pipeline.STAGE_IDS,
+        overrides={"sources": LAMB_SOURCES, "through": "references-found"},
+    )
+
+    assert bounded.exit_code == baton.EXIT_BOUNDED, bounded.detail
+    letter_asks = list(server.requests)
+    assert letter_asks, "the node pass asks every paragraph of the paper"
+    assert {request["path"] for request in letter_asks} == {_DECISION_PATH}
+    for request in letter_asks:
+        _assert_one_question_under_its_item_s_key(request)
+
+    finished = _walk_head(
+        consumer,
+        tmp_path / "runs",
+        stages=kb_pipeline.STAGE_IDS,
+        overrides={"sources": LAMB_SOURCES},
+        run_id="20260901T120000-2",
+    )
+
+    assert finished.exit_code == baton.EXIT_OK, finished.detail
+    rest = server.requests[len(letter_asks) :]
+    (overview,) = [request for request in rest if request["path"] == _CHAT_PATH]
+    assert overview["body"]["model"] == _chat_stub.SERVED_MODEL
+    assert {request["path"] for request in rest} <= {_DECISION_PATH, _CHAT_PATH}
+    for request in rest:
+        if request["path"] == _DECISION_PATH:
+            _assert_one_question_under_its_item_s_key(request)
+    asked = [
+        question
+        for request in server.requests
+        if request["path"] == _DECISION_PATH
+        for question in request["body"]["questions"].values()
+    ]
+    assert {question["type"] for question in asked} == set(
+        prompt_templates.QUESTION_TYPES
+    ), "noul and choice both asked"

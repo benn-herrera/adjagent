@@ -324,17 +324,17 @@ with one of them is the defect.
     alone is worthless** and makes the orphan picture worse, adding nodes
     nothing points at.
 
-13. **Confidence-fed defaults for the letter asks.** A reader returning per-label probabilities is a
-    drop-in (`letters.LetterReader`'s `confidence`), and none is built. With one, a classify answer
-    whose top label clears the next by less than a margin would fall to the candidate's draft, and a
-    paragraph *yes* below a threshold to unjudged — thresholds chosen from the confidences the
-    records already carry, not set ahead of them.
+13. **Confidence-fed defaults for the letter asks.** The decision reader already returns per-label
+    probabilities (`letters.Reply`'s `confidence`), and `letters.decide` reads only their argmax.
+    Read further, a classify answer whose top label clears the next by less than a margin would fall
+    to the candidate's draft, and a paragraph *yes* below a threshold to unjudged — thresholds
+    chosen from the confidences the records already carry, not set ahead of them.
 
 14. **A cycle re-ask, if ring demotions of classified edges prove frequent.** Today every
-    `depends` edge on a cycle of the classified set is recorded as a `demoted` edge with no question
-    asked (`classify.cuts`), and the report names each. Should those counts run high, one re-ask
-    putting the cycle in front of the seat would be the only ask showing it other answers, with a
-    template of its own.
+    `depends` edge on a cycle, once attribution has written its edges, is demoted with no question
+    asked (`write.demote_cycles`), and the report names each. Should those counts run high, one
+    re-ask putting the cycle in front of the seat would be the only ask showing it other answers,
+    with a state template and a question file of its own.
 
 15. **Sub-paragraph claim granularity, if the paragraph unit proves too coarse.** The node pass
     mints one claim per paragraph that states a result, so a paragraph stating two results becomes
@@ -347,20 +347,21 @@ with one of them is the defect.
     defect — a question for the test suite over a built fixture KB, never for a build stage.
 
 17. **A list ask for unmarked references, if the per-pair asks prove too slow.** Today
-    `references-found` asks one letter per shortlisted pair: 197·K asks on ModernCorp's 197
-    sources (985 at K = 5, 2,955 at K = 15, each unit of K about 12–17 minutes at one call in
-    flight). One ask per source listing its K targets and taking several letters back is 197 asks
-    at any K. It was declined for three reasons, each still standing: it breaks SPEC.md's "every
-    claim-graph inference is one decision, answered by one label" (The Driver's Contract); an
-    answer partly wrong has no item-level default; and `letters.LetterReader`'s `confidence` has
-    no multi-label form. What would reopen it is a K the yes rate justifies whose per-pair cost the
-    build cannot carry.
+    `references-found` asks one letter per shortlisted pair: at most 197·(3 + 2) = 985 asks on
+    ModernCorp's 197 sources (three proximity slots and two wildcard slots each, fewer where a
+    paper cannot fill a proximity slot; each slot per source about 12–17 minutes at one call in
+    flight). One ask per source listing its targets and taking several letters back is 197 asks
+    at any slot count. It was declined for three reasons, each still standing: it breaks SPEC.md's
+    "every claim-graph inference is one decision, answered by one label" (The Driver's Contract);
+    an answer partly wrong has no item-level default; and `letters.LetterReader`'s `confidence`
+    has no multi-label form. What would reopen it is a slot count the yes rate justifies whose
+    per-pair cost the build cannot carry.
 
 18. **A `depends` edge's provenance on the `depends-on` record itself.** A `demoted` row carries
     its `origin`; a `depends` row does not, so the sheet recovers cited-or-inferred from the
-    unmarked build record at the repository root (`kb-build-unmarked.yaml`), and a KB without it
-    draws every `depends` as cited. Carrying it on the record is a metadata format change, taking
-    the form `demoted`'s `origin` already has.
+    unmarked and cull build records at the repository root (`kb-build-unmarked.yaml`,
+    `kb-build-cull.yaml`), and a KB without them draws every `depends` as cited. Carrying it on the
+    record is a metadata format change, taking the form `demoted`'s `origin` already has.
 
 19. **Jointly established units.** A strongly connected component of the claim graph that a person
     promotes into one node carrying the solidity its members share; the DAG constraint then holds

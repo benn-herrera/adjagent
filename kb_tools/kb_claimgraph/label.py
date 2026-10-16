@@ -156,8 +156,8 @@ class Render:
         return Span(sentences=tuple(sentence for sentence in self.sentences if sentence.paragraph == paragraph.index))
 
 
-def _body_start(text: str) -> int:
-    """The first line a label may name.
+def body_start(text: str) -> int:
+    """The first line of the body, below the frontmatter and the up-link line: the first a label may name.
 
     The write API's locator match begins beneath the frontmatter block, so a
     label above it could never be found again; and the up-link's line is
@@ -181,7 +181,7 @@ def heading_lines(text: str) -> frozenset[int]:
     return frozenset(
         number
         for number, line in enumerate(text.splitlines())
-        if number >= _body_start(text) and _HEADING_RE.match(BLOCKQUOTE_PREFIX.sub("", line).strip())
+        if number >= body_start(text) and _HEADING_RE.match(BLOCKQUOTE_PREFIX.sub("", line).strip())
     )
 
 
@@ -324,7 +324,7 @@ def render(text: str, *, fences: Sequence[MathFence] = (), excluded: frozenset[i
         offsets.append(cursor)
         cursor += len(line) + 1
 
-    first = _body_start(text)
+    first = body_start(text)
     fenced = frozenset(number for fence in fences for number in range(fence.start, fence.end))
 
     # One blank line between the navigation shown as it stands and the labelled

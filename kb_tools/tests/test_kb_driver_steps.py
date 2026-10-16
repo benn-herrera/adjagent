@@ -31,7 +31,7 @@ def test_the_table_covers_the_whole_stage_vocabulary_and_the_walk_covers_the_tab
     fails it rather than quietly buying a green by not going there.
     """
     assert steps.TABLE_STAGE_IDS == kb_pipeline.STAGE_IDS
-    assert len(steps.TABLE_STAGE_IDS) == 10
+    assert len(steps.TABLE_STAGE_IDS) == 11
 
 
 def test_every_row_of_the_table_is_executed_by_a_handler() -> None:
@@ -259,6 +259,7 @@ def test_the_rows_a_stage_loses_are_named_by_the_table_and_not_by_a_stage_id() -
     assert {stage for stage, rows in by_stage.items() if rows} == {
         "claims-discovered",
         "references-found",
+        "claims-culled",
         "overview-drafted",
     }
     for stage, rows in by_stage.items():
@@ -329,7 +330,14 @@ def test_every_claim_graph_row_belongs_to_a_stage_that_declares_an_invocation() 
     invoking = {stage.id for stage in kb_pipeline.STAGES if stage.claimgraph_invocation}
     rows = {
         steps.STEPS_BY_ID[step_id].stage
-        for step_id in ("declared.build", "discover.build", "equations.build", "unmarked.build", "depends.attribute")
+        for step_id in (
+            "declared.build",
+            "discover.build",
+            "equations.build",
+            "unmarked.build",
+            "cull.build",
+            "depends.attribute",
+        )
     }
 
     assert rows == invoking

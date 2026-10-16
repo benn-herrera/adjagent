@@ -482,23 +482,29 @@ class Runner:
         stages left to walk, so a ``start`` row would be too early to hold it —
         a resume skips ``start``. A run spending no inference, and one with no
         row left to walk that calls a model, need no server and are not asked
-        for one. The validation is ``inference.check_environment``'s, the one
-        every call makes; holding it here is what makes a missing variable exit
+        for one. Each model is asked for by what the rows left will call: the
+        decision model where one asks letters (``steps.Step.asks_letters``), the
+        chat model where one makes the driver's own call under a ``system``
+        prompt. The validation is
+        ``inference.check_environment``'s, the one every call makes; holding it here is what makes a missing variable exit
         14 before hours of mechanical stages rather than a refusal at the first
         call after them.
         """
         if self.config.run.no_inference:
             return
         remaining = [stage for stage in self._walk() if stage not in self._recorded]
-        calling = [step.id for stage in remaining for step in steps.steps_for(stage) if step.calls_a_model]
+        calling = [step for stage in remaining for step in steps.steps_for(stage) if step.calls_a_model]
         if not calling:
             return
         try:
-            inference.check_environment()
+            inference.check_environment(
+                chat=any(step.system is not None for step in calling),
+                decision=any(step.asks_letters for step in calling),
+            )
         except ValueError as refusal:
             self._halt(
                 baton.EXIT_ENVIRONMENT,
-                f"{calling[0]} calls a model, and the environment names no server to call: {refusal}",
+                f"{calling[0].id} calls a model, and the environment names no server to call: {refusal}",
                 "restore: launch from an environment that names the server, or re-run with "
                 f"{NO_INFERENCE_FLAG} to build without those rows",
             )
@@ -1076,6 +1082,8 @@ _HANDLERS: Mapping[str, Callable[[Runner, steps.Step], None]] = MappingProxyType
         "equations.record": Runner._record_stage,
         "unmarked.build": Runner._claim_graph,
         "unmarked.record": Runner._record_stage,
+        "cull.build": Runner._claim_graph,
+        "cull.record": Runner._record_stage,
         "depends.attribute": Runner._depends_attribute,
         "depends.record": Runner._record_stage,
         "p3a.gate": Runner._p3a_gate,

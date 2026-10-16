@@ -18,8 +18,8 @@ not a claim no longer counting toward one.
 authors are the ones the corpus marked; the ones it did not look for are named
 by count, and a leaf carrying no author-marked block carries a reason saying
 exactly that and nothing more. **It writes the node-pass record fresh**, every
-declaring leaf unread, which is the node pass's scope, and the classification
-and unmarked records empty, so neither stage resumes from asks another build
+declaring leaf unread, which is the node pass's scope, and the classification,
+unmarked and cull records empty, so no stage resumes from asks another build
 answered.
 """
 
@@ -136,6 +136,7 @@ def build(*, kb_root: Path, repo_root: Path, scratch: Path) -> Report:
         )
         kb_pipeline.write_classification(repo_root, kb_pipeline.ClassificationRecord())
         kb_pipeline.write_unmarked(repo_root, kb_pipeline.UnmarkedRecord())
+        kb_pipeline.write_cull(repo_root, kb_pipeline.CullRecord())
         report.findings.append(
             Finding(FACT, "stage-F-node-pass", f"{len(leaves)} leaves recorded unread for the node pass")
         )

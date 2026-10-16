@@ -1,12 +1,15 @@
 """The ``references-found`` stage: references made in prose with no cross-reference, found by asking.
 
-THESIS gap 2. A mechanical shortlist (:mod:`shortlist`) is the draft: per
+THESIS gap 2. A mechanical shortlist (:func:`plan`) is the draft: per
 source claim — every node but a minted equation, which has no text of its own
-to point from — its :data:`shortlist.K` best-ranked targets over the whole
-node set, less every pair already an edge candidate (:func:`attribute.narrow`)
-and every equation minted from inside the source's own body
-(:func:`equation_sites.own_equations`). No locality bound enters the pool.
-Each shortlisted ordered pair is one letter ask — does the source claim's text point at the candidate's result —
+to point from — its :data:`shortlist.PROXIMITY_K` nearest targets in its own
+paper, then its :data:`shortlist.WILDCARD_K` best-ranked targets anywhere less
+those, from a pool that leaves out every pair already an edge candidate
+(:func:`attribute.narrow`), every adjacency link (:func:`order.adjacent_links`:
+claims consecutive in one leaf, linked by rule and never asked) and every
+equation minted from inside the source's own body
+(:func:`equation_sites.own_equations`).
+Each shortlisted ordered pair is one letter ask — does the source claim continue the argument the candidate is part of —
 grouped by source in ascending id, every ask of a group sharing the source's
 leaf and statement. ``A`` is a yes and the only answer that yields anything:
 ``B`` and a default (no offered letter after one re-ask) are recorded and
@@ -31,7 +34,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import kb_pipeline
-from . import ask, attribute, classify, conform, equation_sites, graph, identify, inventory, letters, shortlist, tree
+from . import (
+    ask,
+    attribute,
+    classify,
+    conform,
+    equation_sites,
+    graph,
+    identify,
+    inventory,
+    letters,
+    order,
+    shortlist,
+    tree,
+)
 from .report import FACT, PASS, ClaimGraphError, Finding, Report
 
 Pair = tuple[str, str]
@@ -41,43 +57,69 @@ LOCALITIES: tuple[str, ...] = ("same document", "same directory", "same paper", 
 
 
 @dataclass(frozen=True)
-class Shortlist:
-    """The pairs to ask: sources ascending, each source's targets best first.
+class Picks:
+    """One source's targets, by the slot that chose them."""
 
-    ``excluded`` counts the ordered pairs left out of the pools as existing candidates,
-    ``own_equations`` those left out as a source's own equation (:func:`equation_sites.own_equations`).
-    """
+    proximity: tuple[str, ...]
+    wildcard: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Shortlist:
+    """The pairs to ask: sources ascending, each source's proximity picks then its wildcard picks."""
 
     sources: tuple[str, ...]
-    pairs: tuple[Pair, ...]
-    excluded: int
-    own_equations: int
+    picks: Mapping[str, Picks]
+
+    @property
+    def pairs(self) -> tuple[Pair, ...]:
+        return tuple(
+            (source, target)
+            for source in self.sources
+            for target in self.picks[source].proximity + self.picks[source].wildcard
+        )
 
 
 def plan(
     nodes: Mapping[str, graph.ClaimNode],
     statements: Mapping[str, str],
     *,
-    candidate_pairs: Sequence[Pair],
+    positions: Mapping[str, order.Position],
+    excluded: Collection[order.Link],
     own: Collection[Pair],
 ) -> Shortlist:
-    """The stage's shortlist over the whole node set: a pure function of the statements and the excluded pairs.
+    """The stage's shortlist over the whole node set: a pure function of the statements, the positions and the
+    excluded pairs.
 
-    ``statements`` holds every node's statement, keyed by id; ``candidate_pairs``
-    is every pair stage D's narrowing already reaches; ``own`` is
-    :func:`equation_sites.own_equations`, each source's own equations, left out of its pool.
+    Per source — every node but a minted equation — its pool is every other node less the ``excluded`` links
+    and every equation the source states (``own``, :func:`equation_sites.own_equations`). Its proximity slots
+    take the pool's nearest targets within its paper: nearest :data:`LOCALITIES` first, then fewest places
+    apart in the sequence of every node by position and id, a tie to the earlier. Its wildcard slots take the
+    pool's best by cosine, less the proximity picks, so a target in another paper is reached there alone. A
+    slot left unfilled stays empty. Each source is planned apart, so a pair both its ends pick is planned both
+    ways.
     """
     sources = sorted(node_id for node_id, node in nodes.items() if node.equation is None)
-    ranked = shortlist.rank(statements, sources=sources, candidate_pairs=candidate_pairs)
-    pools = {source: [target for target in ranked[source] if (source, target) not in own] for source in sources}
-    chosen = shortlist.top_k(pools, shortlist.K)
-    pool = len(statements) - 1
-    return Shortlist(
-        sources=tuple(sources),
-        pairs=tuple((source, target) for source in sources for target in chosen[source]),
-        excluded=sum(pool - len(ranked[source]) for source in sources),
-        own_equations=sum(len(ranked[source]) - len(pools[source]) for source in sources),
-    )
+    sequence = sorted(nodes, key=lambda node_id: (positions[node_id], node_id))
+    index = {node_id: at for at, node_id in enumerate(sequence)}
+    ranked = shortlist.rank(statements, sources=sources, candidate_pairs=excluded)
+    cross_paper = len(LOCALITIES) - 1
+    picks = {}
+    for source in sources:
+        pool = {
+            target
+            for target in nodes
+            if target != source and order.link(source, target) not in excluded and (source, target) not in own
+        }
+        tier = {target: LOCALITIES.index(locality(nodes[source].document, nodes[target].document)) for target in pool}
+        near = sorted(
+            (target for target in pool if tier[target] < cross_paper),
+            key=lambda target: (tier[target], abs(index[target] - index[source]), index[target]),
+        )
+        proximity = tuple(near[: shortlist.PROXIMITY_K])
+        wildcard = tuple(target for target in ranked[source] if target in pool and target not in proximity)
+        picks[source] = Picks(proximity=proximity, wildcard=wildcard[: shortlist.WILDCARD_K])
+    return Shortlist(sources=tuple(sources), picks=picks)
 
 
 def found(record: kb_pipeline.UnmarkedRecord) -> tuple[Pair, ...]:
@@ -131,6 +173,7 @@ def _findings(
     record: kb_pipeline.UnmarkedRecord,
     nodes: Mapping[str, graph.ClaimNode],
     *,
+    adjacent: int,
     held: int,
     groups: Sequence[letters.GroupRecord],
 ) -> list[Finding]:
@@ -141,9 +184,9 @@ def _findings(
         Finding(
             FACT,
             "stage-U-shortlist",
-            f"{len(planned.sources)} sources, K={shortlist.K}, {len(planned.pairs)} pairs planned, "
-            f"{planned.excluded} pairs excluded as existing candidates, {planned.own_equations} as a source's "
-            f"own equation; {held} held by the record already, "
+            f"{len(planned.sources)} sources, {shortlist.PROXIMITY_K} proximity and {shortlist.WILDCARD_K} "
+            f"wildcard slots each, {adjacent} adjacency links made by rule and not asked, "
+            f"{len(planned.pairs)} pairs planned; {held} held by the record already, "
             f"{len(planned.pairs) - held} asked this run",
         ),
         Finding(FACT, "stage-U-asks", f"sources={len(groups)} {letters.AskTotals.of(groups).detail()}"),
@@ -202,10 +245,14 @@ def build(
         statement_of = classify.statements(documents, authored, sites)
         statement = {node_id: statement_of(node) for node_id, node in authored.nodes.items()}
         narrowed = attribute.narrow(documents, authored, sites, node_pass)
+        positions = order.claim_positions(documents, authored, sites)
+        marked = {order.link(*candidate.pair) for candidate in narrowed.candidates}
+        adjacent = order.adjacent_links(authored, positions, marked)
         planned = plan(
             authored.nodes,
             statement,
-            candidate_pairs=[candidate.pair for candidate in narrowed.candidates],
+            positions=positions,
+            excluded=marked | set(adjacent),
             own=equation_sites.own_equations(documents, authored, sites),
         )
 
@@ -234,7 +281,7 @@ def build(
             record = record.with_entries(entries)
             kb_pipeline.write_unmarked(repo_root, record)
 
-        report.findings += _findings(planned, record, authored.nodes, held=held, groups=groups)
+        report.findings += _findings(planned, record, authored.nodes, adjacent=len(adjacent), held=held, groups=groups)
         report.findings.append(
             Finding(
                 PASS,

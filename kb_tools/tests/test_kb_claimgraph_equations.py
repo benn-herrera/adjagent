@@ -32,8 +32,8 @@ from pathlib import Path
 
 import pytest
 
-from kb_tools import kb_index_lib, kb_schema, kb_util, verify_kb_metadata
-from kb_tools.kb_claimgraph import attribute, equation, equations, graph, inventory, tree
+from kb_tools import kb_index_lib, kb_pipeline, kb_schema, kb_util, verify_kb_metadata
+from kb_tools.kb_claimgraph import attribute, equation, equations, graph, inventory, order, tree
 from kb_tools.kb_claimgraph.build import build
 from kb_tools.tests._claimgraph_consumer import install_claimgraph_consumer
 from kb_tools.tests._shared_builds import copy_build, held_unchanged
@@ -352,6 +352,26 @@ def test_an_equation_node_sources_no_edge_and_no_reference(declared: Path):
     assert not [pair for pair in narrowed.references if pair[0] in minted]
     assert not [candidate for candidate in narrowed.candidates if candidate.source.id in minted]
     assert attribute.cycle_edges(narrowed.edges) == ()
+
+
+def test_a_link_to_an_equation_later_in_reading_order_still_runs_to_it(declared: Path):
+    """Alpha's theorem precedes its own free equation, and no mark joins them: the equation is the target, and the
+    candidate is offered *supported by* and *mention* alone."""
+    documents, sites, authored = _read(declared)
+    nodes = _by_title(authored)
+    theorem, formula = nodes["Alpha result"], nodes["Equation (`eq:free`) — Alpha"]
+    positions = order.claim_positions(documents, authored, sites)
+    assert positions[theorem.id] < positions[formula.id]
+    link = kb_pipeline.CullLink(*sorted((theorem.id, formula.id)), harvest=kb_pipeline.LinkHarvest.UNMARKED)
+
+    narrowed = attribute.narrow(
+        documents, authored, sites, inferred=attribute.orient_links([link], authored, positions)
+    )
+
+    (found,) = [c for c in narrowed.candidates if {c.source.id, c.target.id} == {theorem.id, formula.id}]
+    assert found.pair == (theorem.id, formula.id)
+    assert found.offered == (attribute.Relation.SUPPORTED_BY, attribute.Relation.MENTION)
+    assert found.harvests == {attribute.Harvest.UNMARKED}
 
 
 # ---------------------------------------------------------------------------

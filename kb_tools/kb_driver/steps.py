@@ -194,6 +194,16 @@ class Step:
         """
         return self.spends_inference or self.spends_inference_in_part
 
+    @property
+    def asks_letters(self) -> bool:
+        """Whether this row's model calls are claim-graph letter asks, which name the decision model.
+
+        Every model call made inside a tool the driver invokes is
+        ``kb_claimgraph``'s letter ask; a call the driver makes itself, under a
+        ``system`` prompt, is a chat call on the text model.
+        """
+        return self.spends_own_inference or self.spends_inference_in_part
+
 
 # --- the table ---------------------------------------------------------------
 
@@ -204,6 +214,7 @@ _CLAIMS_DECLARED = "claims-declared"
 _CLAIMS_DISCOVERED = "claims-discovered"
 _EQUATIONS_MINTED = "equations-minted"
 _REFERENCES_FOUND = "references-found"
+_CLAIMS_CULLED = "claims-culled"
 _DEPENDS_ATTRIBUTED = "depends-attributed"
 _PHASE_3A = "phase-3a"
 _OVERVIEW_DRAFTED = "overview-drafted"
@@ -259,14 +270,15 @@ STEPS: tuple[Step, ...] = (
     ),
     # --- the head: the build's own production ---------------------------------
     #
-    # Seven tool rows and their records. Every one of them invokes a module and
+    # Eight tool rows and their records. Every one of them invokes a module and
     # reads an exit code, so none briefs a seat and none raises a barrier of its
     # own — the two exceptions being stated where they sit. The order is forced
     # end to end: the seed refuses a `kb-root/` with no tree in it, the declared
     # pass refuses a `kb-root/` with no spine, the node pass reads the leaves the
     # declared pass recorded unread, equations are minted from the references
-    # its verdicts leave counting, and stage D authors edges over the node set
-    # those three fixed. Each stage's boundary commit is also what leaves the worktree
+    # its verdicts leave counting, the cull removes the prose claims a linked
+    # claim already states, and stage D authors edges over the node set the cull
+    # fixed. Each stage's boundary commit is also what leaves the worktree
     # clean for the next stage's tool, which is why the seed is a stage of its
     # own rather than a row of `start`: its preflight refuses the dirty worktree
     # the document graph has just created.
@@ -348,7 +360,7 @@ STEPS: tuple[Step, ...] = (
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,
     ),
-    # --- equations-minted — the node set's close ------------------------------
+    # --- equations-minted — the last node minted --------------------------------
     # Mechanical, and a stage of its own rather than a tail on `discover.build`:
     # as a tail it would stop that row declaring its inference, and the ledger
     # would no longer name the row a build spending none drops.
@@ -381,6 +393,26 @@ STEPS: tuple[Step, ...] = (
     Step(
         id="unmarked.record",
         stage=_REFERENCES_FOUND,
+        unit=Unit.DRIVER_OP,
+        writer=Writer.TOOL,
+        ledger_op=LedgerOp.ADVANCE_STEP,
+    ),
+    # --- claims-culled — co-linear prose claims removed -------------------------
+    # Inference whole: no claim is culled but on an answer, so a build spending
+    # none drops the row, removes nothing, and the cull record stays as the
+    # declared pass wrote it, empty. A stage of its own because its asks are
+    # what a boundary must keep from being spent twice, and because it is the
+    # last change to the node set before stage D draws edges over it.
+    Step(
+        id="cull.build",
+        stage=_CLAIMS_CULLED,
+        unit=Unit.DRIVER_OP,
+        writer=Writer.TOOL,
+        spends_own_inference=True,
+    ),
+    Step(
+        id="cull.record",
+        stage=_CLAIMS_CULLED,
         unit=Unit.DRIVER_OP,
         writer=Writer.TOOL,
         ledger_op=LedgerOp.ADVANCE_STEP,

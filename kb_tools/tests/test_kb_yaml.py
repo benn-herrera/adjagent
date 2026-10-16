@@ -226,6 +226,233 @@ def test_a_number_keeps_its_text_and_a_typed_scalar_its_type() -> None:
     assert [type(read[key]) for key in "cde"] == [bool, int, float]
 
 
+#: A question file as kbase writes one — comment lines, double-quoted keys holding
+#: composer slots, and literal blocks whose content holds a list, an em dash,
+#: quotes and a parenthesis — and the values yaml.v3 reads from it.
+_QUESTION_FILE = """\
+# The question, with a comment line.
+type: noul
+true-letter: "@!letter-points!@"
+instructions: |-
+  Does the source claim continue the argument the candidate claim is part
+  of? Answer true if it does, false if it does not.
+criteria:
+  "true": |-
+    The source claim continues the argument: it builds on the candidate
+    claim ("the bound above", "this estimate") — read leniently.
+  "false": |-
+    does not continue it — as when any of these
+    holds:
+    - The two claims share only a subject or notation.
+    - The source claim merely mentions the candidate claim's subject — a
+      passing nod, color, an aside.
+"""
+
+_QUESTION_VALUES = {
+    "type": "noul",
+    "true-letter": "@!letter-points!@",
+    "instructions": (
+        "Does the source claim continue the argument the candidate claim is part\n"
+        "of? Answer true if it does, false if it does not."
+    ),
+    "criteria": {
+        "true": (
+            "The source claim continues the argument: it builds on the candidate\n"
+            'claim ("the bound above", "this estimate") — read leniently.'
+        ),
+        "false": (
+            "does not continue it — as when any of these\n"
+            "holds:\n"
+            "- The two claims share only a subject or notation.\n"
+            "- The source claim merely mentions the candidate claim's subject — a\n"
+            "  passing nod, color, an aside."
+        ),
+    },
+}
+
+
+def test_a_question_file_reads_its_literal_blocks_with_the_strip_chomp() -> None:
+    assert kb_yaml.parse(_QUESTION_FILE) == _QUESTION_VALUES
+
+
+_SHIPPED_QUESTIONS = Path(__file__).parents[1] / "kb_driver" / "prompt-templates" / "questions"
+
+#: kbase's five question files as yaml.v3 reads them — the strip chomp applied, the keys as written,
+#: the letter slots unfilled. The files are kbase's bytes, so their values are kbase's text.
+_KBASE_QUESTION_VALUES = {
+    "paragraph": {
+        "type": "noul",
+        "true-letter": "@!letter-claim!@",
+        "instructions": "Does this paragraph state a result of its own?",
+        "criteria": {
+            "true": (
+                "states a result: the paragraph itself asserts a theorem, a relation it\n"
+                "derives, a bound, a condition under which something holds, or a conclusion\n"
+                "it draws from an argument. A result stated in plain prose counts, and one\n"
+                "sentence asserting it is enough."
+            ),
+            "false": (
+                "states none: motivation, signposting, a recap — the paragraph retells a\n"
+                "result without stating or deriving it here — notation, a definition, or\n"
+                "narrative. A notation table or a section preamble states no result of its\n"
+                "own."
+            ),
+        },
+    },
+    "unmarked": {
+        "type": "noul",
+        "true-letter": "@!letter-points!@",
+        "instructions": (
+            "Does the source claim continue the argument the candidate claim is part\n"
+            "of? Answer true if it does, false if it does not."
+        ),
+        "criteria": {
+            "true": (
+                "The source claim continues the argument the candidate claim is part of:\n"
+                "it builds on the candidate claim, applies it, or carries the same line of\n"
+                "reasoning forward. Read this leniently — capture here is generous, and\n"
+                "sharper judgment happens later. The connection may be loose, implicit or\n"
+                "roughly stated: the candidate claim may be where a result the source\n"
+                "claim uses or assumes is set out, where a condition or quantity it names\n"
+                'by description ("the bound above", "this estimate", "the condition of\n'
+                'the previous section") is set out, or where notation is introduced that\n'
+                "the source claim then works with."
+            ),
+            "false": (
+                "does not continue it: the source claim is not part of the same argument\n"
+                "as the candidate claim. Answer false when the source claim stands apart\n"
+                "from the candidate claim's line of reasoning — as when any of these\n"
+                "holds:\n"
+                "- The two claims share only a subject or notation.\n"
+                "- The source claim merely mentions the candidate claim's subject — a\n"
+                "  passing nod, color, an aside — without the source claim's own\n"
+                "  reasoning building on or drawing from that mention.\n"
+                "- Each claim states a result of its own; neither builds on the other."
+            ),
+        },
+    },
+    "classify-three": {
+        "type": "choice",
+        "instructions": (
+            "Does the source claim need the candidate claim, does the candidate claim\n"
+            "need the source claim, or neither? Decide from what the two claims state\n"
+            "and what the passages say one does with the other. That a passage points\n"
+            "at the candidate claim without saying why, or does not point at it at all,\n"
+            "is not evidence for any of the answers."
+        ),
+        "criteria": {
+            "@!letter-supported-by!@": (
+                "supported by: the source claim needs the candidate claim to be true. The\n"
+                "source claim's statement or its proof uses the candidate claim as a\n"
+                "premise or a step."
+            ),
+            "@!letter-in-support-of!@": (
+                "in support of: the candidate claim needs the source claim to be true. The\n"
+                "source claim is a premise or a step for the candidate claim."
+            ),
+            "@!letter-mention!@": (
+                "mention: neither needs the other. The source claim borrows a method from\n"
+                "the candidate claim, refers the reader to it, compares itself with it, or\n"
+                "recaps it."
+            ),
+        },
+    },
+    "classify-two": {
+        "type": "choice",
+        "instructions": (
+            "Does the source claim need the candidate claim — does its statement or its\n"
+            "proof use the candidate claim as a premise or a step? If it does, choose\n"
+            "supported by; if it does not — including when the passages show the\n"
+            "candidate claim building on the source claim — choose mention. Decide from\n"
+            "what the two claims state and what the passages say one does with the\n"
+            "other. That a passage points at the candidate claim without saying why, or\n"
+            "does not point at it at all, is not evidence for any of the answers."
+        ),
+        "criteria": {
+            "@!letter-supported-by!@": (
+                "supported by: the source claim needs the candidate claim to be true. The\n"
+                "source claim's statement or its proof uses the candidate claim as a\n"
+                "premise or a step."
+            ),
+            "@!letter-mention!@": (
+                "mention: the source claim does not need the candidate claim. The source\n"
+                "claim borrows a method from the candidate claim, refers the reader to it,\n"
+                "compares itself with it, recaps it — or the passages show the candidate\n"
+                "claim building on the source claim."
+            ),
+        },
+    },
+    "colinear": {
+        "type": "choice",
+        "instructions": (
+            "Does one of the two claims add nothing to the other, or is each a step of its own? A step is what\n"
+            "a claim adds to the argument: a conclusion, a construction, an estimate, or an application of a\n"
+            "result. Compare only what each claim states. If the two claims each add nothing the other does\n"
+            "not state, choose second adds nothing."
+        ),
+        "criteria": {
+            "@!letter-second-adds-nothing!@": (
+                "second adds nothing: the second claim states no step that the first claim does not already\n"
+                "state. For example, the second claim restates, paraphrases or glosses the first, motivates it,\n"
+                "or comments on it — each only where it states no step of its own."
+            ),
+            "@!letter-first-adds-nothing!@": (
+                "first adds nothing: the second claim states a step that the first does not, and the first\n"
+                "claim states no step that the second does not already state. For example, the first claim\n"
+                "announces, motivates or sketches the result the second states — each only where it states no\n"
+                "step of its own."
+            ),
+            "@!letter-distinct!@": (
+                "distinct: each claim states a step that the other does not. For example, the two claims state\n"
+                "different results, or one applies or extends the other — each only where both claims keep a\n"
+                "step of their own."
+            ),
+        },
+    },
+}
+
+
+@pytest.mark.parametrize("name", sorted(_KBASE_QUESTION_VALUES))
+def test_a_shipped_question_file_reads_to_kbase_s_text(name: str) -> None:
+    """The file kbase wrote, parsed raw: no composer between it and the reader."""
+    text = _read(_SHIPPED_QUESTIONS / f"{name}.question.yaml")
+
+    assert kb_yaml.parse(text) == _KBASE_QUESTION_VALUES[name]
+
+
+@pytest.mark.parametrize(
+    ("text", "values"),
+    [
+        ("a: |\n  x\n  y\n", {"a": "x\ny\n"}),
+        ("a: |\n  x\n\n\nb: 1\n", {"a": "x\n", "b": 1}),
+        ("a: |-\n  x\n\n", {"a": "x"}),
+        ("a: |+\n  x\n\n", {"a": "x\n\n"}),
+        ("a: |+\n  x\n", {"a": "x\n"}),
+        ("a: |\n  x", {"a": "x"}),
+        ("a: |\n\n  x\n\n  # kept\n    deeper\nb: 2\n", {"a": "\nx\n\n# kept\n  deeper\n", "b": 2}),
+        ("a: | # a comment\n  x\n# a comment\nb: 2\n", {"a": "x\n", "b": 2}),
+        ("a: |\nb: 2\n", {"a": "", "b": 2}),
+        ("- |-\n  t\n- 2\n", ["t", 2]),
+        ("- k: |\n    t\n  m: 1\n", [{"k": "t\n", "m": 1}]),
+    ],
+    ids=[
+        "clip",
+        "clip-trailing-blanks",
+        "strip",
+        "keep",
+        "keep-one",
+        "no-final-break",
+        "blank-hash-and-deeper-lines-are-content",
+        "header-comment",
+        "empty",
+        "list-item",
+        "mapping-in-list-item",
+    ],
+)
+def test_a_literal_block_scalar_reads_by_indentation_and_its_chomp(text: str, values: object) -> None:
+    assert kb_yaml.parse(text) == values
+
+
 @pytest.mark.parametrize("value", [Number("1.2.3"), float("nan"), float("inf")], ids=["number", "nan", "inf"])
 def test_a_value_with_no_dialect_form_is_refused_by_the_writer(value: object) -> None:
     with pytest.raises(ValueError):
@@ -238,7 +465,7 @@ def test_a_value_with_no_dialect_form_is_refused_by_the_writer(value: object) ->
         ("a: 1\nb: &x v\n", 2, "anchor"),
         ("a: 1\nb: *pending*\n", 2, "alias"),
         ("a: 1\nb: !!str v\n", 2, "tag"),
-        ("a: 1\nb: |\n  text\n", 2, "block scalar"),
+        ("a: 1\nb: |2\n  text\n", 2, "block scalar"),
         ("a: 1\nb: >\n  text\n", 2, "block scalar"),
         ("a: 1\nb: 'v'\n", 2, "single-quoted"),
         ("a: 1\nb: one\n  two\n", 3, "continued"),
@@ -265,7 +492,7 @@ def test_a_value_with_no_dialect_form_is_refused_by_the_writer(value: object) ->
         "anchor",
         "alias",
         "tag",
-        "literal-block-scalar",
+        "literal-indentation-indicator",
         "folded-block-scalar",
         "single-quoted",
         "plain-continued",

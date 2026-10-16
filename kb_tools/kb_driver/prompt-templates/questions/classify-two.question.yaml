@@ -1,0 +1,25 @@
+# The classify ask's question over two offered letters: supported by and
+# mention, where the candidate offering its support in turn is not on offer.
+# Derived from kb_tools' classify.tmpl.md and its classify-options-two
+# fragment: the criteria are the two bullets the question keeps, the closing
+# question states the decision from the source's side, and the offered
+# letters reach it only as composer constants.
+type: choice
+instructions: |-
+  Does the source claim need the candidate claim — does its statement or its
+  proof use the candidate claim as a premise or a step? If it does, choose
+  supported by; if it does not — including when the passages show the
+  candidate claim building on the source claim — choose mention. Decide from
+  what the two claims state and what the passages say one does with the
+  other. That a passage points at the candidate claim without saying why, or
+  does not point at it at all, is not evidence for any of the answers.
+criteria:
+  "@!letter-supported-by!@": |-
+    supported by: the source claim needs the candidate claim to be true. The
+    source claim's statement or its proof uses the candidate claim as a
+    premise or a step.
+  "@!letter-mention!@": |-
+    mention: the source claim does not need the candidate claim. The source
+    claim borrows a method from the candidate claim, refers the reader to it,
+    compares itself with it, recaps it — or the passages show the candidate
+    claim building on the source claim.

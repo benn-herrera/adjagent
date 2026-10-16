@@ -382,17 +382,20 @@ def test_the_node_pass_is_covered_when_its_record_lists_no_leaf_unread_or_planne
     assert all(unit.asserts_own_work for unit in report.units)
 
 
-def test_the_stages_that_mint_nodes_are_one_run_ending_at_equations_minted() -> None:
-    """I5: the node set is fixed before any edge is drawn over it."""
+def test_the_node_set_is_fixed_at_the_cull_s_boundary_before_attribution_draws_an_edge() -> None:
+    """I5: the node set is fixed before any edge is drawn over it.
+
+    The minting stages are one run ending at ``equations-minted``; the cull is the one stage that removes
+    nodes, and it stands immediately before attribution.
+    """
+    ids = kb_pipeline.STAGE_IDS
     minting = [index for index, stage in enumerate(kb_pipeline.STAGES) if stage.mints_nodes]
+    culling = [stage.id for stage in kb_pipeline.STAGES if stage.culls_nodes]
 
     assert minting == list(range(minting[0], minting[-1] + 1))
-    assert kb_pipeline.STAGES[minting[-1]].id == "equations-minted"
-    assert [kb_pipeline.STAGES[index].id for index in minting] == [
-        "claims-declared",
-        "claims-discovered",
-        "equations-minted",
-    ]
+    assert [ids[index] for index in minting] == ["claims-declared", "claims-discovered", "equations-minted"]
+    assert culling == ["claims-culled"]
+    assert minting[-1] < ids.index("claims-culled") == ids.index("depends-attributed") - 1
 
 
 def test_the_document_walk_is_one_walk(tmp_path: Path) -> None:
@@ -496,12 +499,208 @@ def test_the_unmarked_stage_is_covered_when_its_plan_stands_and_every_pair_carri
     assert all(unit.asserts_own_work for unit in report.units)
 
 
-def test_the_unmarked_stage_sits_after_the_node_set_is_fixed_and_before_classification() -> None:
+# ---------------------------------------------------------------------------
+# The cull record, and the origin rule over it and the unmarked record
+# ---------------------------------------------------------------------------
+
+
+#: A cull record as kbase writes one: every list sorted, each value from its vocabulary.
+_KBASE_CULL = """\
+about: "kbase's text"
+entries:
+  - a: clm-aaaaaa
+    b: clm-cccccc
+    pass: 1
+    verdict: b-adds-nothing
+    outcome: re-asked
+  - a: clm-aaaaaa
+    b: clm-bbbbbb
+    pass: 2
+    verdict: a-adds-nothing
+    outcome: defaulted
+culls:
+  - id: clm-cccccc
+    into: clm-aaaaaa
+links:
+  - a: clm-aaaaaa
+    b: clm-bbbbbb
+    harvest: culled
+  - a: clm-bbbbbb
+    b: clm-dddddd
+    harvest: adjacent
+"""
+
+
+def test_the_cull_record_reads_kbase_s_text_and_writes_it_back_sorted_and_deterministic(repo: Path) -> None:
+    (repo / kb_pipeline.CULL_RELPATH).write_text(_KBASE_CULL, encoding="utf-8")
+
+    back = kb_pipeline.read_cull(repo)
+
+    assert back == kb_pipeline.CullRecord(
+        entries=(
+            kb_pipeline.CullEntry(
+                a="clm-aaaaaa",
+                b="clm-cccccc",
+                pass_number=1,
+                verdict=kb_pipeline.CullVerdict.B_ADDS_NOTHING,
+                outcome=kb_pipeline.ClassifyOutcome.REASKED,
+            ),
+            kb_pipeline.CullEntry(
+                a="clm-aaaaaa",
+                b="clm-bbbbbb",
+                pass_number=2,
+                verdict=kb_pipeline.CullVerdict.A_ADDS_NOTHING,
+                outcome=kb_pipeline.ClassifyOutcome.DEFAULTED,
+            ),
+        ),
+        culls=(kb_pipeline.Cull(culled="clm-cccccc", into="clm-aaaaaa"),),
+        links=(
+            kb_pipeline.CullLink(a="clm-aaaaaa", b="clm-bbbbbb", harvest=kb_pipeline.LinkHarvest.CULLED),
+            kb_pipeline.CullLink(a="clm-bbbbbb", b="clm-dddddd", harvest=kb_pipeline.LinkHarvest.ADJACENT),
+        ),
+    )
+    shuffled = kb_pipeline.CullRecord(
+        entries=tuple(reversed(back.entries)), culls=back.culls, links=tuple(reversed(back.links))
+    )
+    kb_pipeline.write_cull(repo, shuffled)
+    _, rest = (repo / kb_pipeline.CULL_RELPATH).read_text(encoding="utf-8").split("\n", 1)
+    assert rest == _KBASE_CULL.split("\n", 1)[1]
+    assert kb_load.read_record(repo, kb_load.CULL_STEM)["about"] == kb_pipeline.CULL_ABOUT
+    assert kb_pipeline.read_cull(repo) == back
+
+
+def test_the_empty_cull_record_writes_every_list_empty(repo: Path) -> None:
+    kb_pipeline.write_cull(repo, kb_pipeline.CullRecord())
+
+    assert kb_load.read_record(repo, kb_load.CULL_STEM) == {
+        "about": kb_pipeline.CULL_ABOUT,
+        "entries": [],
+        "culls": [],
+        "links": [],
+    }
+    assert kb_pipeline.read_cull(repo) == kb_pipeline.CullRecord()
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("pass: 1", "pass: 3"),
+        ("pass: 1", "pass: true"),
+        ("verdict: b-adds-nothing", "verdict: distinctive"),
+        ("outcome: re-asked", "outcome: drafted"),
+        ("harvest: culled", "harvest: reference"),
+        ("culls:\n  - id: clm-cccccc", "culls:\n  - claim: clm-cccccc"),
+    ],
+    ids=["pass-out-of-range", "pass-a-bool", "verdict", "outcome-drafted", "harvest", "cull-without-id"],
+)
+def test_a_cull_record_value_outside_its_vocabulary_is_refused(repo: Path, old: str, new: str) -> None:
+    assert kb_pipeline.read_cull(repo) is None
+    (repo / kb_pipeline.CULL_RELPATH).write_text(_KBASE_CULL.replace(old, new, 1), encoding="utf-8")
+
+    with pytest.raises(kb_pipeline.CullRecordError, match=re.escape(kb_pipeline.CULL_RELPATH)):
+        kb_pipeline.read_cull(repo)
+
+
+def _unmarked_answer(letter: str) -> kb_pipeline.UnmarkedRecord:
+    """An unmarked record answering s → t with ``letter``."""
+    entry = kb_pipeline.CandidateEntry(offered=("A", "B"), letter=letter, outcome=kb_pipeline.ClassifyOutcome.ANSWERED)
+    return kb_pipeline.UnmarkedRecord().with_entries({("s", "t"): entry})
+
+
+_NO_LINK_CULL = kb_pipeline.CullRecord(
+    entries=(
+        kb_pipeline.CullEntry(
+            a="s",
+            b="u",
+            pass_number=1,
+            verdict=kb_pipeline.CullVerdict.A_ADDS_NOTHING,
+            outcome=kb_pipeline.ClassifyOutcome.ANSWERED,
+        ),
+    ),
+    culls=(kb_pipeline.Cull(culled="s", into="u"),),
+)
+
+
+@pytest.mark.parametrize(
+    ("unmarked", "cull", "found"),
+    [
+        (None, None, set()),
+        (kb_pipeline.UnmarkedRecord(), kb_pipeline.CullRecord(), set()),
+        (_unmarked_answer(kb_pipeline.UNMARKED_POINTS_LETTER), None, {("s", "t")}),
+        (_unmarked_answer("B"), None, set()),
+        (kb_pipeline.UnmarkedRecord().with_entries({("s", "t"): _DEFAULTED}), None, set()),
+        (
+            None,
+            kb_pipeline.CullRecord(
+                links=(kb_pipeline.CullLink(a="s", b="t", harvest=kb_pipeline.LinkHarvest.UNMARKED),)
+            ),
+            {("s", "t"), ("t", "s")},
+        ),
+        (_unmarked_answer(kb_pipeline.UNMARKED_POINTS_LETTER), _NO_LINK_CULL, {("s", "t")}),
+    ],
+    ids=[
+        "no-records",
+        "empty-records",
+        "unmarked-yes-one-way",
+        "unmarked-no",
+        "unmarked-defaulted",
+        "cull-link-both-ways",
+        "cull-entries-and-culls-find-nothing",
+    ],
+)
+def test_an_edge_is_found_with_no_mark_by_an_unmarked_yes_its_way_or_a_cull_link_either_way(
+    unmarked: kb_pipeline.UnmarkedRecord | None, cull: kb_pipeline.CullRecord | None, found: set[tuple[str, str]]
+) -> None:
+    is_inferred = kb_pipeline.inferred_links(unmarked, cull)
+
+    ends = ("s", "t", "u")
+    assert {(source, target) for source in ends for target in ends if is_inferred(source, target)} == found
+
+
+def test_the_unmarked_stage_sits_after_minting_and_before_the_cull() -> None:
     ids = kb_pipeline.STAGE_IDS
     stage = kb_pipeline.stage_by_id("references-found")
 
-    assert ids.index("equations-minted") + 1 == ids.index("references-found") == ids.index("depends-attributed") - 1
-    assert stage.work_is_inference and not stage.mints_nodes
+    assert ids.index("equations-minted") + 1 == ids.index("references-found") == ids.index("claims-culled") - 1
+    assert stage.work_is_inference and not stage.mints_nodes and not stage.culls_nodes
     assert stage.claimgraph_invocation == kb_pipeline.ClaimgraphInvocation(
         which_pass=2, scope=kb_pipeline.CLAIMGRAPH_SCOPE_UNMARKED
     )
+
+
+def test_the_cull_sits_between_the_unmarked_stage_and_attribution() -> None:
+    ids = kb_pipeline.STAGE_IDS
+    stage = kb_pipeline.stage_by_id("claims-culled")
+
+    assert ids.index("references-found") + 1 == ids.index("claims-culled") == ids.index("depends-attributed") - 1
+    assert stage.work_is_inference and not stage.mints_nodes
+    assert stage.claimgraph_invocation == kb_pipeline.ClaimgraphInvocation(
+        which_pass=2, scope=kb_pipeline.CLAIMGRAPH_SCOPE_CULL
+    )
+
+
+_REGISTER = "# Register\n\n## Kept\n<!-- id: clm-aaaaaa -->\n"
+
+
+@pytest.mark.parametrize(
+    ("record", "satisfied"),
+    [
+        (None, False),
+        (kb_pipeline.CullRecord(), True),
+        (kb_pipeline.CullRecord(culls=(kb_pipeline.Cull(culled="clm-bbbbbb", into="clm-aaaaaa"),)), True),
+        (kb_pipeline.CullRecord(culls=(kb_pipeline.Cull(culled="clm-aaaaaa", into="clm-bbbbbb"),)), False),
+    ],
+    ids=["no-record", "declared-empty", "cull-removed", "cull-still-authored"],
+)
+def test_the_cull_is_covered_when_its_record_stands_and_no_cull_is_still_authored(
+    repo: Path, record: kb_pipeline.CullRecord | None, satisfied: bool
+) -> None:
+    kb = kb_util.kb_root(repo)
+    kb.mkdir(parents=True, exist_ok=True)
+    (kb / "claim-quality.md").write_text(_REGISTER, encoding="utf-8")
+    if record is not None:
+        kb_pipeline.write_cull(repo, record)
+
+    report = kb_pipeline._check_claims_culled(kb_pipeline.CheckContext(repo))
+
+    assert [unit.satisfied for unit in report.units] == [satisfied]
