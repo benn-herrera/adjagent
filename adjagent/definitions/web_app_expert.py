@@ -2,16 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="web-app-expert",
+        kind=Kind.AGENT,
         description=(
             "Web app development: JS/TS, HTML/CSS, WebSockets, Web Workers, WASM integration, cross-browser "
-            "compatibility, mobile web, storage strategies, input events, and browser API expertise. Prefer over "
-            "generalist-coder for any web or browser target. Prefer typescript-coder for TypeScript or JavaScript "
-            "whose target is not a browser."
+            "compatibility, mobile web and browser APIs. Prefer over generalist-coder for any web or browser "
+            "target; prefer typescript-coder for TypeScript or JavaScript whose target is not a browser."
         ),
         tools=ALL,
         tier="high",

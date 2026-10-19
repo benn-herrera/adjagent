@@ -1,15 +1,15 @@
 """security-reviewer: the adversarial security-review seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="security-reviewer",
+        kind=Kind.AGENT,
         description=(
-            "Adversarial security review of code and designs. Identifies hazards, attack vectors, and the "
-            "specific conditions that must hold to prevent exploitation. Does not prescribe design solutions — "
-            "that is the architect's job. Review only, never modifies code files."
+            "Adversarial security review of code and designs. Does not prescribe design solutions — that is the "
+            "architect's job. Review only, never modifies code files."
         ),
         tools=(Tool.BASH, Tool.READ, Tool.GREP, Tool.GLOB, Tool.WRITE, Tool.EDIT, Tool.WEBSEARCH, Tool.WEBFETCH),
         tier="high",

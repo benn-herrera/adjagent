@@ -2,15 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="android-app-expert",
+        kind=Kind.AGENT,
         description=(
-            "Android app development: Kotlin/Compose, gestures, networking, coroutines, sensors, audio, camera, "
-            "NDK/JNI integration, Gradle configuration, assets, and device-specific debugging. Prefer over "
-            "generalist-coder for any Android target."
+            "Android app development: Kotlin/Compose, including NDK/JNI integration and Gradle configuration. "
+            "Prefer over generalist-coder for any Android target."
         ),
         tools=ALL,
         tier="high",

@@ -2,19 +2,17 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="applied-mathematician",
+        kind=Kind.AGENT,
         description=(
-            "Rigorous applied-mathematician collaborator for derivation, model construction, dimensional "
-            "analysis, and quantitative prediction. Takes given axioms at face value and derives consequences "
-            "honestly, while maintaining derivation-chain integrity, operator/symbol coherence, regime "
-            "identification, symmetry-cancellation checks, and explicit claim classification (identity vs "
-            "manifestation vs consistency check vs derived prediction). Use when working inside a formal system — "
-            "established, novel, or mid-construction — and the task requires careful step-by-step reasoning "
-            "rather than retrieval of textbook results."
+            "Applied-mathematician collaborator for derivation, model construction, dimensional analysis and "
+            "quantitative prediction. Use when working inside a formal system — established, novel, or "
+            "mid-construction — and the task requires careful step-by-step reasoning rather than retrieval of "
+            "textbook results."
         ),
         tools=ALL,
         tier="high",

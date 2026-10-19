@@ -2,17 +2,13 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="cpp-coder",
-        description=(
-            "C++ implementation specialist. Writes C++ where lifetime is expressed in types, not in comments — "
-            "RAII, value semantics, owning handles over raw pointers. Covers ownership, moves, templates and "
-            "concepts, the standard library, concurrency, and the build. Parallel-execution safe. Prefer over "
-            "generalist-coder for userspace C++ work of any kind."
-        ),
+        kind=Kind.AGENT,
+        description=("C++ implementation specialist. Prefer over generalist-coder for userspace C++ work of any kind."),
         tools=ALL,
         tier="high",
         color="#00599C",

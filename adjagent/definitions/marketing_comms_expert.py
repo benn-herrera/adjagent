@@ -1,15 +1,15 @@
 """marketing-comms-expert: the software marketing and communications seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="marketing-comms-expert",
+        kind=Kind.AGENT,
         description=(
-            "Marketing strategy, brand positioning, copywriting, taglines, product naming, press releases, email "
-            "campaigns, social media, competitive positioning, critique of marketing materials—particularly "
-            "software industry (B2B and consumer)."
+            "Marketing strategy, brand positioning, copywriting, taglines, product naming, press releases, "
+            "campaigns and social media for software (B2B and consumer); also critiques marketing materials."
         ),
         tools=ALL,
         tier="medium",

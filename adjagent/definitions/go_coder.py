@@ -2,15 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="go-coder",
+        kind=Kind.AGENT,
         description=(
-            "Go implementation specialist. Writes idiomatic, minimal Go — explicit errors, stdlib-first, no magic. "
-            "Covers concurrency, modules, CGo, build system, testing, and performance. Parallel-execution safe. "
-            "Prefer over generalist-coder for any Go file modification or Go project task."
+            "Go implementation specialist. Prefer over generalist-coder for any Go file modification or Go "
+            "project task."
         ),
         tools=ALL,
         tier="high",

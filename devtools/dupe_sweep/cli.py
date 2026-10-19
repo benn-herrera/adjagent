@@ -14,7 +14,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="dupe_sweep",
         description="Enumerate one-idea-two-places candidates. Emits candidates, never verdicts.",
     )
-    parser.add_argument("pass_name", choices=("python",), metavar="PASS", help="python")
+    parser.add_argument(
+        "pass_name",
+        choices=("python",),
+        metavar="PASS",
+        help="the python pass: one idea in two places across the owned python trees",
+    )
     parser.add_argument("--rev", help="sweep the tree at this git revision instead of the working tree")
     parser.add_argument(
         "--min-words",

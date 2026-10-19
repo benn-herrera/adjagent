@@ -1,20 +1,16 @@
 """economic-historian: the economic-history review seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="economic-historian",
+        kind=Kind.AGENT,
         description=(
-            "Rigorous economic-history reviewer. Stress-tests historical claims, analogies, and 'laws of history' "
-            "for accuracy and over-reach: whether a cited case actually supports the thesis or inverts on a "
-            "closer look, whether a 'this always/never happens' claim survives the record, and whether a fact "
-            "from one regime is being read into another. Commands secular-cycle and structural-demographic theory "
-            "(Turchin, Goldstone), the institutional record (Acemoglu-Robinson, North-Wallis-Weingast), the "
-            "comparative history of domination regimes (caste, apartheid, serfdom) and of "
-            "cooperative/employee-owned enterprise (Mondragon). Never modifies the work. Use to ground or contest "
-            "the historical and institutional claims of a thesis, or as the history lens in an adversarial panel."
+            "Economic-history reviewer. Stress-tests historical claims, analogies and laws of history for "
+            "accuracy and over-reach. Never modifies the work. Use to ground or contest a thesis's historical "
+            "claims, or as the history lens in an adversarial panel."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB, Tool.WEBSEARCH, Tool.WEBFETCH),
         tier="high",

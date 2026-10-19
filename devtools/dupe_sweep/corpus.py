@@ -1,8 +1,8 @@
 """dupe_sweep — the corpus, read from git: tracked plus untracked non-ignored files, or a revision's tree.
 
 Never a directory walk: the tree holds gitignored byte-copies of the swept sources (``rendered/``,
-the installed surface under ``.claude/``, install targets under ``kb-testing/``), and a walk would
-report every copy as a duplicate.
+the installed surfaces under ``.claude/`` and ``.opencode/``), and a walk would report every copy as
+a duplicate.
 """
 
 import logging

@@ -2,16 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="python-coder",
+        kind=Kind.AGENT,
         description=(
-            "Python implementation specialist. Writes idiomatic, readable Python — explicit over implicit, "
-            "stdlib-first, no over-engineering. Covers type hints, async, testing, packaging, virtual "
-            "environments, and common ecosystem tooling. Parallel-execution safe. Prefer over generalist-coder "
-            "for any Python file modification or Python project task."
+            "Python implementation specialist. Prefer over generalist-coder for any Python file modification or "
+            "Python project task."
         ),
         tools=ALL,
         tier="high",

@@ -1,14 +1,15 @@
 """prose-architect: the prose rhythm and structure audit seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="prose-architect",
+        kind=Kind.AGENT,
         description=(
-            "A high-resolution auditor for prose rhythm and structural integrity. Specialized in identifying "
-            "'hitches' and 'missing beats' while protecting the author's authentic emotional 'leakage' and "
+            "Prose critic for rhythm and structural integrity: hitches, missing beats, unintentional repetition. "
+            "Never modifies files — critique and identification only, protecting the author's authentic voice and "
             "situational mood."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB),

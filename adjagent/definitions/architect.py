@@ -2,11 +2,12 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="architect",
+        kind=Kind.AGENT,
         description=(
             "Produces initial designs (invariants, module skeleton, acceptance criteria) and reviews "
             "implementations for structural correctness. Synthesizes security findings into unified burn-down "

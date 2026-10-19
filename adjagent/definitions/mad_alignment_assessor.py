@@ -1,14 +1,15 @@
 """mad-alignment-assessor: the debate's structural classifier of agreement and disagreement."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="mad-alignment-assessor",
+        kind=Kind.AGENT,
         description=(
-            "Alignment assessor for multi-model debate review process. Classifies structural agreement and "
-            "disagreement between reviewer conclusions only. Never evaluates argument quality or merit."
+            "Alignment assessor in a multi-model debate. Classifies structural agreement and disagreement between "
+            "reviewer conclusions only; never evaluates argument quality or merit."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB),
         tier="high",
@@ -56,7 +57,7 @@ arrives is yours, on two rules:
   settle it.
 
 **Seats, not fixed names.** A run is staffed by a roster the Referee names at invocation: some
-subset of `fable`, `opus`, `sonnet`, `haiku`, `guest`, at least two, at most one of each. You do not
+subset of `a`, `b`, `c`, `d`, `guest`, at least two, at most one of each. You do not
 know which seats or how many until you are dispatched, and you must never assume a particular seat
 is present or that exactly two are. Key every reference — finding IDs, position attributions,
 agreement counts — to the seat name the Referee labeled the input with, exactly as given. Work from
@@ -75,7 +76,7 @@ Findings where **every** active seat has stated a substantively equivalent posit
 
 For each:
 - Neutral one-sentence description of the agreed point
-- The finding ID from each seat, keyed by seat name (e.g. `opus` Finding 3 / `sonnet` Finding 7 /
+- The finding ID from each seat, keyed by seat name (e.g. `b` Finding 3 / `c` Finding 7 /
   `guest` Finding 2)
 - Tag: **[Initial Agreement]** if present in all initial assessments; **[Eventual Agreement]** if
   reached through debate rounds

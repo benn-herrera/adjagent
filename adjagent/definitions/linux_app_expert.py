@@ -2,15 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="linux-app-expert",
+        kind=Kind.AGENT,
         description=(
-            "Linux desktop development: GTK/Qt, D-Bus, systemd, X11/Wayland, XDG standards, native APIs (ALSA, "
-            "V4L2, udev, inotify), packaging (deb/rpm/AppImage/Flatpak/Snap). Prefer over generalist-coder for any "
-            "Linux desktop target."
+            "Linux desktop development: GTK/Qt, D-Bus, systemd, X11/Wayland, native APIs (V4L2, udev, inotify) "
+            "and packaging (deb/rpm/AppImage/Flatpak/Snap). Prefer over generalist-coder for any Linux desktop "
+            "target."
         ),
         tools=ALL,
         tier="high",

@@ -2,15 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="ios-app-expert",
+        kind=Kind.AGENT,
         description=(
-            "iOS app development: SwiftUI/UIKit, gestures, URLSession, state persistence, Swift concurrency, "
-            "sensors, audio, camera, C library integration via SPM, Xcode CLI, and platform gotchas. Prefer over "
-            "generalist-coder for any iOS target."
+            "iOS app development: SwiftUI/UIKit and Swift concurrency, including C library integration via SPM "
+            "and the Xcode CLI. Prefer over generalist-coder for any iOS target."
         ),
         tools=ALL,
         tier="high",

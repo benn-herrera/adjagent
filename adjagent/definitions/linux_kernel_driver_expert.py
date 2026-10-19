@@ -2,15 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="linux-kernel-driver-expert",
+        kind=Kind.AGENT,
         description=(
-            "Linux kernel and driver development in any language: the driver model, device binding, interrupts, "
-            "DMA, kernel-context locking, power management, kbuild and out-of-tree modules. Kernel-side only — it "
-            "designs the userspace ABI a driver exposes but does not write the userspace that consumes it."
+            "Linux kernel and driver development in any language: driver model, device binding, interrupts, DMA, "
+            "kernel-context locking, power management and kbuild. Kernel-side only — designs the userspace ABI a "
+            "driver exposes but does not write the userspace that consumes it."
         ),
         tools=ALL,
         tier="highest",

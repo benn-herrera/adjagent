@@ -29,14 +29,20 @@ from adjagent.vocabulary import HarnessText, key
 def _add_tuning_flags(verb: argparse.ArgumentParser) -> None:
     verb.add_argument("--harness", default=DEFAULT_HARNESS, metavar="NAME", help="the harness to render for")
     verb.add_argument("--family", default=DEFAULT_FAMILY, metavar="NAME", help="the model family to tune for")
-    verb.add_argument(TIER_MAP_FLAG, dest="tier_spec", metavar="SPEC", help="tier=member for every tier, or all=")
+    verb.add_argument(
+        TIER_MAP_FLAG,
+        dest="tier_spec",
+        metavar="SPEC",
+        help="each tier=member; all=<model>+exceptions; bare=all",
+    )
     verb.add_argument(ALIAS_MAP_FLAG, dest="alias_spec", metavar="SPEC", help="tier=alias for every tier, or all=")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """One verb, required: `render --out DIR` and `install ROOT [--verbose]`, each with the tuning
-    flags; `install-agents-file HARNESS DIR`; `render-agents-file HARNESS OUT`; `harnesses`; and
-    `harness NAME KEY`. allow_abbrev=False on every parser."""
+    """One verb, required: `render --out DIR` and `install ROOT [--verbose] [--with-kb]
+    [--kbase-dist PATH] [--project-root DIR]`, each with the tuning flags; `install-agents-file
+    HARNESS DIR`; `render-agents-file HARNESS OUT`; `harnesses`; and `harness NAME KEY`.
+    allow_abbrev=False on every parser."""
     parser = argparse.ArgumentParser(prog="python3 -m adjagent", allow_abbrev=False)
     verbs = parser.add_subparsers(dest="verb", required=True)
     render = verbs.add_parser("render", help="render every definition into DIR", allow_abbrev=False)
@@ -45,6 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
     installing = verbs.add_parser("install", help="render into ROOT and copy the packages", allow_abbrev=False)
     installing.add_argument("root", type=Path, metavar="ROOT", help="the consumer's harness directory")
     installing.add_argument("--verbose", "-v", action="store_true", help="report every file written")
+    installing.add_argument(
+        "--with-kb", action="store_true", help="install the kb definitions and the kb-tools package"
+    )
+    installing.add_argument("--kbase-dist", type=Path, metavar="PATH", help="the signed kbase executable to install")
+    installing.add_argument(
+        "--project-root",
+        type=Path,
+        metavar="DIR",
+        default=None,
+        help="the project root the MCP entry and the runner include line are written against, "
+        "defaulting to ROOT itself",
+    )
     _add_tuning_flags(installing)
     agents_file = verbs.add_parser("install-agents-file", help="install the agents file block", allow_abbrev=False)
     agents_file.add_argument("harness", metavar="HARNESS")
@@ -72,7 +90,14 @@ def _run(args: argparse.Namespace) -> None:
         for path in write_renders(args.out, renders):
             print(f"wrote {path}")
     elif args.verb == "install":
-        install(args.root, _tuned(args), verbose=args.verbose)
+        install(
+            args.root,
+            _tuned(args),
+            verbose=args.verbose,
+            with_kb=args.with_kb,
+            kbase_dist=args.kbase_dist,
+            project_root=args.project_root,
+        )
     elif args.verb == "install-agents-file":
         install_agents_file(args.directory, harness_named(args.harness), uncommitted=uncommitted_sources())
     elif args.verb == "render-agents-file":

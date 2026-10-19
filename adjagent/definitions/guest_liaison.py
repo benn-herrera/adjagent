@@ -2,17 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="guest-liaison",
+        kind=Kind.AGENT,
         description=(
-            "Liaison agent for relaying a conversation between the user and an external model hosted at a "
-            "third-party API endpoint. Keeps the API key out of the agent's context, persists session history "
-            "under `guest-session/<topic>/`, and transparently services file-read and tool-call requests from the "
-            "external model. Use whenever the user wants to consult a guest model directly, outside of the MAD "
-            "process."
+            "Liaison relaying a conversation between the user and an external model at a third-party API "
+            "endpoint, outside the MAD process. Keeps the API key out of the model's context. Use whenever the "
+            "user wants to consult a guest model directly. It persists the session under `guest-session/<topic>/`."
         ),
         tools=ALL,
         tier="medium",
@@ -52,7 +51,7 @@ or reaches the guest. Material the user wants carried over arrives as this turn'
 **Decide new-session-or-continuation with `validate`, never by inspecting the file yourself:**
 
 ```bash
-{clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py validate guest-session/<topic>/messages.json
+{clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py validate guest-session/<topic>/messages.json
 ```
 
 Exit 0 — a well-formed session exists: this invocation is a **continuation**; append only. Non-zero
@@ -112,7 +111,7 @@ For a **new session only**, additionally collect:
 
 ```bash
 TMPDIR=guest-session/<topic>/tmp/ \
-  {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py init \
+  {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py init \
     --system-prompt="${{SYS_PROMPT_FILE}}" \
     --instructions="${{INIT_MSG_FILE}}" \
     guest-session/<topic>/messages.json
@@ -125,7 +124,7 @@ For a **continuation invocation**, skip init; append the new user message via
 ```bash
 API_BASE_URL=<url> API_KEY_FILE=<path-to-api-key-file> MODEL=<model> \
 TMPDIR=guest-session/<topic>/tmp/ \
-  {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py guest-session/<topic>/messages.json
+  {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/post-openai.py guest-session/<topic>/messages.json
 ```
 
 {clauses.liaison_tool_tail(messages="the messages file")}
@@ -161,7 +160,7 @@ READ: <path, as the model asked for it>
 
   ```bash
   TMPDIR=guest-session/<topic>/tmp/ \
-    {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py append --role=<user|agent> \
+    {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py append --role=<user|agent> \
       guest-session/<topic>/messages.json <content-file>
   ```
 

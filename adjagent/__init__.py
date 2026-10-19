@@ -10,7 +10,7 @@ or a family overlay anchor, filled once by `render.filled_body`.
     errors.py        the one error, InputError, reported as exit 2
     vocabulary.py    tiers, tools, anchors, kinds, harness texts and the placeholder spelling
     loading.py       the one loader of the instance packages below
-    definition.py    the Definition value: kind, output path, frontmatter values, body
+    definition.py    the Definition and SkillFile values: kind, output paths, frontmatter values, text
     clauses.py       shared text: constants, and small functions for text with slots
     harness.py       the harness dataclass
     harnesses/       one module per harness, each defining HARNESS

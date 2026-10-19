@@ -2,15 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="windows-app-expert",
+        kind=Kind.AGENT,
         description=(
-            "Windows desktop development: Win32 API, WinUI3/WPF/WinForms, UWP, .NET, COM/WinRT, DirectX, Windows "
-            "services, installers (MSI/MSIX), registry, P/Invoke, and Windows-specific debugging. Prefer over "
-            "generalist-coder for any Windows desktop target."
+            "Windows desktop development: Win32, WinUI3/WPF/WinForms, .NET and COM/WinRT, including services, "
+            "installers (MSI/MSIX) and P/Invoke. Prefer over generalist-coder for any Windows desktop target."
         ),
         tools=ALL,
         tier="high",

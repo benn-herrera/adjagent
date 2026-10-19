@@ -11,7 +11,7 @@ Every stage sorts its output, so the same tree yields the same report, byte for 
 from .clustering import clusters
 from .constants import constant_candidates, constants
 from .doc_sentences import doc_units
-from .python_corpus import CODE_PREFIX, CODE_UNSWEPT, code_corpus
+from .python_corpus import CODE_PREFIXES, CODE_UNSWEPT, code_corpus
 from .report import render_clusters, render_constants, render_header
 from .shapes import shape_units
 
@@ -36,9 +36,8 @@ def python_pass(*, rev: str | None, settings: dict, out) -> None:
     files = code_corpus(rev=rev)
     shapes = shape_units(files)
     docs = doc_units(files)
-    render_header(
-        "python", rev, f"{CODE_PREFIX}/ less {', '.join(CODE_UNSWEPT)}", f"{len(shapes) + len(docs)} spans", out
-    )
+    compared = ", ".join(f"{prefix}/" for prefix in CODE_PREFIXES)
+    render_header("python", rev, f"{compared} less {', '.join(CODE_UNSWEPT)}", f"{len(shapes) + len(docs)} spans", out)
     render_clusters("one concept, two implementations", clusters(shapes, **settings), out=out)
     render_constants(constant_candidates(constants(files)), out=out)
     render_clusters("one rule, two homes", clusters(docs, **DOC_DEFAULTS), out=out)

@@ -2,16 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="shell-dsl-coder",
+        kind=Kind.AGENT,
         description=(
-            "Shell and build-DSL specialist: bash/zsh/POSIX sh scripts, justfiles, Makefiles, CMake, and shell "
-            "embedded in CI/config. Writes and reviews recipe/script changes with quoting, exit-code, and "
-            "portability discipline. Parallel-execution safe. Prefer over go-coder or generalist-coder for any "
-            "change whose substance is shell or a build DSL."
+            "Shell and build-DSL specialist: bash/zsh/POSIX sh, justfiles, Makefiles, CMake and shell embedded in "
+            "CI. Prefer over go-coder or generalist-coder for any change whose substance is shell or a build DSL."
         ),
         tools=ALL,
         tier="medium",

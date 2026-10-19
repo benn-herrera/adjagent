@@ -3,8 +3,8 @@ renderer did not compute: the two map flags' grammar, the rendered model text,
 the CLI's Render refusals, the frontmatter of each kind against literal lines of
 the pre-1.0 render, every rendered definition extracting frontmatter-free and every
 participant extracting to the contract, placeholder filling and refusal, overlay
-resolution and stock, Definition refusals, the loader's refusal, the line cap, and
-the package's source invariants as walks of its syntax trees.
+resolution and stock, Definition refusals, the loader's refusal, the description's one line and
+balanced code spans, the line cap, and the package's source invariants as walks of its syntax trees.
 
 The package is imported from the repository root, which `just test` puts on
 PYTHONPATH.
@@ -24,7 +24,7 @@ import pytest
 import adjagent
 import adjagent.clauses
 from adjagent.context import TIER_MAP_FLAG, Render, build_render, parse_tier_map
-from adjagent.definition import Definition
+from adjagent.definition import Definition, SkillFile
 from adjagent.definitions import definitions_of
 from adjagent.errors import InputError
 from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
@@ -38,12 +38,14 @@ from adjagent.render import (
     agent_fields,
     definitions,
     filled_body,
+    filled_text,
     keyed_by_path,
     render_all,
     render_definition,
+    render_skill_file,
     write_renders,
 )
-from adjagent.vocabulary import ALL, Anchor, HarnessText, Kind, Tool, hole
+from adjagent.vocabulary import ALL, TIERS, Anchor, HarnessText, Kind, Tool, hole
 from devtools import render_diff
 from tests._structure import (
     ARGUMENT_RULE,
@@ -51,6 +53,7 @@ from tests._structure import (
     BODY_RULE,
     CALL_RULE,
     DEFINITION_TOP_RULE,
+    FILES_RULE,
     FUNCTION_RULE,
     IMPORT_RULE,
     TEXT_TOP_RULE,
@@ -117,10 +120,33 @@ def test_model_alias_wins_over_member() -> None:
     assert ctx.model("lowest") == "inherit"
 
 
-@pytest.mark.parametrize("harness, expected", [(CLAUDE, "inherit"), (OPENCODE, "")])
-def test_model_inherit_renders_the_harness_text(harness: Harness, expected: str) -> None:
-    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+@pytest.mark.parametrize(
+    "harness, text, expected",
+    [(CLAUDE, "inherit", "inherit"), (OPENCODE, "inherit", ""), (OPENCODE, "default", "")],
+)
+def test_model_inherit_and_its_synonyms_render_the_harness_text(harness: Harness, text: str, expected: str) -> None:
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=dict.fromkeys(_ALL_INHERIT, text))
     assert ctx.model("medium") == expected
+
+
+def test_opencode_reads_a_bare_tier_spec_as_the_whole_map() -> None:
+    ctx = build_render(harness="opencode", family="claude", tier_spec="default", alias_spec=None)
+    assert dict(ctx.tier_map) == dict.fromkeys(TIERS, "default")
+    assert ctx.model("medium") == ""
+
+
+@pytest.mark.parametrize(
+    "harness, spec, message",
+    [
+        ("claude", "default", "'default' is not a tier=value pair"),
+        ("opencode", "default,high=omlx/X", "'default' is not a tier=value pair"),
+        ("opencode", "", "'' is not a tier=value pair"),
+    ],
+)
+def test_a_tier_spec_no_harness_reads_bare_is_refused(harness: str, spec: str, message: str) -> None:
+    with pytest.raises(InputError) as caught:
+        build_render(harness=harness, family="claude", tier_spec=spec, alias_spec=None)
+    assert message in str(caught.value)
 
 
 def test_build_render_refuses_a_model_outside_the_harness_shape() -> None:
@@ -152,6 +178,7 @@ def test_load_refuses_a_module_without_the_attribute() -> None:
 def _security_reviewer() -> Definition:
     return Definition(
         name="security-reviewer",
+        kind=Kind.AGENT,
         description=(
             "Adversarial security review of code and designs. Identifies hazards, attack vectors, and the "
             "specific conditions that must hold to prevent exploitation. Does not prescribe design solutions — "
@@ -202,10 +229,8 @@ def test_opencode_frontmatter_matches_the_pre_1_0_render() -> None:
 
 
 _PYTHON_CODER_DESCRIPTION = (
-    'description: "Python implementation specialist. Writes idiomatic, readable Python — explicit over implicit, '
-    "stdlib-first, no over-engineering. Covers type hints, async, testing, packaging, virtual environments, and "
-    'common ecosystem tooling. Parallel-execution safe. Prefer over generalist-coder for any Python file '
-    'modification or Python project task."'
+    'description: "Python implementation specialist. Prefer over generalist-coder for any Python file modification '
+    'or Python project task."'
 )
 
 
@@ -316,6 +341,81 @@ def test_every_participant_extracts_to_the_contract_document(discovered: Discove
         assert _extracted(defn, ctx, module=module) == expected, defn.name
 
 
+def _skill(**changes: object) -> Definition:
+    """A skill named `probe` with one reference, its required description filled, overridable."""
+    fields = {
+        "name": "probe",
+        "kind": Kind.SKILL,
+        "description": "Use when the user asks about the knowledge base.",
+        "body": "Route the request to the reference it asks for.",
+        "files": (SkillFile(path="references/reading.md", body="Read a claim before you cite it."),),
+    }
+    return Definition(**{**fields, **changes})
+
+
+@pytest.mark.parametrize("ctx", _HARNESS_RENDERS, ids=lambda ctx: ctx.harness.name)
+def test_a_skill_renders_a_directory_two_fields_and_a_comment_bannered_reference(ctx: Render) -> None:
+    """Both harnesses read the same two fields, so one render is native under each."""
+    defn = _skill()
+    assert defn.output_path == PurePosixPath("skills/probe/SKILL.md")
+    assert defn.output_paths == (
+        PurePosixPath("skills/probe/SKILL.md"),
+        PurePosixPath("skills/probe/references/reading.md"),
+    )
+    lines = render_definition(defn, ctx, module="adjagent.definitions.probe").split("\n")
+    assert lines[0] == "---"
+    assert lines[1].startswith("# !GENERATED! from adjagent/definitions/probe.py — ")
+    assert " seat=none member=none " in lines[2]
+    assert lines[3:6] == [
+        "name: probe",
+        'description: "Use when the user asks about the knowledge base."',
+        "---",
+    ]
+    assert lines[6:] == ["", "Route the request to the reference it asks for.", ""]
+    reference = render_skill_file(defn, defn.files[0], ctx, module="adjagent.definitions.probe").split("\n")
+    assert reference[0].startswith("<!-- !GENERATED! from adjagent/definitions/probe.py — ")
+    assert reference[0].endswith(" -->")
+    assert reference[1].startswith("<!-- !TUNING! family=")
+    assert reference[1].endswith(" -->")
+    assert reference[2:] == ["", "Read a claim before you cite it.", ""]
+
+
+def test_render_all_emits_every_file_and_include_drops_a_whole_definition() -> None:
+    everything = {path for path, _ in render_all(_CLAUDE_RENDER)}
+    skill = {
+        PurePosixPath("skills/kbase/SKILL.md"),
+        PurePosixPath("skills/kbase/references/reading.md"),
+        PurePosixPath("skills/kbase/references/build.md"),
+    }
+    assert skill <= everything
+    without = {path for path, _ in render_all(_CLAUDE_RENDER, include=lambda defn: defn.name != "kbase")}
+    assert everything - without == skill
+
+
+def test_filled_text_names_the_file_an_unknown_placeholder_stands_in() -> None:
+    ctx = _CLAUDE_RENDER
+    with pytest.raises(
+        InputError,
+        match=re.escape("skills/probe/references/reading.md: unknown placeholder @!hrn-nonesuch!@"),
+    ):
+        filled_text("before @!hrn-nonesuch!@ after", _skill(), ctx, where="skills/probe/references/reading.md")
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["references/Reading.md", "SKILL.md", "references/reading.markdown", "../reading.md", "references/"],
+)
+def test_a_skill_file_path_outside_its_contract_is_refused(path: str) -> None:
+    with pytest.raises(InputError, match=re.escape(f"skill file '{path}': path is not kebab")):
+        SkillFile(path=path, body="text")
+
+
+def test_a_skill_file_body_follows_the_definition_body_rule() -> None:
+    for body in ("", "  \n", "text\n", "\ntext"):
+        with pytest.raises(InputError, match="body must be non-empty text with no leading or trailing newline"):
+            SkillFile(path="references/reading.md", body=body)
+
+
 @pytest.mark.parametrize(
     "part, harness, expected",
     [
@@ -327,6 +427,8 @@ def test_every_participant_extracts_to_the_contract_document(discovered: Discove
         (HarnessText.PROJECT_TEMP_DIR, OPENCODE, ".opencode-temp"),
         (HarnessText.USER_HARNESS_DIR, CLAUDE, "~/.claude"),
         (HarnessText.USER_HARNESS_DIR, OPENCODE, "~/.config/opencode"),
+        (HarnessText.MCP_TOOL_PREFIX, CLAUDE, "mcp__kbase__"),
+        (HarnessText.MCP_TOOL_PREFIX, OPENCODE, "kbase_"),
     ],
 )
 def test_a_harness_text_placeholder_fills_with_the_harness_string(
@@ -358,7 +460,7 @@ _TUNED = Family(
 
 
 def _with_family_text(*, family: Family, tier: str, body: str) -> str:
-    defn = Definition(name="probe", description="a probe", tools=ALL, tier=tier, body=body)
+    defn = Definition(name="probe", kind=Kind.AGENT, description="a probe", tools=ALL, tier=tier, body=body)
     ctx = Render(harness=CLAUDE, family=family, tier_map=dict(family.tiers))
     return render_definition(defn, ctx, module="adjagent.definitions.probe").split("---\n\n", 1)[1]
 
@@ -391,6 +493,9 @@ def test_stock_excludes_the_overridden_tier() -> None:
     assert ctx.stock == ("highest", "high", "low", "lowest")
 
 
+_REFERENCE = SkillFile(path="references/reading.md", body="Read it.")
+
+
 @pytest.mark.parametrize(
     "changes, message",
     [
@@ -405,10 +510,37 @@ def test_stock_excludes_the_overridden_tier() -> None:
             "takes no color",
         ),
         ({"folder": "mad/Design"}, "folder 'mad/Design'"),
+        ({"kind": Kind.SKILL, "description": None}, "a skill requires description"),
+        (
+            {"kind": Kind.SKILL, "description": "a probe", "tools": ALL, "tier": None},
+            "a skill takes no tools",
+        ),
+        (
+            {"kind": Kind.SKILL, "description": "a probe", "tools": None, "tier": None, "color": "#000000"},
+            "a skill takes no color",
+        ),
+        (
+            {"kind": Kind.SKILL, "description": "a probe", "tools": None, "tier": None, "folder": "sub"},
+            "a skill takes no folder",
+        ),
+        (
+            {
+                "kind": Kind.SKILL,
+                "description": "a probe",
+                "tools": None,
+                "tier": None,
+                "files": (_REFERENCE, _REFERENCE),
+            },
+            "files names a path twice",
+        ),
+        (
+            {"kind": Kind.COMMAND, "description": None, "tools": None, "tier": None, "files": (_REFERENCE,)},
+            "a command takes no files",
+        ),
     ],
 )
 def test_definition_refusals(changes: dict, message: str) -> None:
-    fields = {"name": "probe", "description": "a probe", "tools": ALL, "tier": "high", "body": "ok"}
+    fields = {"name": "probe", "kind": Kind.AGENT, "description": "a probe", "tools": ALL, "tier": "high", "body": "ok"}
     with pytest.raises(InputError, match="definition 'probe'") as caught:
         Definition(**{**fields, **changes})
     assert message in str(caught.value)
@@ -421,6 +553,12 @@ def test_output_paths_not_names_are_unique() -> None:
     assert paths == [PurePosixPath("agents/nested/probe.md"), PurePosixPath("commands/probe.md")]
     with pytest.raises(InputError, match=re.escape("'commands/probe.md' is produced by both m.a and m.b")):
         keyed_by_path([("m.a", (command,)), ("m.b", (command,))])
+
+
+def test_an_agents_file_has_no_output_path() -> None:
+    defn = Definition(name="probe", kind=Kind.AGENTS_FILE, body="x")
+    with pytest.raises(InputError, match="definition 'probe': an agents file has no output path"):
+        defn.output_path
 
 
 def test_discovery_refuses_a_module_without_definitions() -> None:
@@ -474,7 +612,7 @@ def test_no_composed_text_is_rescanned() -> None:
                 elif attr in ("sub", "subn"):
                     substitutions.append(f"{path}:{scope} .{attr}(")
     assert offenders == []
-    assert substitutions == ["adjagent/render.py:filled_body .sub("]
+    assert substitutions == ["adjagent/render.py:filled_text .sub("]
 
 
 def test_definitions_and_text_reach_nothing_outside_their_arguments() -> None:
@@ -526,6 +664,11 @@ def _definitions_of_body(body: str, *, head: str = "") -> str:
     return f'{_DEFINITION_HEAD}{head}DEFINITIONS = (Definition(name="p", kind=Kind.COMMAND, body={body}),)\n'
 
 
+def _definitions_of_files(files: str) -> str:
+    """A definition-module source whose one skill has `files` as its files= source text."""
+    return f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", kind=Kind.SKILL, files={files}),)\n'
+
+
 @pytest.mark.parametrize(
     "source, line, rule",
     [
@@ -541,6 +684,12 @@ def _definitions_of_body(body: str, *, head: str = "") -> str:
         (_definitions_of_body('f"{_S.upper()}"', head='_S = "s"\n'), 4, CALL_RULE),
         (_definitions_of_body('f"{clauses.x(**_K)}"'), 3, ARGUMENT_RULE),
         (_definitions_of_body('f"{_S if _S else _S}"', head='_S = "s"\n'), 4, BODY_RULE),
+        (_definitions_of_files('(SkillFile(path="references/r.md", body="b"),)'), 3, ""),
+        (_definitions_of_files('(SkillFile(path="references/r.md", body=f"{clauses.dissent()}"),)'), 3, ""),
+        (_definitions_of_files('(SkillFile(path=clauses.f(), body="b"),)'), 3, FILES_RULE),
+        (_definitions_of_files("(SkillFile(path=_P, body='b'),)"), 3, FILES_RULE),
+        (_definitions_of_files("(clauses.f(),)"), 3, CALL_RULE),
+        (_definitions_of_files('(SkillFile(path="references/r.md", body=f"{len(_S)}"),)'), 3, CALL_RULE),
         (
             f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=clauses.f(), body="b"),)\n',
             3,
@@ -588,14 +737,32 @@ _CLAUDE_RENDER = Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAU
 RENDERED_DEFINITION_LINE_CAP = 500  # a runaway guard, not a target; the 100-column wrap makes lines a fair size
 
 
-def test_no_rendered_agent_definition_exceeds_the_line_cap(discovered: Discovered) -> None:
+def test_no_rendered_definition_exceeds_the_line_cap(discovered: Discovered) -> None:
+    """A definition's own rendered body is capped whatever its kind; a supporting file is carried beside
+    it, not its own output, and is not counted."""
     over = [
         f"{defn.output_path} renders at {count} lines after the banner; the cap is {RENDERED_DEFINITION_LINE_CAP}"
         for _, defn in discovered
-        if defn.output_path.parts[0] == "agents"
-        and (count := len(filled_body(defn, _CLAUDE_RENDER).splitlines())) > RENDERED_DEFINITION_LINE_CAP
+        if (count := len(filled_body(defn, _CLAUDE_RENDER).splitlines())) > RENDERED_DEFINITION_LINE_CAP
     ]
     assert over == []
+
+
+def test_every_description_is_one_line_with_balanced_code_spans(discovered: Discovered) -> None:
+    """A description emits as `description: "…"` on one line, so a newline breaks the frontmatter block
+    and an odd backtick count opens a code span that never closes, swallowing the rest of the line. The
+    double quote is not checked here: `Definition` already refuses one at construction, which
+    `test_definition_refusals` pins."""
+    offenders = []
+    for _, defn in discovered:
+        description = defn.description
+        if description is None:
+            continue
+        if "\n" in description:
+            offenders.append(f"{defn.name}: description holds a newline")
+        if description.count("`") % 2:
+            offenders.append(f"{defn.name}: description has an unclosed code span")
+    assert offenders == []
 
 
 def _credited_text() -> types.SimpleNamespace:
@@ -650,6 +817,19 @@ def _prose_units(body: str) -> set[bytes]:
     return units
 
 
+def _outputs(defn: Definition, sentinel: Definition) -> list[tuple[str, str, str]]:
+    """(label, the definition's own text, its credited twin's) for every file it renders: its output
+    first, labelled by the path it renders to, then each supporting file."""
+    if defn.kind is Kind.AGENTS_FILE:
+        return [(defn.name, defn.body, sentinel.body)]
+    pairs = [(str(defn.output_path), defn.body, sentinel.body)]
+    pairs += [
+        (str(defn.file_output_path(file)), file.body, twin.body)
+        for file, twin in zip(defn.files, sentinel.files, strict=True)
+    ]
+    return pairs
+
+
 def _uncredited_shared_paragraphs(sources: dict[str, str]) -> list[str]:
     """Every prose unit two or more outputs write out rather than take from a constant, a slot constant
     or a text function: the unit survives each one's credited render unchanged."""
@@ -658,12 +838,12 @@ def _uncredited_shared_paragraphs(sources: dict[str, str]) -> list[str]:
         rendered = _source_definitions(source, module=module, credited=False)
         credited = _source_definitions(source, module=module, credited=True)
         for defn, sentinel in zip(rendered, credited, strict=True):
-            literal = _prose_units(filled_body(defn, _CLAUDE_RENDER)) & _prose_units(
-                filled_body(sentinel, _CLAUDE_RENDER)
-            )
-            label = defn.name if defn.kind is Kind.AGENTS_FILE else str(defn.output_path)
-            for unit in literal:
-                written.setdefault(unit, []).append(label)
+            for label, literal_body, credited_body in _outputs(defn, sentinel):
+                literal = _prose_units(filled_text(literal_body, defn, _CLAUDE_RENDER, where=label)) & _prose_units(
+                    filled_text(credited_body, sentinel, _CLAUDE_RENDER, where=label)
+                )
+                for unit in literal:
+                    written.setdefault(unit, []).append(label)
     return [
         f"written out in {', '.join(written[unit])}: {unit.decode()[:120]}"
         for unit in sorted(written)
@@ -680,12 +860,28 @@ def test_a_paragraph_two_outputs_carry_has_one_source() -> None:
 _FIXTURE_HEAD = (
     "from adjagent import clauses\nfrom adjagent.definition import Definition\nfrom adjagent.vocabulary import Kind\n"
 )
+_SKILL_FIXTURE_HEAD = (
+    "from adjagent import clauses\nfrom adjagent.definition import Definition, SkillFile\n"
+    "from adjagent.vocabulary import Kind\n"
+)
 
 
 def _fixture_module(*bodies: tuple[str, str], head: str = "") -> str:
     """A definition-module source of one command per (name, body source text)."""
     entries = "".join(f'Definition(name="{name}", kind=Kind.COMMAND, body={body}),' for name, body in bodies)
     return f"{_FIXTURE_HEAD}{head}DEFINITIONS = ({entries})\n"
+
+
+def _skill_fixture_module(*file_bodies: str) -> str:
+    """A definition-module source of one skill whose supporting files carry `file_bodies`."""
+    names = ("one", "two", "three")
+    entries = "".join(
+        f'SkillFile(path="references/{names[index]}.md", body={body}),' for index, body in enumerate(file_bodies)
+    )
+    return (
+        f'{_SKILL_FIXTURE_HEAD}DEFINITIONS = (Definition(name="s", kind=Kind.SKILL, description="a skill", '
+        f'body="Own router.", files=({entries})),)\n'
+    )
 
 
 def test_a_paragraph_written_out_in_two_outputs_is_found_and_a_constant_is_not() -> None:
@@ -703,6 +899,20 @@ def test_a_paragraph_written_out_in_two_outputs_is_found_and_a_constant_is_not()
     assert _uncredited_shared_paragraphs(sources) == [
         "written out in commands/e.md, commands/f.md: Written out in one module twice.",
         "written out in commands/a.md, commands/b.md: Written out twice.",
+    ]
+
+
+def test_a_paragraph_two_supporting_files_write_out_is_found() -> None:
+    """A skill's references are outputs too: one of them pasting a paragraph another holds is the same
+    defect, named by the path it renders to."""
+    sources = {
+        "fixture.skill": _skill_fixture_module(
+            '"Written out twice."',
+            'f"{clauses.DISSENT}\\n\\nWritten out twice."',
+        )
+    }
+    assert _uncredited_shared_paragraphs(sources) == [
+        "written out in skills/s/references/one.md, skills/s/references/two.md: Written out twice."
     ]
 
 

@@ -32,11 +32,11 @@ default handler copies request headers, `Authorization` included, to the redirec
 **Key containment.** `openai_chat.read_api_key` is the one function that opens a key file,
 reading it straight into memory with `Path.read_text`; the requests take the key as a value, and
 `openai_chat` reads no environment variable. `post-openai.py` reads `API_KEY_FILE` through it, and
-so does any in-process caller outside the package that needs a key from a key file (`kb_tools`'
-claim-graph reader). `msg-util.py` never touches the key file, and `relay-driver.py` passes
-`API_KEY_FILE`'s path through to the transport without reading it. SPEC's API Key Handling
-guarantees rest on that confinement: a key read added anywhere else is a second place the key can
-leak from.
+no other module here opens a key file: a consumer's in-process caller is left to read its own, by
+this function or otherwise (SPEC.md, API Key Handling). `msg-util.py` never touches the key file,
+and `relay-driver.py` passes `API_KEY_FILE`'s path through to the transport without reading it.
+SPEC's API Key Handling guarantees rest on that confinement: a key read added anywhere else is a
+second place the key can leak from.
 
 **SSE demux (`demux_sse`).** Reads a line iterator, ignores blank lines and `:`-prefixed comments,
 and only inspects `data:`-prefixed lines. `[DONE]` ends the stream cleanly; a line whose parsed JSON
@@ -188,7 +188,7 @@ that reads the API key.
 |---|---|
 | `test_post_openai.py` | SSE demux/reassembly and API-key-format validation against `test-fixture-*.txt` fixtures (offline); an end-to-end subprocess class against a stubbed local `http.server` endpoint, proving the stdout contract byte-for-byte in both shapes. Documented gaps: `/models` listing and substring model-resolution retry, and real mid-stream connection drops — `is_model_error_text`, the pure sniffing those paths pivot on, is covered. |
 | `test_openai_chat.py` | What an in-process caller reaches that the command does not: `classify_reply`'s table, `reassemble_content` beside a tool call, and the request's optional fields (`stream_options` only when asked, no `tools`) against a stubbed endpoint; `post_embeddings` returning vectors in input order from an out-of-order reply, and refusing a short one. |
-| `test_msg-util.py` | The three properties an adversarial review found missing (module docstring's own naming): `LC-S1` a failed write must not exit 0, `LC-S2` concurrent appends must not lose turns, `LC-S3` scratch must land on the target's filesystem — plus `LC-M3`, the `validate` verb, and a killed lock holder not blocking the next mutation. |
+| `test_msg_util.py` | The three properties an adversarial review found missing (module docstring's own naming): `LC-S1` a failed write must not exit 0, `LC-S2` concurrent appends must not lose turns, `LC-S3` scratch must land on the target's filesystem — plus `LC-M3`, the `validate` verb, and a killed lock holder not blocking the next mutation. |
 | `test_relay_driver.py` | The reply classifier, path confinement (traversal/absolute/symlink-escape), the protocol-block append contract, the budget state machine, the loop-top round-trip guard, and READ/LIST/GREP servicing against a fixture corpus; an end-to-end subprocess class against a stubbed SSE endpoint proving a full scripted run (answer file, `stats.csv` with real token totals, `messages.json` shape). |
 
 Per-suite case counts are not recorded here — nothing would check them; `just test liaison_tools`
@@ -196,9 +196,9 @@ reports the live numbers.
 
 All four suites are stdlib-only and never touch the network beyond `127.0.0.1` (per each module's
 own docstring). Run via `just test liaison_tools` (or `just test` for the full tooling suite:
-`kb_tools` + `liaison_tools` + `adjagent` + `dupe_sweep`), which sets `PYTHONPATH` to the
-repository root so the shipped packages import as top-level packages — the same import shape a
-consumer gets with `PYTHONPATH=.claude/agents` after install.
+`liaison_tools` + `adjagent` + `dupe_sweep`), which sets `PYTHONPATH` to the repository root so the
+shipped package imports as a top-level package — the same import shape a consumer gets with
+`PYTHONPATH=.claude/adj-tools` after install.
 
 ## Caller Composition
 
@@ -207,7 +207,12 @@ consumer gets with `PYTHONPATH=.claude/agents` after install.
 | `guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body | `guest-session/<topic>/messages.json` + `tmp/` |
 | `mad-guest-liaison.md` | `post-openai.py`, `msg-util.py` — invoked directly from the definition body | `liaison-messages.json` + `tmp/` inside the run directory its referee hands it, which differs between a review run and a design run |
 | `relay-driver.py` | `post-openai.py` (sole transport), `msg-util.py` (sole messages-file mutator) | its own, under `--output-dir` (SPEC.md, `relay-driver.py`) |
-| `kb_tools/inference/liaison_tools.py` | `openai_chat`, imported in-process; the key is a value it reads from the `claude` CLI's environment (`kb_tools/ARCHITECTURE.md`, the `inference/` row) | none: it writes the capture its caller names |
+
+`openai_chat` is the package's in-process surface and has no caller in this repository:
+`post-openai.py` and `tests/` are its only importers. The kb set's toolchain is `kbase`, a Go
+binary a kb install writes, whose `build` spends inference through its own provider configuration
+(root `README.md`, KB toolchain) and which imports nothing from here. The surface exists for a
+consumer's in-process caller (SPEC.md, Importable Request).
 
 Frontmatter stripping is not a tool here: each liaison definition runs the `sed` range itself. No
 layout above is asserted or checked by anything in this package (SPEC.md, Paths).

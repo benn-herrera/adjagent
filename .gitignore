@@ -4,16 +4,27 @@
 .claude/agents/
 .claude/commands/
 .claude/skills/
+.claude/adj-tools/
 .opencode-temp/
 .opencode/*local*
 .opencode/agents/
 .opencode/commands/
 .opencode/skills/
+.opencode/adj-tools/
+
+# this repository's own install output: the shipped packages under adj-tools/, beside
+# the definition surfaces above and not part of any, the kbase MCP registration at the
+# repository root and the opencode settings, both written by an install that
+# includes kb (just install-with-kb, just install-agents-here).
+.mcp.json
+.opencode/opencode.jsonc
 __pycache__/
 .pytest_*/
 .venv/
 mad-design/
 mad-review/
+
+.tool-dist-cache/
 
 # this repo's own render tree (justfile RENDERED): a build product, produced
 # on demand by the same install path a consuming project gets. Never committed.

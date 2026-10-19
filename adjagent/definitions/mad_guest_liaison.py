@@ -2,15 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="mad-guest-liaison",
+        kind=Kind.AGENT,
         description=(
-            "Liaison agent for multi-model debate process. Relays messages to and from an external model via "
-            "post-openai.py, presenting an identical interface to the Referee as a local participant. Handles file "
-            "read requests from the external model."
+            "Liaison for the multi-model debate process: relays messages to and from an external model via "
+            "post-openai.py, presenting an identical interface to the Referee as a local participant."
         ),
         tools=ALL,
         tier="medium",
@@ -58,7 +58,7 @@ stands for it:
 **Decide initialize-or-append with `validate`, never by inspecting the file yourself:**
 
 ```bash
-{clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py validate <messages-file>
+{clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py validate <messages-file>
 ```
 
 Exit 0 — a well-formed session already exists: append only. Non-zero because the file does not exist
@@ -121,7 +121,7 @@ anywhere (**Secrets handling** below).
    file in review mode:
 
   ```bash
-   {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py init \
+   {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py init \
      --system-prompt="${{GUEST_SYS_PROMPT_FILE}}" \
      --instructions="<first-document>" \
      <messages-file>
@@ -132,8 +132,8 @@ anywhere (**Secrets handling** below).
    Referee named one:
 
   ```bash
-   {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py append --role=user <messages-file> "${{REFEREE_INSTRUCTIONS_FILE}}"
-   {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py append --role=user <messages-file> <requirements-file>
+   {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py append --role=user <messages-file> "${{REFEREE_INSTRUCTIONS_FILE}}"
+   {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py append --role=user <messages-file> <requirements-file>
   ```
 
 4. Append last the participation framing, which is yours to author and carries no caller text:
@@ -150,7 +150,7 @@ GUEST_FRAMING_FILE=$(mktemp "${{TMPDIR}}/framing.XXXXXX")
   echo "You cannot see the repository, run tools, or read files yourself. Any statement you make about the code MUST be grounded in file contents your liaison has actually delivered to you in this conversation. You MUST NOT infer, guess, or reconstruct code behavior from file names, line counts, the diff stat, the artifact description, the requirements documents, summaries, or your prior knowledge of similar projects. Before making ANY claim about a file, request its contents from the liaison — name the exact path, and line ranges if useful — and wait for them to be delivered. Issuing several file-read requests before you produce any findings is the expected and correct behavior, not a delay. A finding you cannot tie to file contents the liaison delivered to you is not permitted: request the source instead of asserting. When you do cite, reference the delivered file and the specific lines."
 }} > "${{GUEST_FRAMING_FILE}}"
 
-{clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py append --role=user <messages-file> "${{GUEST_FRAMING_FILE}}"
+{clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py append --role=user <messages-file> "${{GUEST_FRAMING_FILE}}"
 ```
 
   > ### ⚠ TEXT TRANSPORT RULE — BINDING
@@ -160,7 +160,7 @@ GUEST_FRAMING_FILE=$(mktemp "${{TMPDIR}}/framing.XXXXXX")
 {clauses.LIAISON_TOOL_LEAD}
 ```bash
 API_BASE_URL=<url> API_KEY_FILE=<path-to-api-key-file> MODEL=<model> \
-  {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py <messages.json>
+  {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/post-openai.py <messages.json>
 ```
 
 {clauses.liaison_tool_tail(messages="`<messages.json>`")}
@@ -194,7 +194,7 @@ READ: <path, as the model asked for it>
 {clauses.liaison_message_file_lead(init_ref="Onboarding step 2", user_side="new instructions from the Referee")}
 
   ```bash
-  {clauses.PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py append --role=<user|agent> <messages-file> <content-file>
+  {clauses.PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py append --role=<user|agent> <messages-file> <content-file>
   ```
 
   A file the Referee wrote is passed by its own path; a turn you author yourself is written to a

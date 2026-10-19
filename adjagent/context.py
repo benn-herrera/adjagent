@@ -86,10 +86,12 @@ class Render:
             )
 
     def model(self, tier: Tier) -> str:
-        """The tier's rendered model text: alias if the alias map is set, else member; "inherit" ->
-        harness.inherit_text."""
+        """The tier's rendered model text: alias if the alias map is set, else member; "inherit" and the
+        harness's inherit synonyms render harness.inherit_text."""
         text = (self.tier_map if self.alias_map is None else self.alias_map)[tier]
-        return self.harness.inherit_text if text == INHERIT_MODEL else text
+        if text == INHERIT_MODEL or text in self.harness.inherit_synonyms:
+            return self.harness.inherit_text
+        return text
 
     def overlay(self, anchor: Anchor) -> str:
         """The anchor's text: tier_map[seat]'s member override, else family-wide text, else "" (seat None:
@@ -116,16 +118,28 @@ def harness_named(name: str) -> Harness:
     return harnesses[name]
 
 
+def _bare_tier_spec_expanded(harness: Harness, spec: str) -> str:
+    """`spec`, or `all=<spec>` where the harness reads a bare value as the whole map — a non-empty value
+    holding neither `=` nor `,`, so `default` but not `default,high=omlx/X`."""
+    if not harness.bare_tier_spec_is_all or "=" in spec or "," in spec or not spec.strip():
+        return spec
+    return f"{MAP_ALL}={spec}"
+
+
 def build_render(*, harness: str, family: str, tier_spec: str | None, alias_spec: str | None) -> Render:
     """The CLI's Render. Unknown harness/family names are refused, listing the names there are (a
-    path-shaped --family included). Then every tier's model text is checked against
+    path-shaped --family included). A tier spec that names no tier becomes all=<spec> where the harness
+    reads a bare value as the whole map. Then every tier's model text is checked against
     harness.model_pattern, refusing with tier, value, supplier and model_shape."""
     loaded_harness = harness_named(harness)
     families = load("adjagent.families", "FAMILY")
     if family not in families:
         raise InputError(f"--family '{family}' names no family — families are {', '.join(families)}")
     loaded = families[family]
-    tier_map = dict(loaded.tiers) if tier_spec is None else parse_tier_map(tier_spec, flag=TIER_MAP_FLAG)
+    if tier_spec is None:
+        tier_map = dict(loaded.tiers)
+    else:
+        tier_map = parse_tier_map(_bare_tier_spec_expanded(loaded_harness, tier_spec), flag=TIER_MAP_FLAG)
     alias_map = None if alias_spec is None else parse_tier_map(alias_spec, flag=ALIAS_MAP_FLAG)
     render = Render(harness=loaded_harness, family=loaded, tier_map=tier_map, alias_map=alias_map)
     if alias_map is not None:

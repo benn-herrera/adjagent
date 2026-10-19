@@ -2,16 +2,15 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="lua-coder",
+        kind=Kind.AGENT,
         description=(
-            "Lua implementation specialist. Writes Lua for the runtime the project targets — PUC Lua 5.1 through "
-            "5.5 or LuaJIT, standalone or embedded. Covers metatables, coroutines, modules, the C API and LuaJIT "
-            "FFI, testing, and LuaRocks. Parallel-execution safe. Prefer over generalist-coder for any Lua or "
-            "LuaJIT work."
+            "Lua implementation specialist for PUC Lua 5.1 through 5.5 or LuaJIT, standalone or embedded. Prefer "
+            "over generalist-coder for any Lua or LuaJIT work."
         ),
         tools=ALL,
         tier="high",

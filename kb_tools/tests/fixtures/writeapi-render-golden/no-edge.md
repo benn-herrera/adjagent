@@ -1,1 +1,0 @@
-- no-edge: cited for context only; the derivation takes nothing from that domain

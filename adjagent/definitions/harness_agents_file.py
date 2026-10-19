@@ -51,8 +51,9 @@ to right answers for tricky problems.
   reads after the task that produced it: fixtures, answer files, evaluation instruments, brief
   templates, requirements feeding an agent. A single-use dispatch brief is exempt; a durable
   artifact it drafts is not.
-- Coder dispatches: when the brief is fully mechanical — every edit enumerated, no design choice, no
-  debugging — dispatch at `model: @!agf-dispatch-model!@`; otherwise the definition's pin stands.
+
+@!agf-coder-dispatch!@
+
 - **Direction a sub-agent reads carries outcome and operative consequence only**, plus the guiding
   principle where one still steers open choices. Decision history — who ruled, when, which branches
   lost, the deciding narrative — stays in the audit record (changelog, ruling record, owner

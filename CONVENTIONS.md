@@ -6,11 +6,20 @@ not here.
 
 - **A definition module holds nothing but imports, string constants and `DEFINITIONS`.** It reads
   top to bottom as the file it renders. `just test` fails on any other top-level statement or call.
+  A skill's supporting files are `SkillFile(path=…, body=…)` values inside its `files=`, each body
+  held to the same rule as a definition body.
 - **Text two definitions share byte for byte is one constant**, in `adjagent/clauses.py`, or in a
   group module's private constants when only that set shares it. A definition never pastes shared
   text or a paraphrase of it; `just test` fails on a paragraph two outputs write out.
   - **A private constant cannot name `clauses.*`.** Shared text that holds a harness string takes a
     hole, filled at the call site in the body.
+- **Composed text is never rescanned.** Outside `adjagent/definitions/`, no module of the package
+  calls `str.replace`, `format` or `format_map` (`dataclasses.replace` is not one), and the only
+  pattern substitution is the body fill in `render.filled_text`. A definition module's `.format` on
+  one of its own string literals is the permitted call, and that literal holds no composed text.
+  What a constant or a harness string fills in is literal: a placeholder-shaped span it introduces
+  is never filled again. Only `tests/test_adjagent.py::test_no_composed_text_is_rescanned` stated
+  the rule, which is why it is written here.
 - **`just retake-reference` is run only after a content change is accepted.** It overwrites the
   baseline `just render-diff` compares against, so running it earlier erases the change from the
   next comparison.
@@ -21,19 +30,60 @@ not here.
   someone has read the list and said which pairs are one idea.
 - **The gate after a change is `just test-changed [base]`.** It runs only the test surfaces the
   change touches (the mapping lives in the justfile's `TEST_SURFACE_MAP`); bare `just test` is the
-  full run. Cross-surface coupling is either removed or explicitly accepted as a risk — never paid
-  for by running unrelated surfaces. The accepted exception today:
-  `kb_tools/tests/test_kb_driver_head.py` runs the real generator install, so a generator change can
-  break it unnoticed until the `kb_tools` surface next runs.
+  full run. Cross-surface coupling is removed, not paid for by running unrelated surfaces.
+- **A `just` recipe's note goes above the recipe, not in its body.** A body with no shebang is run
+  line by line, and `just` echoes every line it runs, `#` included: a note there prints on every
+  invocation, so a note explaining the recipe reads as its output. Above the recipe the line is
+  never a command line and stays silent under either body.
 - **Never comment in a rendered body.** A definition's body, and every constant it interpolates,
   becomes an agent's system prompt; maintainer commentary there ships into every dispatch and is
   read by every seat. A Python `#` comment above a constant is not in the string and is the place
   for a note the next editor needs.
-- **An untracked file under `.claude/`, `.opencode/` or `rendered/` is render or install output.**
-  Its source is a definition module under `adjagent/definitions/` or a module at the repository
-  root (`liaison_tools/`, `kb_tools/`), and the next install overwrites the copy. Before an edit
-  brief names a path, `git ls-files <path>` settles which it is, and the brief names the source.
-  Running definitions point at the copy, which is how a brief comes to name it.
+- **An untracked file under `.claude/`, `.opencode/` or `rendered/` is render or install output, not
+  source.** SPEC.md states what an install ships and to which destination (Deployed Surfaces), and
+  what a re-install replaces (Write Safety); ARCHITECTURE.md's Repo Layout holds the trees each is
+  sourced from, the gitignored dist cache among them. The next install replaces what it wrote, bar
+  the installed `kbase` executable a run carrying no new one leaves standing — so a change belongs
+  at the source, not in the copy. Before an edit brief names a path, `git ls-files <path>` settles
+  which it is, and the brief names the source. Running definitions point at the copy, which is how a
+  brief comes to name it.
+- **A set a default install excludes is excluded by its definitions' names, held in
+  `NOT_BY_DEFAULT`.** `install.py` holds that pattern over definition names — `excluded()`'s one
+  call site in the install is the `include` filter `render_all` takes, and what it passes is a
+  definition's name — and it names `^(kb-|kbase$)` today: the `kb-` agents and the `kbase` skill.
+  A package destination is not a name and no destination is matched; prune needs no carve-out for
+  one, every destination sitting under `adj-tools/`, beside the surfaces rather than inside one. The
+  match is on the definition's name, not on a rendered file's stem, so a definition that owns several
+  files is one keep-or-drop decision and never a partial tree. A second such set adds its own
+  alternation there, over its output names — a name the pattern misses is rendered and shipped by
+  every install. A run that excludes the match renders none of the matching definitions, and one
+  already installed is stale: removed from the tree and named in that run's report.
+- **The runner include line is a byte-level edit of a file the project does not own.** The
+  consumer's justfile or Makefile is read and written with `newline=""`, so a rewrite keeps each
+  line's own ending instead of translating it to the host's. Only a live line matches: one whose
+  first non-blank character is `#` is a comment about an install, never an include. The rewrite
+  splices the installed snippets-path token in place of the path the line already names and keeps
+  the rest of the line, so an assignment's left-hand side and a trailing comment survive. A file
+  holding more than one matching line is reported for the operator to merge by hand, never
+  half-rewritten.
+- **The install's recognizer spells the banner the renderer writes.** `install.py` builds its
+  generated-file prefixes from `render.GENERATED_MARK`, so what recognises a generated file reads
+  the spelling the renderer writes. A test that plants a literal `!GENERATED!` banner does not hold
+  that binding — a change on either side passes it — so the case plants rendered output.
+- **An install whose ROOT already holds the installed `kbase` executable installs the kb set.** The
+  signal is the file — `adj-tools/kb-tools/kbase`, `kbase.exe` where that is the installed name —
+  never the `kb-tools/` directory it sits in: an empty destination, or one whose executable was
+  never pulled, is a base install. The choice is per ROOT — the harness directory — not per project,
+  so a later plain `just install` into that directory refreshes the snippets and leaves the installed
+  executable where it stands, rather than emptying the directory. A plain install includes kb exactly
+  when its ROOT holds that executable, at `adj-tools/kb-tools/` or in the `agents/kb-tools/` an
+  earlier version installed.
+- **An install parameter and its CLI flag are one change.** `just install` reaches the verb only
+  through the flags `adjagent/cli.py` declares in `build_parser`, so a parameter added to
+  `install()` alone ships a capability no recipe can ask for. The flag lands in the same change. The
+  parameter's own tests do not catch the gap: a test calling `install(...)` proves the parameter
+  works, never that anything can supply it — only a call through `main([...])` proves the flag
+  reaches it, the shape `--with-kb` has.
 - **A dispatch names its seats before the tool call.** The acting message states the agent count
   and model. More than one seat at the family's highest tier waits for a go that names the count: a
   fan-out's cost shows only as the plan's usage moving, and by then it is spent.
@@ -47,10 +97,9 @@ not here.
   same change — not commented out, not left unreferenced behind a "maybe someday", not kept as a
   second implementation nobody calls. Git holds it, and a commit message naming what replaced it is
   a better record than a dead module. The cost of keeping it is paid by everyone after: a reader
-  can't tell live from vestigial, an agent reads it as current, and
-  `tests/test_orphan_name_sweep.py` makes every unreferenced module-level name someone's problem to
-  classify. A plan for rebuilding it later is cheap and belongs in `ROADMAP_PLANS/`; the code itself
-  is not.
+  can't tell live from vestigial, an agent reads it as current, and whoever reads the module next
+  inherits the job of classifying a name nothing refers to. A plan for rebuilding it later is cheap
+  and belongs in `ROADMAP_PLANS/`; the code itself is not.
 - **Partly-planned work that isn't ready to execute lives in `ROADMAP_PLANS/`, not in scratch.**
   `mad-design/` and the repository's other scratch trees are gitignored, so a plan parked there is
   one power-cycle from gone. A plan worth keeping moves to `ROADMAP_PLANS/`, which is tracked. It's
@@ -65,15 +114,19 @@ not here.
 
 - **Where it goes.** One module in `adjagent/definitions/`; its existence is its enrollment, and
   nothing imports it by name. Definitions that share text and ship as a set share one module.
-- **What it is called.** From the output path below `agents/` or `commands/`, the folder as a
-  prefix and each `/` and `-` read as `_`: `python_coder.py` for `agents/python-coder.md`,
-  `mad_design_topics.py` for `agents/mad/design-topics/*.md`. A module of a set is named for the
-  set (`mad_referees.py`). The harness agents file, which has no output path, is
-  `harness_agents_file.py`.
-- **What it sets.** `kind` is agent, document, command or agents file; it decides the output root,
-  the frontmatter and the required fields. `folder` is the path below the root for a nested output
-  and empty otherwise. Output paths, not names, are unique.
+- **What it is called.** From the output path below the surface root, the folder as a prefix and each
+  `/` and `-` read as `_`: `python_coder.py` for `agents/python-coder.md`, `mad_design_topics.py`
+  for `agents/mad/design-topics/*.md`. A module of a set is named for the set (`mad_referees.py`).
+  A skill's output path is `skills/<name>/SKILL.md`, and its fixed file name is no part of the
+  module's name, so the module takes the skill's name alone: `kbase.py` for `skills/kbase/SKILL.md`.
+  The harness agents file, which has no output path, is `harness_agents_file.py`.
+- **What it sets.** `kind` is agent, document, command, skill or agents file; it decides the output
+  root, the frontmatter and the required fields. `folder` is the path below the root for a nested
+  output and empty otherwise; a skill refuses it, its directory being its name. A skill's
+  `description` is required and is all the model sees before it loads the skill; its `files` are the
+  supporting files, each a kebab path ending `.md` below the skill's directory, opened by the comment
+  banner. A definition's output paths are unique — its own, and each supporting file's.
 - **What `render-diff` shows.** The first `just render-diff` after adding a definition shows its
-  whole file as `Only in`.
+  whole file — for a skill, each of its files — as `Only in`.
 - **Where the rest is.** The composition model is in ARCHITECTURE.md; the `adjagent` package and
   module docstrings hold the mechanism.

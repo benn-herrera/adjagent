@@ -2,17 +2,13 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="c-coder",
-        description=(
-            "C implementation specialist. Writes C that states its ownership, checks what the language will not, "
-            "and survives a sanitizer build. Covers memory and lifetime, undefined behaviour, strings and buffers, "
-            "integer conversion, headers and ABI, portability, and the build. Parallel-execution safe. Prefer "
-            "over generalist-coder for userspace C work of any kind."
-        ),
+        kind=Kind.AGENT,
+        description=("C implementation specialist. Prefer over generalist-coder for userspace C work of any kind."),
         tools=ALL,
         tier="high",
         color="#A8B9CC",

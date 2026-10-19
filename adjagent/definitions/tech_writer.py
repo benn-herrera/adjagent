@@ -2,17 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="tech-writer",
+        kind=Kind.AGENT,
         description=(
-            "Authors and revises technical documentation: READMEs, architecture docs, API references, "
-            "contributing guides, getting-started guides, changelogs. Scope: technical writing only — not essays, "
-            "prose, or long-form narrative writing. Also the reviewer seat for technical documentation — audits "
-            "docs against the code for accuracy and audience fit; dispatched to review, reports findings and "
-            "modifies nothing."
+            "Authors and revises technical documentation: READMEs, architecture docs, API references, guides and "
+            "changelogs. Technical writing only — not essays, prose or long-form narrative. Also the reviewer "
+            "seat for documentation — reports findings and modifies nothing."
         ),
         tools=ALL,
         tier="medium",

@@ -2,8 +2,7 @@
 
 Future intent only. Not part of the contract doc set; not handed to coding dispatches.
 
-**See also**, for work scoped to a shipped package: `kb_tools/ROADMAP.md`,
-`liaison_tools/ROADMAP.md`.
+**See also**, for work scoped to a shipped package: `liaison_tools/ROADMAP.md`.
 
 ## List conventions
 
@@ -21,91 +20,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    `tests/test_adjagent.py` (ARCHITECTURE.md, Verification, and Why There Is No Verification Verb);
    behavioral ones do not yet.
 
-2. **Claude Code release reconciliation.** The generator authors agent definitions and slash
-   commands against the harness's definition format and its dispatch behavior, so a release that
-   moves either moves this repository's templates with it. The binary moved `2.1.220` → `2.1.272`,
-   fifty-two releases. The definition surface was surveyed against the new build; what follows is
-   what that established.
-
-    **Verified and requiring no change:**
-
-    - **Tool declaration.** Eight definitions name tools, and between them they name five: `Read`,
-      `Grep`, `Glob`, `WebFetch`, `WebSearch`. None was renamed or removed, and a definition naming
-      a tool that does not resolve fails to launch rather than degrading — so this surface is safe
-      or loudly broken, never quietly wrong. The other definitions omit `tools`, which still means
-      inherit.
-    - **`model`.** Every rendered value is in the accepted vocabulary (`opus` 23, `sonnet` 11,
-      `haiku` 1, `fable` 1). **This is the one behavior that moved under us**: releases
-      `.259`–`.261` fixed frontmatter `model:` being ignored in some contexts, so the tier map
-      begins taking effect where it may have been inert. The floor and stock tunings are worth
-      re-rendering under the new binary for that reason — each is a `just render <slug>` with the
-      tuning flags that name it, diffed against a default slot by `just render-diff`.
-    - **`omitClaudeMd`** (new at `.271`) — **deliberately not set.** Both the operator baseline and
-      the project's own conventions reaching every dispatched seat is the design, and the field's
-      only use is to switch that off.
-
-    **Settled as nonexistent. Do not re-open, and do not add either field to a definition:**
-
-    - `type` / `type: custom` — no such key. It entered this item from a model's invention rather
-      than from documentation.
-    - `stripParentContext` — no such key. Subagents already start without the parent's conversation;
-      there is no field governing it.
-
-    **The method that settled them, which is reusable against any future release**: grep the installed binary for the key name *alongside positive controls*. At `2.1.272`, `stripParentContext` returns 0 while `permissionMode` returns 157, `disallowedTools` 59, `maxTurns` 42 and `omitClaudeMd` 15. The controls are what make a zero mean absent rather than unsearchable, and this reads what is actually running rather than what is documented.
-
-    **The one open question: `permissionMode`.** The key exists. What it defaults to when absent is not documented, and no definition states it — so that default is this repository's behavior on every dispatch, unexamined. Settling it wants a behavioral probe rather than a search.
-
-    **Fields available and not used**, each an adopt-or-decline decision rather than a repair: `disallowedTools`, `maxTurns`, `skills`, `memory`, `background`, `effort`, `isolation`, `mcpServers`, `hooks`, `experimental`.
-
-    **Closed by a live-inference walk, not a mechanical one.** The `--no-inference` recipes spend no model call by construction, so they exercise the build pipeline and dispatch nothing — a moved dispatch default passes straight through them. What settles this is `kb-driver-arxiv-corpus` over `ARXIV_LIVE_IDS`, and it was run: both papers reached `claims-discovered` and `depends-attributed`, so seats launch, receive briefs, and return parseable answers under the new build. Re-render and re-install were no-ops, the templates being unchanged.
-
-    **The pins were verified honored, at the output side.** `runs/<id>/<ts>/calls/*.stream.jsonl` carries the model id per session, and a floor-tuned run (every tier tuned for and pinned to haiku) reported `claude-haiku-4-5-20251001` throughout. That is the direct check: the definition states the pin, and the stream says what served the call. Neither `/usage` nor the console log breaks usage down by model, so this is the only instrument for it.
-
-3. **Unified install with owner-safe config integration.** `just install <project>` gains a binary
-   flag that runs the agents-file install at *project* scope in the same invocation.
-   `install-agents-file`'s DIR already reaches a project root; what remains is the flag. The
-   target project's `CLAUDE.md` is never touched by default: config integration happens only via
-   that flag or via `just install-agents-file <dir> [harness]`, whose directory target is required
-   and may be `~/.claude` or a project root. The agents-file install keeps its own refusals (no
-   ordered marker pair, uncommitted sources) and they abort the whole invocation unwritten.
-
-4. **Family-skeleton inversion — the kb agent set becomes small-model-followable** The common
-   template skeleton becomes the imperative core a small local model can follow — short
-   declaratives, one instruction per sentence, explicit sequencing, no conditionals beyond stop
-   rules — and the Claude-grade prose (interference armor, nuanced conditionals, long contracts)
-   moves into `family/claude.toml`, layered on top: capability-additive, not capability-assumed.
-   **Mechanism prerequisite, already landed.** Additive-only stays — it is what keeps the template
-   set trackable for maintainers instead of untrackable spaghetti — and overrides stay scoped to a
-   family file and kept to a minimum; SPEC's additive-only clause is therefore untouched by this
-   entry. The hard-coded rendering form this pass would otherwise have had to remove is already
-   gone: family text now renders verbatim in place, with no lead-in and no wrapper, so a family file
-   can restore a passage of contract prose exactly as readily as it can add a corrective note — an
-   author wanting a `**NB**: ` lead writes one into their own text. Anchor placement was never
-   order-dependent either: an anchor expands wherever it sits, so this pass's content work starts
-   unblocked. Note the starting position: of the nine kb templates, eight hold **zero** overlay
-   anchors today — the ninth, `kb-claim-scorer.tmpl.md`, carries `family.gap-aversion`, the other of
-   the two anchors that exist across the entire template tree (`family.ask-vs-stipulate` in
-   `applied-mathematician.tmpl.md` is the first) — so this pass authors the seams for the remaining
-   eight as well as the text. The provenance doctrine is not in conflict here (owner-ruled
-   2026-09-04): strip-first-observe-patch is satisfied, because these anchors answer observed
-   failures from the stall catalog rather than speculation. What the hard rule failed to anticipate
-   is a second legitimate motivation — holding extra content a capable family can use, to improve
-   functionality, as distinct from correcting a failure. Provenance discipline itself stands
-   unchanged: every entry still records the behavior, the model, and the date that motivated it. The
-   render/install report is in scope too: it names each filled anchor and its scope but never which
-   definitions received it, and its per-tier `stock` notice reads as contradicting the anchor list
-   printed beside it. Evidence base: the 2026-09-03 paired-run stall catalog — gemma-4-31B ignored
-   the long system-prompt contract but followed a short absolute one perfectly (the BANANA probe:
-   the cheap instruction-following differential, seconds per hypothesis); stalled waiting at the
-   confirmation barrier; then narrated "I will now continue" and ended its turn instead of acting.
-   Each failure class names skeleton text needing demotion to an overlay. The binding principle
-   (owner): **the imperative core must stay sufficient, not just simple** — the week's mechanization
-   is what makes this winnable, since format/exhaustiveness direction left the prose for tools and
-   only judgment direction remains; where prose sufficiency still runs out for a seat, the answer is
-   relay-pattern decomposition (code owns the loop, the model gets one bounded question), not more
-   prose. Input: the gemma failure catalog mined via the resume path from the current paired runs.
-
-5. **One rule arriving several times in one prompt — the duplication class no instrument sees.**
+2. **One rule arriving several times in one prompt — the duplication class no instrument sees.**
    Distinct from the cross-output duplication the suite's identical-paragraph test refuses: a seat
    is told the same thing twice inside its own definition, through a clause and an inline
    restatement, or through two clauses that both land in it. Single-sourcing does not prevent it —
@@ -143,8 +58,12 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    a repair exactly; what it does not do is name which omissions are deliberate. First: enumerate
    every deviation across the coders and platform experts and classify it.
 
-6. **Re-examine the MAD agent set against what the harness now does.** That design predates several
+3. **Re-examine the MAD agent set against what the harness now does.** That design predates several
    harness capabilities and may be replicating orchestration the harness performs more reliably.
+
+   Decide whether the agent set and process actually earns its keep any more. MAD process usage
+   has fallen off sharply in general practice due to increasing capability of frontier models.
+
    **Explore at the start of the next MAD process rather than as standalone work** — the protocol is
    best examined against a live run.
 
@@ -172,23 +91,22 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    carried. Both candidates turn on that answer and neither has been checked against the protocol as
    written.
 
-7. **The content pass the 1.0 port deferred.** The port changed no prose; these change what a
-   seat reads and each is a `render-diff` the owner reads before `retake-reference`. Unify the two
-   debate referees' vocabulary on one set of words (gate, seat, outcome, the run and file names),
-   after which their slot constants lose their holes and the two bodies converge. Drop the
-   referees' "in Steps … above" cross-reference, which the sentence already names. Give the two
-   liaison definitions one spelling of the `liaison_tools` path instead of one per command line.
-   The 74 sites where a clause and a definition's own sentence share a paragraph: each a judgment
-   whether the sentence is its own paragraph, to be read site by site, not swept.
+   - **The content pass the 1.0 port deferred.** The port changed no prose; these change what a
+     seat reads and each is a `render-diff` the owner reads before `retake-reference`. Unify the two
+     debate referees' vocabulary on one set of words (gate, seat, outcome, the run and file names),
+     after which their slot constants lose their holes and the two bodies converge. Drop the
+     referees' "in Steps … above" cross-reference, which the sentence already names. Give the two
+     liaison definitions one spelling of the `liaison_tools` path instead of one per command line.
+     The 74 sites where a clause and a definition's own sentence share a paragraph: each a judgment
+     whether the sentence is its own paragraph, to be read site by site, not swept.
 
-8. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+4. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
    installs the agent and command definitions under a prefixed namespace so the set coexists with
    an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
    packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a
    render pass substituting every cross-reference site (dispatch names, slash-command names in
-   prose, the MAD roster) with a lint against bare fleet names, and a decision on how the prefix
-   reaches runtime callers that name agents from code (the driver's `--agent <seat>` invocations):
-   driver-config key vs. install-time stamp into the installed `kb_tools`. The harness agents file
-   (`adjagent/definitions/harness_agents_file.py`) is in the prefix substitution set, so agent
-   references inside it — the prompt-engineer review rule, any seat named by the working
-   preferences — render with the prefix applied at install.
+   prose, the MAD roster) with a lint against bare fleet names. Nothing outside the definition text
+   names an agent, so the rendered prose is the whole substitution set and no runtime route has to
+   carry the prefix. The harness agents file (`adjagent/definitions/harness_agents_file.py`) is in
+   it, so agent references inside that file — the prompt-engineer review rule, any seat named by
+   the working preferences — render with the prefix applied at install.

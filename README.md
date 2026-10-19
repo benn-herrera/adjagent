@@ -1,7 +1,7 @@
-# README – Adjagent: An Agent and Command Set Generator
+# README – Adjagent: An Agent, Command and Skill Set Generator
 
 This repository generates agents rather than collecting them — a single-sourced generation system
-paired with the multi-capability agent and command set it renders. Definitions are produced to
+paired with the multi-capability agent, command and skill set it renders. Definitions are produced to
 order: written as Python modules, tuned per model family, rendered into consuming projects that
 commit the result and never edit it. The generator owns the guarantees — one source for every shared
 span of text, additive-only model tuning, drift visible as the consumer's `git diff`; the rendered
@@ -22,19 +22,32 @@ user. It's accident protection, not hack-proofing, but can prevent painful misha
 
 ### Install
 
-Requires **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with
-the standard library's `tomllib`, which first shipped in 3.11.
+Base requirements: 
 
-Clone this repo anywhere, then install both deployed surfaces into the consuming project — from
+- **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with the 
+  standard library's `tomllib`, which first shipped in 3.11.
+
+For the kb set (`just install-with-kb`, whose `kbase` release the recipe downloads):
+
+- pandoc 3.12 - LaTeX <-> Markdown, host tool, not shipped; a build refuses one out of range
+- git - a KB lives in a git repository, and a build records each stage boundary as a commit
+- graphviz - optional, for rendering claim graph diagrams as SVG
+- a provider configuration - for a build that spends inference; a `--no-inference` build needs none
+
+Clone this repo anywhere, then install the deployed surfaces into the consuming project — from
 **this** repo's root:
 
 ```sh
 just install ~/projects/foo
 ```
 
-That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` in full: every definition,
-the MAD design-topic set, `kb_tools/`, `liaison_tools/`, and the slash commands. The definitions are
-rendered by that invocation and the tool packages are copied. Test suites and caches stay behind.
+That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` — every definition a base
+install carries, the MAD design-topic set and the slash commands — plus the shipped `liaison_tools/`
+package beside them under `adj-tools/`. The kb set is not in a base install:
+`just install-with-kb ~/projects/foo` adds its two agents and the `kbase`
+skill under `skills/`, with the `kbase` toolchain ("Knowledge Base Agent Set", below). The
+definitions are rendered by that invocation and the tool packages are copied. Test suites and
+caches stay behind.
 `--harness=opencode` installs into `.opencode/` instead (the harness's project directory;
 `--subdir=` overrides). Every `--*` flag after the target forwards verbatim to
 `python3 -m adjagent`, so tuning the render is one more flag, not a different command —
@@ -48,8 +61,25 @@ says so. Re-running the install overwrites the tree and removes definitions this
 produces; the consumer's `git diff` is the review of what changed. Re-installing an unchanged
 source changes nothing.
 
-Claude Code reads agent and command definitions from `.claude/`; nothing outside `agents/` and
-`commands/` is installed, so nothing else is visible to a session.
+If the project tracks the installed tree, put the `kbase` executable under Git LFS: it is a binary of
+several MB, and a plain commit makes every clone carry it. From the project root:
+
+```sh
+git lfs track '**/adj-tools/kb-tools/kbase*'
+```
+
+covers `kbase` and `kbase.exe` under either harness directory. If the binary was already committed,
+rewrite that history once with
+`git lfs migrate import --include='**/adj-tools/kb-tools/kbase*'` before the next clone. An install
+prints the same advice when it writes the executable, and stays silent when git reports it already
+tracked; a project that leaves the installed tree untracked needs none of this.
+
+Claude Code reads agent definitions from `.claude/agents/`, slash commands from `.claude/commands/`
+and skills from `.claude/skills/`; a base install writes `agents/` and `commands/` there and no
+`skills/` — the shipped `liaison_tools/` lands beside them under `adj-tools/` — so nothing else is
+visible to a session. A kb install adds `adj-tools/kb-tools/`, the `kbase` skill at `skills/kbase/`,
+and, at the project root, the `kbase` MCP entry and one include line in the project's justfile or
+Makefile.
 
 ### Harness Agents File
 
@@ -74,9 +104,9 @@ by one end marker line is refused with nothing written, as is any run while `adj
 uncommitted changes. A write that changes the file keeps one rolling `backup.<name>` of what it
 replaced.
 
-`agents/` and `commands/` are the two deployed surfaces install produces inside
+`agents/`, `commands/` and `skills/` are the three deployed surfaces install produces inside
 `<project>/.claude/`; the catalogs below name entries by where they land there — every entry lives
-under `agents/` unless noted as a command.
+under `agents/` unless noted as a command or a skill.
 
 ### Model Tuning
 
@@ -94,10 +124,15 @@ Tuned sets are rendered to order, typically out of repo, with `--family NAME`, w
 module name under `adjagent/families/` — a bare model name is not a family name, and a path is not
 accepted. Two independent flags carry the tuning further: `--model-tier-map` overrides which family
 member each tier is tuned against, and the optional `--model-pin-tier-alias-map` renders an alias in
-place of each tier's member.
+place of each tier's member. Under opencode, `--model-tier-map=inherit` or `=default` — two words
+that render alike there — means "the project's own model for every tier": each agent renders with no
+`model:` line and runs on whatever that project has configured. `--harness=opencode` with the
+default family needs the tier map overridden, its tier texts being Claude model names opencode does
+not accept, and a bare value is the whole map in one word. The alias map takes no bare value, and
+under claude a bare one is refused as no `tier=value` pair.
 `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]`
-applies the same mechanism to an install (see "Install" above) — every flag forwards verbatim to
-`python3 -m adjagent`.
+applies the same mechanism to an install (see "Install" above), and `just install-with-kb` takes the
+same flags — every one forwards verbatim to `python3 -m adjagent`.
 
 Authoring a new family, or extending an existing one, is repository work — see Development →
 Authoring a Family.
@@ -126,9 +161,9 @@ Authoring a Family.
   * windows-app-expert.md
 
 Every definition in this catalog is **generated** — the coder and platform files, the MAD agent set,
-all three kb definitions, the specialists, the liaisons, and every slash command. There are no
-hand-maintained definitions and nothing to edit directly; see Development → Generated Definitions
-for how a definition maps to its source module.
+the `kbase` skill and its two agents, the specialists, the liaisons, and every slash command. There
+are no hand-maintained definitions and nothing to edit directly; see Development → Generated
+Definitions for how a definition maps to its source module.
 
 ### Specialists
 Single-purpose agents invoked directly for non-coding work.
@@ -163,8 +198,8 @@ Development → Liaison Tooling.
 #### Shared Agents
 * mad/participant-contract.md - the model-neutral participant contract (reviewer in review mode,
   proposer in design mode); the body a guest model receives as its system prompt
-* mad-participant-fable.md, mad-participant-opus.md, mad-participant-sonnet.md,
-  mad-participant-haiku.md - the same contract as dispatchable agents, one per model pin; a run
+* mad-participant-a.md, mad-participant-b.md, mad-participant-c.md,
+  mad-participant-d.md - the same contract as dispatchable agents, one per model pin; a run
   draws its participants from different pins so their blind spots differ
 * mad-guest-liaison.md - a liaison that can loop in an external model via API base url, key, and
   model name
@@ -177,9 +212,9 @@ Development → Liaison Tooling.
   * mad-review.md - initiates a review process. you must provide:
     * a review name — a bare slug naming the output folder and documents; review mode has no topic
       library, so the invoker's charter carries the methodology
-    * a seat roster (`SEATS=`) — comma-separated subset of `fable`, `opus`, `sonnet`, `haiku`,
+    * a seat roster (`SEATS=`) — comma-separated subset of `a`, `b`, `c`, `d`,
       `guest`; at most one of each, at least two. No default: a roster-less invocation is refused.
-      `opus,sonnet` is a reasonable pick for most review jobs. A `guest` seat additionally requires
+      `b,c` is a reasonable pick for most review jobs. A `guest` seat additionally requires
       `ENV_FILE=` (path to the guest model's env file)
     * \[optional\] a requirements/constraints doc (e.g. coding invariants, math invariants, etc.)
     * a review target (path to document, file, or hierarchy)
@@ -192,7 +227,7 @@ Development → Liaison Tooling.
     * all artifacts, temporary or otherwise, are produced under the review work directory
   * round cap: 5
   * examples
-    * ```/mad-review src-review SEATS=opus,sonnet,guest ENV_FILE=~/.config/guest.env CONSTRAINTS=CONVENTIONS.md TARGET=src/ **IGNORE `src/third_party`**```
+    * ```/mad-review src-review SEATS=b,c,guest ENV_FILE=~/.config/guest.env CONSTRAINTS=CONVENTIONS.md TARGET=src/ **IGNORE `src/third_party`**```
 
 #### Design Mode
 
@@ -203,8 +238,8 @@ Development → Liaison Tooling.
       * architecture.md
       * math-derivation.md
       * ml-engineering.md (more topics can be added: software-design, hardware-design, etc.)
-    * a seat roster (`SEATS=`) — same contract as review mode: subset of `fable`, `opus`, `sonnet`,
-      `haiku`, `guest`, at most one of each, at least two, no default; `guest` requires `ENV_FILE=`
+    * a seat roster (`SEATS=`) — same contract as review mode: subset of `a`, `b`, `c`,
+      `d`, `guest`, at most one of each, at least two, no default; `guest` requires `ENV_FILE=`
     * \[optional\] a requirements/constraints doc
     * a problem statement: either (a) a path to an existing brief defining the open problem, or (b)
       an empty/not-yet-created output location — in case (b) the referee elicits the brief from the
@@ -230,7 +265,7 @@ Development → Liaison Tooling.
       axiom/principle/input
     * **unresolved**: candidates preserved for human arbitration if no convergence within round cap
   * examples
-    * ```/mad-design math-derivation SEATS=fable,opus,sonnet CONSTRAINTS=SPEC.md TARGET=mad-design/my-derivation/```
+    * ```/mad-design math-derivation SEATS=a,b,c CONSTRAINTS=SPEC.md TARGET=mad-design/my-derivation/```
 
 ### Guest Liaison
 
@@ -321,9 +356,16 @@ is preserved and new turns continue from it. To switch active sessions without d
 
 Agents and portable tooling for building, navigating, and maintaining a knowledge base — a
 navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph
-metadata spine. All three kb-* definitions are project-portable: per-project facts live in the
-consuming project's `kb-root/AGENTS.md`, not in the definitions. All three are **generated** from
-their definition modules.
+metadata spine. The set is one skill, `kbase`, and two agents, all project-portable: per-project
+facts live in the consuming project's `kb-root/AGENTS.md`, not in the definitions. The whole set is
+**generated** from its definition modules, and a base install omits it — `just install-with-kb` is
+what delivers it.
+
+You don't invoke a command to use it. Ask about the knowledge base — what it says, how to get
+around it, what a claim rests on — and the session loads the `kbase` skill and routes from there.
+The skill's description is what makes that work, so it also covers the case where there is no KB
+yet but there are LaTeX sources to build one from: ask it to build the KB and it identifies the
+volume root, confirms it with you, and follows the build reference.
 
 A build derives the KB from the LaTeX corpus, and the corpus is the only thing that exists at that
 point. Once you have edited the KB by hand — a leaf's prose, a claim minted or wired — that work
@@ -332,34 +374,51 @@ build at a KB you have been working in and you lose the work; continue an interr
 not.
 
 * Using/navigating a knowledge base
-  * kb-docent.md
-  * commands/ - custom slash commands
-    * kb-start.md (/kb-start)
-    * kb-next.md  (/kb-next)
+  * `kbase` skill — `skills/kbase/SKILL.md` locates the KB and routes the request, with
+    `references/reading.md` carrying navigation, claim quality and cross-references
 
 * Building/Modifying Knowledge Base
-  * commands/ - custom slash commands
-    * kb-build.md (/kb-build) - launches a build in the background, relays its status changes, and
-      consumes the driver's relay card when it stops
-  * kb_tools/kb_driver - the builder itself: walks a static step table, dispatches each row to the
-    seat it names, and exits at a barrier rather than asking
+  * `kbase` skill, `references/build.md` - drives kbase's `build` tool: reports the refusal, or the
+    launch that entered a stage — its `state-dir`, `pid`, `resume` and `wait` lines, `wait` run in
+    the background to hear the build end; then `status` on request, `cancel` on your word
+  * kbase - the builder itself, a Go binary this repository installs but does not ship as source:
+    `kbase build` runs the stages in order, spends inference through its own provider configuration,
+    and makes each stage boundary a commit in your repository
   * kb-claim-scorer.md - grades written derivations; returns judgments and writes nothing
-  * kb-maintainer.md - the write side: leaf edits, claim-graph wiring, refresh→verify loop
+  * kb-maintainer.md - the write side: leaf edits, claim-graph wiring, refresh→verify loop; the
+    skill dispatches it
 
 #### KB toolchain
 
-`kb_tools/` is the stdlib-only, zero-config Python toolchain the kb agents drive — see
-[kb_tools/CONVENTIONS.md](kb_tools/CONVENTIONS.md) for the full picture. An install delivers it to
-`.claude/agents/kb_tools/`, which is the path the definitions and the runner snippets name. A
-consuming project:
+The kb set drives **kbase**, a Go binary, not a Python package. `just install-with-kb` delivers it to
+`.claude/adj-tools/kb-tools/kbase` by default (`.opencode/adj-tools/kb-tools/kbase` under opencode) —
+the path the definitions and the runner snippets name — and beside it the two runner fragments.
+kbase's own documentation is its repository, [benn-herrera/kbase](https://github.com/benn-herrera/kbase);
+`INTEGRATING_KBASE_VIA_MCP.md` there is the wiring guide. The same install:
 
-1. Installs `.claude/agents` as in [Install](#install) and keeps its KB in `kb-root/` at the repo
-   root — the tools self-anchor by walking up from the cwd to `.git` and requiring `kb-root/` beside
-   it.
-2. Installs the runner targets once, from the project root:
-   `PYTHONPATH=.claude/agents python3 -m kb_tools.kb_util install-targets` — this adds a single
-   non-fatal include line to the project's justfile or Makefile.
-3. Uses `just`/`make` `kb-verify`, `kb-refresh`, and `kb-stats` from then on.
+1. Registers a `kbase` MCP server in the project's own settings file — `.mcp.json` under Claude Code;
+   under opencode the first of `.opencode/opencode.json`, `opencode.jsonc`, `opencode.json`, else
+   `.opencode/opencode.jsonc` created. The entry's command is the installed binary and its KB root
+   the project root. Every query, write op, `refresh`, `verify` and `build` the set names is a tool
+   of that server, offered under the harness's own prefix — `mcp__kbase__stats` under Claude Code,
+   `kbase_stats` under opencode. A settings file carrying JSONC comments is reported with the entry
+   printed for you to merge by hand.
+2. Appends one include line to the project's justfile or Makefile — creating a `Makefile` where there
+   is neither: `import? '<harness-dir>/adj-tools/kb-tools/runner-snippets/kb.just'` (just 1.33 or
+   later) or the `-include` form naming `kb.mk`. Both are non-fatal, so a consumer's runner keeps
+   working if the tree is absent, and `just`/`make` then carry `kb-verify`, `kb-refresh` and
+   `kb-stats`.
+
+The route is MCP-only. Where the `kbase` server is not connected the skill says so and stops;
+registering it, which the install does, is the fix, not a second interface. The KB lives in
+`kb-root/` at the repository root, which is also what the entry's `--kb-root` names.
+
+The choice is sticky: a directory that already carries `adj-tools/kb-tools/` — or the
+`agents/kb-tools/` an earlier version installed — is a kb install, so a later `just install` into it
+refreshes the fragments and keeps kb rather than dropping it. A plain `just
+install` into a directory without them writes no kb-set definition — no `kb-` agent, no part of the
+`skills/kbase/` tree — no kb-tools tree, no MCP entry and no include line, and removes each file of
+one it finds as stale.
 
 ## Development
 
@@ -374,6 +433,11 @@ adjagent/                 the generator and every definition, run as `python3 -m
   definitions/            one module per definition, or per set that shares text and ships together
   harnesses/              one module per harness (claude, opencode), each defining HARNESS
   families/               one module per model family, each defining FAMILY
+liaison_tools/            shipped python helpers for the liaison agents; installed under the harness
+                          directory, beside the definition surfaces, as adj-tools/liaison_tools/
+kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
+                          a kb install only; installed beside the kbase binary as adj-tools/kb-tools/
+.tool-dist-cache/         gitignored — the kbase release `install-with-kb` downloads and installs
 devtools/render_diff.py   compares two rendered slots by text; reads only rendered output
 rendered/                 gitignored build product — `just render [slug]` puts a render here per
                           slot; the three `reference*` slots are the baseline `just render-diff`
@@ -382,13 +446,14 @@ ROADMAP_PLANS/            tracked home for planned work not yet ready to execute
 ```
 
 In `adjagent/`, a definition module registers by existing in `definitions/`; its `kind` and
-`folder` decide where it lands. Mechanism is in the package and module docstrings, and in
+`folder` decide where it lands, and a skill's `files` add the supporting files beneath its own
+directory. Mechanism is in the package and module docstrings, and in
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
-`agents/` and `commands/` are not directories in this repository. They are the two deployed surfaces
-of the *product*, produced into `<project>/.claude/` by an install (or into `rendered/` by
-`just render`), and the catalogs in Usage name entries by where they land there: every entry lives
-under `agents/` unless noted as a command.
+`agents/`, `commands/` and `skills/` are not directories in this repository. They are the three
+deployed surfaces of the *product*, produced into `<project>/.claude/` by an install (or into
+`rendered/` by `just render`), and the catalogs in Usage name entries by where they land there:
+every entry lives under `agents/` unless noted as a command or a skill.
 
 Project docs: [THESIS.md](THESIS.md) — purpose and intent, [SPEC.md](SPEC.md) — observable contract,
 [ARCHITECTURE.md](ARCHITECTURE.md) — how the mechanism works, [CONVENTIONS.md](CONVENTIONS.md) —
@@ -409,13 +474,15 @@ text with holes, read top to bottom as the file it renders.
 * The gate is `just test-changed`. Run `just retake-reference` only after a content change is
   accepted; it re-takes the baseline slots `render-diff` compares against.
 
-Other targets: `just render [slug]` renders the full install product into `rendered/<slug>/` (slug
-defaults to `latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/` — Claude
-Code's `CLAUDE.md` by default, or another harness's with `--harness=NAME`. A slug starting with
-`reference` is refused. `just render-diff [a] [b]` compares two slots — reference against latest by
-default — by text, with each file's banner replaced by one constant line, and reports differences
-without failing on them. `just test` runs the full tooling test suite (the `kb_tools`,
-`liaison_tools`, `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
+Other targets: `just render [slug]` renders the full install product — kb set included, so the slot
+carries the `kbase` skill under `skills/`, `adj-tools/kb-tools/`, the harness's MCP entry and a
+`Makefile` include line — into
+`rendered/<slug>/` (slug defaults to `latest`), plus the harness agents file under
+`rendered/<slug>/harness/<name>/` — Claude Code's `CLAUDE.md` by default, or another harness's with
+`--harness=NAME`. A slug starting with `reference` is refused. `just render-diff [a] [b]` compares
+two slots — reference against latest by default — by text, with each file's banner replaced by one
+constant line, and reports differences without failing on them. `just test` runs the full tooling
+test suite (the `liaison_tools`, `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
 `just test-changed [base]` runs only the surfaces the uncommitted tree (plus, given `base`, the
 commits since it) touches, and says which paths chose each.
 
@@ -448,19 +515,21 @@ and against which observed behavior it was added.
 
 ### Generated Definitions
 
-Every definition in the Usage catalogs — the coder and platform files, the MAD agent set, all three
-kb definitions, the specialists, the liaisons, and every slash command — is **generated**. There are
-no hand-maintained definitions and nothing to edit directly in a rendered tree; the source is the
-definition's module (see "Working In This Repo"). A rendered file carries a two-line banner inside
-its frontmatter: a generated-from line naming its definition module and stating that the file is not
-for local edit, and a tuning line recording the family, seat, tier map and harness it was rendered
-for. There is no content hash; consuming projects track the rendered output, and their `git diff` is
-the drift check. See [CONVENTIONS.md](CONVENTIONS.md#adding-definitions) for how to add one.
+Every definition in the Usage catalogs — the coder and platform files, the MAD agent set, the
+`kbase` skill with its references, its two agents, the specialists, the liaisons, and every slash
+command — is **generated**. There are no hand-maintained definitions and nothing to edit directly
+in a rendered tree; the source is the definition's module (see "Working In This Repo"). A rendered
+definition carries a two-line banner inside its frontmatter: a generated-from line naming its
+definition module and stating that the file is not for local edit, and a tuning line recording the
+family, seat, tier map and harness it was rendered for. A skill's supporting file has no
+frontmatter, so it carries the same two lines as HTML comments on its first two lines. There is no
+content hash; consuming projects track the rendered output, and their `git diff` is the drift
+check. See [CONVENTIONS.md](CONVENTIONS.md#adding-definitions) for how to add one.
 
 ### Liaison Tooling
 `liaison_tools/` contains the helpers used by both `mad-guest-liaison.md` (MAD process) and
 `guest-liaison.md` (general guest-model sessions); an install delivers it to
-`.claude/agents/liaison_tools/`, which is the path the definitions name. The liaison agents are the
+`.claude/adj-tools/liaison_tools/`, which is the path the definitions name. The liaison agents are the
 primary callers; MAD referees set `TMPDIR` for liaison invocations to keep `mktemp` output contained
 in the review/design directory.
 * `post-openai.py` - posts a message history to an OpenAI-compatible API and prints the assistant
@@ -478,8 +547,8 @@ in the review/design directory.
 
 ## Third Party Acknowledgements
 
-The deployed runtime (`agents/`, `commands/`) is stdlib-only Python and shell with no third-party
-dependencies. `pytest`, `black`, and `isort` are dev/test-only tools, installed into a local `.venv`
-by the `just test` and `just format-python` recipes.
+The deployed runtime (`agents/`, `commands/`, `skills/`) is stdlib-only Python and shell with no
+third-party dependencies. `pytest`, `black`, and `isort` are dev/test-only tools, installed into a
+local `.venv` by the `just test` and `just format-python` recipes.
 
 pandoc (John MacFarlane and contributors) and Graphviz `dot` (Graphviz authors) are run as external programs and are not bundled.

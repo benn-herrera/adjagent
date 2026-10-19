@@ -1,20 +1,16 @@
 """literature-scout: the missing-reference review seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="literature-scout",
+        kind=Kind.AGENT,
         description=(
-            "Reference-finder for a manuscript or claim: identifies the literature it SHOULD cite — especially "
-            "the omissions a referee in the field would flag — grades each essential/recommended/minor, says "
-            "exactly where to cite it and why (what it strengthens or protects), flags claimed results that "
-            "assert a contrast or build on a framework without the citation they need, and checks that "
-            "already-cited works are apt. Gives real citations it is confident exist and verifies with web "
-            "search; flags uncertainty rather than inventing. Spans economics, applied dynamical systems / "
-            "control / stochastic escape, political economy, organizational theory, and history. Never modifies "
-            "the work. Use before a paper goes out, or as the literature lens in a review."
+            "Reference-finder for a manuscript or claim: the literature it should cite, especially omissions a "
+            "referee in the field would flag, graded essential/recommended/minor with the place for each. Never "
+            "modifies the work. Use before a paper goes out, or as the literature lens in a review."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB, Tool.WEBSEARCH, Tool.WEBFETCH),
         tier="high",

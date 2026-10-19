@@ -6,17 +6,18 @@ its own file presenting the identical contract.
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 _DESCRIPTION = (
-    "Independent technical participant for multi-model debate process. Produces structured initial "
-    "assessments (review mode) or proposals (design mode), and responds to debate rounds. Sees only the "
-    "Alignment Assessor's structured map, never another participant's full output."
+    "Independent technical participant in a multi-model debate, review or design: produces the initial "
+    "assessment or proposal and responds to debate rounds. Sees only the Alignment Assessor's structured "
+    "map, never another participant's full output."
 )
 
 DEFINITIONS = (
     Definition(
-        name="mad-participant-fable",
+        name="mad-participant-a",
+        kind=Kind.AGENT,
         description=_DESCRIPTION,
         tools=ALL,
         tier="highest",
@@ -24,7 +25,8 @@ DEFINITIONS = (
         body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
     Definition(
-        name="mad-participant-opus",
+        name="mad-participant-b",
+        kind=Kind.AGENT,
         description=_DESCRIPTION,
         tools=ALL,
         tier="high",
@@ -32,7 +34,8 @@ DEFINITIONS = (
         body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
     Definition(
-        name="mad-participant-sonnet",
+        name="mad-participant-c",
+        kind=Kind.AGENT,
         description=_DESCRIPTION,
         tools=ALL,
         tier="medium",
@@ -40,7 +43,8 @@ DEFINITIONS = (
         body=clauses.MAD_PARTICIPANT_CONTRACT,
     ),
     Definition(
-        name="mad-participant-haiku",
+        name="mad-participant-d",
+        kind=Kind.AGENT,
         description=_DESCRIPTION,
         tools=ALL,
         tier="low",

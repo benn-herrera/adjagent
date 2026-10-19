@@ -2,18 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="kb-claim-scorer",
+        kind=Kind.AGENT,
         description=(
-            "Grades derivations that are already written: how well each one establishes its own result, taken "
-            "alone and with whatever it rests on assumed sound; and, where a piece of work is offered in support "
-            "of a result it did not itself state, how much of it bears on that result. Returns a judgment for "
-            "every item assigned and writes nothing — someone else lands the values. Parallel-safe across "
-            "disjoint assignments. Not for producing derivations, model construction, or open-ended mathematical "
-            "work — that is the applied-mathematician."
+            "Grades derivations already written: how well each establishes its own result taken alone, and how "
+            "much of a work bears on a result it did not state. Returns a judgment for every item assigned; writes "
+            "nothing. Not for producing derivations or model construction — that is the applied-mathematician."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB),
         tier="high",

@@ -1,20 +1,17 @@
 """theoretical-economist: the theoretical-economics review seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import Tool
+from adjagent.vocabulary import Kind, Tool
 
 DEFINITIONS = (
     Definition(
         name="theoretical-economist",
+        kind=Kind.AGENT,
         description=(
-            "Rigorous theoretical-economics reviewer. Adversarially-but-fairly stress-tests production/growth, "
-            "information-economics, IO/market-structure, mechanism-design, and macro/general-equilibrium claims: "
-            "classifies each claim, finds the falsifiable hinge, checks aggregation and fixed-point logic, and "
-            "names the single strongest counter-move and whether it is fatal. Commands the relevant literature "
-            "(Krusell capital-skill complementarity, Baumol/Aghion bottlenecks, Nelson-Winter selection, credence "
-            "goods, Say/Kalecki) and the standard adversarial arsenal. Never modifies the work under review. Use "
-            "to pressure-test the economics of a claim, derivation, or manuscript, or as the economics lens in an "
-            "adversarial panel."
+            "Theoretical-economics reviewer. Adversarially but fairly stress-tests production/growth, "
+            "information-economics, IO, mechanism-design and macro/general-equilibrium claims. Never modifies the "
+            "work. Use to pressure-test an economic claim, derivation or manuscript, or as the economics lens in "
+            "an adversarial panel."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB, Tool.WEBSEARCH, Tool.WEBFETCH),
         tier="high",

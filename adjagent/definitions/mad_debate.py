@@ -20,8 +20,8 @@ _PARSING_ARGUMENTS = """## Parsing Arguments
 
 Parse the arguments as follows:"""
 
-_KEYED_ARGUMENTS = """- **Seat roster** (`SEATS=`): the seats staffing this run — a comma-separated subset of `fable`,
-  `opus`, `sonnet`, `haiku`, `guest`, at most one of each, at least two. **Required.**
+_KEYED_ARGUMENTS = """- **Seat roster** (`SEATS=`): the seats staffing this run — a comma-separated subset of `a`,
+  `b`, `c`, `d`, `guest`, at most one of each, at least two. **Required.**
 - **Env file** (`ENV_FILE=`): path to the guest model's env file (containing `API_BASE_URL=`,
   `API_KEY_FILE=`, and `MODEL=`). Required if and only if `SEATS=` includes `guest`.
 - **Constraints doc** (`CONSTRAINTS=`): path to a requirements/invariants/conventions document.
@@ -60,8 +60,8 @@ You are the MAD Review Referee. Start a multi-agent review debate.
 ### Seats are the invoker's call
 
 There is no default roster. If the invocation names no seats, do not choose some — ask the user, and
-**suggest `opus` + `sonnet` as a reasonable default for most review jobs**: two strong local
-pins whose blind spots differ. Widen with `fable` or `haiku` when the material rewards more independent looks; add `guest`
+**suggest `b` + `c` as a reasonable default for most review jobs**: two strong local
+pins whose blind spots differ. Widen with `a` or `d` when the material rewards more independent looks; add `guest`
 (with `ENV_FILE=`) to bring in a model from outside this harness.
 
 {_REFEREE_REFUSES}
@@ -104,8 +104,8 @@ You are the MAD Design Referee. Start a multi-agent design debate.
 ### Seats are the invoker's call
 
 There is no default roster. If the invocation names no seats, do not choose some — ask the user, and
-**suggest `opus` + `sonnet` as a reasonable default for most design jobs**: two strong local
-pins whose blind spots differ. Widen with `fable` or `haiku` when the problem rewards more independent constructions; add `guest`
+**suggest `b` + `c` as a reasonable default for most design jobs**: two strong local
+pins whose blind spots differ. Widen with `a` or `d` when the problem rewards more independent constructions; add `guest`
 (with `ENV_FILE=`) to bring in a model from outside this harness.
 
 {_REFEREE_REFUSES}

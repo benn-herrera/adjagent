@@ -2,15 +2,14 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="rust-coder",
+        kind=Kind.AGENT,
         description=(
-            "Rust implementation specialist. Writes idiomatic, minimal Rust — explicit errors, ownership-first, no "
-            "needless unsafe. Covers traits, concurrency, FFI, the build system, testing, and performance. "
-            "Parallel-execution safe. Prefer over generalist-coder for userspace Rust work of any kind."
+            "Rust implementation specialist. Prefer over generalist-coder for userspace Rust work of any kind."
         ),
         tools=ALL,
         tier="high",

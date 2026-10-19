@@ -15,6 +15,7 @@ AGENTS_FILE = "@!hrn-agents-file!@"
 PROJECT_HARNESS_DIR = "@!hrn-project-harness-dir!@"
 PROJECT_TEMP_DIR = "@!hrn-project-temp-dir!@"
 USER_HARNESS_DIR = "@!hrn-user-harness-dir!@"
+MCP_TOOL_PREFIX = "@!hrn-mcp-tool-prefix!@"
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
 
@@ -382,7 +383,7 @@ LIAISON_TOOL_LEAD = f"""## Tool
 You communicate with the external model using the script:
 
 ```
-{PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py
+{PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/post-openai.py
 ```
 
 **Required environment variables** (collected during Onboarding, then set by the liaison when invoking the script):
@@ -390,7 +391,7 @@ You communicate with the external model using the script:
 - `API_KEY_FILE` — path to the file containing only the API key; the script reads the key directly so it is not exposed through argv or environment values
 - `MODEL` — model identifier (exact or unambiguous substring; the script will resolve and warn if a substring match is used)
 
-**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `TOP_P`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `{PROJECT_HARNESS_DIR}/agents/liaison_tools/post-openai.py`.
+**Optional environment variables:** `MAX_TOKENS`, `ENABLE_THINKING`, `TEMPERATURE`, `TOP_P`, `DEBUG_POST`, `DEBUG_RESPONSE`, `USAGE_STATS_FILE`. Their accepted values and defaults are documented in the header docstring of `{PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/post-openai.py`.
 
 **Invocation:**"""
 
@@ -452,7 +453,7 @@ def liaison_round_cap(*, cap_source: str, principal: str, substantive: str) -> s
 def liaison_message_file_lead(*, init_ref: str, user_side: str) -> str:
     return f"""## Message File Management
 
-Maintain one JSON messages file per session. All creation and mutation of this file goes through `{PROJECT_HARNESS_DIR}/agents/liaison_tools/msg-util.py`:
+Maintain one JSON messages file per session. All creation and mutation of this file goes through `{PROJECT_HARNESS_DIR}/adj-tools/liaison_tools/msg-util.py`:
 
 - **Initialize** at session start via `msg-util.py init` (see {init_ref}), under the `validate` guard in **Session Files**.
 - **Append turns** — both the user side (file content returned in response to a file request, or {user_side}) and the agent side (the external model's verbatim reply from `post-openai.py`) — via:"""
@@ -616,21 +617,28 @@ Apply these as a constant background, not as a final pass:
 
 # ─── KB set ──────────────────────────────────────────────────────────────────
 
+# The `kb-` runner targets an install writes: a project whose runner carries them reaches `refresh`,
+# `verify` and `stats` through the targets rather than the tool names.
+KB_RUNNER_TARGETS = (
+    "Where the project's runner carries the installed `kb-` targets, `refresh`, `verify` and `stats` "
+    "are `kb-refresh`, `kb-verify` and `kb-stats`."
+)
+
 
 def kb_orientation(*, role: str) -> str:
     """role states the seat's own position only, never a paraphrase of its definition's opening line."""
     return f"""## The KB System
 
-A KB built by this toolchain is **two graphs over one tree of Markdown files**, and every agent in the set works on one or both.
+A KB built by this toolchain is **two graphs over one tree of Markdown files**, and every route that reads or maintains the KB works on one or both.
 
-- **Topography graph** — the navigation hierarchy `entry-point → domain index → subtopic index → leaf`, with `kb-root/invariants.md` holding what is invariant across all domains where the corpus declares any; a corpus declaring none has no such file, and there is then nothing to read and nothing to go looking for. A **leaf** is a translated (LaTeX→Markdown) unit of the corpus; a **summary** (subtopic, domain, entry-point) leads with Key Results drawn verbatim from below and exists to route a reader to the right leaf, not to stand in for it. The KB's audience is the source material's audience — nothing in it is re-pitched, analogized, or simplified for a different reader; that is the docent's job, delivered live.
-- **Claim graph** — a graph over the corpus's results, materialized under `kb-root/.index/`. Leaves *host* its node bodies, whose entries live in `claim-quality.md` registers; the two exceptions are the framework nodes `kb-root/invariants.md` declares and the cited works below. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of node bodies. Its `depends` and `supports` edges close no cycle — solidity is undefined on one, and `kb-verify` fails it — while `references` and `demoted` edges carry no solidity and may cycle. A `demoted` edge is a dependency the build cut because it closed a cycle, its origin `inferred` where the build's own reading found the reference and `cited` otherwise; whether it is a real dependency stays open until a maintainer resolves it.
+- **Topography graph** — the navigation hierarchy `entry-point → domain index → subtopic index → leaf`, with `kb-root/invariants.md` holding what is invariant across all domains where the corpus declares any; a corpus declaring none has no such file, and there is then nothing to read and nothing to go looking for. A **leaf** is a translated (LaTeX→Markdown) unit of the corpus; a **summary** (subtopic, domain, entry-point) leads with Key Results drawn verbatim from below and exists to route a reader to the right leaf, not to stand in for it. The KB's audience is the source material's audience — nothing in it is re-pitched, analogized, or simplified for a different reader; that is the reading route's job, delivered live.
+- **Claim graph** — a graph over the corpus's results, materialized under `kb-root/.index/`. Leaves *host* its node bodies, whose entries live in `claim-quality.md` registers; the two exceptions are the framework nodes `kb-root/invariants.md` declares and the cited works below. A leaf is a container: its `kind` labels its topography position and encodes no node-flavor, and one leaf may host any number and combination of node bodies. Its `depends` and `supports` edges close no cycle — solidity is undefined on one, and `verify` fails it — while `references` and `demoted` edges carry no solidity and may cycle. A `demoted` edge is a dependency the build cut because it closed a cycle, its origin `inferred` where the build's own reading found the reference and `cited` otherwise; whether it is a real dependency stays open until a maintainer resolves it.
 
 **The off-graph endcap.** A `work-` node stands for a work the corpus **cites and does not contain**. No leaf hosts one and nothing mints one: its id is `work-` plus the corpus's own citation key, and the KB root's register holds every one of them, so a work three volumes cite is a single node. It is terminal — it emits no edge — and carries one authored value, `strength`, the work's own standing from foundational at 1 to spurious at 0. That is not a solidity — it sits on no build band — but it **gates**. A claim reaches such a node by a **`rests-on`** edge carrying the pairing's applicability, and the two values divide the job: an applicability above zero puts the work's `strength` into the citing claim's dependency `min`, exactly where an in-corpus dependency's solidity sits, while `0.0` takes the pairing out of the `min` and `strength` is never read. While either value is `*pending*`, the citing claim's `solidity` is pending and everything downstream of that claim with it — a claim resting on unjudged outside work genuinely has unknown solidity, so those two judgements are owed rather than routed around. The edge is what tells a claim that rests on nothing from one whose warrant is outside reach: the same zero in an edge count, and not the same epistemic state.
 
-**Authored vs. derived.** Authored: leaf content, leaf frontmatter, claim-quality entry text, `depends-on` membership, and local rigor — one value, written as `confidence` on a claim and `quality` on a support. Derived by the refresh target: `solidity`, build-status, `(solidity X)` annotations, `subtree-claims:` / `subtree-experiments:`, and everything under `.index/`. A hand-edited derived field is a verifier failure. The toolchain's targets run under whichever runner the project uses — `just kb-refresh` or `make kb-refresh`, and likewise `kb-verify` (the read-only gate) and `kb-stats`.
+**Authored vs. derived.** Authored: leaf content, leaf frontmatter, claim-quality entry text, `depends-on` membership, and local rigor — one value, written as `confidence` on a claim and `quality` on a support. Derived by `refresh`: `solidity`, build-status, `(solidity X)` annotations, `subtree-claims:` / `subtree-experiments:`, and everything under `.index/`. A hand-edited derived field is a verifier failure.
 
-**Authored is not typed.** Every metadata byte in the KB — frontmatter blocks, register entries and their fields, in-body claim markers, edges — is composed by a `kb_util` write op from values a seat supplies. No agent in this set types one. The op surface is the CLI's own: `PYTHONPATH=<project-root>/{PROJECT_HARNESS_DIR}/agents python3 -m kb_tools.kb_util --help` lists every op, and `--help` on one op gives that op's invocation and its closed set of value keys — the project root being the directory that holds `kb-root/`.
+**Metadata is written by the tools.** Every metadata byte in the KB — frontmatter blocks, register entries and their fields, in-body claim markers, edges — is composed by the `kbase` server's write-op tools from values a seat supplies, each tool's schema being that op's closed set of value keys. No agent in this set types one.
 
 **Per-project facts.** What this KB distills — which corpus, and which node kinds and edge classes it populates — is pinned in `kb-root/AGENTS.md`, in the words the build was given rather than as fields. `kb-root/AGENTS.md` and `kb-root/CONVENTIONS.md` are the KB's orientation docs: a build seeds either one it finds absent and leaves an authored one whole, and no agent in this set authors or edits either. Neither is a corpus-invariant channel; `invariants.md` is.
 

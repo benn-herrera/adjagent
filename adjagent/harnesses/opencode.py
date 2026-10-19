@@ -2,8 +2,10 @@
 
 import re
 
-from adjagent.harness import AgentFields, Harness, quoted
+from adjagent.harness import AgentFields, Harness, McpSettings, quoted
 from adjagent.vocabulary import Tool
+
+_PROJECT_HARNESS_DIR = ".opencode"
 
 
 def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
@@ -21,12 +23,19 @@ def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _mcp_entry(*, command: str, kb_root: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """The `kbase` server entry and the `mcp.servers` container it nests under."""
+    return {"type": "local", "command": [command, "mcp", "--kb-root", kb_root]}, ("mcp", "servers", "kbase")
+
+
 HARNESS = Harness(
     name="opencode",
     agents_file="AGENTS.md",
-    project_harness_dir=".opencode",
+    project_harness_dir=_PROJECT_HARNESS_DIR,
     project_temp_dir=".opencode-temp",
     user_harness_dir="~/.config/opencode",
+    mcp_tool_prefix="kbase_",
+    coder_dispatch=None,
     tools={
         Tool.READ: ("read",),
         Tool.GREP: ("grep",),
@@ -38,13 +47,20 @@ HARNESS = Harness(
         Tool.WEBSEARCH: ("websearch",),
         Tool.AGENT: ("task",),
     },
-    model_pattern=re.compile(r"^(inherit|[^/\s]+/\S+)$"),
+    model_pattern=re.compile(r"^(inherit|default|[^/\s]+/\S+)$"),
     model_shape=(
         "provider/model with the provider named as your opencode config names it, "
-        "for example omlx/Qwen3.8-Flash-Next, or inherit"
+        "for example omlx/Qwen3.8-Flash-Next, or inherit, also spelled default"
     ),
     inherit_text="",
+    inherit_synonyms=("default",),
+    bare_tier_spec_is_all=True,
     frontmatter=_frontmatter,
     # An undispatchable reference document: listed as a subagent, never offered for dispatch.
     document_frontmatter=("mode: subagent", "disable: true"),
+    mcp=McpSettings(
+        canonical=f"{_PROJECT_HARNESS_DIR}/opencode.jsonc",
+        alternatives=(f"{_PROJECT_HARNESS_DIR}/opencode.json", "opencode.jsonc", "opencode.json"),
+        entry=_mcp_entry,
+    ),
 )

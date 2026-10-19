@@ -21,6 +21,9 @@ import 'python.just'
 
 GEN := "adjagent"
 
+KBASE_VERSION := "v0.6.0"
+TOOL_DIST_CACHE := justfile_dir() / ".tool-dist-cache"
+
 default:
     @just --list | grep -v '\[dev\]'
     @echo "===="
@@ -31,7 +34,12 @@ default:
 # the record of what changed. Every flag forwards verbatim; adjagent's argparse is the single
 # source of flag truth. `--subdir=X`, read only as the first flag, is this recipe's own and
 # defaults to the --harness's project-harness-dir.
-[doc("install into <project>/<subdir>/; <project> is the first non-flag argument; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
+#
+# The recipe also resolves <target> — the first non-flag argument — and passes it beside ROOT as
+# the project root, because ROOT is only the harness directory a project keeps under it: the MCP
+# entry an install registers and the runner include line it appends belong at the project root,
+# never at the harness directory they spell their paths from.
+[doc("install into <project>/<subdir>/; <project> is the first non-flag argument, resolved and passed as the project root the harness directory ROOT sits under; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
 install target *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -68,6 +76,11 @@ install target *args:
         printf '%s\n' "error: target project root '${target}' does not exist — create the project first" >&2
         exit 1
     fi
+    # pwd -P so a symlinked path resolves to the tree the install reads; the
+    # harness arguments name paths from the project root, not from ROOT. The
+    # assignment's status is `cd`'s own, so an unenterable directory stops the
+    # recipe here rather than at the install with no project root.
+    project_root="$(cd "${target}" && pwd -P)"
     if [[ -z "${have_subdir}" ]]; then
         subdir="$("{{just_executable()}}" --justfile "{{justfile()}}" _harness-value "${harness}" project-harness-dir)"
     fi
@@ -75,7 +88,42 @@ install target *args:
     mkdir -p "${root}"
     # ${arr[@]+...} guard: expanding an empty array trips `set -u` on the
     # bash 3.2 that macOS ships at /bin/bash.
-    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install "${root}" ${args[@]+"${args[@]}"}
+    PYTHONPATH="{{PROJECT_ROOT}}" python3 -m {{GEN}} install "${root}" --project-root="${project_root}" ${args[@]+"${args[@]}"}
+
+# The bare install above with the kb set added. "$@" is the caller's own $1
+# (the target) and flags, unchanged: `install`'s leading-flag scan and
+# existence check own them, so this recipe resolves no target of its own.
+# Only the `kbase` executable is this recipe's to name.
+[doc("install with the kb set as well as the base product: the kb- definitions, the kb-tools package with a kbase from the dist cache beside its runner snippets, and the project-root kbase MCP entry and runner include line; every argument means what it means to install")]
+install-with-kb target *args: _download-kbase-dist
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kbase_bin="$("{{just_executable()}}" --justfile "{{justfile()}}" _kbase-bin)"
+    "{{just_executable()}}" --justfile "{{justfile()}}" install "$@" --with-kb --kbase-dist="${kbase_bin}"
+
+# The release script unpacks either `kbase` or, under a Windows shell, `kbase.exe`, so the probe
+# accepts both names; a probe testing only `kbase` never matched there and re-ran the script on
+# every invocation. `_kbase-bin` below is the one place that decides which name runs.
+[private]
+_download-kbase-dist:
+  @mkdir -p "{{TOOL_DIST_CACHE}}"
+  @cd "{{TOOL_DIST_CACHE}}"; [[ -f install-kbase-{{KBASE_VERSION}}.sh ]] || \
+    curl -OL https://github.com/benn-herrera/kbase/releases/download/{{KBASE_VERSION}}/install-kbase-{{KBASE_VERSION}}.sh
+  @cd "{{TOOL_DIST_CACHE}}"; [[ -x "kbase-{{KBASE_VERSION}}"/kbase || -x "kbase-{{KBASE_VERSION}}"/kbase.exe ]] || bash ./install-kbase-{{KBASE_VERSION}}.sh
+
+# The executable `_download-kbase-dist` leaves in the cache: the release
+# script's one unsuffixed name, which carries `.exe` under a Windows shell —
+# msys, cygwin and mingw all report it from `uname -s`. Printed, not
+# interpolated, so the one platform decision is made where `uname` is readable.
+[private]
+_kbase-bin:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exe=""
+    case "$(uname -s)" in
+        MSYS*|CYGWIN*|MINGW*) exe=".exe" ;;
+    esac
+    printf '%s\n' "{{TOOL_DIST_CACHE}}/kbase-{{KBASE_VERSION}}/kbase${exe}"
 
 # The one reader of a harness's values for recipes: prints KEY of harness NAME
 # through `python3 -m adjagent harness`, a leading `~` expanded to $HOME.
@@ -172,8 +220,14 @@ RENDERED_DIR := "rendered"
 # The slot is removed and rebuilt on every render. A slug starting with
 # `reference` is refused with nothing touched: those slots are the pre-1.0
 # oracle until stage 6 re-renders them.
-[doc("[dev] render the full install product into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug) plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — refuses a slug starting with reference; every --* flag, --harness included, forwards verbatim to `python3 -m adjagent install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
-render *args:
+#
+# A slot is rendered with the kb set as well as the base product — the kb
+# definitions, the kb-tools package with the dist `kbase`, and the slot's own
+# MCP entry and runner include line (the slot is its own project root) — so a
+# `render-diff` compares the kb half too, and `_download-kbase-dist` runs
+# before the slot is touched.
+[doc("[dev] render the full install product, kb set included, into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug), plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/ — refuses a slug starting with reference; every --* flag, --harness included, forwards verbatim to `python3 -m adjagent install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
+render *args: _download-kbase-dist
     #!/usr/bin/env bash
     set -euo pipefail
     slug="latest"
@@ -218,15 +272,17 @@ _render-slot slug *args:
         : > "${out}/RENDER-FLAGS.txt"
     fi
     "{{just_executable()}}" --justfile "{{justfile()}}" render-agents-file "${harness}" "${out}/harness/${harness}/${agents_file}"
-    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= ${@+"${@}"}
+    kbase_bin="$("{{just_executable()}}" --justfile "{{justfile()}}" _kbase-bin)"
+    "{{just_executable()}}" --justfile "{{justfile()}}" install "${out}" --subdir= --with-kb --kbase-dist="${kbase_bin}" ${@+"${@}"}
 
 # The three `reference*` slots are the oracle `render-diff` reads. `render`
 # refuses their names so a render never overwrites the oracle by accident; this
 # recipe is the one deliberate way to re-take them, run after a change to what
 # the definitions say has been reviewed and accepted, so that the next
-# `render-diff` measures the next change and not that one.
+# `render-diff` measures the next change and not that one. Each slot is
+# rendered with the kb set, as `render` renders one.
 [doc("[dev] re-take the three oracle slots rendered/reference, reference-opencode and reference-gemma from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
-retake-reference:
+retake-reference: _download-kbase-dist
     #!/usr/bin/env bash
     set -euo pipefail
     render_slot=("{{just_executable()}}" --justfile "{{justfile()}}" _render-slot)
@@ -247,22 +303,26 @@ render-agents-file harness out:
 # not be MADE is fatal — a missing slot, or a file that cannot be read.
 #
 # Files compare by text, not by bytes: a file whose first line is `---` and whose
-# next lines have exactly one of the two banner shapes has those lines replaced
-# by the one constant line `# !BANNER!`; then, outside fenced code, whitespace
-# inside a paragraph collapses to one space, while headings, table rows, list
-# items, fenced blocks and frontmatter stay exact (devtools/render_diff.py
-# states the rules). A copied file's `!INSTALLED!` banner is replaced the same
-# way. Two files are the same when that text is identical. The output keeps
-# `diff -rq`'s two line forms.
+# next lines have exactly one of the two frontmatter banner shapes has those lines
+# replaced by the one constant line `# !BANNER!`; so does a skill's supporting file,
+# which has no frontmatter and carries the third shape, the two HTML comments
+# `<!-- !GENERATED! ... -->` and `<!-- !TUNING! ... -->` from its first line. Then,
+# outside fenced code, whitespace inside a paragraph collapses to one space, while
+# headings, table rows, list items, fenced blocks and frontmatter stay exact
+# (devtools/render_diff.py states the rules). A copied file's `!INSTALLED!` banner
+# is replaced the same way. Two files are the same when that text is identical. The
+# output keeps `diff -rq`'s two line forms.
 [doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
 render-diff a="reference" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
-# The shipped packages are imported as top-level packages (`kb_tools`,
-# `liaison_tools`), and their sources sit at the repository root — so the
-# repository root IS the import path. The consumer-side invocation is
-# unaffected: there the same packages arrive under .claude/agents/ and are
-# imported with PYTHONPATH=.claude/agents.
+# The one shipped python package is `liaison_tools`, imported as a top-level
+# package from its source at the repository root — so the repository root IS
+# the import path, here and in the tests. The installed `kb-tools/` tree is
+# not an importable package: it holds the runner snippets and the `kbase`
+# binary the same install writes. The consumer-side invocation is unaffected:
+# there `liaison_tools` arrives under <harness-dir>/adj-tools/ and is imported
+# with PYTHONPATH=<harness-dir>/adj-tools.
 # `surface` is always positional parameter $1 (positional-arguments, set
 # above); the pytest arguments follow it from $2, and are forwarded as the
 # separate words `just` received them as, so `-k "a and b"` stays one argument.
@@ -271,17 +331,16 @@ render-diff a="reference" b="latest":
 # directory. A flag alone does not narrow: pytest gets the directory plus the
 # flags. A path outside the surface's directory is refused. The word after a
 # flag that takes a separate value (`-k expr`) is that value, never a path.
-[doc("[dev] run tooling python tests: no argument runs all four (kb_tools + liaison_tools + adjagent + dupe_sweep); a surface argument (kb_tools, liaison_tools, adjagent, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+[doc("[dev] run tooling python tests: no argument runs all three (liaison_tools + adjagent + dupe_sweep); a surface argument (liaison_tools, adjagent, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     read -ra dirs <<< "{{ \
-      if surface == "" { "kb_tools/tests liaison_tools/tests tests devtools/tests" } \
-      else if surface == "kb_tools" { "kb_tools/tests" } \
+      if surface == "" { "liaison_tools/tests tests devtools/tests" } \
       else if surface == "liaison_tools" { "liaison_tools/tests" } \
       else if surface == "adjagent" { "tests" } \
       else if surface == "dupe_sweep" { "devtools/tests" } \
-      else { error("unknown test surface '" + surface + "' — valid values: kb_tools, liaison_tools, adjagent, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
+      else { error("unknown test surface '" + surface + "' — valid values: liaison_tools, adjagent, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }}"
     root="{{PROJECT_ROOT}}"
     has_path=0
@@ -331,8 +390,8 @@ format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
-        black_isort_paths=(kb_tools liaison_tools tests adjagent devtools)
-        flake8_paths=(kb_tools liaison_tools adjagent devtools tests)
+        black_isort_paths=(liaison_tools tests adjagent devtools)
+        flake8_paths=(liaison_tools adjagent devtools tests)
     else
         black_isort_paths=("$@")
         flake8_paths=("$@")
@@ -358,7 +417,7 @@ format-python *paths: _venv
 # The prose half is
 # `tests/test_adjagent.py::test_a_paragraph_two_outputs_carry_has_one_source`,
 # which runs in `just test`: shared prose is one constant by construction.
-[doc("[dev] list one-idea-two-places candidates across kb_tools/ — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
+[doc("[dev] list one-idea-two-places candidates across the owned python trees (the corpus devtools/dupe_sweep/python_corpus.py names) — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-python *args:
     PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep python "$@"
 
@@ -369,7 +428,7 @@ sweep-python *args:
 # untracked, both sides of a rename) plus, when <base> is given, everything
 # committed since it (`git diff base...HEAD`). Each path selects the surface
 # its prefix names in TEST_SURFACE_MAP below; a path matching no row (docs,
-# plans, scratch, kb-testing) selects nothing. There are no cross-surface
+# plans, scratch) selects nothing. There are no cross-surface
 # "just in case" rows. The one exception is the runner itself: `justfile` and
 # `python.just` select every surface, because a change to the `test` recipe
 # cannot be validated by skipping it. With nothing selected, it says so and
@@ -382,7 +441,6 @@ adjagent/ adjagent
 tests/ adjagent
 devtools/render_diff.py adjagent
 devtools/ dupe_sweep
-kb_tools/ kb_tools
 liaison_tools/ liaison_tools
 justfile ALL
 python.just ALL
@@ -394,7 +452,7 @@ test-changed base="":
     set -euo pipefail
     cd "{{PROJECT_ROOT}}"
     base="${1}"
-    all_surfaces=(kb_tools liaison_tools adjagent dupe_sweep)
+    all_surfaces=(liaison_tools adjagent dupe_sweep)
     rows="{{TEST_SURFACE_MAP}}"
 
     changed=()
@@ -460,10 +518,16 @@ test-changed base="":
         exit 1
     fi
 
-# update this projects agent installation from current state
-# the opencode line names models as provider/model, the provider as the operator's opencode config
-# names the oMLX endpoint
+# update this project's own agent installation, base product only: the plain `install` verb once per
+# harness. The kb set belongs to a target project, which is what `just install-with-kb <that-project>`
+# is for — this repository builds the kb definitions and the kb-tools package but does not use them,
+# so nothing here writes adj-tools/kb-tools/, the kbase executable, or a project-root MCP entry.
+# No runner include line either: an install never writes one into this repository's own justfile.
+# A harness directory that already holds adj-tools/kb-tools/ or the legacy agents/kb-tools/ is a kb
+# install even here — the one way this recipe can still install kb.
+# The opencode line overrides the tier map because the default family's tier texts name claude
+# models, which opencode refuses.
 [private]
 install-agents-here:
   just install "{{justfile_directory()}}" --harness=claude
-  just install "{{justfile_directory()}}" --harness=opencode --model-tier-map=all=inherit
+  just install "{{justfile_directory()}}" --harness=opencode --model-tier-map=default

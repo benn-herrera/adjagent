@@ -4,10 +4,11 @@ package, and proves each rule on a fixture.
 
 A definition module holds imports, string constants and `DEFINITIONS`. Its constants are string
 literals or f-strings over its own constants. Its only calls are `Definition(...)` as a
-`DEFINITIONS` element and, inside a `body=` value, `clauses.<name>(...)` and
-`<constant>.format(...)` on one of its string literals, every argument a string literal or a
-constant. The clauses module holds string constants and text functions: at most three keyword-only
-parameters, one returned string over the parameters and its constants, and no call.
+`DEFINITIONS` element, `SkillFile(...)` as a `files=` element, and, inside a `body=` value or a
+`SkillFile` body, `clauses.<name>(...)` and `<constant>.format(...)` on one of its string literals,
+every argument a string literal or a constant. The clauses module holds string constants and text
+functions: at most three keyword-only parameters, one returned string over the parameters and its
+constants, and no call.
 """
 
 import ast
@@ -18,11 +19,12 @@ CLAUSES = "clauses"
 
 ASSIGNMENT_RULE = "a module-level assignment is a string literal or an f-string over the module's constant names"
 CALL_RULE = (
-    "a definition module calls only Definition(...) in DEFINITIONS and, inside a body= value, "
-    "clauses.<name>(...) or .format(...) on one of its string literals"
+    "a definition module calls only Definition(...) in DEFINITIONS, SkillFile(...) in a files= value, and "
+    "clauses.<name>(...) or .format(...) on a string literal inside a body= value"
 )
 ARGUMENT_RULE = "an argument to a text function or a .format is a string literal or a module-level constant"
 BODY_RULE = "a body= expression is a module constant, a clauses.<name>, or a permitted call"
+FILES_RULE = "files= is a tuple of SkillFile(path=<string literal>, body=<body>) calls"
 FUNCTION_RULE = (
     "a text function takes at most three keyword-only parameters and returns one string over its "
     "parameters and module constants, with no call"
@@ -103,9 +105,7 @@ def _imports_text_wrongly(node: ast.Import | ast.ImportFrom) -> bool:
         return any(alias.name == f"adjagent.{CLAUSES}" for alias in node.names)
     if node.module == f"adjagent.{CLAUSES}":
         return True
-    return node.module == "adjagent" and any(
-        alias.name == CLAUSES and alias.asname is not None for alias in node.names
-    )
+    return node.module == "adjagent" and any(alias.name == CLAUSES and alias.asname is not None for alias in node.names)
 
 
 def _is_text_function(node: ast.FunctionDef, constants: dict[str, ast.expr]) -> bool:
@@ -130,8 +130,8 @@ def _is_text_function(node: ast.FunctionDef, constants: dict[str, ast.expr]) -> 
 
 
 def _definitions_violations(node: ast.stmt, constants: dict[str, ast.expr]) -> list[tuple[int, str]]:
-    """DEFINITIONS is a non-empty tuple of Definition(...) calls; a call anywhere in it but in a
-    body= value is a violation, and in a body= value only the permitted calls and names stand."""
+    """DEFINITIONS is a non-empty tuple of Definition(...) calls; a call anywhere in it but in a body=
+    value or in a files= element is a violation, and in those only the permitted calls and names stand."""
     value = node.value if isinstance(node, ast.Assign) else None
     if not isinstance(value, ast.Tuple) or not value.elts:
         return [(node.lineno, DEFINITION_TOP_RULE)]
@@ -145,8 +145,32 @@ def _definitions_violations(node: ast.stmt, constants: dict[str, ast.expr]) -> l
         for argument in [*element.args, *element.keywords]:
             if isinstance(argument, ast.keyword) and argument.arg == "body":
                 found += _body_violations(argument.value, constants)
+            elif isinstance(argument, ast.keyword) and argument.arg == "files":
+                found += _files_violations(argument.value, constants)
             else:
                 found += [(call.lineno, CALL_RULE) for call in ast.walk(argument) if isinstance(call, ast.Call)]
+    return found
+
+
+def _files_violations(files: ast.expr, constants: dict[str, ast.expr]) -> list[tuple[int, str]]:
+    """`files=` is a tuple of `SkillFile(path=<string literal>, body=<body>)` calls; each body is walked
+    under the body= rule, and a call standing anywhere else in the value is a violation."""
+    if not isinstance(files, ast.Tuple):
+        return [(files.lineno, FILES_RULE)]
+    found = []
+    for element in files.elts:
+        if not (
+            isinstance(element, ast.Call) and isinstance(element.func, ast.Name) and element.func.id == "SkillFile"
+        ):
+            found.append((element.lineno, CALL_RULE))
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in element.keywords}
+        if element.args or None in keywords or set(keywords) != {"path", "body"}:
+            found.append((element.lineno, FILES_RULE))
+            continue
+        if not _is_literal(keywords["path"]):
+            found.append((keywords["path"].lineno, FILES_RULE))
+        found += _body_violations(keywords["body"], constants)
     return found
 
 

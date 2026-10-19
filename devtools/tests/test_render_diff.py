@@ -6,11 +6,18 @@ from pathlib import Path
 
 from devtools.render_diff import body, text, walk
 
-OLD_BANNER = (
-    b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# !BODY-SHA256! abc\n#\nname: a\n---\ntext\n"
-)
+OLD_BANNER = b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# !BODY-SHA256! abc\n#\nname: a\n---\ntext\n"
 NEW_BANNER = b"---\n# !GENERATED! from x\n# !TUNING! y\nname: a\n---\ntext\n"
 BANNERED_BODY = b"---\n# !BANNER!\nname: a\n---\ntext\n"
+COMMENT_BANNER = (
+    b"<!-- !GENERATED! from adjagent/definitions/kbase.py \xe2\x80\x94 x -->\n"
+    b"<!-- !TUNING! family=claude seat=none member=none tier=a stock=b harness=claude -->\n"
+    b"\n# Reading\n\nA paragraph.\n"
+)
+COMMENT_BANNER_OTHER = COMMENT_BANNER.replace(
+    b"<!-- !TUNING! family=claude seat=none member=none tier=a stock=b harness=claude -->",
+    b"<!-- !TUNING! family=gemma-4 seat=none member=none tier=c stock=none harness=opencode -->",
+)
 
 
 def run_walk(a: Path, b: Path) -> list[str]:
@@ -27,9 +34,15 @@ class BodyTest(unittest.TestCase):
     def test_new_banner_replaced(self):
         self.assertEqual(body(NEW_BANNER), BANNERED_BODY)
 
+    def test_a_skill_files_comment_banner_is_replaced(self):
+        expected = b"# !BANNER!\n\n# Reading\n\nA paragraph.\n"
+        self.assertEqual(body(COMMENT_BANNER), expected)
+        self.assertEqual(body(COMMENT_BANNER_OTHER), expected)
+        self.assertEqual(text(COMMENT_BANNER), text(COMMENT_BANNER_OTHER))
+
     def test_installed_banners_replaced(self):
         old = b"#\n# !INSTALLED! from the adjagent repo\n# !BODY-SHA256! abc\n#\n"
-        new = b"# !INSTALLED! from kb_tools/x.py \xe2\x80\x94 do not edit here\n"
+        new = b"# !INSTALLED! from kb-tools/x.py \xe2\x80\x94 do not edit here\n"
         for shebang in (b"", b"#!/usr/bin/env python3\n"):
             for banner in (old, new):
                 with self.subTest(shebang=shebang, banner=banner):
@@ -69,16 +82,13 @@ class TextTest(unittest.TestCase):
         )
 
     def test_a_fence_with_an_info_string_stays_exact(self):
-        self.assertNotEqual(
-            text(b"```python\nif x:\n    y\n```\n"), text(b"```python\nif x:\n  y\n```\n"))
+        self.assertNotEqual(text(b"```python\nif x:\n    y\n```\n"), text(b"```python\nif x:\n  y\n```\n"))
 
     def test_a_tilde_fence_is_not_closed_by_backticks(self):
-        self.assertNotEqual(
-            text(b"~~~\n```\nif x:\n    y\n~~~\n"), text(b"~~~\n```\nif x:\n  y\n~~~\n"))
+        self.assertNotEqual(text(b"~~~\n```\nif x:\n    y\n~~~\n"), text(b"~~~\n```\nif x:\n  y\n~~~\n"))
 
     def test_list_items_wrapped_differently_compare_equal(self):
-        self.assertEqual(
-            text(b"- one two\n  three\n- four  five\n"), text(b"- one\n  two three\n- four five\n"))
+        self.assertEqual(text(b"- one two\n  three\n- four  five\n"), text(b"- one\n  two three\n- four five\n"))
 
     def test_list_items_merged_into_one_differ(self):
         self.assertNotEqual(text(b"- one two\n- three\n"), text(b"- one two three\n"))

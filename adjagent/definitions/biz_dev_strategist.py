@@ -1,14 +1,15 @@
 """biz-dev-strategist: the software business-strategy seat."""
 
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="biz-dev-strategist",
+        kind=Kind.AGENT,
         description=(
-            "Software business strategy, market analysis, opportunity identification, business plans, pitch "
-            "materials, monetization planning, investor outreach, competitive positioning, go-to-market strategy."
+            "Software business strategy, market analysis, competitive positioning, business plans, pitch "
+            "materials, monetization, investor outreach and go-to-market strategy."
         ),
         tools=ALL,
         tier="medium",

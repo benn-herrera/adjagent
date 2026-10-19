@@ -2,18 +2,17 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="prompt-engineer",
+        kind=Kind.AGENT,
         description=(
-            "Authors and revises text whose primary reader is a model: agent definitions, slash commands, skills, "
-            "and agent-facing docs (AGENTS.md, CONVENTIONS.md). Writes to survive adversarial agent-definition "
-            "review — emphasis economy, interference analysis, observed-failure provenance. Also the reviewer "
-            "seat for model-facing text — dispatched to review, reports findings and modifies nothing. Prefer "
-            "over tech-writer whenever the audience is a model; tech-writer owns human-facing and dual-audience "
-            "documents (SPEC, ARCHITECTURE, README)."
+            "Authors and revises text whose primary reader is a model: agent definitions, slash commands, skills "
+            "and agent-facing docs. Reviewer seat for the same — reports findings, modifies nothing. Prefer over "
+            "tech-writer when the audience is a model; tech-writer owns human-facing and dual-audience docs "
+            "(SPEC, ARCHITECTURE, README)."
         ),
         tools=ALL,
         tier="high",

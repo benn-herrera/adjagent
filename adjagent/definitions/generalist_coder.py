@@ -2,20 +2,16 @@
 
 from adjagent import clauses
 from adjagent.definition import Definition
-from adjagent.vocabulary import ALL
+from adjagent.vocabulary import ALL, Kind
 
 DEFINITIONS = (
     Definition(
         name="generalist-coder",
+        kind=Kind.AGENT,
         description=(
-            "General-purpose implementation agent for coding tasks across any language. Writes, edits, and fixes "
-            "code with a strong bias toward minimal, correct, idiomatic solutions. Designed to run as one of many "
-            "parallel instances — stays strictly within assigned scope, declares file boundaries upfront, and stops "
-            "when the task is done. Use when no language-specific or platform-specific agent matches the task. "
-            "Prefer c-coder for C, cpp-coder for C++, go-coder for Go, lua-coder for Lua, python-coder for Python, "
-            "rust-coder for Rust, typescript-coder for TypeScript and JavaScript outside the browser, "
-            "shell-dsl-coder for shell and build DSLs, and the relevant platform expert for "
-            "Android, iOS, Linux, macOS, web, or Windows targets."
+            "General-purpose implementation agent for coding tasks in any language. Use when no language-specific "
+            "or platform-specific seat matches the task — where one does, the language specialist or platform "
+            "expert takes it instead."
         ),
         tools=ALL,
         tier="high",

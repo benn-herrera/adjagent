@@ -50,12 +50,15 @@ class Anchor(Enum):
 class Kind(Enum):
     """What a definition renders as. An agent is dispatchable and carries the harness's agent
     frontmatter; a document is read by agents and carries the harness's document frontmatter; a
-    command carries no field lines; an agents file renders to a block that an installer wraps the
-    operator's text around; it has no output path and no frontmatter."""
+    command carries no field lines; a skill renders a directory — `skills/<name>/SKILL.md`, carrying
+    the two fields both harnesses read, and the supporting files it lists, each opened by a comment
+    banner; an agents file renders to a block that an installer wraps the operator's text around; it
+    has no output path and no frontmatter."""
 
     AGENT = "agent"
     DOCUMENT = "document"
     COMMAND = "command"
+    SKILL = "skill"
     AGENTS_FILE = "agents file"
 
 
@@ -66,13 +69,14 @@ class HarnessText(Enum):
     PROJECT_HARNESS_DIR = "project_harness_dir"
     PROJECT_TEMP_DIR = "project_temp_dir"
     USER_HARNESS_DIR = "user_harness_dir"
+    MCP_TOOL_PREFIX = "mcp_tool_prefix"
 
 
 class AgentsFileText(Enum):
     """A value only the agents file's prose names, bound when it renders."""
 
     SCOPE_NAME = "scope_name"
-    DISPATCH_MODEL = "dispatch_model"
+    CODER_DISPATCH = "coder_dispatch"
 
 
 def key(name: HarnessText | Anchor | AgentsFileText) -> str:
