@@ -30,7 +30,22 @@ PROVE_REPLACEMENT_RULE = """**Retire a mechanism only after its replacement has 
 
 PROVE_REPLACEMENT_FIRST_CHANGE = f"""{PROVE_REPLACEMENT_RULE} When your assignment deletes a mechanism whose replacement no test or runner target yet shows doing its job, report that as a Blocker and leave it in place."""
 
-MACHINE_GUARANTEES = """**Put machine guarantees on machines.** A consumer of inference-produced output that assumes a guarantee only a machine gives is a defect — machine behavior expected of inference. Tells, by guarantee assumed — *byte fidelity*: a parser, schema, or format spec whose input an agent hand-authors. *Exhaustiveness*: an always/every/never obligation with no mechanical check. *Tirelessness*: an instruction expected to hold on the last repetition as on the first, or at the end of a long context as at its top. *Determinism*: same input relied on for same output. *Recall*: a far-back instruction relied on at the point of use. Split it: the guaranteed half to a tool, the judgment half to inference. A guarantee is carried by a tool by definition, so where that tool does not exist, name the tool that must — its absence is a gap to surface, never grounds to leave the guarantee in prose."""
+MACHINE_GUARANTEES_LEAD = """**Put machine guarantees on machines.**"""
+MACHINE_GUARANTEES_FRAME = """A consumer of inference-produced output that assumes a guarantee only a machine gives is a defect — machine behavior expected of inference."""
+MACHINE_GUARANTEES_TELLS = """Tells, by guarantee assumed — *byte fidelity*: a parser, schema, or format spec whose input an agent hand-authors. *Exhaustiveness*: an always/every/never obligation with no mechanical check. *Tirelessness*: an instruction expected to hold on the last repetition as on the first, or at the end of a long context as at its top. *Determinism*: same input relied on for same output. *Recall*: a far-back instruction relied on at the point of use. Split it: the guaranteed half to a tool, the judgment half to inference. A guarantee is carried by a tool by definition, so where that tool does not exist, name the tool that must — its absence is a gap to surface, never grounds to leave the guarantee in prose."""
+
+# The frame is the one sentence in this clause naming who holds the obligation no machine can carry:
+# a consumer of inference-produced output for a seat that produces or reviews one, a clause's own
+# reader for the seat that writes clauses. The lead, the tells and the split are shared either side
+# of it, so the constant is the consumer-framed default, byte for byte as it was, and
+# machine_guarantees() puts a caller's own frame in its place.
+MACHINE_GUARANTEES = f"""{MACHINE_GUARANTEES_LEAD} {MACHINE_GUARANTEES_FRAME} {MACHINE_GUARANTEES_TELLS}"""
+
+
+def machine_guarantees(*, frame: str = MACHINE_GUARANTEES_FRAME) -> str:
+    """The same clause over a caller's own `frame` sentence in place of the consumer-framed default."""
+    return f"""{MACHINE_GUARANTEES_LEAD} {frame} {MACHINE_GUARANTEES_TELLS}"""
+
 
 TESTS_NOT_RUNTIME_CHECKS = """**A deterministic job is a tested function, not a runtime check.** Write it once, unit-test it, call it. Runtime checks are for boundaries (*Runtime boundary checks*) and for results no finite test set settles; a check that fires only when your own code is wrong is a missing test."""
 

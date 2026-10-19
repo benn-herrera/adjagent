@@ -42,7 +42,8 @@ Every `kb-root/...` path a reference names resolves against the located **KB roo
 **No KB, and this repository holds LaTeX sources.** Not a dead end: it is a build waiting to happen.
 Identify the volume root — the entry whose `usage` is `toplevel` in `00README.json` where the project
 has one, else the `.tex` file carrying `\\documentclass` — put it to the user, and route to
-`references/build.md` once they confirm it.
+`references/build.md` once they confirm it. That build has a fast path that spends no inference, and
+the reference carries it.
 
 **Neither a KB nor a source.** Say so and stop. There is nothing here to probe for, and further
 looking only costs the user time.
@@ -220,6 +221,20 @@ The volume roots the user names are the whole input, each spelled relative to th
 passed in the order given, one `volume-root` per source. The KB root is always `kb-root/`, a name the
 tool hard-codes and takes no override for. Anything else the user typed is not an input — not a further
 source, and nothing this reference carries into the launch; say so rather than folding it into the call.
+
+## The fast path
+
+The same `build` call with `no-inference` true is the shortcut to a KB — the structure, without the
+models, in one argument rather than a separate command or a second tool. Offer it for a
+first look at what a KB over these sources holds, or for a run the user wants before spending
+inference on a long build.
+
+Every step that calls a model is dropped and the rest of the build is walked: the document graph, its
+spine seed, declared claims, equations, the validation gate and readiness all still run. What it
+leaves out is the model's share — no discovered claims, no unmarked references, no co-linear
+culling, no dependencies attributed by the model, no overview passage — and the result carries a
+note naming each step it skipped. State that trade when you offer it: this is the structure, not a
+complete KB. The full build follows on the same KB afterwards if the user wants the rest.
 
 ## Launch
 

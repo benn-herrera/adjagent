@@ -13,6 +13,7 @@ renderer maps tools to spellings and computes the governed keys.
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from adjagent.errors import InputError
@@ -33,9 +34,12 @@ class AgentFields:
 
 class McpEntryBuilder(Protocol):
     """Builds the `kbase` server entry and the container path it nests under, from the server command
-    string and the absolute KB root path; keyword-only, so the two strings cannot be swapped."""
+    string, the absolute KB root path, and the project root — a path, not a string — that the command
+    is named relative to when it sits inside it; keyword-only, so the strings cannot be swapped."""
 
-    def __call__(self, *, command: str, kb_root: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
+    def __call__(
+        self, *, command: str, kb_root: str, project_root: Path
+    ) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
 
 
 @dataclass(frozen=True)

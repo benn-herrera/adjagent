@@ -1,6 +1,7 @@
 """The claude harness."""
 
 import re
+from pathlib import Path
 
 from adjagent.harness import AgentFields, Harness, McpSettings, quoted
 from adjagent.vocabulary import Tool
@@ -24,9 +25,16 @@ def _coder_dispatch(model: str) -> str:
   debugging — dispatch at `model: {model}`; otherwise the definition's pin stands."""
 
 
-def _mcp_entry(*, command: str, kb_root: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """The `kbase` server entry and the `mcpServers` container it nests under."""
-    return {"command": command, "args": ["mcp", "--kb-root", kb_root]}, ("mcpServers", "kbase")
+def _mcp_entry(*, command: str, kb_root: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """The `kbase` server entry and the `mcpServers` container it nests under. The command is the
+    executable's path relative to the project when it sits inside it, absolute otherwise: Claude Code
+    reads an absolute path inside the project as a shared file outside it."""
+    executable = Path(command).resolve()
+    project = project_root.resolve()
+    return {
+        "command": executable.relative_to(project).as_posix() if executable.is_relative_to(project) else command,
+        "args": ["mcp", "--kb-root", kb_root],
+    }, ("mcpServers", "kbase")
 
 
 HARNESS = Harness(

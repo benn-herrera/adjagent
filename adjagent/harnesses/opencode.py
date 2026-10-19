@@ -1,6 +1,7 @@
 """The opencode harness."""
 
 import re
+from pathlib import Path
 
 from adjagent.harness import AgentFields, Harness, McpSettings, quoted
 from adjagent.vocabulary import Tool
@@ -23,8 +24,10 @@ def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _mcp_entry(*, command: str, kb_root: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """The `kbase` server entry and the `mcp.servers` container it nests under."""
+def _mcp_entry(*, command: str, kb_root: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """The `kbase` server entry and the `mcp.servers` container it nests under. The command stays
+    absolute, unlike claude's: opencode reports no shared-file warning for one, and it starts a local
+    server from its own directory rather than the project's — so `project_root` is not read."""
     return {"type": "local", "command": [command, "mcp", "--kb-root", kb_root]}, ("mcp", "servers", "kbase")
 
 

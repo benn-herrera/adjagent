@@ -263,30 +263,240 @@ def _kbase_copy(root: Path, source: Path) -> tuple[Path, bytes]:
         raise InputError(f"the kbase source '{source}' cannot be read: {exc}") from exc
 
 
+def _refuse_non_object(data: dict, *, container: tuple[str, ...]) -> None:
+    """Refuse a key on `container`'s path that holds something other than an object: it cannot nest the
+    entry."""
+    for key in container[:-1]:
+        child = data.get(key)
+        if child is None:
+            return
+        if not isinstance(child, dict):
+            raise InputError(f"MCP settings nests a non-object under '{key}' — cannot register the kbase server")
+        data = child
+
+
 def _mcp_entry_at(data: dict, *, container: tuple[str, ...], entry: dict) -> dict:
     """`data` with `entry` at `container`'s path, every unrelated key kept. A key on that path holding
     something other than an object cannot nest the entry and is refused."""
+    _refuse_non_object(data, container=container)
     nested = data
     for key in container[:-1]:
-        child = nested.get(key)
-        if child is None:
-            child = {}
-            nested[key] = child
-        if not isinstance(child, dict):
-            raise InputError(f"MCP settings nests a non-object under '{key}' — cannot register the kbase server")
-        nested = child
+        nested = nested.setdefault(key, {})
     nested[container[-1]] = entry
     return data
 
 
-def mcp_merge(project: Path, *, harness: Harness, command: str, kb_root: str) -> None:
-    """Register the `kbase` server in `harness`'s project settings file under `project`: the first
-    discovered alternative, else the canonical path — created when no file the contract names exists.
-    The entry lands at the contract's container path, every unrelated key kept by a parse-and-rewrite.
+# The splice `mcp_merge` edits an existing settings file with. A file the consumer already has is
+# theirs, so the entry is placed in the text itself rather than by reserializing a parse of it: key
+# order, indentation, line endings and every other value come back byte for byte. The scanner below
+# reads just enough structure to delimit that one slot, and refuses rather than guesses.
 
-    A discovered file that is not plain JSON — JSONC comments, which a rewrite would destroy — is
-    reported and left untouched, with the entry printed for the operator to merge by hand."""
-    entry, container = harness.mcp.entry(command=command, kb_root=kb_root)
+
+class _Unsafe(Exception):
+    """A placement the splice will not guess at: a level naming the key it must touch twice, or a text
+    it cannot delimit."""
+
+
+class _Member(NamedTuple):
+    """One member of a JSON object: its key, where the key's token starts, and its value's span."""
+
+    key: str
+    key_start: int
+    value_start: int
+    value_end: int
+
+
+class _Object(NamedTuple):
+    """A JSON object: where its braces sit and the members between them."""
+
+    start: int
+    end: int
+    members: tuple[_Member, ...]
+
+
+def _at(text: str, index: int) -> str:
+    """The character at `index`; running off the end is a text the splice will not delimit."""
+    if index >= len(text):
+        raise _Unsafe("text ends inside a value")
+    return text[index]
+
+
+def _skip_ws(text: str, index: int) -> int:
+    """The first index at or after `index` holding a non-whitespace character."""
+    while index < len(text) and text[index] in " \t\r\n":
+        index += 1
+    return index
+
+
+def _string_end(text: str, index: int) -> int:
+    """The index just past the string opening at `index`: escapes stepped over whole, so a quote or
+    brace inside the string is never read as structure."""
+    index += 1
+    while True:
+        char = _at(text, index)
+        if char == "\\":
+            index += 2
+        elif char == '"':
+            return index + 1
+        else:
+            index += 1
+
+
+def _value_end(text: str, index: int) -> int:
+    """The index just past the JSON value opening at `index`."""
+    char = _at(text, index)
+    if char == '"':
+        return _string_end(text, index)
+    if char == "{":
+        return _object(text, index).end
+    if char == "[":
+        index = _skip_ws(text, index + 1)
+        while _at(text, index) != "]":
+            index = _skip_ws(text, _value_end(text, index))
+            if _at(text, index) == ",":
+                index = _skip_ws(text, index + 1)
+            elif _at(text, index) != "]":
+                raise _Unsafe("an array element with no separator")
+        return index + 1
+    while index < len(text) and text[index] not in ",}] \t\r\n":
+        index += 1
+    return index
+
+
+def _object(text: str, index: int) -> _Object:
+    """The object whose opening brace is at `index`: its members and the span it covers. A key appearing
+    twice is read as it stands; `_member` is what refuses it, at the level the splice chooses on."""
+    members: list[_Member] = []
+    cursor = _skip_ws(text, index + 1)
+    while _at(text, cursor) != "}":
+        key_end = _string_end(text, cursor)
+        value_start = _skip_ws(text, key_end)
+        if _at(text, value_start) != ":":
+            raise _Unsafe("a member with no colon")
+        value_start = _skip_ws(text, value_start + 1)
+        value_end = _value_end(text, value_start)
+        members.append(_Member(json.loads(text[cursor:key_end]), cursor, value_start, value_end))
+        cursor = _skip_ws(text, value_end)
+        if _at(text, cursor) == ",":
+            cursor = _skip_ws(text, cursor + 1)
+        elif _at(text, cursor) != "}":
+            raise _Unsafe("a member with no separator")
+    return _Object(index, cursor + 1, tuple(members))
+
+
+def _member(members: tuple[_Member, ...], key: str) -> _Member | None:
+    """The member named `key`, or None when the object has none. A level naming it twice does not say
+    which one is meant, so it is refused."""
+    found = [member for member in members if member.key == key]
+    if len(found) > 1:
+        raise _Unsafe(f"'{key}' twice on one level")
+    return found[0] if found else None
+
+
+def _line_indent(text: str, index: int) -> str | None:
+    """The whitespace from the start of `index`'s line up to `index` — the indent a key or brace takes
+    there; None when anything other than whitespace precedes it on that line."""
+    prefix = text[text.rfind("\n", 0, index) + 1 : index]
+    return prefix if not prefix.strip(" \t") else None
+
+
+def _indent_unit(text: str, root: _Object) -> str | None:
+    """The step from an object's closing-brace indent to its members' indent, read from the file's first
+    object that states one; None when it writes none (a file on one line, or flat)."""
+    obj = root
+    while True:
+        close = _line_indent(text, obj.end - 1)
+        if obj.members and close is not None:
+            member = _line_indent(text, obj.members[0].key_start)
+            if member is not None and member.startswith(close):
+                return member[len(close) :] or None
+        nested = next((member for member in obj.members if _at(text, member.value_start) == "{"), None)
+        if nested is None:
+            return None
+        obj = _object(text, nested.value_start)
+
+
+def _member_indent(text: str, obj: _Object, unit: str | None) -> str | None:
+    """The indent a member added to `obj` takes: its last sibling's, else one `unit` in from the
+    object's closing brace; None where the file writes no such line."""
+    if obj.members:
+        return _line_indent(text, obj.members[-1].key_start)
+    close = _line_indent(text, obj.end - 1)
+    return None if close is None or unit is None else close + unit
+
+
+def _value_text(value: object, *, indent: str | None, unit: str | None, newline: str) -> str:
+    """`value` as JSON: inline when `indent` or `unit` is None, else a level per line, the first line
+    where the caller puts it and every line after it at `indent` plus the depth it already carries."""
+    if indent is None or unit is None:
+        return json.dumps(value, separators=(",", ":"))
+    lines = json.dumps(value, indent=unit).split("\n")
+    return newline.join([lines[0], *(indent + line for line in lines[1:])])
+
+
+def _with_member(text: str, *, obj: _Object, key: str, value: object, unit: str | None, newline: str) -> str:
+    """`text` with `key` and `value` a member of `obj` — after its last member, or alone in an empty
+    object — on a line at its siblings' indent, or inline where the file writes no such line."""
+    indent = _member_indent(text, obj, unit)
+    member = f"{json.dumps(key)}: {_value_text(value, indent=indent, unit=unit, newline=newline)}"
+    if obj.members:
+        at = obj.members[-1].value_end
+        if indent is None:
+            return f"{text[:at]},{member}{text[at:]}"
+        return f"{text[:at]},{newline}{indent}{member}{text[at:]}"
+    close = _line_indent(text, obj.end - 1)
+    interior = obj.start + 1
+    if indent is None or close is None:
+        return f"{text[:interior]}{member}{text[obj.end - 1 :]}"
+    return f"{text[:interior]}{newline}{indent}{member}{newline}{close}{text[obj.end - 1 :]}"
+
+
+def _splice(text: str, *, container: tuple[str, ...], entry: dict) -> str | None:
+    """`text` — plain JSON the caller has parsed — with `entry` at `container`'s path, every byte
+    outside that slot kept. None when the placement cannot be made with certainty: a level naming the
+    key the splice must pass through twice, or a text this scanner cannot delimit."""
+    try:
+        start = _skip_ws(text, 0)
+        if _at(text, start) != "{":
+            raise _Unsafe("a document whose root is not an object")
+        root = _object(text, start)
+        unit = _indent_unit(text, root)
+        newline = "\r\n" if "\r\n" in text else "\n"
+        obj = root
+        for depth, key in enumerate(container[:-1]):
+            member = _member(obj.members, key)
+            if member is None:
+                # The container is absent from here down: the whole chain goes in as one member.
+                value: object = {container[-1]: entry}
+                for name in reversed(container[depth + 1 : -1]):
+                    value = {name: value}
+                return _with_member(text, obj=obj, key=key, value=value, unit=unit, newline=newline)
+            if _at(text, member.value_start) != "{":
+                raise _Unsafe(f"'{key}' is not an object")
+            obj = _object(text, member.value_start)
+        member = _member(obj.members, container[-1])
+        if member is None:
+            return _with_member(text, obj=obj, key=container[-1], value=entry, unit=unit, newline=newline)
+        indent = _line_indent(text, member.key_start)
+        value_text = _value_text(entry, indent=indent, unit=unit, newline=newline)
+        return f"{text[: member.value_start]}{value_text}{text[member.value_end :]}"
+    except _Unsafe:
+        return None
+
+
+def mcp_merge(project: Path, *, harness: Harness, command: str, kb_root: str) -> None:
+    """Register the `kbase` server in `harness`'s project settings file under `project` — also the
+    project root the entry is built against, so a command inside it is named relative to it: the first
+    discovered alternative, else the canonical path — created when no file the contract names exists.
+    The entry lands at the contract's container path.
+
+    An existing file is edited, never reserialized: the entry's own slot is spliced into the text as it
+    stands, so every other byte — other entries, key order, indentation, line endings, number and
+    string spelling — comes back exactly as it was found. A file that is not plain JSON (JSONC comments
+    a rewrite would destroy), one naming a key the entry must pass through twice, and one the splice
+    cannot delimit are each reported and left untouched, with the entry printed for the operator to
+    merge by hand."""
+    entry, container = harness.mcp.entry(command=command, kb_root=kb_root, project_root=project)
     canonical = project / harness.mcp.canonical
     candidates = [project / alternative for alternative in harness.mcp.alternatives] + [canonical]
     target = next((path for path in candidates if path.is_file()), canonical)
@@ -296,18 +506,25 @@ def mcp_merge(project: Path, *, harness: Harness, command: str, kb_root: str) ->
         target.write_text(fresh, encoding="utf-8")
         print(f"wrote {target} with the kbase MCP entry")
         return
+    # newline="" on both sides: the file's own line endings are the consumer's, and a CRLF file
+    # translated on the way in or out would be rewritten without the merge touching it.
+    text = _utf8_text(target)
     try:
-        data = json.loads(target.read_text(encoding="utf-8"))
+        data = json.loads(text)
     except json.JSONDecodeError:
         data = None
-    # A text json.loads rejects is a JSONC comment carrier, or otherwise not a plain object; a
-    # parse-and-rewrite would destroy what it cannot read, so both are left to the operator.
-    if isinstance(data, dict):
-        merged = json.dumps(_mcp_entry_at(data, container=container, entry=entry), indent=2) + "\n"
-        target.write_text(merged, encoding="utf-8")
-        print(f"registered the kbase MCP entry in {target}")
-    else:
+    # A text json.loads rejects is a JSONC comment carrier, or otherwise not a plain object; a splice
+    # would destroy what it cannot read, so both are left to the operator.
+    if not isinstance(data, dict):
         print(f"{target} carries JSONC comments — left untouched; merge this entry by hand: {json.dumps(entry)}")
+        return
+    _refuse_non_object(data, container=container)
+    spliced = _splice(text, container=container, entry=entry)
+    if spliced is None:
+        print(f"{target} could not be edited safely — left untouched; merge this entry by hand: {json.dumps(entry)}")
+        return
+    target.write_text(spliced, encoding="utf-8", newline="")
+    print(f"registered the kbase MCP entry in {target}")
 
 
 def _runner_file(project: Path) -> tuple[str, Path] | None:
@@ -320,14 +537,14 @@ def _runner_file(project: Path) -> tuple[str, Path] | None:
     return None
 
 
-def _read_runner(path: Path) -> str:
+def _utf8_text(path: Path) -> str:
     """`path`'s text, read with no newline translation so a rewrite keeps each line's own ending. A
     file that cannot be read or decoded is refused, naming it."""
     try:
         with path.open("r", encoding="utf-8", newline="") as handle:
             return handle.read()
     except (OSError, UnicodeError) as exc:
-        raise InputError(f"runner file '{path}' is not readable UTF-8 text: {exc}") from exc
+        raise InputError(f"'{path}' is not readable UTF-8 text: {exc}") from exc
 
 
 def _check_runner(project: Path) -> None:
@@ -335,7 +552,7 @@ def _check_runner(project: Path) -> None:
     refused there, not raised out of the write phase with packages and renders already landed."""
     found = _runner_file(project)
     if found is not None:
-        _read_runner(found[1])
+        _utf8_text(found[1])
 
 
 def kb_include_line(*, runner: str, harness_relpath: str) -> str:
@@ -430,7 +647,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
         print(f"created {path} with the KB include line")
         return
     runner, path = found
-    text = _read_runner(path)
+    text = _utf8_text(path)
     named = _named_harnesses(text)
     if len(named) > 1:
         indexes = ", ".join(str(match.index + 1) for match in named)

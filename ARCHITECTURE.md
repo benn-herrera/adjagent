@@ -69,8 +69,13 @@ A kb install writes three things beside the renders:
 - **The `kbase` server entry**, merged into the harness's own project settings file (`Harness.mcp`):
   claude's `.mcp.json`, or for opencode the first discovered of `.opencode/opencode.json`,
   `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. The entry's command is
-  the absolute path of the installed executable and its KB root is the project root. A settings file
-  that is not plain JSON — JSONC comments a rewrite would destroy — is reported with the entry
+  the installed executable's path relative to the project root when it sits inside it, and absolute
+  otherwise, and its KB root is the project root: Claude Code reads an absolute in-project command as
+  a shared file outside the project. opencode's entry keeps the absolute form, which draws no such
+  warning. An existing settings file is edited in place: the entry's own slot is spliced into the text
+  as it stands, so every other byte — other entries, key order, indentation, line endings — is kept,
+  while a file this install creates is written whole. One that is not plain JSON — JSONC comments a
+  splice would destroy — or that the splice cannot place with certainty is reported with the entry
   printed, and left as it stands.
 - **The runner include line**, appended to the project's justfile or Makefile — or to a `Makefile`
   created carrying it, where the project has neither: the non-fatal `import?` or `-include` form

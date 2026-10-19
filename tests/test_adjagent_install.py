@@ -338,7 +338,12 @@ def test_a_kb_install_writes_the_kb_definitions_the_package_the_mcp_entry_and_th
     assert kbase.read_bytes() == dist.read_bytes() == _KBASE_BYTES
     assert os.access(kbase, os.X_OK)
     assert json.loads((project / ".mcp.json").read_text(encoding="utf-8")) == {
-        "mcpServers": {"kbase": {"command": str(kbase.resolve()), "args": ["mcp", "--kb-root", str(project.resolve())]}}
+        "mcpServers": {
+            "kbase": {
+                "command": ".claude/adj-tools/kb-tools/kbase",
+                "args": ["mcp", "--kb-root", str(project.resolve())],
+            }
+        }
     }
     assert (project / "justfile").read_text(encoding="utf-8") == (
         "# mine\n\nimport? '.claude/adj-tools/kb-tools/runner-snippets/kb.just'\n"
@@ -615,18 +620,56 @@ def test_every_install_removes_each_legacy_tree_and_names_it(tmp_path: Path, cap
     assert (message in out) == (not kb)
 
 
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        (lambda project: project / ".claude/adj-tools/kb-tools/kbase", ".claude/adj-tools/kb-tools/kbase"),
+        (lambda project: project / "adj-tools/kb-tools/kbase", "adj-tools/kb-tools/kbase"),
+        (lambda project: project.parent / "elsewhere/kbase", None),
+    ],
+    ids=["inside", "project-is-root", "outside"],
+)
+def test_the_claude_mcp_command_is_relative_to_the_project_when_it_sits_inside(
+    tmp_path: Path, command, expected: str | None
+) -> None:
+    """Claude Code reads an absolute command inside the project as a shared file outside it, so one
+    there is named relative to the project root with POSIX separators. An executable outside the
+    project — an install root there is refused before the entry is built, so this is the builder's
+    own contract — keeps its absolute path, `None` standing for it: there is no relative name."""
+    project = tmp_path / "project"
+    project.mkdir()
+    executable = command(project).resolve()
+    entry, container = CLAUDE.mcp.entry(command=str(executable), kb_root=str(project), project_root=project)
+    assert entry["command"] == (str(executable) if expected is None else expected)
+    assert container == ("mcpServers", "kbase")
+
+
 def test_the_mcp_merge_keeps_every_unrelated_key(tmp_path: Path) -> None:
+    """The entry is replaced where it stands — the absolute command an earlier version wrote does not
+    survive, so an upgraded project needs no hand edit — and every key beside it is kept."""
     project = tmp_path
     root = project / ".claude"
     root.mkdir()
     (project / ".mcp.json").write_text(
-        json.dumps({"permissions": {"allow": ["Bash"]}, "mcpServers": {"other": {"command": "x"}}}), encoding="utf-8"
+        json.dumps(
+            {
+                "permissions": {"allow": ["Bash"]},
+                "mcpServers": {
+                    "other": {"command": "x"},
+                    "kbase": {"command": f"{project.resolve()}/.claude/adj-tools/kb-tools/kbase", "args": []},
+                },
+            }
+        ),
+        encoding="utf-8",
     )
     _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
     data = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
     assert data["permissions"] == {"allow": ["Bash"]}
     assert data["mcpServers"]["other"] == {"command": "x"}
-    assert data["mcpServers"]["kbase"]["command"] == str(root.resolve() / "adj-tools/kb-tools/kbase")
+    assert data["mcpServers"]["kbase"] == {
+        "command": ".claude/adj-tools/kb-tools/kbase",
+        "args": ["mcp", "--kb-root", str(project.resolve())],
+    }
 
 
 def test_the_opencode_mcp_entry_lands_in_the_discovered_file_in_the_v2_shape(tmp_path: Path) -> None:
@@ -676,6 +719,135 @@ def test_an_mcp_file_carrying_jsonc_comments_is_reported_and_left_untouched(tmp_
     _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
     assert discovered.read_text(encoding="utf-8") == prior
     assert f"{discovered} carries JSONC comments — left untouched; merge this entry by hand:" in capsys.readouterr().out
+
+
+def _built_entry(harness: Harness, project: Path, root: Path) -> dict:
+    """The `kbase` entry `harness`'s builder makes for `root` installed under `project` — the value the
+    splice is expected to have placed, read from the builder rather than restated."""
+    entry, _ = harness.mcp.entry(
+        command=str(root.resolve() / "adj-tools/kb-tools/kbase"), kb_root=str(project.resolve()), project_root=project
+    )
+    return entry
+
+
+def test_the_mcp_splice_leaves_every_byte_outside_the_entry_slot(tmp_path: Path) -> None:
+    """A settings file the consumer wrote is theirs: four-space indentation, a compact one-line object
+    beside ours, key order and the number spelling `2.50` all come back as they were, only our slot
+    being touched."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    seed = (
+        "{\n"
+        '    "permissions": {"allow": ["Bash", "Read"], "deny": []},\n'
+        '    "mcpServers": {\n'
+        '        "other": {"command": "x", "args": [1, 2.50, true]}\n'
+        "    },\n"
+        '    "theme": "dark"\n'
+        "}\n"
+    )
+    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    head, other, tail = seed.partition('"other": {"command": "x", "args": [1, 2.50, true]}')
+    assert other and text.startswith(head) and text.endswith(tail)
+    before = json.loads(seed)
+    before["mcpServers"]["kbase"] = _built_entry(CLAUDE, project, root)
+    assert json.loads(text) == before
+
+
+def test_a_compact_one_line_mcp_file_gains_the_entry_inline(tmp_path: Path) -> None:
+    """The file states no indent, so none is invented: the entry goes in on the line it finds."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    (project / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    assert "\n" not in text
+    assert json.loads(text) == {"mcpServers": {"kbase": _built_entry(CLAUDE, project, root)}}
+
+
+def test_a_settings_file_without_the_container_gains_it_whole(tmp_path: Path) -> None:
+    """`mcpServers` absent is not a reason to reserialize: the container goes in as one member, on a
+    line indented like the sibling it lands beside."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    seed = '{\n  "permissions": {"allow": ["Bash"]}\n}\n'
+    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    assert text.startswith('{\n  "permissions": {"allow": ["Bash"]},\n  "mcpServers": ')
+    assert text.endswith("\n}\n")
+    assert json.loads(text) == {
+        "permissions": {"allow": ["Bash"]},
+        "mcpServers": {"kbase": _built_entry(CLAUDE, project, root)},
+    }
+
+
+def test_an_existing_kbase_entry_is_replaced_where_it_stands(tmp_path: Path) -> None:
+    """Our value replaces the entry's, and every other member — including the one written after it —
+    keeps its bytes: an upgraded project loses an absolute command without a hand edit."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    prior = '{"command": "/old/absolute/kbase", "args": ["mcp", "--kb-root", "/old"]}'
+    seed = f'{{\n  "mcpServers": {{\n    "kbase": {prior},\n    "other": {{"command": "x"}}\n  }}\n}}\n'
+    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    head, found, tail = seed.partition(prior)
+    assert found and text.startswith(head) and text.endswith(tail)
+    assert json.loads(text)["mcpServers"] == {"kbase": _built_entry(CLAUDE, project, root), "other": {"command": "x"}}
+
+
+def test_a_crlf_mcp_file_keeps_its_line_endings(tmp_path: Path) -> None:
+    """Byte reading and writing with no newline translation, and the entry's own lines take the file's
+    ending: a CRLF file stays CRLF through the merge."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    seed = '{\r\n  "mcpServers": {\r\n  }\r\n}\r\n'
+    (project / ".mcp.json").write_bytes(seed.encode("utf-8"))
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    raw = (project / ".mcp.json").read_bytes()
+    assert b"\n" not in raw.replace(b"\r\n", b"")
+    assert json.loads(raw.decode("utf-8")) == {"mcpServers": {"kbase": _built_entry(CLAUDE, project, root)}}
+
+
+def test_a_duplicate_container_key_is_reported_and_left_byte_identical(tmp_path: Path, capsys) -> None:
+    """The file names `mcpServers` twice, so the splice cannot say which one is meant: it reports and
+    writes nothing — the install still succeeded — rather than picking one."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    seed = '{"mcpServers": {"other": {"command": "x"}}, "mcpServers": {}}\n'
+    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    capsys.readouterr()
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    assert (project / ".mcp.json").read_text(encoding="utf-8") == seed
+    out = capsys.readouterr().out
+    entry = _built_entry(CLAUDE, project, root)
+    assert f"{project / '.mcp.json'} could not be edited safely — left untouched; merge this entry by hand:" in out
+    assert json.dumps(entry) in out
+
+
+def test_the_opencode_container_is_spliced_into_a_plain_json_file(tmp_path: Path) -> None:
+    """opencode reaches the splice whenever the file it discovers is plain JSON — the `.jsonc` name it
+    prefers says nothing about the content — so its three-level `mcp.servers` container is placed the
+    same way, every other byte kept."""
+    project = tmp_path
+    root = project / ".opencode"
+    root.mkdir()
+    discovered = root / "opencode.json"
+    seed = '{\n  "theme": "omlx",\n  "mcp": {\n    "servers": {\n      "other": {"type": "local"}\n    }\n  }\n}\n'
+    discovered.write_text(seed, encoding="utf-8")
+    _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    text = discovered.read_text(encoding="utf-8")
+    head, other, tail = seed.partition('"other": {"type": "local"}')
+    assert other and text.startswith(head) and text.endswith(tail)
+    assert json.loads(text)["mcp"]["servers"]["kbase"] == _built_entry(OPENCODE, project, root)
 
 
 def test_the_include_line_is_appended_to_an_existing_justfile(tmp_path: Path) -> None:
