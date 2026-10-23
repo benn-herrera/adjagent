@@ -10,8 +10,8 @@ from .corpus import corpus
 
 log = logging.getLogger(__name__)
 
-CODE_PREFIXES = ("liaison_tools", "adjagent", "devtools")
-CODE_UNSWEPT = ("liaison_tools/tests/", "devtools/tests/")
+CODE_PREFIXES = ("adjagent", "devtools")
+CODE_UNSWEPT = ("devtools/tests/",)
 
 
 def code_corpus(*, rev: str | None) -> dict[str, str]:

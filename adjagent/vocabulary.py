@@ -63,13 +63,22 @@ class Kind(Enum):
 
 
 class HarnessText(Enum):
-    """A harness string a definition's prose may name; each value is the `Harness` field it reads."""
+    """A harness string a definition's prose may name; each value is the `Harness` field it reads, and
+    every harness supplies all of them, so a body naming one always renders its text."""
 
     AGENTS_FILE = "agents_file"
     PROJECT_HARNESS_DIR = "project_harness_dir"
     PROJECT_TEMP_DIR = "project_temp_dir"
     USER_HARNESS_DIR = "user_harness_dir"
     MCP_TOOL_PREFIX = "mcp_tool_prefix"
+
+
+class OptionalHarnessText(Enum):
+    """A harness string a definition's prose may name that a harness may supply nothing for; each value
+    is the `Harness` field it reads. Spelled and filled as a `HarnessText` is, and a harness supplying
+    nothing fills it to the empty string, which drops the paragraph the placeholder stands in."""
+
+    RECIPE_RULE = "recipe_rule"
 
 
 class AgentsFileText(Enum):
@@ -79,14 +88,14 @@ class AgentsFileText(Enum):
     CODER_DISPATCH = "coder_dispatch"
 
 
-def key(name: HarnessText | Anchor | AgentsFileText) -> str:
+def key(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText) -> str:
     """A render-time value's flat key: its enum value with each "_" read as "-"."""
     return "-".join(name.value.split("_"))
 
 
-def hole(name: HarnessText | Anchor | AgentsFileText) -> str:
+def hole(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText) -> str:
     """The placeholder a definition body carries for a render-time value: `@!hrn-<key>!@` for a harness
-    text, `@!fam-<key>!@` for an overlay anchor, `@!agf-<key>!@` for an agents-file value. No rendered
-    prose spells `@!`."""
-    namespace = {HarnessText: "hrn", Anchor: "fam", AgentsFileText: "agf"}[type(name)]
+    text, optional or not, `@!fam-<key>!@` for an overlay anchor, `@!agf-<key>!@` for an agents-file
+    value. No rendered prose spells `@!`."""
+    namespace = {HarnessText: "hrn", OptionalHarnessText: "hrn", Anchor: "fam", AgentsFileText: "agf"}[type(name)]
     return f"@!{namespace}-{key(name)}!@"

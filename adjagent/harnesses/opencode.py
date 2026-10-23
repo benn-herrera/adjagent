@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from adjagent.harness import AgentFields, Harness, McpSettings, quoted
+from adjagent.harness import AgentFields, Harness, McpSettings, project_relative, quoted
 from adjagent.vocabulary import Tool
 
 _PROJECT_HARNESS_DIR = ".opencode"
@@ -24,11 +24,10 @@ def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _mcp_entry(*, command: str, kb_root: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """The `kbase` server entry and the `mcp.servers` container it nests under. The command stays
-    absolute, unlike claude's: opencode reports no shared-file warning for one, and it starts a local
-    server from its own directory rather than the project's — so `project_root` is not read."""
-    return {"type": "local", "command": [command, "mcp", "--kb-root", kb_root]}, ("mcp", "servers", "kbase")
+def _mcp_entry(*, command: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """A local entry under `mcp.servers` whose argv is the command from `project_relative` and `mcp`.
+    The server is started in the project directory and finds the KB from there, so the argv names no root."""
+    return {"type": "local", "command": [project_relative(command, project_root), "mcp"]}, ("mcp", "servers", "kbase")
 
 
 HARNESS = Harness(
@@ -38,6 +37,7 @@ HARNESS = Harness(
     project_temp_dir=".opencode-temp",
     user_harness_dir="~/.config/opencode",
     mcp_tool_prefix="kbase_",
+    recipe_rule="",
     coder_dispatch=None,
     tools={
         Tool.READ: ("read",),
@@ -66,4 +66,6 @@ HARNESS = Harness(
         alternatives=(f"{_PROJECT_HARNESS_DIR}/opencode.json", "opencode.jsonc", "opencode.json"),
         entry=_mcp_entry,
     ),
+    # The guardrail plugin it ships registers itself.
+    guardrail=None,
 )

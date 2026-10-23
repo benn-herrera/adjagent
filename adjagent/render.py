@@ -15,7 +15,7 @@ from adjagent.definitions import discover
 from adjagent.errors import InputError
 from adjagent.harness import AgentFields, Harness, quoted
 from adjagent.loading import load
-from adjagent.vocabulary import ALL, AgentsFileText, Anchor, HarnessText, Kind, Tier, hole
+from adjagent.vocabulary import ALL, AgentsFileText, Anchor, HarnessText, Kind, OptionalHarnessText, Tier, hole
 
 GENERATED_MARK = "!GENERATED! from "
 GENERATED_NOTICE = (
@@ -119,10 +119,11 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     """`body` with every placeholder filled in one pass: a harness text from ctx.harness, an anchor from
     ctx.overlay for the definition's seat ("" where the family fills none), and for the agents file alone
     its scope name and coder-dispatch bullet. A paragraph that fills to nothing is dropped with its blank
-    line, so an unfilled anchor standing as its own paragraph leaves no empty one. A placeholder-shaped
-    span naming no key is refused, naming `where`. Filled text is not rescanned."""
+    line, so an unfilled anchor or an optional harness text the harness supplies nothing for, standing as
+    its own paragraph, leaves no empty one. A placeholder-shaped span naming no key is refused, naming
+    `where`. Filled text is not rescanned."""
     seated = dataclasses.replace(ctx, seat=defn.tier)
-    values = {hole(part): ctx.harness.text(part) for part in HarnessText}
+    values = {hole(part): ctx.harness.text(part) for part in (*HarnessText, *OptionalHarnessText)}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
     if defn.kind is Kind.AGENTS_FILE:
         values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope

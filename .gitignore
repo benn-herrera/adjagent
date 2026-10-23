@@ -1,40 +1,26 @@
 .DS_Store
 .claude-temp/
-.claude/settings.local.json
-.claude/agents/
-.claude/commands/
-.claude/skills/
-.claude/adj-tools/
+.claude/
 .opencode-temp/
-.opencode/*local*
-.opencode/agents/
-.opencode/commands/
-.opencode/skills/
-.opencode/adj-tools/
+.opencode/
 
-# this repository's own install output: the shipped packages under adj-tools/, beside
-# the definition surfaces above and not part of any, the kbase MCP registration at the
-# repository root and the opencode settings, both written by an install that
-# includes kb (just install-with-kb, just install-agents-here).
+# this repository's own install output: adj-tools/, where an install puts a shipped package,
+# beside the definition surfaces above and not part of any, the kb-tools package under
+# skills/kbase/, which those surface entries already ignore, the kbase MCP
+# registration at the repository root and the opencode settings, both written by an
+# install that includes kb (just install-with-kb, just install-agents-here).
 .mcp.json
-.opencode/opencode.jsonc
 __pycache__/
 .pytest_*/
 .venv/
 mad-design/
-mad-review/
 
+# binary tool distribution download cache
 .tool-dist-cache/
 
 # this repo's own render tree (justfile RENDERED): a build product, produced
 # on demand by the same install path a consuming project gets. Never committed.
 rendered/
-
-# guest-liaison session state: messages.json is a plaintext record of
-# everything relayed to a third-party endpoint, and params.env records the
-# base URL and the key-file path. Never version-controlled.
-guest-session/
-
 
 # auto-made backups of regenerated files.
 *.bak

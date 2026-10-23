@@ -3,7 +3,8 @@
 import re
 from pathlib import Path
 
-from adjagent.harness import AgentFields, Harness, McpSettings, quoted
+from adjagent.errors import InputError
+from adjagent.harness import AgentFields, GuardrailHook, Harness, HookClaim, McpSettings, project_relative, quoted
 from adjagent.vocabulary import Tool
 
 
@@ -25,16 +26,63 @@ def _coder_dispatch(model: str) -> str:
   debugging — dispatch at `model: {model}`; otherwise the definition's pin stands."""
 
 
-def _mcp_entry(*, command: str, kb_root: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """The `kbase` server entry and the `mcpServers` container it nests under. The command is the
-    executable's path relative to the project when it sits inside it, absolute otherwise: Claude Code
-    reads an absolute path inside the project as a shared file outside it."""
-    executable = Path(command).resolve()
-    project = project_root.resolve()
-    return {
-        "command": executable.relative_to(project).as_posix() if executable.is_relative_to(project) else command,
-        "args": ["mcp", "--kb-root", kb_root],
-    }, ("mcpServers", "kbase")
+_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them, and
+never hands back with a background command running. If a recipe times out, the agent hands back naming it
+instead of rerunning it in the background."""
+
+
+def _mcp_entry(*, command: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """A `command`/`args` entry under `mcpServers`, its command from `project_relative`."""
+    return {"command": project_relative(command, project_root), "args": ["mcp"]}, ("mcpServers", "kbase")
+
+
+_GUARDRAIL_SCRIPT = "hooks/guardrail.pl"
+# The hook command, split around the harness directory it names. Claude Code reads exit 2 as a block,
+# and that is perl's status for a script it cannot open, so the command runs the script only where it
+# stands and otherwise names it on stderr and exits 1, which Claude Code reports without blocking.
+# The interpreter is `perl` on PATH, never an absolute path: the settings file is often committed and
+# shared across machines.
+_GUARDRAIL_COMMAND_HEAD = 's="$CLAUDE_PROJECT_DIR/'
+_GUARDRAIL_COMMAND_TAIL = (
+    f'{_GUARDRAIL_SCRIPT}"; if [ -f "$s" ] && [ -r "$s" ]; then exec perl "$s"; fi; '
+    'echo "guardrail hook: no readable script at $s" >&2; exit 1'
+)
+# The characters a double-quoted shell word reads as syntax, as a regex class body: a harness directory
+# holding one cannot be named in the command.
+_UNQUOTABLE = r'"$`\\'
+_GUARDRAIL_COMMAND = re.compile(
+    rf"{re.escape(_GUARDRAIL_COMMAND_HEAD)}(?:[^{_UNQUOTABLE}]+/)?{re.escape(_GUARDRAIL_COMMAND_TAIL)}"
+)
+
+
+def _guardrail_entry(harness_relpath: str) -> dict[str, object]:
+    """The PreToolUse entry running the guardrail on every Bash call, named from `$CLAUDE_PROJECT_DIR`.
+    A harness directory holding a character the double-quoted word would read as syntax is refused."""
+    if re.search(f"[{_UNQUOTABLE}]", harness_relpath):
+        raise InputError(
+            f"harness directory '{harness_relpath}' holds a character the guardrail hook command cannot "
+            "quote (\", $, ` or \\) — install into a directory without one"
+        )
+    prefix = "" if harness_relpath == "." else f"{harness_relpath}/"
+    command = f"{_GUARDRAIL_COMMAND_HEAD}{prefix}{_GUARDRAIL_COMMAND_TAIL}"
+    return {"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}
+
+
+def _guardrail_claim(element: object) -> HookClaim:
+    """What a PreToolUse element holds of the guardrail: a command is ours only when it is exactly the
+    one `_guardrail_entry` writes, for any harness directory."""
+    commands = element.get("hooks") if isinstance(element, dict) else None
+    if not isinstance(commands, list):
+        return HookClaim.NONE
+    ours = [
+        isinstance(hook, dict)
+        and isinstance(hook.get("command"), str)
+        and _GUARDRAIL_COMMAND.fullmatch(hook["command"]) is not None
+        for hook in commands
+    ]
+    if not any(ours):
+        return HookClaim.NONE
+    return HookClaim.ALONE if all(ours) else HookClaim.SHARED
 
 
 HARNESS = Harness(
@@ -44,6 +92,7 @@ HARNESS = Harness(
     project_temp_dir=".claude-temp",
     user_harness_dir="~/.claude",
     mcp_tool_prefix="mcp__kbase__",
+    recipe_rule=_RECIPE_RULE,
     coder_dispatch=_coder_dispatch,
     tools={
         Tool.READ: ("Read",),
@@ -64,4 +113,12 @@ HARNESS = Harness(
     frontmatter=_frontmatter,
     document_frontmatter=(),
     mcp=McpSettings(canonical=".mcp.json", alternatives=(), entry=_mcp_entry),
+    # Claude Code reads project hooks from this one path, whatever directory the harness is installed in.
+    guardrail=GuardrailHook(
+        script=_GUARDRAIL_SCRIPT,
+        settings=".claude/settings.json",
+        container=("hooks", "PreToolUse"),
+        entry=_guardrail_entry,
+        claim=_guardrail_claim,
+    ),
 )

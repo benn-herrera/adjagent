@@ -1,10 +1,12 @@
 """The adjagent package's own logic, each case checked against values the
 renderer did not compute: the two map flags' grammar, the rendered model text,
-the CLI's Render refusals, the frontmatter of each kind against literal lines of
-the pre-1.0 render, every rendered definition extracting frontmatter-free and every
-participant extracting to the contract, placeholder filling and refusal, overlay
-resolution and stock, Definition refusals, the loader's refusal, the description's one line and
-balanced code spans, the line cap, and the package's source invariants as walks of its syntax trees.
+the CLI's Render refusals, the frontmatter of each kind — an agent's and a
+skill's against literal lines of the pre-1.0 render, a command's and a
+document's as bare fixtures pinned to their render's shape — every rendered
+definition extracting frontmatter-free, placeholder filling and refusal, overlay resolution
+and stock, Definition refusals, the loader's refusal, the description's one line
+and balanced code spans, the line cap, and the package's source invariants as
+walks of its syntax trees.
 
 The package is imported from the repository root, which `just test` puts on
 PYTHONPATH.
@@ -45,7 +47,7 @@ from adjagent.render import (
     render_skill_file,
     write_renders,
 )
-from adjagent.vocabulary import ALL, TIERS, Anchor, HarnessText, Kind, Tool, hole
+from adjagent.vocabulary import ALL, TIERS, Anchor, HarnessText, Kind, OptionalHarnessText, Tool, hole
 from devtools import render_diff
 from tests._structure import (
     ARGUMENT_RULE,
@@ -253,17 +255,6 @@ def test_an_unrestricted_agent_frontmatter_matches_the_pre_1_0_render(ctx: Rende
     assert ctx.harness.frontmatter(agent_fields(defn, ctx)) == expected
 
 
-# The first body line of the pre-1.0 render of agents/mad/participant-contract.md.
-_CONTRACT_FIRST_LINE = (
-    "You are an independent technical reviewer participating in a structured multi-model debate review "
-    "process. The Referee has seated two or more participants for this run — each pinned to a different "
-    "model, each working the same artifact independently. You will never see any other participant's full "
-    "output, in any mode or any round; the structured alignment map produced by the Alignment Assessor is "
-    "your only window onto their positions. You are not told how many other seats there are or which models "
-    "fill them, and you do not need to know."
-)
-_CONTRACT_PATH = "agents/mad/participant-contract.md"
-
 Discovered = tuple[tuple[str, Definition], ...]
 
 
@@ -278,38 +269,62 @@ def _found(discovered: Discovered, path: str) -> tuple[str, Definition]:
     return found
 
 
-@pytest.mark.parametrize(
-    "path, harness, after_banner",
-    [
-        (_CONTRACT_PATH, CLAUDE, ["---", ""]),
-        (_CONTRACT_PATH, OPENCODE, ["mode: subagent", "disable: true", "---", ""]),
-        ("commands/mad-review.md", CLAUDE, ["---", "@.claude/agents/mad-review-referee.md"]),
-        ("commands/mad-review.md", OPENCODE, ["---", "@.opencode/agents/mad-review-referee.md"]),
-    ],
+# A command and a document take no frontmatter value of their own, so each fixture is the least a
+# definition of its kind can be: a name, a kind and a body. Each body does one thing — names the temp
+# directory — so that the placeholder fill is observable.
+_COMMAND = Definition(
+    name="probe",
+    kind=Kind.COMMAND,
+    body=f"Write scratch output under {hole(HarnessText.PROJECT_TEMP_DIR)}.",
 )
-def test_document_and_command_shapes_match_the_pre_1_0_render(
-    discovered: Discovered, path: str, harness: Harness, after_banner: list[str]
-) -> None:
-    module, defn = _found(discovered, path)
+_DOCUMENT = Definition(
+    name="note",
+    kind=Kind.DOCUMENT,
+    body=f"Keep a working draft under {hole(HarnessText.PROJECT_TEMP_DIR)}.",
+)
+
+
+@pytest.mark.parametrize("harness", [CLAUDE, OPENCODE], ids=["claude", "opencode"])
+def test_a_command_renders_its_banner_straight_into_a_body_naming_the_harness_temp_dir(harness: Harness) -> None:
+    """A command carries no field lines, so its closing fence is the body's own first line: a blank
+    line there opens the file with an empty paragraph. The body names the scratch directory the
+    definition's placeholder stands for, filled as this harness spells it."""
     ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
-    lines = render_definition(defn, ctx, module=module).split("\n")
+    lines = render_definition(_COMMAND, ctx, module="adjagent.definitions.probe").split("\n")
     assert lines[0] == "---"
-    assert lines[1].startswith("# !GENERATED! from adjagent/definitions/")
+    assert lines[1].startswith("# !GENERATED! from adjagent/definitions/probe.py — ")
     assert " seat=none member=none tier=" in lines[2]
-    assert lines[3 : 3 + len(after_banner)] == after_banner
+    assert lines[3] == "---"
+    body = "\n".join(lines[4:])
+    assert not body.startswith("\n"), "a blank line after the closing fence opens the file with an empty paragraph"
+    assert body.strip(), "the command renders no body"
+    assert harness.text(HarnessText.PROJECT_TEMP_DIR) in body
+    assert not re.search(r"@!hrn-[a-z0-9-]+!@", body), body
+
+
+@pytest.mark.parametrize(
+    "harness, fields",
+    [(CLAUDE, ()), (OPENCODE, ("mode: subagent", "disable: true"))],
+    ids=["claude", "opencode"],
+)
+def test_a_document_renders_no_field_of_its_own_and_the_harness_guard_over_it(
+    harness: Harness, fields: tuple[str, ...]
+) -> None:
+    """A document declares no frontmatter value, so between the fences stand the banner alone under
+    claude and, under opencode, the guard that keeps it from being dispatched."""
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+    lines = render_definition(_DOCUMENT, ctx, module="adjagent.definitions.probe").split("\n")
+    assert lines[0] == "---"
+    assert lines[1].startswith("# !GENERATED! from adjagent/definitions/probe.py — ")
+    assert " seat=none member=none tier=" in lines[2]
+    assert lines[3 : 3 + len(fields)] == list(fields)
+    assert lines[3 + len(fields)] == "---"
 
 
 _HARNESS_RENDERS = [
     Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers)),
     Render(harness=OPENCODE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT),
 ]
-
-
-def _extracted(defn: Definition, ctx: Render, *, module: str) -> str:
-    """What `sed '1,/^---$/d'` leaves of the rendered file: every line after the first `---` line past
-    line 1, without leading or trailing blank lines."""
-    lines = render_definition(defn, ctx, module=module).split("\n")
-    return "\n".join(lines[lines.index("---", 1) + 1 :]).strip("\n")
 
 
 @pytest.mark.skipif(shutil.which("sed") is None, reason="extraction needs sed")
@@ -327,18 +342,6 @@ def test_every_rendered_definition_extracts_frontmatter_free(tmp_path: Path, ctx
         text = path.read_text(encoding="utf-8")
         between = text.removeprefix("---\n").split("\n---\n", 1)[0]
         assert text == "---\n" + between + "\n---\n" + done.stdout, path
-        if path == tmp_path / _CONTRACT_PATH:
-            assert done.stdout.lstrip("\n").split("\n", 1)[0] == _CONTRACT_FIRST_LINE
-
-
-@pytest.mark.parametrize("ctx", _HARNESS_RENDERS, ids=lambda ctx: ctx.harness.name)
-def test_every_participant_extracts_to_the_contract_document(discovered: Discovered, ctx: Render) -> None:
-    module, contract = _found(discovered, _CONTRACT_PATH)
-    expected = _extracted(contract, ctx, module=module)
-    participants = [(module, defn) for module, defn in discovered if defn.name.startswith("mad-participant-")]
-    assert expected and participants
-    for module, defn in participants:
-        assert _extracted(defn, ctx, module=module) == expected, defn.name
 
 
 def _skill(**changes: object) -> Definition:
@@ -386,10 +389,35 @@ def test_render_all_emits_every_file_and_include_drops_a_whole_definition() -> N
         PurePosixPath("skills/kbase/SKILL.md"),
         PurePosixPath("skills/kbase/references/reading.md"),
         PurePosixPath("skills/kbase/references/build.md"),
+        PurePosixPath("skills/kbase/references/scoring.md"),
+        PurePosixPath("skills/kbase/references/maintaining.md"),
     }
     assert skill <= everything
     without = {path for path, _ in render_all(_CLAUDE_RENDER, include=lambda defn: defn.name != "kbase")}
     assert everything - without == skill
+
+
+def _routed_references(router: str) -> set[str]:
+    """The reference paths the router's tables route to, read off the table cells themselves."""
+    routed = set()
+    for line in router.split("\n"):
+        if not line.startswith("|"):
+            continue
+        for cell in line.strip("|").split("|"):
+            path = cell.strip().strip("`")
+            if path.startswith("references/"):
+                routed.add(path)
+    return routed
+
+
+def test_the_router_routes_to_every_reference_that_ships_and_no_other(discovered: Discovered) -> None:
+    """A reference is read only when its route is reached and every route is a reference, so the two
+    sets are one: a route naming a file the skill does not carry opens on nothing, and a file no route
+    names is text no session ever reads."""
+    _, skill = _found(discovered, "skills/kbase/SKILL.md")
+    routed = _routed_references(skill.body)
+    assert routed == {file.path for file in skill.files}
+    assert routed, "no route parsed from the table, so the comparison above would pass vacuously"
 
 
 def test_filled_text_names_the_file_an_unknown_placeholder_stands_in() -> None:
@@ -447,9 +475,27 @@ def test_an_unknown_placeholder_is_refused_at_render(placeholder: str) -> None:
         filled_body(defn, ctx)
 
 
-@pytest.mark.parametrize("part", list(HarnessText), ids=lambda part: part.name)
-def test_the_text_module_spells_each_harness_placeholder_as_the_renderer_fills_it(part: HarnessText) -> None:
+@pytest.mark.parametrize("part", [*HarnessText, *OptionalHarnessText], ids=lambda part: part.name)
+def test_the_text_module_spells_each_harness_placeholder_as_the_renderer_fills_it(
+    part: HarnessText | OptionalHarnessText,
+) -> None:
     assert getattr(adjagent.clauses, part.name) == hole(part)
+
+
+@pytest.mark.parametrize("path", ["agents/python-coder.md", "agents/web-app-expert.md"])
+def test_a_coder_and_a_platform_expert_render_the_recipe_rule_under_claude_and_drop_it_under_opencode(
+    discovered: Discovered, path: str
+) -> None:
+    """The paragraph is the harness's own: where the harness supplies one it stands as its own paragraph,
+    and where it supplies none the paragraph goes whole, leaving no empty one behind."""
+    _, coder = _found(discovered, path)
+    paragraph = CLAUDE.recipe_rule
+    under_claude = filled_body(coder, Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers)))
+    under_opencode = filled_body(coder, Render(harness=OPENCODE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT))
+    assert OPENCODE.recipe_rule == ""
+    assert f"\n\n{paragraph}\n\n" in under_claude
+    assert paragraph not in under_opencode
+    assert "\n\n\n" not in under_opencode
 
 
 _TUNED = Family(
@@ -509,7 +555,7 @@ _REFERENCE = SkillFile(path="references/reading.md", body="Read it.")
             {"kind": Kind.COMMAND, "description": None, "tools": None, "tier": None, "color": "#000000"},
             "takes no color",
         ),
-        ({"folder": "mad/Design"}, "folder 'mad/Design'"),
+        ({"folder": "nested/Design"}, "folder 'nested/Design'"),
         ({"kind": Kind.SKILL, "description": None}, "a skill requires description"),
         (
             {"kind": Kind.SKILL, "description": "a probe", "tools": ALL, "tier": None},

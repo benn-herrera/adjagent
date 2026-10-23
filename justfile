@@ -21,7 +21,7 @@ import 'python.just'
 
 GEN := "adjagent"
 
-KBASE_VERSION := "v0.6.0"
+KBASE_VERSION := "v0.8.0"
 TOOL_DIST_CACHE := justfile_dir() / ".tool-dist-cache"
 
 default:
@@ -108,7 +108,7 @@ install-with-kb target *args: _download-kbase-dist
 _download-kbase-dist:
   @mkdir -p "{{TOOL_DIST_CACHE}}"
   @cd "{{TOOL_DIST_CACHE}}"; [[ -f install-kbase-{{KBASE_VERSION}}.sh ]] || \
-    curl -OL https://github.com/benn-herrera/kbase/releases/download/{{KBASE_VERSION}}/install-kbase-{{KBASE_VERSION}}.sh
+    curl --fail --silent --show-error --location --proto '=https' -O https://github.com/benn-herrera/kbase/releases/download/{{KBASE_VERSION}}/install-kbase-{{KBASE_VERSION}}.sh
   @cd "{{TOOL_DIST_CACHE}}"; [[ -x "kbase-{{KBASE_VERSION}}"/kbase || -x "kbase-{{KBASE_VERSION}}"/kbase.exe ]] || bash ./install-kbase-{{KBASE_VERSION}}.sh
 
 # The executable `_download-kbase-dist` leaves in the cache: the release
@@ -316,13 +316,11 @@ render-agents-file harness out:
 render-diff a="reference" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
-# The one shipped python package is `liaison_tools`, imported as a top-level
-# package from its source at the repository root — so the repository root IS
-# the import path, here and in the tests. The installed `kb-tools/` tree is
-# not an importable package: it holds the runner snippets and the `kbase`
-# binary the same install writes. The consumer-side invocation is unaffected:
-# there `liaison_tools` arrives under <harness-dir>/adj-tools/ and is imported
-# with PYTHONPATH=<harness-dir>/adj-tools.
+# PYTHONPATH is the repository root, here and in the tests: `adjagent` and
+# `devtools` are top-level packages under it, and the tests import `adjagent`
+# from that root the same way `sweep-python` runs `devtools.dupe_sweep`. Nothing
+# an install writes is importable — the installed tree holds runner snippets and
+# the `kbase` binary, not a python package.
 # `surface` is always positional parameter $1 (positional-arguments, set
 # above); the pytest arguments follow it from $2, and are forwarded as the
 # separate words `just` received them as, so `-k "a and b"` stays one argument.
@@ -331,16 +329,15 @@ render-diff a="reference" b="latest":
 # directory. A flag alone does not narrow: pytest gets the directory plus the
 # flags. A path outside the surface's directory is refused. The word after a
 # flag that takes a separate value (`-k expr`) is that value, never a path.
-[doc("[dev] run tooling python tests: no argument runs all three (liaison_tools + adjagent + dupe_sweep); a surface argument (liaison_tools, adjagent, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+[doc("[dev] run tooling python tests: no argument runs both (adjagent + dupe_sweep); a surface argument (adjagent, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     read -ra dirs <<< "{{ \
-      if surface == "" { "liaison_tools/tests tests devtools/tests" } \
-      else if surface == "liaison_tools" { "liaison_tools/tests" } \
+      if surface == "" { "tests devtools/tests" } \
       else if surface == "adjagent" { "tests" } \
       else if surface == "dupe_sweep" { "devtools/tests" } \
-      else { error("unknown test surface '" + surface + "' — valid values: liaison_tools, adjagent, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
+      else { error("unknown test surface '" + surface + "' — valid values: adjagent, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" " + surface) } \
     }}"
     root="{{PROJECT_ROOT}}"
     has_path=0
@@ -381,17 +378,17 @@ test surface="" *pytest_args: _venv
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
 # `*paths` (positional-arguments, set above) arrives as "$@" with each path
 # its own word, so a path containing a space still reaches every tool as one
-# argument. No paths given reproduces today's four-surface, tool-by-tool
+# argument. No paths given reproduces today's three-path, tool-by-tool
 # argument order exactly — the order flake8 was already called with differs
 # from black/isort's, and that difference is preserved rather than
 # normalized away.
-[doc("[dev] black-format, isort, flake8 the shipped python packages, the generator (adjagent), the tests and devtools, or the given path(s) in place of all of them")]
+[doc("[dev] black-format, isort, flake8 the generator (adjagent), the tests and devtools, or the given path(s) in place of all of them")]
 format-python *paths: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "$#" -eq 0 ]]; then
-        black_isort_paths=(liaison_tools tests adjagent devtools)
-        flake8_paths=(liaison_tools adjagent devtools tests)
+        black_isort_paths=(tests adjagent devtools)
+        flake8_paths=(adjagent devtools tests)
     else
         black_isort_paths=("$@")
         flake8_paths=("$@")
@@ -441,7 +438,6 @@ adjagent/ adjagent
 tests/ adjagent
 devtools/render_diff.py adjagent
 devtools/ dupe_sweep
-liaison_tools/ liaison_tools
 justfile ALL
 python.just ALL
 "
@@ -452,7 +448,7 @@ test-changed base="":
     set -euo pipefail
     cd "{{PROJECT_ROOT}}"
     base="${1}"
-    all_surfaces=(liaison_tools adjagent dupe_sweep)
+    all_surfaces=(adjagent dupe_sweep)
     rows="{{TEST_SURFACE_MAP}}"
 
     changed=()
@@ -521,10 +517,10 @@ test-changed base="":
 # update this project's own agent installation, base product only: the plain `install` verb once per
 # harness. The kb set belongs to a target project, which is what `just install-with-kb <that-project>`
 # is for — this repository builds the kb definitions and the kb-tools package but does not use them,
-# so nothing here writes adj-tools/kb-tools/, the kbase executable, or a project-root MCP entry.
+# so nothing here writes skills/kbase/kb-tools/, the kbase executable, or a project-root MCP entry.
 # No runner include line either: an install never writes one into this repository's own justfile.
-# A harness directory that already holds adj-tools/kb-tools/ or the legacy agents/kb-tools/ is a kb
-# install even here — the one way this recipe can still install kb.
+# A harness directory that already holds skills/kbase/kb-tools/ or the legacy agents/kb-tools/ is a
+# kb install even here — the one way this recipe can still install kb.
 # The opencode line overrides the tier map because the default family's tier texts name claude
 # models, which opencode refuses.
 [private]

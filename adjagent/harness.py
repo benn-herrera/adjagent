@@ -3,9 +3,11 @@
 A harness is everything rendered output differs on between harnesses: the
 directory and file names prose spells, the tool spellings, the model shape it
 accepts and the words that render no model at all, whether a map flag's bare
-value names the whole map, the frontmatter lines it reads, the agents file's
-coder-dispatch bullet as a callable over the rendered model, and the project
-settings file it registers an MCP server in. It holds no tier map, no family and
+value names the whole map, the frontmatter lines it reads, the rule a dispatched
+agent follows when running recipes in its shell, the agents file's
+coder-dispatch bullet as a callable over the rendered model, the project
+settings file it registers an MCP server in, and the Bash guardrail hook it
+registers, where it has one. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
 renderer maps tools to spellings and computes the governed keys.
 """
@@ -13,11 +15,12 @@ renderer maps tools to spellings and computes the governed keys.
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
 from adjagent.errors import InputError
-from adjagent.vocabulary import IDENTIFIER, HarnessText, Tool
+from adjagent.vocabulary import IDENTIFIER, HarnessText, OptionalHarnessText, Tool
 
 
 @dataclass(frozen=True)
@@ -34,12 +37,10 @@ class AgentFields:
 
 class McpEntryBuilder(Protocol):
     """Builds the `kbase` server entry and the container path it nests under, from the server command
-    string, the absolute KB root path, and the project root — a path, not a string — that the command
-    is named relative to when it sits inside it; keyword-only, so the strings cannot be swapped."""
+    string and the project root that the command is named relative to when it sits inside it;
+    keyword-only, so the two cannot be swapped."""
 
-    def __call__(
-        self, *, command: str, kb_root: str, project_root: Path
-    ) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
+    def __call__(self, *, command: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,37 @@ class McpSettings:
     entry: McpEntryBuilder
 
 
+def project_relative(command: str, project_root: Path) -> str:
+    """`command` named relative to `project_root` in POSIX form. The install root always sits inside the
+    project root, so the settings file names no machine-specific path and a project can track it."""
+    return Path(command).resolve().relative_to(project_root.resolve()).as_posix()
+
+
+class HookClaim(Enum):
+    """What one element of a settings file's hook array holds of the guardrail hook: none of it, only
+    it, or it beside a command of the project's own."""
+
+    NONE = "none"
+    ALONE = "alone"
+    SHARED = "shared"
+
+
+@dataclass(frozen=True)
+class GuardrailHook:
+    """The Bash guardrail hook a harness ships and registers in a project settings file. `script` is the
+    hook script's path under `resources/<harness>/`, which is also its path under the harness directory;
+    `settings` is the settings file relative to the project root; `container` is the path in it to the
+    array the entry is an element of; `entry` builds the entry from the harness directory's path
+    relative to the project root, refusing one it cannot name; `claim` reads an element of that array
+    as `entry` writes it, for any harness directory."""
+
+    script: str
+    settings: str
+    container: tuple[str, ...]
+    entry: Callable[[str], dict[str, object]]
+    claim: Callable[[object], HookClaim]
+
+
 @dataclass(frozen=True)
 class Harness:
     """Everything a harness differs on; a new harness fills every field or fails at import."""
@@ -64,6 +96,7 @@ class Harness:
     project_temp_dir: str  # ".claude-temp" / ".opencode-temp"
     user_harness_dir: str  # "~/.claude" / "~/.config/opencode"
     mcp_tool_prefix: str  # "mcp__kbase__" / "kbase_"; this prefix + the tool's own name is its offered name
+    recipe_rule: str  # the rule a dispatched agent follows running recipes in its shell; "" where there is none
     coder_dispatch: (
         Callable[[str], str] | None
     )  # the agents file's coder-dispatch bullet, built from the rendered model; None where the harness cannot choose a model per dispatch
@@ -76,15 +109,25 @@ class Harness:
     frontmatter: Callable[[AgentFields], tuple[str, ...]]  # an agent's field lines between the fences
     document_frontmatter: tuple[str, ...]  # a document's field lines between the fences
     mcp: McpSettings  # the project settings file this harness registers the kbase server in
+    guardrail: GuardrailHook | None  # the Bash guardrail hook it registers; None where its own file registers itself
 
     def __post_init__(self) -> None:
-        """Refuse a non-IDENTIFIER name, an empty HarnessText field or model_shape, a coder_dispatch that
-        is neither None nor callable, a tools table not total in Tool order, or an MCP settings contract
-        lacking a canonical path, a non-empty alternative name, or a builder."""
+        """Refuse a non-IDENTIFIER name, an empty HarnessText field or model_shape, a recipe_rule that is
+        not a string, a coder_dispatch that is neither None nor callable, a tools table not total in Tool
+        order, an MCP settings contract lacking a canonical path, a non-empty alternative name, or a
+        builder, or a guardrail hook lacking a script path, a settings path, a container path, a
+        builder, or a recogniser.
+
+        An empty string is refused of the fields a body naming them always renders, since every harness
+        supplies each HarnessText and a model shape. `recipe_rule` is an OptionalHarnessText, which a
+        harness imposes or does not, so there "" is a value rather than a missing one: it drops the
+        paragraph its placeholder stands in."""
         if re.fullmatch(IDENTIFIER, self.name) is None:
             raise InputError(f"harness '{self.name}': name is not a strict-kebab identifier")
         if not all(self.text(part) for part in HarnessText) or not self.model_shape:
             raise InputError(f"harness '{self.name}': an empty string field")
+        if not isinstance(self.recipe_rule, str):
+            raise InputError(f"harness '{self.name}': recipe_rule must be a string")
         if self.coder_dispatch is not None and not callable(self.coder_dispatch):
             raise InputError(f"harness '{self.name}': coder_dispatch must be a callable or None")
         if tuple(self.tools) != tuple(Tool) or not all(self.tools.values()):
@@ -94,9 +137,22 @@ class Harness:
                 f"harness '{self.name}': MCP settings needs a canonical path, non-empty alternative names, "
                 "and a builder"
             )
+        guardrail = self.guardrail
+        if guardrail is not None and not (
+            guardrail.script
+            and guardrail.settings
+            and guardrail.container
+            and all(guardrail.container)
+            and callable(guardrail.entry)
+            and callable(guardrail.claim)
+        ):
+            raise InputError(
+                f"harness '{self.name}': guardrail hook needs a script path, a settings path, a container "
+                "path, a builder, and a recogniser"
+            )
 
-    def text(self, part: HarnessText) -> str:
-        """The value of the string field `part` names."""
+    def text(self, part: HarnessText | OptionalHarnessText) -> str:
+        """The value of the string field `part` names; "" where an optional one is supplied nowhere."""
         return getattr(self, part.value)
 
 

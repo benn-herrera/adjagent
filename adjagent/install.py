@@ -1,20 +1,24 @@
 """`python3 -m adjagent install ROOT`: every definition rendered into ROOT's agents/, commands/ and
-skills/, the shipped packages copied beside them under adj-tools/, and — when the install includes kb
-— the kb-tools package beside the consumer's `kbase` MCP entry and its runner include line.
-Overwrites without ceremony: the consumer's git is the record of what an install changed."""
+skills/, the shipped packages copied beside them under adj-tools/, each file the installing harness
+ships copied into ROOT as it stands, the harness's guardrail hook registered in the project's settings
+file where one install-time run of it succeeds, and — when the install includes kb — the kb-tools
+package inside the kbase skill's own directory, with the consumer's `kbase` MCP entry and its runner
+include line.
+Overwrites without ceremony only what carries this repository's banner, refusing over any other file at
+a path it writes: the consumer's git is the record of what an install changed."""
 
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import NamedTuple, cast
 
 from adjagent.context import Render
 from adjagent.errors import InputError
-from adjagent.harness import Harness
+from adjagent.harness import GuardrailHook, Harness, HookClaim
 from adjagent.loading import load
 from adjagent.render import GENERATED_MARK, GENERATED_NOTICE, render_all, write_renders
 
@@ -22,52 +26,55 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # (source directory in this repository, destination below ROOT) for the packages every install ships.
 # A destination is a consumer contract — definition bodies and the installed runner line name it —
 # so it is stated, never derived.
-SHIPPED_PACKAGES = (("liaison_tools", "adj-tools/liaison_tools"),)
+#
+# Empty for now: no package ships, the one row this held having retired. The machinery around it
+# stays, because a package is expected to return — `package_copies`, the `!INSTALLED!` stamping, the
+# destination replacement and `_refuse_root`'s source list all read this tuple, so one row
+# here restores the whole path, and nothing else needs an edit.
+SHIPPED_PACKAGES: tuple[tuple[str, str], ...] = ()
+# The harness resources: files a harness ships that land in its project harness directory as they
+# stand, copied and never rendered. The directory below this one in the source is the harness's own
+# name, and the destination is ROOT itself — both stated, neither derived from a directory listing.
+HARNESS_RESOURCES_SOURCE = "adjagent/harnesses/resources"
+# The interpreter the install-time probe runs a guardrail hook script under, found on PATH, and how long
+# that run may take before it counts as failed.
+GUARDRAIL_INTERPRETER = "perl"
+GUARDRAIL_PROBE_SECONDS = 5.0
 # The kb toolchain's package: the runner snippets from this repository beside a `kbase` executable,
-# shipped to one destination only when the install includes kb.
-KB_TOOLS_PACKAGE = "adj-tools/kb-tools"
+# delivered inside the kbase skill's own directory, shipped there only when the install includes kb.
+KB_TOOLS_PACKAGE = "skills/kbase/kb-tools"
 KB_TOOLS_SOURCE = "kb-tools"
 RUNNER_SNIPPETS = "runner-snippets"
 KB_TOOLS_SNIPPETS = f"{KB_TOOLS_PACKAGE}/{RUNNER_SNIPPETS}"
+# The snippet each runner's include line pulls in — a justfile imports `kb.just`, a Makefile includes
+# `kb.mk` — and the suffix that makes a line a line for that runner.
+KB_SNIPPET_NAMES = {"just": "kb.just", "make": "kb.mk"}
 KBASE_BASENAME = "kbase.exe" if os.name == "nt" else "kbase"
-# The installed executable's Git LFS pattern, matched at any depth so either harness directory and
-# the Windows name are covered.
-_LFS_PATTERN = "**/adj-tools/kb-tools/kbase*"
-_LFS_ADVICE = f"""  If this project tracks its installed agent tree, put it under Git LFS before committing:
-
-      git lfs track '{_LFS_PATTERN}'
-
-  If it was committed already, rewrite that history once with:
-
-      git lfs migrate import --include='{_LFS_PATTERN}'
-
-  A project that leaves the installed tree untracked needs nothing."""
-_LFS_UNTRACKED = f"  NOTE: the `kbase` executable is a binary of several MB and is not under Git LFS.\n\n{_LFS_ADVICE}"
-# Said of whichever `kbase` the installed tree holds, not of one this run wrote: the sticky install
-# refreshes the snippets and leaves the executable an earlier run put there.
-_LFS_UNKNOWN = (
-    f"  NOTE: the installed `kbase` executable is a binary of several MB, and git cannot tell whether "
-    f"it is under Git LFS.\n\n{_LFS_ADVICE}"
-)
 # The pre-1.0 underscore destination: the one legacy tree whose removal a run that excluded kb reports
 # with advice, so it is named for that message as well as being the first LEGACY_KB_DIRS entry.
 LEGACY_KB_TOOLS = "agents/kb_tools"
 # The hyphenated destination the kb-tools package moved out of.
 LEGACY_KB_TOOLS_PACKAGE = "agents/kb-tools"
 # Every tree the kb toolchain has been installed into: the pre-1.0 underscore helper tree, then the
-# hyphenated destination it moved to. Each is removed on every install whatever this one installs, and
-# each is a snippets path an installed include line may name.
+# hyphenated destination it moved to. Each is removed on every install whatever this one installs.
 LEGACY_KB_DIRS = (LEGACY_KB_TOOLS, LEGACY_KB_TOOLS_PACKAGE)
 # Every tree an earlier version installed that this one removes, whatever it installs: the kb trees,
 # and the liaison_tools package's old home under a definition surface.
 LEGACY_TREES = (*LEGACY_KB_DIRS, "agents/liaison_tools")
 LEGACY_KB_TOOLS_MESSAGE = "legacy kb_tools removed. if you are using kb functionality install using `install-with-kb`"
-# The snippets paths an installed runner include line may name: the current destination, then that
-# path below each legacy tree.
-_SNIPPET_PATHS = (KB_TOOLS_SNIPPETS, *(f"{directory}/{RUNNER_SNIPPETS}" for directory in LEGACY_KB_DIRS))
-# The `kb-` definition names and `kbase` — the skill, whose name is also its directory. This repository
-# produces them only for an install that includes the kb toolchain, so a run without kb neither writes
-# them nor keeps the ones it finds.
+# A runner include line is recognized by the shape of the path it names, never by a list of spellings:
+# any path ending `<directory>/runner-snippets/<that runner's snippet>`, so a tree no release here
+# wrote — the pre-1.0 `agents/kb_tools/`, or the consumer's own hand — is still a line this install
+# owns rather than one it appends a second copy beside. The path's first segment is the harness
+# directory the line is a line for.
+_SNIPPET_PATTERNS = {
+    runner: re.compile(rf"(?P<path>[^\s/'\"]+(?:/[^\s/'\"]+)*/{RUNNER_SNIPPETS}/{re.escape(snippet)})")
+    for runner, snippet in KB_SNIPPET_NAMES.items()
+}
+# The definition names a base install excludes, matched by shape rather than against a list of names:
+# anything opening `kb-`, then `kbase` — the skill, and the one name it excludes today. No `kb-`
+# definition ships, so the prefix is there for the next one: a `kb-` definition stays out of a base
+# install without an edit here.
 NOT_BY_DEFAULT = re.compile(r"^(kb-|kbase$)")
 # Runner files probed at the project root, in priority order: any justfile variant selects `just`,
 # else any make variant selects `make`.
@@ -91,6 +98,12 @@ SURFACES = ("agents", "commands", "skills")
 _GENERATED = f"# {GENERATED_MARK}".encode("utf-8")
 _COMMENT_GENERATED = f"<!-- {GENERATED_MARK}".encode("utf-8")
 _PAYLOAD_PATHS = (b"adjagent/", b"templates/")
+# The mark a copied file's banner opens with: the one `stamped` writes, and the one a harness resource
+# carries as its own text beside the repository's name on one of its first lines, in whatever comment
+# syntax its format takes, so no format's syntax is parsed.
+_INSTALLED_MARK = "!INSTALLED!"
+_RESOURCE_BANNER = re.compile(re.escape(_INSTALLED_MARK).encode("utf-8") + rb" .* adjagent")
+_RESOURCE_BANNER_LINES = 10
 
 
 def _shipped(relative: Path) -> bool:
@@ -104,8 +117,9 @@ def _shipped(relative: Path) -> bool:
 
 
 def excluded(name: str) -> bool:
-    """A definition name `NOT_BY_DEFAULT` covers: a `kb-` definition or the `kbase` skill. This
-    repository produces such a name only for an install that includes the kb toolchain."""
+    """A definition name `NOT_BY_DEFAULT` covers, matched by shape: anything opening `kb-`, and
+    `kbase` — the one name it excludes today. No `kb-` definition ships, so the prefix is what keeps
+    the next one out of a base install."""
     return NOT_BY_DEFAULT.match(name) is not None
 
 
@@ -130,9 +144,33 @@ def package_copies(root: Path, *, kb_included: bool) -> list[tuple[Path, Path]]:
     ]
 
 
+def harness_resource_copies(root: Path, *, harness: str) -> list[tuple[Path, Path]]:
+    """(source file, target under `root`) for every file `harness` ships: `resources/<harness>/` in this
+    repository, delivered into ROOT — the harness directory — so `resources/opencode/plugins/x.ts` lands
+    at `<ROOT>/plugins/x.ts`.
+
+    These files are the harness's own, not this repository's generated product: each is copied
+    byte-verbatim with its mode preserved and nothing else — no `!INSTALLED!` banner, no stamping. Each
+    must carry its own `!INSTALLED! … adjagent` header in its first ten lines: that header is how a
+    later install knows the target is one it wrote, and a target without it refuses the install. A
+    harness shipping no resources directory copies nothing, which is not an error.
+
+    The copy is one-way and is not a mirror: a resource file this repository drops is not removed from
+    a consumer, because `prune` owns the three rendered surfaces and nothing outside them. What lands
+    here stays until the consuming project removes it."""
+    source = REPO_ROOT / HARNESS_RESOURCES_SOURCE / harness
+    if not source.is_dir():
+        return []
+    return [
+        (path, root / path.relative_to(source))
+        for path in sorted(source.rglob("*"))
+        if path.is_file() and _shipped(path.relative_to(source))
+    ]
+
+
 def stamped(data: bytes, *, origin: str) -> bytes:
     """`data` with the one-line installed banner on top, or below its shebang line."""
-    banner = f"# !INSTALLED! from {origin} — {GENERATED_NOTICE}\n".encode("utf-8")
+    banner = f"# {_INSTALLED_MARK} from {origin} — {GENERATED_NOTICE}\n".encode("utf-8")
     if not data.startswith(b"#!"):
         return banner + data
     shebang, _, rest = data.partition(b"\n")
@@ -140,15 +178,20 @@ def stamped(data: bytes, *, origin: str) -> bytes:
 
 
 def _refuse_root(root: Path) -> None:
-    """Refuse a root that is not a directory, that is this repository, or that sits inside a shipped
-    package's source — installing there writes the product into the tree a later install reads from."""
+    """Refuse a root that is not a directory, that is this repository, or that sits inside a source it
+    copies from — a shipped package's, the kb toolchain's, or a harness's resource tree — installing
+    there writes the product into the tree a later install reads from."""
     if not root.is_dir():
         raise InputError(f"install root '{root}' is not an existing directory")
     resolved = root.resolve()
-    sources = [REPO_ROOT / package for package, _ in SHIPPED_PACKAGES] + [REPO_ROOT / KB_TOOLS_SOURCE]
+    sources = [
+        *(REPO_ROOT / package for package, _ in SHIPPED_PACKAGES),
+        REPO_ROOT / KB_TOOLS_SOURCE,
+        REPO_ROOT / HARNESS_RESOURCES_SOURCE,
+    ]
     if resolved == REPO_ROOT or any(resolved.is_relative_to(source) for source in sources):
         raise InputError(
-            f"install root '{root}' is this repository or inside a package source it copies from — "
+            f"install root '{root}' is this repository or inside a source it copies from — "
             "install into the project that consumes it"
         )
 
@@ -173,15 +216,72 @@ def _is_ours(path: Path) -> bool:
     )
 
 
+def _is_our_resource(path: Path) -> bool:
+    """A harness resource this repository ships, by the `!INSTALLED! … adjagent` header on one of its
+    first ten lines. A file that cannot be read is not ours."""
+    try:
+        with path.open("rb") as handle:
+            head = [handle.readline() for _ in range(_RESOURCE_BANNER_LINES)]
+    except OSError:
+        return False
+    return any(_RESOURCE_BANNER.search(line) for line in head)
+
+
+def _blocked_component(target: Path, *, base: Path) -> Path | None:
+    """The outermost path strictly between `base` and `target` that exists as a symlink or as anything
+    but a directory — a write below it would land elsewhere or fail — or None. `base` and everything
+    above it are not examined."""
+    for parent in reversed(target.relative_to(base).parents[:-1]):
+        component = base / parent
+        if os.path.lexists(component) and (component.is_symlink() or not component.is_dir()):
+            return component
+    return None
+
+
+def _foreign_on_path(target: Path, *, root: Path, ours: Callable[[Path], bool]) -> Path | None:
+    """The path that keeps the install from writing `target` as a file it owns, or None: a component
+    `_blocked_component` names below `root`, else `target` itself unless it is absent — a dangling
+    symlink counts as something — or a regular file, not a symlink, that `ours` accepts."""
+    blocked = _blocked_component(target, base=root)
+    if blocked is not None:
+        return blocked
+    if os.path.lexists(target) and (target.is_symlink() or not target.is_file() or not ours(target)):
+        return target
+    return None
+
+
+def _refuse_foreign_targets(
+    root: Path, *, render_targets: Iterable[Path], resource_targets: Iterable[Path]
+) -> None:
+    """Refuse an install that would overwrite a file it did not write, or write below a path under
+    `root` that is a symlink or not a directory. A target passes as `_foreign_on_path` reads it, a
+    render needing its generated banner and a resource its installed header. Every failing path is
+    named once in the one refusal, so the operator clears them in one pass."""
+    failing = (
+        _foreign_on_path(target, root=root, ours=ours)
+        for targets, ours in ((render_targets, _is_ours), (resource_targets, _is_our_resource))
+        for target in targets
+    )
+    foreign = list(dict.fromkeys(path for path in failing if path is not None))
+    if foreign:
+        named = ", ".join(f"'{target}'" for target in foreign)
+        raise InputError(
+            f"install would overwrite files it did not write, or write below a symlink or a non-directory: "
+            f"{named} — move or remove each, then re-install"
+        )
+
+
 def prune(root: Path, *, keep: set[Path]) -> list[Path]:
     """Remove every regular file under ROOT's surfaces that is not in `keep`, would ship, and is ours;
     then each directory that leaves empty, up to its surface.
 
-    No shipped package lands inside a surface — the destinations sit beside them, under `adj-tools/` —
-    so every file under a surface is either ours or untouched, and no destination is carved out. The
-    would-ship vocabulary is name-based and covers `kb-` names and `kbase`, so a kb definition this
-    run did not write — an install without kb — is stale and removed, while one the run wrote is in
-    `keep`."""
+    The kb-tools package is the one destination inside a surface — `skills/kbase/kb-tools/` — and no
+    destination is carved out by name. It needs none: a copied package file opens with the
+    `!INSTALLED!` banner rather than the generated one `_is_ours` reads, so it is untouched here rather
+    than pruned, and the `kbase` executable beside it carries no banner of ours at all. Every file
+    under a surface is thus either ours or untouched. The would-ship vocabulary is name-based and
+    covers `kb-` names and `kbase`, so a kb definition this run did not write — an install without kb —
+    is stale and removed, while one the run wrote is in `keep`."""
     stale = [
         path
         for surface in SURFACES
@@ -263,27 +363,31 @@ def _kbase_copy(root: Path, source: Path) -> tuple[Path, bytes]:
         raise InputError(f"the kbase source '{source}' cannot be read: {exc}") from exc
 
 
-def _refuse_non_object(data: dict, *, container: tuple[str, ...]) -> None:
-    """Refuse a key on `container`'s path that holds something other than an object: it cannot nest the
-    entry."""
-    for key in container[:-1]:
-        child = data.get(key)
-        if child is None:
+_JSON_TYPE_NAMES = {dict: "an object", list: "an array"}
+
+
+def _refuse_wrong_types(data: dict, *, target: Path, container: tuple[str, ...], leaf: type) -> None:
+    """Refuse `target`, parsed as `data`, where a key on `container`'s path holds the wrong type, `null`
+    included: each key above the last must hold an object, and the last one a `leaf`. A key that is
+    absent is created by the merge and passes."""
+    node = data
+    for depth, key in enumerate(container):
+        if key not in node:
             return
-        if not isinstance(child, dict):
-            raise InputError(f"MCP settings nests a non-object under '{key}' — cannot register the kbase server")
-        data = child
+        expected = leaf if depth == len(container) - 1 else dict
+        if not isinstance(node[key], expected):
+            raise InputError(
+                f"'{target}' holds a '{'.'.join(container[: depth + 1])}' that is not "
+                f"{_JSON_TYPE_NAMES[expected]} — cannot register the entry there"
+            )
+        node = node[key]
 
 
-def _mcp_entry_at(data: dict, *, container: tuple[str, ...], entry: dict) -> dict:
-    """`data` with `entry` at `container`'s path, every unrelated key kept. A key on that path holding
-    something other than an object cannot nest the entry and is refused."""
-    _refuse_non_object(data, container=container)
-    nested = data
-    for key in container[:-1]:
-        nested = nested.setdefault(key, {})
-    nested[container[-1]] = entry
-    return data
+def _nested(keys: tuple[str, ...], leaf: object) -> object:
+    """`leaf` nested under `keys`, the first outermost."""
+    for name in reversed(keys):
+        leaf = {name: leaf}
+    return leaf
 
 
 # The splice `mcp_merge` edits an existing settings file with. A file the consumer already has is
@@ -312,6 +416,14 @@ class _Object(NamedTuple):
     start: int
     end: int
     members: tuple[_Member, ...]
+
+
+class _Array(NamedTuple):
+    """A JSON array: where its brackets sit and each element's (start, end) span."""
+
+    start: int
+    end: int
+    elements: tuple[tuple[int, int], ...]
 
 
 def _at(text: str, index: int) -> str:
@@ -350,14 +462,7 @@ def _value_end(text: str, index: int) -> int:
     if char == "{":
         return _object(text, index).end
     if char == "[":
-        index = _skip_ws(text, index + 1)
-        while _at(text, index) != "]":
-            index = _skip_ws(text, _value_end(text, index))
-            if _at(text, index) == ",":
-                index = _skip_ws(text, index + 1)
-            elif _at(text, index) != "]":
-                raise _Unsafe("an array element with no separator")
-        return index + 1
+        return _array(text, index).end
     while index < len(text) and text[index] not in ",}] \t\r\n":
         index += 1
     return index
@@ -382,6 +487,21 @@ def _object(text: str, index: int) -> _Object:
         elif _at(text, cursor) != "}":
             raise _Unsafe("a member with no separator")
     return _Object(index, cursor + 1, tuple(members))
+
+
+def _array(text: str, index: int) -> _Array:
+    """The array whose opening bracket is at `index`: each element's span and the span it covers."""
+    elements: list[tuple[int, int]] = []
+    cursor = _skip_ws(text, index + 1)
+    while _at(text, cursor) != "]":
+        end = _value_end(text, cursor)
+        elements.append((cursor, end))
+        cursor = _skip_ws(text, end)
+        if _at(text, cursor) == ",":
+            cursor = _skip_ws(text, cursor + 1)
+        elif _at(text, cursor) != "]":
+            raise _Unsafe("an array element with no separator")
+    return _Array(index, cursor + 1, tuple(elements))
 
 
 def _member(members: tuple[_Member, ...], key: str) -> _Member | None:
@@ -416,13 +536,30 @@ def _indent_unit(text: str, root: _Object) -> str | None:
         obj = _object(text, nested.value_start)
 
 
-def _member_indent(text: str, obj: _Object, unit: str | None) -> str | None:
-    """The indent a member added to `obj` takes: its last sibling's, else one `unit` in from the
-    object's closing brace; None where the file writes no such line."""
-    if obj.members:
-        return _line_indent(text, obj.members[-1].key_start)
-    close = _line_indent(text, obj.end - 1)
+def _child_indent(text: str, *, last_start: int | None, end: int, unit: str | None) -> str | None:
+    """The indent an item added to a container takes: its last sibling's, starting at `last_start`, else
+    one `unit` in from the container's closing character just before `end`; None where the file writes
+    no such line."""
+    if last_start is not None:
+        return _line_indent(text, last_start)
+    close = _line_indent(text, end - 1)
     return None if close is None or unit is None else close + unit
+
+
+def _with_item(
+    text: str, *, start: int, end: int, last_end: int | None, item: str, indent: str | None, newline: str
+) -> str:
+    """`text` with `item` added to the container spanning `start` to `end` — after its last item, which
+    ends at `last_end`, or alone in an empty container — on a line at `indent`, or inline where that is
+    None."""
+    if last_end is not None:
+        if indent is None:
+            return f"{text[:last_end]},{item}{text[last_end:]}"
+        return f"{text[:last_end]},{newline}{indent}{item}{text[last_end:]}"
+    close = _line_indent(text, end - 1)
+    if indent is None or close is None:
+        return f"{text[: start + 1]}{item}{text[end - 1 :]}"
+    return f"{text[: start + 1]}{newline}{indent}{item}{newline}{close}{text[end - 1 :]}"
 
 
 def _value_text(value: object, *, indent: str | None, unit: str | None, newline: str) -> str:
@@ -437,18 +574,61 @@ def _value_text(value: object, *, indent: str | None, unit: str | None, newline:
 def _with_member(text: str, *, obj: _Object, key: str, value: object, unit: str | None, newline: str) -> str:
     """`text` with `key` and `value` a member of `obj` — after its last member, or alone in an empty
     object — on a line at its siblings' indent, or inline where the file writes no such line."""
-    indent = _member_indent(text, obj, unit)
+    last_start, last_end = (obj.members[-1].key_start, obj.members[-1].value_end) if obj.members else (None, None)
+    indent = _child_indent(text, last_start=last_start, end=obj.end, unit=unit)
     member = f"{json.dumps(key)}: {_value_text(value, indent=indent, unit=unit, newline=newline)}"
-    if obj.members:
-        at = obj.members[-1].value_end
-        if indent is None:
-            return f"{text[:at]},{member}{text[at:]}"
-        return f"{text[:at]},{newline}{indent}{member}{text[at:]}"
-    close = _line_indent(text, obj.end - 1)
-    interior = obj.start + 1
-    if indent is None or close is None:
-        return f"{text[:interior]}{member}{text[obj.end - 1 :]}"
-    return f"{text[:interior]}{newline}{indent}{member}{newline}{close}{text[obj.end - 1 :]}"
+    return _with_item(
+        text, start=obj.start, end=obj.end, last_end=last_end, item=member, indent=indent, newline=newline
+    )
+
+
+def _with_element(text: str, *, arr: _Array, value: object, unit: str | None, newline: str) -> str:
+    """`text` with `value` appended to `arr` — after its last element, or alone in an empty array — on a
+    line at its siblings' indent, or inline where the file writes no such line."""
+    last_start, last_end = arr.elements[-1] if arr.elements else (None, None)
+    indent = _child_indent(text, last_start=last_start, end=arr.end, unit=unit)
+    item = _value_text(value, indent=indent, unit=unit, newline=newline)
+    return _with_item(text, start=arr.start, end=arr.end, last_end=last_end, item=item, indent=indent, newline=newline)
+
+
+class _Layout(NamedTuple):
+    """A plain-JSON document's root object, the indent step it writes (None for none), and its line
+    ending."""
+
+    root: _Object
+    unit: str | None
+    newline: str
+
+
+def _layout(text: str) -> _Layout:
+    """The root object of `text` and the formatting an added value copies."""
+    start = _skip_ws(text, 0)
+    if _at(text, start) != "{":
+        raise _Unsafe("a document whose root is not an object")
+    root = _object(text, start)
+    return _Layout(root, _indent_unit(text, root), "\r\n" if "\r\n" in text else "\n")
+
+
+def _descend(text: str, *, root: _Object, container: tuple[str, ...]) -> tuple[_Object, int, _Member | None]:
+    """Walk `container`'s path from `root`: (the deepest object reached, the depth of the key looked up
+    in it, that key's member or None where it is absent). A key the walk passes through must hold an
+    object."""
+    obj = root
+    for depth, key in enumerate(container[:-1]):
+        member = _member(obj.members, key)
+        if member is None:
+            return obj, depth, None
+        if _at(text, member.value_start) != "{":
+            raise _Unsafe(f"'{key}' is not an object")
+        obj = _object(text, member.value_start)
+    return obj, len(container) - 1, _member(obj.members, container[-1])
+
+
+def _with_chain(text: str, *, layout: _Layout, obj: _Object, keys: tuple[str, ...], leaf: object) -> str:
+    """`text` with the chain `keys` — absent from `obj` down — added to `obj` as one member, `leaf` at
+    its end."""
+    value = _nested(keys[1:], leaf)
+    return _with_member(text, obj=obj, key=keys[0], value=value, unit=layout.unit, newline=layout.newline)
 
 
 def _splice(text: str, *, container: tuple[str, ...], entry: dict) -> str | None:
@@ -456,35 +636,96 @@ def _splice(text: str, *, container: tuple[str, ...], entry: dict) -> str | None
     outside that slot kept. None when the placement cannot be made with certainty: a level naming the
     key the splice must pass through twice, or a text this scanner cannot delimit."""
     try:
-        start = _skip_ws(text, 0)
-        if _at(text, start) != "{":
-            raise _Unsafe("a document whose root is not an object")
-        root = _object(text, start)
-        unit = _indent_unit(text, root)
-        newline = "\r\n" if "\r\n" in text else "\n"
-        obj = root
-        for depth, key in enumerate(container[:-1]):
-            member = _member(obj.members, key)
-            if member is None:
-                # The container is absent from here down: the whole chain goes in as one member.
-                value: object = {container[-1]: entry}
-                for name in reversed(container[depth + 1 : -1]):
-                    value = {name: value}
-                return _with_member(text, obj=obj, key=key, value=value, unit=unit, newline=newline)
-            if _at(text, member.value_start) != "{":
-                raise _Unsafe(f"'{key}' is not an object")
-            obj = _object(text, member.value_start)
-        member = _member(obj.members, container[-1])
+        layout = _layout(text)
+        obj, depth, member = _descend(text, root=layout.root, container=container)
         if member is None:
-            return _with_member(text, obj=obj, key=container[-1], value=entry, unit=unit, newline=newline)
+            return _with_chain(text, layout=layout, obj=obj, keys=container[depth:], leaf=entry)
         indent = _line_indent(text, member.key_start)
-        value_text = _value_text(entry, indent=indent, unit=unit, newline=newline)
+        value_text = _value_text(entry, indent=indent, unit=layout.unit, newline=layout.newline)
         return f"{text[: member.value_start]}{value_text}{text[member.value_end :]}"
     except _Unsafe:
         return None
 
 
-def mcp_merge(project: Path, *, harness: Harness, command: str, kb_root: str) -> None:
+def _splice_element(text: str, *, container: tuple[str, ...], entry: dict, replace: int | None) -> str | None:
+    """`text` — plain JSON the caller has parsed — with `entry` an element of the array at `container`'s
+    path: replacing the element at index `replace`, else appended, every byte outside that slot kept. An
+    absent array, or a chain of objects down to it, is created holding `entry` alone. None when the
+    placement cannot be made with certainty, as for `_splice`, or where the path holds no array."""
+    try:
+        layout = _layout(text)
+        obj, depth, member = _descend(text, root=layout.root, container=container)
+        if member is None:
+            return _with_chain(text, layout=layout, obj=obj, keys=container[depth:], leaf=[entry])
+        if _at(text, member.value_start) != "[":
+            raise _Unsafe(f"'{container[-1]}' is not an array")
+        arr = _array(text, member.value_start)
+        if replace is None:
+            return _with_element(text, arr=arr, value=entry, unit=layout.unit, newline=layout.newline)
+        start, end = arr.elements[replace]
+        indent = _line_indent(text, start)
+        value_text = _value_text(entry, indent=indent, unit=layout.unit, newline=layout.newline)
+        return f"{text[:start]}{value_text}{text[end:]}"
+    except _Unsafe:
+        return None
+
+
+def _mcp_settings_file(project: Path, *, harness: Harness) -> Path:
+    """The settings file `harness` registers its MCP entry in under `project`: the first discovered
+    alternative, else the canonical path, whether or not it exists yet."""
+    canonical = project / harness.mcp.canonical
+    candidates = [project / alternative for alternative in harness.mcp.alternatives] + [canonical]
+    return next((path for path in candidates if os.path.lexists(path)), canonical)
+
+
+def _settings_obstacle(target: Path, *, project: Path) -> str | None:
+    """Why the settings file at `target` cannot be created or edited in place, naming the path that
+    stands in the way; None where `target` is a regular file or absent. A symlink at it or on its path
+    below `project`, dangling or not, is never written through — what it reaches is not this project's
+    alone — and a non-directory on that path, or anything but a regular file at it, cannot hold it."""
+    blocked = _blocked_component(target, base=project)
+    if blocked is not None:
+        return f"{blocked} is {'a symlink' if blocked.is_symlink() else 'not a directory'}"
+    if target.is_symlink():
+        return f"{target} is a symlink"
+    if os.path.lexists(target) and not target.is_file():
+        return f"{target} is not a regular file"
+    return None
+
+
+def _settings_to_read(target: Path, *, project: Path) -> bool:
+    """Whether a merge would read `target`: it exists, and `_settings_obstacle` names nothing."""
+    return _settings_obstacle(target, project=project) is None and target.is_file()
+
+
+def _check_settings(target: Path, *, project: Path, container: tuple[str, ...], leaf: type) -> None:
+    """Read a settings file a merge will edit before an install's first write: an unreadable or
+    undecodable one, or a plain-JSON one holding the wrong type on `container`'s path, is refused there,
+    not raised out of the write phase with renders already landed. One the merge will only report — a
+    JSONC file, or one `_settings_obstacle` names — passes."""
+    if not _settings_to_read(target, project=project):
+        return
+    plain = _plain_json_object(target)
+    if plain is not None:
+        _refuse_wrong_types(plain[1], target=target, container=container, leaf=leaf)
+
+
+def _plain_json_object(target: Path) -> tuple[str, dict] | None:
+    """`target`'s text and its parse when it is a plain JSON object a splice can edit, else None. A file
+    that cannot be read or decoded is refused."""
+    # Read untranslated: a splice writes this text back, and a CRLF file translated here would be
+    # rewritten without the merge touching it.
+    text = _utf8_text(target)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    # A text json.loads rejects is a JSONC comment carrier, or otherwise not a plain object; a splice
+    # would destroy what it cannot read, so both are left to the operator.
+    return (text, data) if isinstance(data, dict) else None
+
+
+def mcp_merge(project: Path, *, harness: Harness, command: str) -> None:
     """Register the `kbase` server in `harness`'s project settings file under `project` — also the
     project root the entry is built against, so a command inside it is named relative to it: the first
     discovered alternative, else the canonical path — created when no file the contract names exists.
@@ -493,38 +734,142 @@ def mcp_merge(project: Path, *, harness: Harness, command: str, kb_root: str) ->
     An existing file is edited, never reserialized: the entry's own slot is spliced into the text as it
     stands, so every other byte — other entries, key order, indentation, line endings, number and
     string spelling — comes back exactly as it was found. A file that is not plain JSON (JSONC comments
-    a rewrite would destroy), one naming a key the entry must pass through twice, and one the splice
-    cannot delimit are each reported and left untouched, with the entry printed for the operator to
-    merge by hand."""
-    entry, container = harness.mcp.entry(command=command, kb_root=kb_root, project_root=project)
-    canonical = project / harness.mcp.canonical
-    candidates = [project / alternative for alternative in harness.mcp.alternatives] + [canonical]
-    target = next((path for path in candidates if path.is_file()), canonical)
+    a rewrite would destroy), one naming a key the entry must pass through twice, one the splice
+    cannot delimit, and a path `_settings_obstacle` names are each reported and left untouched, with
+    the entry printed for the operator to merge by hand."""
+    entry, container = harness.mcp.entry(command=command, project_root=project)
+    target = _mcp_settings_file(project, harness=harness)
+    by_hand = f"merge this entry by hand: {json.dumps(entry)}"
+    obstacle = _settings_obstacle(target, project=project)
+    if obstacle is not None:
+        print(f"{target} not written: {obstacle} — left untouched; {by_hand}")
+        return
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
-        fresh = json.dumps(_mcp_entry_at({}, container=container, entry=entry), indent=2) + "\n"
-        target.write_text(fresh, encoding="utf-8")
+        target.write_text(json.dumps(_nested(container, entry), indent=2) + "\n", encoding="utf-8")
         print(f"wrote {target} with the kbase MCP entry")
         return
-    # newline="" on both sides: the file's own line endings are the consumer's, and a CRLF file
-    # translated on the way in or out would be rewritten without the merge touching it.
-    text = _utf8_text(target)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = None
-    # A text json.loads rejects is a JSONC comment carrier, or otherwise not a plain object; a splice
-    # would destroy what it cannot read, so both are left to the operator.
-    if not isinstance(data, dict):
-        print(f"{target} carries JSONC comments — left untouched; merge this entry by hand: {json.dumps(entry)}")
+    plain = _plain_json_object(target)
+    if plain is None:
+        print(f"{target} carries JSONC comments — left untouched; {by_hand}")
         return
-    _refuse_non_object(data, container=container)
+    text, _ = plain
     spliced = _splice(text, container=container, entry=entry)
     if spliced is None:
-        print(f"{target} could not be edited safely — left untouched; merge this entry by hand: {json.dumps(entry)}")
+        print(f"{target} could not be edited safely — left untouched; {by_hand}")
         return
     target.write_text(spliced, encoding="utf-8", newline="")
     print(f"registered the kbase MCP entry in {target}")
+
+
+def _guardrail_probe(script: Path, *, project: Path, temp_dir: str) -> str | None:
+    """None when `script`, run once under `GUARDRAIL_INTERPRETER` on a command it allows — a redirect
+    into `temp_dir` — exits 0 within `GUARDRAIL_PROBE_SECONDS`; otherwise why it did not: the exit status
+    and the first stderr line, the timeout, or the `OSError` raised starting the interpreter. The argv
+    runs with no shell, so a missing
+    interpreter raises rather than exiting 127, and `CLAUDE_PROJECT_DIR` is removed so the hook reads
+    the root from the input, as it does when that variable is unset."""
+    payload = {"tool_name": "Bash", "tool_input": {"command": f"echo x > {temp_dir}/probe"}, "cwd": str(project)}
+    env = {name: value for name, value in os.environ.items() if name != "CLAUDE_PROJECT_DIR"}
+    argv = [GUARDRAIL_INTERPRETER, str(script)]
+    try:
+        result = subprocess.run(
+            argv,
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+            timeout=GUARDRAIL_PROBE_SECONDS,
+        )
+    except OSError as exc:
+        return f"'{GUARDRAIL_INTERPRETER}' could not be run: {exc}"
+    except subprocess.TimeoutExpired:
+        return f"'{' '.join(argv)}' did not exit within {GUARDRAIL_PROBE_SECONDS:g} seconds"
+    if result.returncode == 0:
+        return None
+    first = next(iter(result.stderr.splitlines()), "")
+    return f"'{' '.join(argv)}' exited {result.returncode}: {first}"
+
+
+def _guardrail_claims(data: dict, *, guardrail: GuardrailHook) -> list[tuple[int, HookClaim]]:
+    """(index, claim) for each element of the array at `guardrail.container` in a parsed settings file
+    that holds the guardrail hook, as `guardrail.claim` reads it; empty where none does, or where the
+    path holds no array."""
+    node: object = data
+    for key in guardrail.container:
+        node = node.get(key) if isinstance(node, dict) else None
+    if not isinstance(node, list):
+        return []
+    claims = [(index, guardrail.claim(element)) for index, element in enumerate(node)]
+    return [(index, claim) for index, claim in claims if claim is not HookClaim.NONE]
+
+
+def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str, object]) -> None:
+    """Register `entry` in `guardrail.settings` under `project`, created holding it alone when absent.
+
+    An existing file is the project's own and is edited, never reserialized: the entry is spliced into
+    the array at `guardrail.container`, created when absent, and every other byte — the project's own
+    hooks included — comes back as it was found. Ours is the one element holding only the guardrail
+    hook, replaced whole; with none, the entry is appended. More than one such element, or one holding
+    the hook beside another command, is reported and the file left untouched: replacing it whole would
+    delete the project's hook. So is a file that is not a plain JSON object (JSONC comments), one the
+    splice cannot place with certainty, and a path `_settings_obstacle` names, each with the entry
+    printed to merge by hand."""
+    target = project / guardrail.settings
+    by_hand = f"merge this entry by hand: {json.dumps(entry)}"
+    obstacle = _settings_obstacle(target, project=project)
+    if obstacle is not None:
+        print(f"{target} not written: {obstacle} — left untouched; {by_hand}")
+        return
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(_nested(guardrail.container, [entry]), indent=2) + "\n", encoding="utf-8")
+        print(f"wrote {target} with the guardrail hook entry")
+        return
+    plain = _plain_json_object(target)
+    if plain is None:
+        print(f"{target} is not a plain JSON object — left untouched; {by_hand}")
+        return
+    text, data = plain
+    found = _guardrail_claims(data, guardrail=guardrail)
+    if len(found) > 1 or (found and found[0][1] is HookClaim.SHARED):
+        indexes = ", ".join(str(index) for index, _ in found)
+        print(
+            f"{target} names the guardrail hook in {'.'.join(guardrail.container)} entries {indexes}, not one "
+            f"entry holding it alone — left untouched; {by_hand}"
+        )
+        return
+    replace = found[0][0] if found else None
+    spliced = _splice_element(text, container=guardrail.container, entry=entry, replace=replace)
+    if spliced is None:
+        print(f"{target} could not be edited safely — left untouched; {by_hand}")
+        return
+    if spliced == text:
+        print(f"{target} already registers the guardrail hook")
+        return
+    target.write_text(spliced, encoding="utf-8", newline="")
+    print(f"registered the guardrail hook in {target}")
+
+
+def _earlier_guardrail(script: Path, *, project: Path, guardrail: GuardrailHook) -> list[Path]:
+    """The guardrail script and settings file an earlier install left registered: the script where it
+    carries the installed header, and the settings file where it holds an element `guardrail.claim`
+    accepts. A settings file the merge would not edit, or one that cannot be read or parsed, is not
+    named."""
+    left = [script] if _is_our_resource(script) else []
+    settings = project / guardrail.settings
+    if not _settings_to_read(settings, project=project):
+        return left
+    try:
+        plain = _plain_json_object(settings)
+    except InputError:
+        return left
+    if plain is not None and _guardrail_claims(plain[1], guardrail=guardrail):
+        left.append(settings)
+    return left
 
 
 def _runner_file(project: Path) -> tuple[str, Path] | None:
@@ -559,8 +904,8 @@ def kb_include_line(*, runner: str, harness_relpath: str) -> str:
     """The canonical KB include line for `runner`: the non-fatal `import?` form for a justfile (just
     >= 1.33), or the `-include` form for a Makefile, each naming the installed snippets under the
     harness directory `harness_relpath` names relative to the project root."""
-    snippets = f"{harness_relpath}/{KB_TOOLS_SNIPPETS}"
-    return {"just": f"import? '{snippets}/kb.just'", "make": f"-include {snippets}/kb.mk"}[runner]
+    snippets = f"{harness_relpath}/{KB_TOOLS_SNIPPETS}/{KB_SNIPPET_NAMES[runner]}"
+    return {"just": f"import? '{snippets}'", "make": f"-include {snippets}"}[runner]
 
 
 def _harness_dirs() -> dict[str, str]:
@@ -571,41 +916,32 @@ def _harness_dirs() -> dict[str, str]:
 
 class _NamedLine(NamedTuple):
     """An existing runner include line `_named_harnesses` recognized: the harness it names — or the raw
-    directory prefix when no harness claims it — its index in the file, the snippets path it spells and
-    where in the line that path starts."""
+    first path segment when no harness claims it — its index in the file, and the span of the snippets
+    path it spells."""
 
     name: str
     index: int
-    path: str
     start: int
+    end: int
 
 
-def _snippet_path(line: str) -> tuple[str, int] | None:
-    """The installed snippets path `line` names first and its offset in the line, or None when it names
-    none."""
-    found = [(line.find(path), path) for path in _SNIPPET_PATHS if path in line]
-    if not found:
-        return None
-    start, path = min(found)
-    return path, start
-
-
-def _named_harnesses(text: str) -> list[_NamedLine]:
-    """A `_NamedLine` for every non-comment line pointing at any harness's installed kb-tools snippets,
-    under any path an install has used; empty when no line points at one. A commented-out line is prose
-    about an install, not one."""
+def _named_harnesses(text: str, *, runner: str) -> list[_NamedLine]:
+    """A `_NamedLine` for every non-comment line naming `runner`'s installed kb-tools snippets, under
+    whatever tree the path spells; empty when no line names one. A commented-out line is prose about an
+    install, not one."""
     dirs = _harness_dirs()
+    pattern = _SNIPPET_PATTERNS[runner]
     found: list[_NamedLine] = []
     for index, line in enumerate(text.splitlines()):
         if line.lstrip().startswith("#"):
             continue
-        match = _snippet_path(line)
+        match = pattern.search(line)
         if match is None:
             continue
-        path, start = match
-        prefix = line[:start].rsplit(maxsplit=1)[-1].strip("/'\"")
-        name = next((name for name, directory in dirs.items() if directory == prefix), prefix)
-        found.append(_NamedLine(name, index, path, start))
+        start, end = match.span("path")
+        segment = line[start:end].split("/", 1)[0]
+        name = next((name for name, directory in dirs.items() if directory == segment), segment)
+        found.append(_NamedLine(name, index, start, end))
     return found
 
 
@@ -625,13 +961,13 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
     """Write the canonical KB include line into `project`'s runner file: the justfile or Makefile
     probed there, else a `Makefile` created carrying it.
 
-    One line only. A line naming this run's harness under any snippets path an install has used is
-    rewritten in place — only that path token, so an assignment's left-hand side and a trailing comment
-    survive — and no second line is appended. A line naming another harness is reported and left alone,
-    and so is a file holding more than one such line, which the operator merges by hand. Only the runner
-    file this run selected is examined: a second runner file's legacy line is left to the operator and
-    is non-fatal. Nothing is written when `project` is this repository — its own runner is the
-    generator's, not a consumer's."""
+    One line only. A line naming this run's harness is recognized by the shape of the snippets path it
+    names, whatever tree sits in front of `runner-snippets/`, and rewritten in place — only that path
+    token, so an assignment's left-hand side and a trailing comment survive — with no second line
+    appended. A line naming another harness is reported and left alone, and so is a file holding more
+    than one such line, which the operator merges by hand. Only the runner file this run selected is
+    examined: a second runner file's stale line is left to the operator and is non-fatal. Nothing is
+    written when `project` is this repository — its own runner is the generator's, not a consumer's."""
     if project == REPO_ROOT:
         return
     found = _runner_file(project)
@@ -648,7 +984,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
         return
     runner, path = found
     text = _utf8_text(path)
-    named = _named_harnesses(text)
+    named = _named_harnesses(text, runner=runner)
     if len(named) > 1:
         indexes = ", ".join(str(match.index + 1) for match in named)
         print(f"no include line written: {path} names the kb snippets on lines {indexes}; merge them into one")
@@ -663,7 +999,11 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
             return
         lines = text.splitlines(keepends=True)
         prior = lines[match.index]
-        rewritten = f"{prior[: match.start]}{KB_TOOLS_SNIPPETS}{prior[match.start + len(match.path) :]}"
+        # The harness directory the line spells is kept as it is written; the tree below it belongs to
+        # this install, so it is replaced whole.
+        segment = prior[match.start : match.end].split("/", 1)[0]
+        canonical = f"{segment}/{KB_TOOLS_SNIPPETS}/{KB_SNIPPET_NAMES[runner]}"
+        rewritten = f"{prior[: match.start]}{canonical}{prior[match.end :]}"
         if rewritten == prior:
             print(
                 f"no include line written: {path} line {match.index + 1} already names the installed "
@@ -687,33 +1027,6 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
     print(f"installed: appended the KB include line to {path}")
 
 
-def _git(directory: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    """`git -C directory <args>` captured as text, or None when git is absent or cannot run. An
-    install must not fail on a repository's state."""
-    try:
-        return subprocess.run(
-            ["git", "-C", str(directory), *args],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _lfs_advisory(binary: Path) -> str | None:
-    """The Git LFS note for the installed `kbase`: None when it is already LFS-tracked, the untracked
-    note when git says it is not, the generic note when git cannot answer."""
-    inside = _git(binary.parent, "rev-parse", "--is-inside-work-tree")
-    if inside is None or inside.returncode != 0:
-        return _LFS_UNKNOWN
-    attr = _git(binary.parent, "check-attr", "filter", "--", binary.name)
-    if attr is not None and attr.returncode == 0 and attr.stdout.rstrip().endswith("filter: lfs"):
-        return None
-    return _LFS_UNTRACKED
-
-
 def install(
     root: Path,
     ctx: Render,
@@ -723,32 +1036,69 @@ def install(
     kbase_dist: Path | None = None,
     project_root: Path | None = None,
 ) -> None:
-    """Render, replace each package destination whole with a stamped copy, write the renders over what
-    is there, then prune. An install that includes kb — `with_kb` names it, or an installed `kbase`
-    binary stands at the current `adj-tools/kb-tools` destination or the `agents/kb-tools` one an
-    earlier version used (the sticky rule, per ROOT and not per project) — also writes the kb-tools
-    package, the harness's `kbase` MCP entry and the consumer's runner include line; every install
-    removes each tree an earlier version installed. A refusal of the root, of the render, or of the
-    kbase source writes nothing."""
+    """Render, replace each package destination whole with a stamped copy, copy the harness's own
+    resource files into ROOT as they stand, write the renders over what is there, then prune. An
+    install that includes kb — `with_kb` names it, or an installed `kbase` binary stands at the current
+    `skills/kbase/kb-tools` destination or the `agents/kb-tools` one an earlier version used (the
+    sticky rule, per ROOT and not per project) — also writes the kb-tools package, the harness's
+    `kbase` MCP entry and the consumer's runner include line; every install removes each tree an
+    earlier version installed. A harness with a guardrail hook has its script run once on this machine
+    first: when that run succeeds the script ships with the other resources and every install
+    registers it in the project's settings file; when it fails, neither happens, the install goes on,
+    and the report names why and what an earlier install left in place. A file at a render or resource
+    target that does not carry this repository's banner for its kind, or a symlink or non-directory
+    between ROOT and such a target, refuses the install; package destinations are replaced whole
+    unchecked. A refusal of the root, of the render, of a target it would overwrite, of the kbase
+    source, of the runner file, of the MCP settings file, of the harness directory the guardrail entry
+    cannot name or of the guardrail settings file writes nothing; a settings path that is a symlink or
+    not a regular file is reported and left alone."""
     _refuse_root(root)
     project = root.resolve() if project_root is None else Path(project_root).resolve()
     harness_relpath = _harness_relpath(root, project)
-    # A per-ROOT diagnostic on the file's presence alone: a tree whose tracked executable has not
-    # been pulled from LFS must not turn a plain install into one that rewrites the consumer's runner
-    # and MCP configuration, so no mode and no tree shape is read. What the install copies from is a
-    # different question — there the MCP entry would register a command that cannot start, so
-    # `_kbase_source` is stricter, and its refusal is the place that reports it.
+    # A per-ROOT diagnostic on the file's presence alone: a tree whose executable is absent must not
+    # turn a plain install into one that rewrites the consumer's runner and MCP configuration, so no
+    # mode and no tree shape is read. What the install copies from is a different question — there the
+    # MCP entry would register a command that cannot start, so `_kbase_source` is stricter, and its
+    # refusal is the place that reports it.
     kb_included = with_kb or any(
         (root / destination / KBASE_BASENAME).is_file() for destination in (KB_TOOLS_PACKAGE, LEGACY_KB_TOOLS_PACKAGE)
     )
     # Every check runs before the first write: the root refusal and harness relpath above, then the
-    # render, the kbase source an install including kb copies from, and that install's runner file.
+    # render, the guardrail probe that decides whether its script is a resource target, each render and
+    # resource target the install would overwrite and the paths below ROOT it would write through, the
+    # kbase source an install including kb copies from, that install's runner file and MCP settings
+    # file, and — when the probe passed — the guardrail entry built for this harness directory and the
+    # guardrail settings file.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
-    copies = package_copies(root, kb_included=kb_included)
+    package_files = package_copies(root, kb_included=kb_included)
+    resource_files = harness_resource_copies(root, harness=ctx.harness.name)
+    guardrail = ctx.harness.guardrail
+    guardrail_skipped: str | None = None
+    if guardrail is not None:
+        script = REPO_ROOT / HARNESS_RESOURCES_SOURCE / ctx.harness.name / guardrail.script
+        guardrail_skipped = _guardrail_probe(script, project=project, temp_dir=ctx.harness.project_temp_dir)
+        if guardrail_skipped is not None:
+            resource_files = [(source, target) for source, target in resource_files if source != script]
+    _refuse_foreign_targets(
+        root,
+        render_targets=[root.joinpath(*relative.parts) for relative, _ in renders],
+        resource_targets=[target for _, target in resource_files],
+    )
+    # Everything this install copies, in one list: `keep` and the report below count a harness's own
+    # files with the packages', so neither reads as a stale render.
+    copies = [*package_files, *resource_files]
     kbase = _kbase_source(root, kbase_dist) if kb_included else None
     kbase_copy = _kbase_copy(root, kbase[0]) if kbase is not None and kbase[1] else None
+    kbase_command = str(root.resolve() / KB_TOOLS_PACKAGE / KBASE_BASENAME)
     if kb_included:
         _check_runner(project)
+        _, mcp_container = ctx.harness.mcp.entry(command=kbase_command, project_root=project)
+        mcp_target = _mcp_settings_file(project, harness=ctx.harness)
+        _check_settings(mcp_target, project=project, container=mcp_container, leaf=object)
+    guardrail_entry: dict[str, object] | None = None
+    if guardrail is not None and guardrail_skipped is None:
+        guardrail_entry = guardrail.entry(harness_relpath)
+        _check_settings(project / guardrail.settings, project=project, container=guardrail.container, leaf=list)
 
     for _, destination in SHIPPED_PACKAGES:
         shutil.rmtree(root / destination, ignore_errors=True)
@@ -766,17 +1116,16 @@ def install(
     elif kbase is not None:
         # The sticky install refreshes the snippets and leaves the installed executable alone.
         shutil.rmtree(root / KB_TOOLS_PACKAGE / RUNNER_SNIPPETS, ignore_errors=True)
-    if kbase is not None:
-        binary = dist_target if dist_target is not None else root / KB_TOOLS_PACKAGE / KBASE_BASENAME
-        advisory = _lfs_advisory(binary)
-        if advisory is not None:
-            print(advisory, file=sys.stderr)
-    for source, target in copies:
+    for source, target in package_files:
         data = source.read_bytes()
         if source.suffix in STAMPED_SUFFIXES:
             data = stamped(data, origin=source.relative_to(REPO_ROOT).as_posix())
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        shutil.copymode(source, target)
+    for source, target in resource_files:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
         shutil.copymode(source, target)
     written = write_renders(root, renders)
 
@@ -790,7 +1139,7 @@ def install(
     pruned = prune(root, keep={*written, *(target for _, target in copies)})
     print(
         f"installed: {len(written)} rendered files, "
-        f"{len(copies) + int(dist_target is not None)} package files → {root}"
+        f"{len(copies) + int(dist_target is not None)} copied files → {root}"
     )
     for path in pruned:
         print(f"pruned {path}")
@@ -798,10 +1147,14 @@ def install(
         for path in [*(target for _, target in copies), *([dist_target] if dist_target is not None else []), *written]:
             print(f"wrote {path}")
     if kb_included:
-        mcp_merge(
-            project,
-            harness=ctx.harness,
-            command=str(root.resolve() / KB_TOOLS_PACKAGE / KBASE_BASENAME),
-            kb_root=str(project),
-        )
+        mcp_merge(project, harness=ctx.harness, command=kbase_command)
         install_kb_include_line(project, harness_relpath=harness_relpath)
+    if guardrail is None:
+        return
+    if guardrail_entry is not None:
+        guardrail_merge(project, guardrail=guardrail, entry=guardrail_entry)
+        return
+    # Neither prune nor the one-way copy removes what an earlier install delivered, so it is named.
+    earlier = _earlier_guardrail(root / guardrail.script, project=project, guardrail=guardrail)
+    left = f"; left in place from an earlier install: {', '.join(str(path) for path in earlier)}" if earlier else ""
+    print(f"guardrail hook skipped, neither installed nor registered: {guardrail_skipped}{left}")

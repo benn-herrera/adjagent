@@ -1,15 +1,15 @@
 """The agent-facing write-op contract, held to its load-bearing tokens.
 
-The kb-maintainer definition's own text states the contract for the seat that writes metadata, read
-by a seat that may have no brief at all: every metadata write is one write-op tool call whose schema
-is that op's closed set of value keys, an insert mints the id, and the outcome ladder decides what
-the seat does next. That ladder is the write op's — `done`, `unchanged`, `refused`, `retry`,
-`failed` — not the build's, whose `bounded` and `cancelled` no write op returns. This module asserts
-a token vocabulary of it, so editing that text into silence about a fact a seat acts on mid-call
-fails the suite rather than shipping.
+The contract lives in the kbase skill's maintaining reference, read by a session that may have no
+brief at all: every metadata write is one write-op tool call whose schema is that op's closed set of
+value keys, an insert mints the id, and the outcome ladder decides what the session does next. That
+ladder is the write op's — `done`, `unchanged`, `refused`, `retry`, `failed` — not the build's, whose
+`bounded` and `cancelled` no write op returns. This module asserts a token vocabulary of it, so
+editing that text into silence about a fact a session acts on mid-call fails the suite rather than
+shipping.
 
-The body under test is the definition's rendered text, clauses included: a token below that lives in
-a shared clause the body interpolates (`adjagent/clauses.py`) is fixed there, not in the definition.
+The text under test is the reference's body, clauses included: a token below that lives in a shared
+clause the body interpolates (`adjagent/clauses.py`) is fixed there, not in the definition.
 
 Tokens, not sentences: the assertions have to survive a rewording of the text. What they may not
 survive is a definition that has stopped carrying the fact.
@@ -17,6 +17,7 @@ survive is a definition that has stopped carrying the fact.
 
 import pytest
 
+from adjagent.definition import SkillFile
 from adjagent.render import definitions
 
 #: What the definition must carry, and what each token is load-bearing *for*. Every
@@ -46,7 +47,18 @@ CONTRACT_TOKENS: tuple[tuple[str, str], ...] = (
 )
 
 
+#: The kbase skill's reference the write contract belongs to.
+MAINTAINING_REFERENCE = "references/maintaining.md"
+
+
+@pytest.fixture(scope="module")
+def maintaining() -> SkillFile:
+    """The `SkillFile` carrying the contract, read off the definition rather than its rendered text."""
+    [skill] = [defn for _, defn in definitions() if defn.name == "kbase"]
+    [reference] = [file for file in skill.files if file.path == MAINTAINING_REFERENCE]
+    return reference
+
+
 @pytest.mark.parametrize(("token", "carries"), CONTRACT_TOKENS, ids=[token for token, _ in CONTRACT_TOKENS])
-def test_the_maintainer_definition_carries_the_contract(token: str, carries: str) -> None:
-    [defn] = [defn for _, defn in definitions() if defn.name == "kb-maintainer"]
-    assert token in defn.body, carries
+def test_the_maintaining_reference_carries_the_contract(maintaining: SkillFile, token: str, carries: str) -> None:
+    assert token in maintaining.body, carries

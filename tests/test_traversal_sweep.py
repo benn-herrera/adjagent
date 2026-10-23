@@ -92,7 +92,7 @@ FIXTURE_DEFINITIONS = (
         """\
 # Seat A
 
-When the user checks a derivation, trace the solidity of the
+When the user checks a derivation, trace the strength of the
 chain it rests on and name the weakest link.
 
 Follow the canonical direction when naming ids.
@@ -102,7 +102,7 @@ Follow the canonical direction when naming ids.
   resolves.
 
 ```
-trace the solidity of the chain
+trace the strength of the chain
 walk the tree
 ```
 """,
@@ -113,7 +113,7 @@ walk the tree
 Follow each index's child
 links down to the leaves.
 
-Starting from any leaf, trace the solidity of the chain.
+Starting from any leaf, trace the strength of the chain.
 
 Walk the proof and trace each step.
 """,
@@ -121,7 +121,7 @@ Walk the proof and trace each step.
 )
 
 FIXTURE_SITES = {
-    ("seat-a.md", "trace the solidity of the chain"): "judged, and wrapped across two lines",
+    ("seat-a.md", "trace the strength of the chain"): "judged, and wrapped across two lines",
     ("seat-a.md", "walk-back annotations"): "a noun, not a traversal",
     ("seat-b.md", "walk the proof"): "one of two entries on one logical line",
     ("seat-b.md", "trace each step"): "the other of the two",
@@ -152,7 +152,7 @@ def test_the_report_names_every_unjudged_ambiguous_and_stale_site() -> None:
         "unclassified seat-a.md:9 [walk] - Walk every up-link in the tree and confirm each one resolves.",
         "unclassified seat-a.md:14 [walk] walk the tree",
         "unclassified seat-b.md:1 [follow-links] Follow each index's child links down to the leaves.",
-        "unclassified seat-b.md:4 [starting-from-any,trace] Starting from any leaf, trace the solidity of the chain.",
+        "unclassified seat-b.md:4 [starting-from-any,trace] Starting from any leaf, trace the strength of the chain.",
         "ambiguous seat-b.md:6 matches ['walk the proof', 'trace each step']",
         "stale seat-b.md: 'walk the derivation backwards'",
     ]
@@ -160,6 +160,6 @@ def test_the_report_names_every_unjudged_ambiguous_and_stale_site() -> None:
 
 def test_a_clean_corpus_reports_nothing() -> None:
     """A report that is never empty is equally consistent with a classifier that flags everything."""
-    judged = (("seat-a.md", "Assist by tracing the solidity\nof the chain.\n"),)
+    judged = (("seat-a.md", "Assist by tracing the strength\nof the chain.\n"),)
 
-    assert _sweep_report(judged, {("seat-a.md", "tracing the solidity of the chain"): "judged"}) == []
+    assert _sweep_report(judged, {("seat-a.md", "tracing the strength of the chain"): "judged"}) == []

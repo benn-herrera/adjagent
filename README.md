@@ -2,11 +2,10 @@
 
 This repository generates agents rather than collecting them — a single-sourced generation system
 paired with the multi-capability agent, command and skill set it renders. Definitions are produced to
-order: written as Python modules, tuned per model family, rendered into consuming projects that
-commit the result and never edit it. The generator owns the guarantees — one source for every shared
-span of text, additive-only model tuning, drift visible as the consumer's `git diff`; the rendered
-set does the work — coder and platform specialists, multi-agent debate processes, knowledge-base
-construction and tooling, guest-model liaisons.
+order: written as Python modules, tuned per model family, rendered into consuming projects and never
+edited there. The generator owns the guarantees — one source for every shared span of text,
+additive-only model tuning, the whole tree regenerated on each install; the rendered set does the
+work — coder and platform specialists, knowledge-base construction and tooling.
 
 ## Usage
 
@@ -26,13 +25,16 @@ Base requirements:
 
 - **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with the 
   standard library's `tomllib`, which first shipped in 3.11.
+- `perl` with core `JSON::PP` — optional, for the claude Bash guardrail; without it the install
+  skips that hook and installs everything else ([Bash guardrail](#bash-guardrail)).
 
 For the kb set (`just install-with-kb`, whose `kbase` release the recipe downloads):
 
 - pandoc 3.12 - LaTeX <-> Markdown, host tool, not shipped; a build refuses one out of range
 - git - a KB lives in a git repository, and a build records each stage boundary as a commit
 - graphviz - optional, for rendering claim graph diagrams as SVG
-- a provider configuration - for a build that spends inference; a `--no-inference` build needs none
+- a way to reach a model - a build that spends inference needs one; today that is a provider
+  configuration; `kbase score` always spends inference; a `--no-inference` build needs none
 
 Clone this repo anywhere, then install the deployed surfaces into the consuming project — from
 **this** repo's root:
@@ -42,44 +44,111 @@ just install ~/projects/foo
 ```
 
 That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` — every definition a base
-install carries, the MAD design-topic set and the slash commands — plus the shipped `liaison_tools/`
-package beside them under `adj-tools/`. The kb set is not in a base install:
-`just install-with-kb ~/projects/foo` adds its two agents and the `kbase`
-skill under `skills/`, with the `kbase` toolchain ("Knowledge Base Agent Set", below). The
-definitions are rendered by that invocation and the tool packages are copied. Test suites and
-caches stay behind.
+install carries, the agent set and the slash commands — and copies each package the installer ships
+beside them under `adj-tools/`; no such package is shipped today. Files a harness ships come along
+too, copied unchanged and unstamped: they are not renders of this project's definitions. Both
+harnesses ship one, a Bash guardrail, claude's only where `perl` passes the install's check ("Bash
+guardrail", below). The kb set is not in a base install: `just
+install-with-kb ~/projects/foo` adds the `kbase` skill under `skills/`, with the `kbase` toolchain in
+`skills/kbase/kb-tools/` beneath it ("Knowledge Base Set", below). The definitions are rendered by
+that invocation and the tool packages are copied. Test suites and caches stay behind.
 `--harness=opencode` installs into `.opencode/` instead (the harness's project directory;
 `--subdir=` overrides). Every `--*` flag after the target forwards verbatim to
 `python3 -m adjagent`, so tuning the render is one more flag, not a different command —
 `just install ~/projects/foo --family=gemma-4` tunes the generated definitions for that model family
 (see "Model Tuning" below).
 
-The installed tree is **committed by the consuming project and not for local edit**. A change
-request comes to this project, which evaluates it, implements it and makes it available to every
-consumer; a consumer's own needs go in its `CONVENTIONS.md`. Every rendered file's first banner line
-says so. Re-running the install overwrites the tree and removes definitions this project no longer
-produces; the consumer's `git diff` is the review of what changed. Re-installing an unchanged
-source changes nothing.
-
-If the project tracks the installed tree, put the `kbase` executable under Git LFS: it is a binary of
-several MB, and a plain commit makes every clone carry it. From the project root:
-
-```sh
-git lfs track '**/adj-tools/kb-tools/kbase*'
-```
-
-covers `kbase` and `kbase.exe` under either harness directory. If the binary was already committed,
-rewrite that history once with
-`git lfs migrate import --include='**/adj-tools/kb-tools/kbase*'` before the next clone. An install
-prints the same advice when it writes the executable, and stays silent when git reports it already
-tracked; a project that leaves the installed tree untracked needs none of this.
+The installed tree is **an artifact, not for local edit**. A change request comes to this project,
+which evaluates it, implements it and makes it available to every consumer; a consumer's own needs
+go in its `CONVENTIONS.md`. Every rendered file's first banner line says so. Re-running the install
+overwrites the tree and removes definitions this project no longer produces, so a local edit is
+replaced with no diff to show it; a project that tracks the tree reviews what changed in its
+`git diff`, and one that does not has the install's report — how many files it wrote and each path
+it pruned — and the version its runner pins. Re-installing an unchanged source changes nothing. An
+install refuses, writing nothing, to overwrite a file at one of its paths that carries no banner of
+this project's, such as your own `agents/python-coder.md`, or to write below a symlink or a
+non-directory on the way to one; the refusal names each such path, and you move or remove them and
+install again. A harness's shipped file is replaced on each install, unless its install-time run
+fails (see "Bash guardrail"), and never pruned, so one this project stops shipping stays in your
+tree until you remove it.
 
 Claude Code reads agent definitions from `.claude/agents/`, slash commands from `.claude/commands/`
 and skills from `.claude/skills/`; a base install writes `agents/` and `commands/` there and no
-`skills/` — the shipped `liaison_tools/` lands beside them under `adj-tools/` — so nothing else is
-visible to a session. A kb install adds `adj-tools/kb-tools/`, the `kbase` skill at `skills/kbase/`,
-and, at the project root, the `kbase` MCP entry and one include line in the project's justfile or
-Makefile.
+`skills/`. A claude install whose guardrail check passes also writes `.claude/hooks/guardrail.pl`
+and one entry in `.claude/settings.json`, and nothing else is visible to a session. An opencode install writes one
+file more, `.opencode/plugins/guardrail.ts`, copied as it stands. A kb
+install adds the `kbase` skill at `skills/kbase/`, with the `kbase` toolchain in
+`skills/kbase/kb-tools/` beneath it (the skill carries its own tooling), and, at the project root,
+the `kbase` MCP entry and one include line in the project's justfile or Makefile.
+
+### Bash guardrail
+
+Each harness ships a hook that blocks Bash commands which change a file behind the Edit and Write
+tools: in-place `sed`, `perl` or `ruby` edits, redirects (`>`, `>>`), `tee`, `cp` and `mv` onto an
+existing file, and inline `python`, `node`, `perl` or `ruby` scripts that write. Writes into
+`.claude-temp/` and `test-data/transient` are allowed. A relative path is judged against the
+directory the command runs in, and a heredoc's body is not read as shell. The hook catches the forms
+agents habitually use; it is not a boundary against a command written to evade it. opencode's is a
+plugin that registers itself.
+
+Claude's is `.claude/hooks/guardrail.pl`, which needs `perl` on `PATH` with core `JSON::PP` when a
+session runs it. The install runs it once to check, and without perl or the module, or if the run
+takes more than a few seconds, it skips the hook, reports the reason in one line and installs
+everything else; a script and entry from an earlier install are left in place and named. The install
+adds one `PreToolUse` entry for Bash to `.claude/settings.json`, the file Claude Code reads whatever
+`--subdir` is. The entry runs the script under `$CLAUDE_PROJECT_DIR` only if it is a readable file:
+where it is missing, for example because you committed `settings.json` but not `.claude/hooks/`, a
+Bash call prints `guardrail hook: no readable script at <path>` and goes ahead, rather than being
+blocked. An existing file keeps every other byte, including your own hooks, and a re-install
+replaces that one entry in place; only an entry written by an install is replaced, so a hook of
+yours that runs some other `guardrail.pl` is left alone. A project has one entry: installing under
+a different `--subdir` replaces it. A settings file with comments, or with more than one of our
+entries, or a settings path that is a symlink or sits behind one, or is not a regular file, is
+reported with the entry printed for you to merge by hand and is left untouched. A settings file that
+is not UTF-8, or whose `hooks` or `PreToolUse` has the wrong shape (`null` included), refuses the
+install with nothing written, as does a harness directory whose path holds a `"`, `$`, backtick or
+`\`.
+
+### Runner snippets for adding to a project
+
+Add `.claude/`, `.opencode/` to `.gitignore`
+
+The examples below use the `install` recipe. 
+
+The `install-with-kb` recipe installs the [kbase](https://github.com/benn-herrera/kbase) knowledge base tool
+and the skill to use it. Add `.mcp.json` to `.gitignore` if you use this recipe.
+
+#### Justfile
+```just
+AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
+AGENTS_DIR := ".claude" / file_stem(AGENTS_REPO)
+AGENTS_VER := "v0.11.1"
+[doc("updates and installs agent set from adjagents public repo")]
+agents:
+  @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
+  @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" fetch --tags || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}"
+  @git -c "advice.detachedHead=false" -C "{{AGENTS_DIR}}" checkout "{{AGENTS_VER}}"
+  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=claude
+  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode --model-tier-map=default
+  just --justfile "{{AGENTS_DIR}}/justfile" install-agents-file ~/.claude
+	just --justfile "{{AGENTS_DIR}}/justfile" install-agents-file ~/.config/opencode	
+```
+
+#### Makefile
+```make
+.PHONY: agents
+AGENTS_REPO := https://github.com/benn-herrera/adjagent.git
+AGENTS_DIR := .claude/$(basename $(notdir $(AGENTS_REPO)))
+AGENTS_VER := v0.11.1
+agents:
+	@mkdir -p $(dir $(AGENTS_DIR))
+	@[[ -d "$(AGENTS_DIR)" ]] && git -C "$(AGENTS_DIR)" fetch --tags || git -C "$(dir $(AGENTS_DIR))" clone $(AGENTS_REPO)
+	@git -c "advice.detachedHead=false" -C "$(AGENTS_DIR)" checkout "${AGENTS_VER}"
+	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=claude
+	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=opencode --model-tier-map=default
+	just --justfile "$(AGENTS_DIR)/justfile" install-agents-file ~/.claude
+	just --justfile "$(AGENTS_DIR)/justfile" install-agents-file ~/.config/opencode	
+```
 
 ### Harness Agents File
 
@@ -160,9 +229,9 @@ Authoring a Family.
   * web-app-expert.md
   * windows-app-expert.md
 
-Every definition in this catalog is **generated** — the coder and platform files, the MAD agent set,
-the `kbase` skill and its two agents, the specialists, the liaisons, and every slash command. There
-are no hand-maintained definitions and nothing to edit directly; see Development → Generated
+Every definition in this catalog is **generated** — the coder and platform files, the `kbase` skill
+with its references, the specialists, and every slash command.
+There are no hand-maintained definitions and nothing to edit directly; see Development → Generated
 Definitions for how a definition maps to its source module.
 
 ### Specialists
@@ -184,181 +253,13 @@ Single-purpose agents invoked directly for non-coding work.
 * prompt-engineer.md - authors and revises model-facing text: agent definitions, commands, skills,
   definition bodies, model-tuning overlay entries, agent-facing docs.
 
-### Multi-Agent Debate Agent Set
-Uses Multi-Agent Debate Process. Two modes share the same participants but use different referees;
-only design mode carries a topic library:
-* **Review mode** — adversarial assessment of an *existing* artifact (architecture, code, math,
-  agent definitions).
-* **Design mode** — constructive proposal for an *open problem* (derivations, software designs,
-  hardware designs, other problem-solving).
+### Knowledge Base Set
 
-Both modes' liaison plumbing (`liaison_tools/`, shared with Guest Liaison below) is documented under
-Development → Liaison Tooling.
-
-#### Shared Agents
-* mad/participant-contract.md - the model-neutral participant contract (reviewer in review mode,
-  proposer in design mode); the body a guest model receives as its system prompt
-* mad-participant-a.md, mad-participant-b.md, mad-participant-c.md,
-  mad-participant-d.md - the same contract as dispatchable agents, one per model pin; a run
-  draws its participants from different pins so their blind spots differ
-* mad-guest-liaison.md - a liaison that can loop in an external model via API base url, key, and
-  model name
-* mad-alignment-assessor.md - only assesses alignment/disagreement among participants
-
-#### Review Mode
-
-* mad-review-referee.md - runs multi-agent debate review process
-* commands
-  * mad-review.md - initiates a review process. you must provide:
-    * a review name — a bare slug naming the output folder and documents; review mode has no topic
-      library, so the invoker's charter carries the methodology
-    * a seat roster (`SEATS=`) — comma-separated subset of `a`, `b`, `c`, `d`,
-      `guest`; at most one of each, at least two. No default: a roster-less invocation is refused.
-      `b,c` is a reasonable pick for most review jobs. A `guest` seat additionally requires
-      `ENV_FILE=` (path to the guest model's env file)
-    * \[optional\] a requirements/constraints doc (e.g. coding invariants, math invariants, etc.)
-    * a review target (path to document, file, or hierarchy)
-* process
-  * /mad-review \[your specifics\]
-  * referee launches agents and reviews/debate/resolution occurs
-  * output is a directory `./mad-review/<review-name>/` of documents containing
-    * summary doc - burndown list, unresolved conflicts, resolved conflicts
-    * audit trail of debate process and outcomes
-    * all artifacts, temporary or otherwise, are produced under the review work directory
-  * round cap: 5
-  * examples
-    * ```/mad-review src-review SEATS=b,c,guest ENV_FILE=~/.config/guest.env CONSTRAINTS=CONVENTIONS.md TARGET=src/ **IGNORE `src/third_party`**```
-
-#### Design Mode
-
-* mad-design-referee.md - runs multi-agent debate design process
-* commands
-  * mad-design.md - initiates a design process. you must provide:
-    * a topic from .claude/agents/mad/design-topics/
-      * architecture.md
-      * math-derivation.md
-      * ml-engineering.md (more topics can be added: software-design, hardware-design, etc.)
-    * a seat roster (`SEATS=`) — same contract as review mode: subset of `a`, `b`, `c`,
-      `d`, `guest`, at most one of each, at least two, no default; `guest` requires `ENV_FILE=`
-    * \[optional\] a requirements/constraints doc
-    * a problem statement: either (a) a path to an existing brief defining the open problem, or (b)
-      an empty/not-yet-created output location — in case (b) the referee elicits the brief from the
-      user via interactive dialogue before dispatching participants
-* process
-  * /mad-design \[your specifics\]
-  * referee launches agents and proposals/debate/convergence occurs
-  * output is a directory `./mad-design/<design-name>/` of documents containing
-    * SOLUTION.md - the constructed solution with full provenance (which participant proposed what,
-      where it survived/failed), or a convergent under-determination diagnosis, or preserved
-      candidates if unresolved
-    * audit trail of debate process and outcomes
-    * all artifacts, temporary or otherwise, are produced under the design work directory
-  * round cap: 10 (construction is iterative; converging two independently-built proposals takes
-    longer than retiring a list of flaws)
-  * convergence criteria
-    * **algebraic**: all participants reach the same closed-form result modulo trivial reformulation
-    * **multi-path**: participants reach the same numerical answer via demonstrably independent
-      paths (treated as strong-positive; multiple independent constructions reaching the same answer
-      is mutual reinforcement)
-    * **under-determined**: all participants converge on the same diagnosis of why the problem
-      cannot be closed from the supplied axioms, identifying the specific missing
-      axiom/principle/input
-    * **unresolved**: candidates preserved for human arbitration if no convergence within round cap
-  * examples
-    * ```/mad-design math-derivation SEATS=a,b,c CONSTRAINTS=SPEC.md TARGET=mad-design/my-derivation/```
-
-### Guest Liaison
-
-`guest-liaison.md` relays a multi-turn conversation between you and an external "guest" model
-accessed via an OpenAI-compatible API. Distinct from `mad-guest-liaison.md`, which is the
-MAD-process-only variant invoked by referees inside review/design debates. Both share
-`liaison_tools/` (Development → Liaison Tooling).
-
-Properties of the relay:
-* **Verbatim relay** of the system prompt and each user message — no summarizing, paraphrasing, or
-  topic-tailoring. Verified post-write by `diff` against the source; the liaison aborts before
-  sending if the diff is non-empty.
-* **Secrets containment** — the API key lives in a file read directly by `post-openai.py`. The
-  liaison treats the file path as opaque and is forbidden from reading the contents.
-* **Audit-permanent session log** — every turn (system, user, agent) is appended to
-  `guest-session/<topic>/messages.json` and never deleted.
-* **File and tool-call services** — when the guest model asks for a file's contents or emits a tool
-  call, the liaison reads the file (using a fixed `Here is the content of <path>:` frame) or returns
-  a "not available in this environment" stub, then re-invokes the model.
-
-#### Slash commands
-
-* `/guest-start <topic>` — initiate (or resume) a session: onboarding, persist session state, send
-  the first user message, return the guest's reply.
-* `/guest <message>` — append `<message>` as the next user turn in the active session and return the
-  guest's reply.
-* `/guest-end` — clear the active-topic pointer (`guest-session/active-topic.txt`). The session
-  directory itself is preserved as audit history.
-
-#### `/guest-start` arguments
-
-`/guest-start` takes one argument: the **topic slug**, which names the session directory under
-`guest-session/`. It must contain no path separators, leading dots, or whitespace.
-
-Everything else is collected interactively after the command starts:
-
-* `API_BASE_URL`, `API_KEY_FILE`, `MODEL` — the connection parameters. `API_BASE_URL` is the **API
-  root**, not the chat-completions endpoint — `post-openai.py` appends `/chat/completions` itself.
-  (Including `/chat/completions` in the URL produces a doubled path and a 404.)
-* **System prompt source** *(new session only)* — either a path to an agent definition under
-  `.claude/agents/` whose body (frontmatter stripped) is sent verbatim as the guest model's system
-  prompt, or, if you decline to pick one, the literal default `You are a helpful assistant.` The
-  agent body is not a Claude-only artifact — any agent body that reads as a coherent instruction set
-  works (e.g. `applied-mathematician`, `architect`, `tech-writer`).
-* **Initial message** *(new session only)* — the first prompt sent to the guest model.
-
-The collected connection parameters are persisted to `guest-session/<topic>/params.env` so `/guest`
-can reuse them on later turns.
-
-#### API key file format (the file at `API_KEY_FILE`)
-
-The file contains only the API key. Its entire content, with leading and trailing whitespace
-trimmed, is the key; the key must contain no internal whitespace.
-
-The liaison never reads this file. `post-openai.py` reads the key directly — the key does not appear
-in argv, env, transcripts, or any tool output the liaison sees.
-
-#### Session directory layout
-
-```
-guest-session/
-  active-topic.txt              # one line: the currently active topic slug
-  <topic>/
-    messages.json               # full conversation (system + user + agent turns); permanent audit
-    params.env                  # API_BASE_URL, MODEL, API_KEY_FILE, SYSTEM_PROMPT_AGENT
-    tmp/                        # mktemp scratch space; safe to leave between turns
-```
-
-`guest-session/` is in `.gitignore` so audit logs and `params.env` (which references local API key
-file paths) do not leak into commits.
-
-#### Resuming and switching topics
-
-Re-running `/guest-start` with an existing topic slug offers to resume — the prior `messages.json`
-is preserved and new turns continue from it. To switch active sessions without deleting either, run
-`/guest-end` then `/guest-start` with the new topic; both session directories survive.
-
-#### Example
-
-```
-/guest-start solar-system
-/guest how long does light take to get from the sun to the earth?
-/guest now compute the same for Proxima Centauri.
-/guest-end
-```
-
-### Knowledge Base Agent Set
-
-Agents and portable tooling for building, navigating, and maintaining a knowledge base — a
-navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph
-metadata spine. The set is one skill, `kbase`, and two agents, all project-portable: per-project
-facts live in the consuming project's `kb-root/AGENTS.md`, not in the definitions. The whole set is
-**generated** from its definition modules, and a base install omits it — `just install-with-kb` is
+The `kbase` skill and portable tooling for building, navigating, and maintaining a knowledge base —
+a navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph
+metadata spine. The set is one skill, `kbase`, with four references, project-portable: per-project
+facts live in the consuming project's `kb-root/AGENTS.md`, not in the skill's text. The set is
+**generated** from its definition module, and a base install omits it — `just install-with-kb` is
 what delivers it.
 
 You don't invoke a command to use it. Ask about the knowledge base — what it says, how to get
@@ -375,7 +276,7 @@ not.
 
 * Using/navigating a knowledge base
   * `kbase` skill — `skills/kbase/SKILL.md` locates the KB and routes the request, with
-    `references/reading.md` carrying navigation, claim quality and cross-references
+    `references/reading.md` carrying navigation, claim rigor and strength, and cross-references
 
 * Building/Modifying Knowledge Base
   * `kbase` skill, `references/build.md` - drives kbase's `build` tool: reports the refusal, or the
@@ -384,46 +285,58 @@ not.
   * kbase - the builder itself, a Go binary this repository installs but does not ship as source:
     `kbase build` runs the stages in order, spends inference through its own provider configuration,
     and makes each stage boundary a commit in your repository
-  * kb-claim-scorer.md - grades written derivations; returns judgments and writes nothing
-  * kb-maintainer.md - the write side: leaf edits, claim-graph wiring, refresh→verify loop; the
-    skill dispatches it
+  * `kbase` skill, `references/maintaining.md` - the write side: leaf edits, claim-graph wiring and
+    the refresh→verify loop, for a correction or a migration a session lands by hand
+  * `kbase` skill, `references/scoring.md` - scoring the KB's rigor and bearings: the `score` tool
+    walks the KB's scoring set itself, one question per item, and records a run ledger it resumes
+    from; a work's rigor and a `founds` edge's bearing are yours to author, never a run's
 
 #### KB toolchain
 
 The kb set drives **kbase**, a Go binary, not a Python package. `just install-with-kb` delivers it to
-`.claude/adj-tools/kb-tools/kbase` by default (`.opencode/adj-tools/kb-tools/kbase` under opencode) —
-the path the definitions and the runner snippets name — and beside it the two runner fragments.
+`.claude/skills/kbase/kb-tools/kbase` by default (`.opencode/skills/kbase/kb-tools/kbase` under
+opencode) — inside the skill's own directory, the path the include line and the MCP entry name — and
+beside it the two runner fragments.
 kbase's own documentation is its repository, [benn-herrera/kbase](https://github.com/benn-herrera/kbase);
 `INTEGRATING_KBASE_VIA_MCP.md` there is the wiring guide. The same install:
 
 1. Registers a `kbase` MCP server in the project's own settings file — `.mcp.json` under Claude Code;
    under opencode the first of `.opencode/opencode.json`, `opencode.jsonc`, `opencode.json`, else
-   `.opencode/opencode.jsonc` created. The entry's command is the installed binary and its KB root
-   the project root. Every query, write op, `refresh`, `verify` and `build` the set names is a tool
-   of that server, offered under the harness's own prefix — `mcp__kbase__stats` under Claude Code,
-   `kbase_stats` under opencode. A settings file carrying JSONC comments is reported with the entry
-   printed for you to merge by hand.
+   `.opencode/opencode.jsonc` created. The entry's command is the installed binary, run as
+   `kbase mcp`; it names no KB path. Every query, write op, `refresh`, `verify`, `build` and `score`
+   the set names is a tool of that server, offered under the harness's own prefix —
+   `mcp__kbase__stats` under Claude Code, `kbase_stats` under opencode. A settings file carrying
+   JSONC comments, or a settings path that is a symlink or not a regular file, is reported with the
+   entry printed for you to merge by hand.
 2. Appends one include line to the project's justfile or Makefile — creating a `Makefile` where there
-   is neither: `import? '<harness-dir>/adj-tools/kb-tools/runner-snippets/kb.just'` (just 1.33 or
+   is neither: `import? '<harness-dir>/skills/kbase/kb-tools/runner-snippets/kb.just'` (just 1.33 or
    later) or the `-include` form naming `kb.mk`. Both are non-fatal, so a consumer's runner keeps
    working if the tree is absent, and `just`/`make` then carry `kb-verify`, `kb-refresh` and
    `kb-stats`.
 
-The route is MCP-only. Where the `kbase` server is not connected the skill says so and stops;
-registering it, which the install does, is the fix, not a second interface. The KB lives in
-`kb-root/` at the repository root, which is also what the entry's `--kb-root` names.
+The route is MCP-only for every verb, scoring among them: the `score` tool starts its run detached
+and answers once the run's ledger and pid stand, and the run is followed with `status`, `wait` and
+`cancel`. Where the server is not connected the skill says so and stops, and registering it, which
+the install does, is the fix, not a second interface. The KB lives in `kb-root/` at the repository
+root, and the entry names no path to it: `kbase mcp` locates the KB from the working directory it
+is started in, as every kbase subcommand does, so the server must be started in the project
+directory.
 
-The choice is sticky: a directory that already carries `adj-tools/kb-tools/` — or the
-`agents/kb-tools/` an earlier version installed — is a kb install, so a later `just install` into it
-refreshes the fragments and keeps kb rather than dropping it. A plain `just
-install` into a directory without them writes no kb-set definition — no `kb-` agent, no part of the
-`skills/kbase/` tree — no kb-tools tree, no MCP entry and no include line, and removes each file of
+The choice is sticky: a directory already holding the installed `kbase` executable at
+`skills/kbase/kb-tools/` — or the `agents/kb-tools/` an earlier version installed — is a kb install,
+so a later `just install` into it refreshes the fragments and keeps kb rather than dropping it. A
+plain `just install` into a directory without that executable writes nothing of the kb set — no
+`skills/kbase/` tree, no kb-tools tree, no MCP entry and no include line — and removes each file of
 one it finds as stale.
 
 ## Development
 
 This section is for working on this repository itself — the generator, its definitions, and the
 shipped tool packages. If you are installing the product into a project, see Usage, above.
+
+Beyond the install requirements, the test suite needs `bun` and `perl` on `PATH`: the guardrail
+parity test (`tests/test_guardrail.py`) runs one case table through both guardrails and fails, not
+skips, without `bun`. The two guardrails change together ([CONVENTIONS.md](CONVENTIONS.md)).
 
 ### Repository Layout
 
@@ -432,11 +345,13 @@ adjagent/                 the generator and every definition, run as `python3 -m
   clauses.py              shared text: named string constants, small functions for slotted text
   definitions/            one module per definition, or per set that shares text and ships together
   harnesses/              one module per harness (claude, opencode), each defining HARNESS
+    resources/            one directory per harness — the files it ships, copied into the install's
+                          harness directory as they stand (opencode/plugins/guardrail.ts,
+                          claude/hooks/guardrail.pl)
   families/               one module per model family, each defining FAMILY
-liaison_tools/            shipped python helpers for the liaison agents; installed under the harness
-                          directory, beside the definition surfaces, as adj-tools/liaison_tools/
 kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
-                          a kb install only; installed beside the kbase binary as adj-tools/kb-tools/
+                          a kb install only; installed beside the kbase binary as
+                          skills/kbase/kb-tools/, inside the kbase skill's own directory
 .tool-dist-cache/         gitignored — the kbase release `install-with-kb` downloads and installs
 devtools/render_diff.py   compares two rendered slots by text; reads only rendered output
 rendered/                 gitignored build product — `just render [slug]` puts a render here per
@@ -475,14 +390,14 @@ text with holes, read top to bottom as the file it renders.
   accepted; it re-takes the baseline slots `render-diff` compares against.
 
 Other targets: `just render [slug]` renders the full install product — kb set included, so the slot
-carries the `kbase` skill under `skills/`, `adj-tools/kb-tools/`, the harness's MCP entry and a
-`Makefile` include line — into
+carries the `kbase` skill under `skills/` with the `kbase` toolchain in `skills/kbase/kb-tools/`
+beneath it, the harness's MCP entry and a `Makefile` include line — into
 `rendered/<slug>/` (slug defaults to `latest`), plus the harness agents file under
 `rendered/<slug>/harness/<name>/` — Claude Code's `CLAUDE.md` by default, or another harness's with
 `--harness=NAME`. A slug starting with `reference` is refused. `just render-diff [a] [b]` compares
 two slots — reference against latest by default — by text, with each file's banner replaced by one
 constant line, and reports differences without failing on them. `just test` runs the full tooling
-test suite (the `liaison_tools`, `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
+test suite (the `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
 `just test-changed [base]` runs only the surfaces the uncommitted tree (plus, given `base`, the
 commits since it) touches, and says which paths chose each.
 
@@ -515,35 +430,17 @@ and against which observed behavior it was added.
 
 ### Generated Definitions
 
-Every definition in the Usage catalogs — the coder and platform files, the MAD agent set, the
-`kbase` skill with its references, its two agents, the specialists, the liaisons, and every slash
-command — is **generated**. There are no hand-maintained definitions and nothing to edit directly
-in a rendered tree; the source is the definition's module (see "Working In This Repo"). A rendered
+Every definition in the Usage catalogs — the coder and platform files, the `kbase` skill with its
+references, the specialists, and every slash command — is **generated**. There are no
+hand-maintained definitions and nothing to edit directly in a rendered tree; the source is the
+definition's module (see "Working In This Repo"). A rendered
 definition carries a two-line banner inside its frontmatter: a generated-from line naming its
 definition module and stating that the file is not for local edit, and a tuning line recording the
 family, seat, tier map and harness it was rendered for. A skill's supporting file has no
 frontmatter, so it carries the same two lines as HTML comments on its first two lines. There is no
-content hash; consuming projects track the rendered output, and their `git diff` is the drift
-check. See [CONVENTIONS.md](CONVENTIONS.md#adding-definitions) for how to add one.
-
-### Liaison Tooling
-`liaison_tools/` contains the helpers used by both `mad-guest-liaison.md` (MAD process) and
-`guest-liaison.md` (general guest-model sessions); an install delivers it to
-`.claude/adj-tools/liaison_tools/`, which is the path the definitions name. The liaison agents are the
-primary callers; MAD referees set `TMPDIR` for liaison invocations to keep `mktemp` output contained
-in the review/design directory.
-* `post-openai.py` - posts a message history to an OpenAI-compatible API and prints the assistant
-  reply. Reads the API key from a file so it never enters argv or env.
-* `msg-util.py` - the only sanctioned path for creating or mutating the messages JSON (init / append
-  / validate). Use this rather than ad-hoc jq or sed.
-* `relay-driver.py` - the corpus-relay eval instrument: runs budgeted, fresh-history Q&A sessions
-  against a guest model over a read-only corpus, appending its own READ/LIST/GREP relay protocol
-  block to the caller's system prompt (callers supply navigation doctrine only) and servicing
-  exactly what it appended. Per-question sessions, answers, and a `stats.csv` with real token totals
-  (via `post-openai.py`'s `USAGE_STATS_FILE` side channel) land under `--output-dir`. Sketch:
-  `relay-driver.py --corpus-root kb-root --system-prompt scout.md --questions-file questions.md --output-dir eval-out --env-file guest.env` (single questions via `--question`
-  or `--question-number N`).
-* `tests/` - fixtures for the above scripts.
+content hash; a project that tracks the rendered output sees drift in its `git diff`, and one that
+does not loses any local edit to the next install. See
+[CONVENTIONS.md](CONVENTIONS.md#adding-definitions) for how to add one.
 
 ## Third Party Acknowledgements
 

@@ -18,14 +18,18 @@ FAMILY = Family(
         # vehicle: the whole-definition fork applied-mathematician-strict.md (created
         # f9866d2, tightened f9e2911, retired cabf3c9). The three bullets below were
         # that fork's proven prompt text carried over essentially verbatim; only the
-        # packaging changed — the anchor renders this text verbatim in place, so the
+        # packaging changed — an anchor renders this text verbatim in place, so the
         # one-line lead-in above the bullets is written into the text itself.
         #
-        # 2026-09-06, no longer verbatim. This anchor is now authored in
-        # kb-claim-scorer.tmpl.md and reaches that seat alone: this family staffs the KB
-        # scoring wave, and applied-mathematician — the fork's original subject — is an
-        # interactive seat nothing runs on gemma. So the text is written for a batch
-        # grader, and two places where it addressed a collaborator are gone.
+        # 2026-09-06, no longer verbatim. The text was rewritten for a batch grader rather
+        # than an interactive collaborator: this family staffs the KB scoring wave, and
+        # applied-mathematician — the fork's original subject — is an interactive seat
+        # nothing runs on gemma. The revision was made against kb-claim-scorer.tmpl.md,
+        # which carried the anchor at the time. No definition interpolates this anchor
+        # today, so the overlay renders nowhere; the text is retained because its
+        # destination is kbase's scoring prompt, where the rigor judgement now lives, and
+        # it is not this repository's to place. Two places where it addressed a
+        # collaborator are gone.
         #   · Step 3 read "Either request the missing piece from the user, or proceed by
         #     *stipulating* a specific closure with the closure labeled as a
         #     stipulation rather than a derivation." Base text now forbids closing a
@@ -77,9 +81,9 @@ FAMILY = Family(
         #     stipulation as an acceptable second-best; base text now forbids closing a
         #     gap with a supplied step however it is labelled, and an overlay fills rather
         #     than replaces.
-        #   · "(see the foundational gap discipline above)" is struck: gap-aversion now
-        #     renders only in kb-claim-scorer, so in this seat that pointer resolved to
-        #     nothing.
+        #   · "(see the foundational gap discipline above)" is struck: gap-aversion renders
+        #     nowhere — no definition interpolates its anchor — so in this seat that pointer
+        #     resolved to nothing.
         # STANDING QUESTION for whoever owns this file: nothing is run on gemma but the
         # KB scoring wave, and this entry fills an anchor only the interactive seat
         # authors — so it tunes a render that is not currently produced. Retiring it is

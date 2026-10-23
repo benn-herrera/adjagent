@@ -1,12 +1,12 @@
 # KB maintenance recipes. This file is installed at
-# <harness-dir>/adj-tools/kb-tools/runner-snippets/ — <harness-dir> being the
-# project's .claude or .opencode — and is imported from the consuming
+# <harness-dir>/skills/kbase/kb-tools/runner-snippets/ — <harness-dir> being
+# the project's .claude or .opencode — and is imported from the consuming
 # project's justfile by one installed line (never copied into it):
 #
-#     import? '<harness-relpath>/adj-tools/kb-tools/runner-snippets/kb.just'
+#     import? '<harness-relpath>/skills/kbase/kb-tools/runner-snippets/kb.just'
 #
 # A consumer running make instead gets the `-include` line pointing at
-# `<harness-relpath>/adj-tools/kb-tools/runner-snippets/kb.mk`.
+# `<harness-relpath>/skills/kbase/kb-tools/runner-snippets/kb.mk`.
 #
 # The line is written by `install-with-kb`, run from the consumer root — not
 # by anything in this tree. `import?` requires just >= 1.33; the optional form
@@ -16,7 +16,7 @@
 #
 # Assumed consumer layout: the repo root (where just runs) contains kb-root/,
 # and this fragment sits beside the installed `kbase` executable under
-# <harness-dir>/adj-tools/kb-tools/. kbase finds the KB from the working
+# <harness-dir>/skills/kbase/kb-tools/. kbase finds the KB from the working
 # directory, so these recipes run from the repo root.
 #
 # The binary is found from this fragment's own location: the snippets

@@ -6,11 +6,11 @@ SPEC.md. Cites SPEC's requirements rather than restating them.
 ## Repo Layout
 
 ```
-kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, and nothing importable; installed beside the kbase executable under <harness-dir>/adj-tools/kb-tools/ (KB_TOOLS_PACKAGE, adjagent/install.py)
-liaison_tools/          shipped package, delivered by every install — shell/python helpers shared by guest-liaison.md and mad-guest-liaison.md, imported from the repository root as `liaison_tools`; installed beside the definition surfaces under <harness-dir>/adj-tools/liaison_tools/ (SHIPPED_PACKAGES)
+kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, and nothing importable; installed beside the kbase executable under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
 .tool-dist-cache/       gitignored — the signed kbase release a recipe downloads, <version>/kbase[.exe], which `install-with-kb` installs (justfile KBASE_VERSION, TOOL_DIST_CACHE)
 rendered/               gitignored build product — this repo's own render tree, one slot per render, and the three `reference*` slots `render-diff` compares against (justfile RENDERED); created on demand
 adjagent/               the generator package, run as python3 -m adjagent — definitions as Python values rendered into a named output root; the package docstring lists its modules
+  harnesses/resources/  one directory per harness, named for it — the files that harness ships into its project harness directory, copied into ROOT as they stand and never rendered (HARNESS_RESOURCES_SOURCE, adjagent/install.py); `opencode/plugins/guardrail.ts` and `claude/hooks/guardrail.pl` today, and no `__init__.py`, so `load` still reads one harness per module
 devtools/               repository-maintenance tooling — project space, never installed; imported from the repository root as `devtools.*`
   render_diff.py        the text comparison of two rendered slots (justfile `render-diff`); reads rendered output only and never imports the generator
   dupe_sweep/           the duplication sweep, run as `python3 -m devtools.dupe_sweep` — enumerates one-idea-two-places candidates over the owned python trees (justfile `sweep-python`)
@@ -19,7 +19,7 @@ devtools/               repository-maintenance tooling — project space, never 
     corpus.py           the corpus read from git, never a directory walk; the sweep's error
     clustering.py       units, containment scoring, shingle-blocked clustering, union-find grouping
     normalization.py    text to lower-cased words, `@!…!@` placeholders dropped
-    python_corpus.py    what the python pass reads: `CODE_PREFIXES` — liaison_tools, adjagent, devtools — less `CODE_UNSWEPT`, parsed
+    python_corpus.py    what the python pass reads: `CODE_PREFIXES` — adjagent, devtools — less `CODE_UNSWEPT`, parsed
     shapes.py           one concept, two implementations: function structural shapes
     constants.py        one constant, two definitions: module-level literals and their candidates
     doc_sentences.py    one rule, two homes: docstring and comment sentences
@@ -38,8 +38,17 @@ The three deployed surfaces are absent from this listing because they are absent
 `just install` wraps `python3 -m adjagent install <project>/<subdir>` (`adjagent/install.py`);
 `just install-with-kb` wraps the same verb with `--with-kb` and a `--kbase-dist` naming the release
 its recipe caches under the gitignored `.tool-dist-cache/`. It refuses, with nothing written, a ROOT
-that is this repository or inside a shipped package's source, and a ROOT outside the project root it
-is given; a kb install with no `kbase` executable to write refuses the same way.
+that is this repository or inside a source it copies from — a shipped package's, the kb toolchain's,
+or a harness's resource tree — and a ROOT outside the project root it is given; a kb install with no
+`kbase` executable to write refuses the same way. So does a render or harness-resource target
+holding a file without this repository's banner, or with a symlink or non-directory on its path
+below ROOT; a harness settings file that is not UTF-8 or holds the wrong type, `null` included,
+where the entry goes — the MCP settings file on a kb install, and the guardrail's
+`.claude/settings.json` on a claude install whose probe passes; and, on that install, a harness
+directory the guardrail entry cannot name. Every such check runs before the first write. The target
+refusal names every failing path at once; a settings or entry refusal names the one it met. A
+settings path that is a symlink or not a regular file is no refusal: the merge reports it and leaves
+it (below).
 
 The two install types differ by one filter and three emissions. The filter is `NOT_BY_DEFAULT`,
 `^(kb-|kbase$)`, applied to the definition's name — its declared name, not a rendered file's stem —
@@ -47,35 +56,40 @@ before anything about it is rendered: a base install drops every match whole, so
 dropped definition is written, and the skill's directory is never created by a run that excludes
 it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes beside its
 `--kbase-dist`, or is sticky: the installed `kbase` executable standing under ROOT — at
-`adj-tools/kb-tools/kbase`, `kbase.exe` where that is the installed name, or at the
+`skills/kbase/kb-tools/kbase`, `kbase.exe` where that is the installed name, or at the
 `agents/kb-tools/` an earlier version installed there — already includes kb, per ROOT rather than
 per project, so a later base-typed invocation refreshes that package instead of dropping it. The
 test is that file's presence, and presence alone: the mode is never read, the runner snippets and any
-include fragment beside it are never inspected, so a `kb-tools/` directory holding no such file — an
-empty one, or one whose tracked executable was never pulled — is a base install. Selecting what a kb
-install copies from is stricter, and the installed binary must run: a file there that cannot execute
-is no source, the legacy `agents/kb-tools/` is consulted, and with nothing runnable there either the
-install refuses with `InputError` naming the path and its remedies — `--kbase-dist`, or install kb
-first — rather than register a command that cannot start. The underscore `agents/kb_tools/` tree is
-not a signal; it never held an executable.
+include fragment beside it are never inspected, so a destination holding no file of that name — an
+empty `kb-tools/` directory, or one whose executable was never placed — is a base install. Presence
+alone cuts the other way too: a `kbase` sitting there that cannot run — empty, or not executable —
+still selects the kb set, and the source check below is what refuses the install. Selecting what a
+kb install copies from is stricter, and the installed binary must run: a file there that cannot
+execute is no source, the legacy `agents/kb-tools/` is consulted, and with nothing runnable there
+either the install refuses with `InputError` naming the path and its remedies — `--kbase-dist`, or
+install kb first — rather than register a command that cannot start. The underscore
+`agents/kb_tools/` tree is not a signal; it never held an executable.
 
-A kb install writes three things beside the renders:
+A kb install writes three things beyond the renders:
 
 - **The kb-tools package**, assembled from two sources: the `runner-snippets/` fragments copied from
-  `kb-tools/`, and the executable the distribution names, which replaces the destination whole. With
-  no distribution named, the executable already installed stays where it is and only the snippets are
-  refreshed; one an earlier version installed under `agents/kb-tools/` is copied across before that
-  tree is removed.
+  `kb-tools/`, and the executable the distribution names, which replaces the destination whole. The
+  destination is `KB_TOOLS_PACKAGE` — `skills/kbase/kb-tools/`, its own directory inside the `kbase`
+  skill's, within the `skills/` surface — so a replacement covers that directory and never the
+  skill's `SKILL.md` or references beside it. With no distribution named, the executable already
+  installed stays where it is and only the snippets are refreshed; one an earlier version installed
+  under `agents/kb-tools/` is copied across before that tree is removed.
 - **The `kbase` server entry**, merged into the harness's own project settings file (`Harness.mcp`):
   claude's `.mcp.json`, or for opencode the first discovered of `.opencode/opencode.json`,
-  `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. The entry's command is
-  the installed executable's path relative to the project root when it sits inside it, and absolute
-  otherwise, and its KB root is the project root: Claude Code reads an absolute in-project command as
-  a shared file outside the project. opencode's entry keeps the absolute form, which draws no such
-  warning. An existing settings file is edited in place: the entry's own slot is spliced into the text
-  as it stands, so every other byte — other entries, key order, indentation, line endings — is kept,
-  while a file this install creates is written whole. One that is not plain JSON — JSONC comments a
-  splice would destroy — or that the splice cannot place with certainty is reported with the entry
+  `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. Under both harnesses
+  the entry's command is the installed executable's path relative to the project root, which ROOT
+  always sits inside, so the settings file names no machine-specific path and a project can track
+  it. Its argument list is `mcp` alone and names no KB path: the server locates the KB from the working directory it is started in,
+  so it has to be started in the project root. An existing settings file is edited in place: the
+  entry's own slot is spliced into the text as it stands, so every other byte — other entries, key
+  order, indentation, line endings — is kept, while a file this install creates is written whole.
+  One that is not plain JSON — JSONC comments a splice would destroy — or that the splice cannot
+  place with certainty, or whose path `_settings_obstacle` names, is reported with the entry
   printed, and left as it stands.
 - **The runner include line**, appended to the project's justfile or Makefile — or to a `Makefile`
   created carrying it, where the project has neither: the non-fatal `import?` or `-include` form
@@ -83,30 +97,123 @@ A kb install writes three things beside the renders:
   alone, and one naming this harness under a path an earlier version installed is rewritten in place.
 
 An install renders every included definition — its own output, then each supporting file a skill
-lists — replaces `liaison_tools/`'s destination whole (`SHIPPED_PACKAGES`) with a copy, writes the
-renders over what is there, and removes each file under `agents/`, `commands/` or `skills/` that
-this run did not write, that would ship, and that is ours by its own carrier: a frontmatter block
-holding a `!GENERATED!` line, or a comment line opening with it, which is how a skill's supporting
-file holds its banner. It then removes each directory that leaves empty, up to its surface. That walk
-needs no carve-out for a package destination: both sit beside the surfaces, under `adj-tools/`, so
-every file under a surface is either ours or untouched. A kb-set name is inside that would-ship
-vocabulary, so under a base install one this run did not write is stale and goes — every one of its
-files, a skill's included. Every install also removes each tree an earlier version installed under a
-harness directory — `agents/kb_tools/`, `agents/kb-tools/` and `agents/liaison_tools/` — naming each
-it removed, and reporting the underscore tree's removal on a run that excludes kb. A render that
-fails writes nothing. There is no hash, backup or refusal of a modified file: the consumer tracks the
-installed set, and its git is the record of what an install changed.
+lists — replaces each destination the `SHIPPED_PACKAGES` table names whole with a copy, copies each
+file the installing harness ships into ROOT as it stands — bar a guardrail script whose probe
+fails (below) — writes the renders over what is there, and
+removes each file under `agents/`, `commands/` or `skills/` that this run did not write, that would
+ship, and that is ours by its own carrier: a frontmatter block holding a `!GENERATED!` line, or a
+comment line opening with it, which is how a skill's supporting file holds its banner. It then
+removes each directory that leaves empty, up to its surface. That walk needs no carve-out for a
+package destination: the table's destinations sit beside the surfaces, under `adj-tools/`, and the
+kb toolchain's sits inside one — `skills/kbase/kb-tools/`, in the
+`kbase` skill's own directory — where every file it holds is stamped installed or left unstamped,
+never generated, so every file under a surface is still either ours or untouched. A kb-set name is
+inside that would-ship vocabulary, so under a base install one this run did not write is stale and
+goes — every one of its files, a skill's included. Every install also removes each tree an earlier
+version installed under a harness directory — `agents/kb_tools/`, `agents/kb-tools/` and
+`agents/liaison_tools/` — naming each it removed, and reporting the underscore tree's removal on a
+run that excludes kb. A render that fails writes nothing. There is no hash or backup of a modified
+file: a local edit that keeps the banner lives only until the next install, which rewrites the file
+it touched or prunes it, while a file at a render target that has lost the banner, or is a directory
+or symlink, refuses the install; where the consuming project tracks the installed set, its git is
+the record of what an install changed.
 
 The package copy skips a vocabulary of names matched at any depth (test directories, caches,
 `.DS_Store`, `.bak` files, the project documents) and carries the executable bit. A copied file of a
 `#`-comment type (`.py`, `.sh`, `.toml`, `.mk`, `.just`) takes the installed banner; any other file
-is copied byte-verbatim. `just install-agents-here` installs this repository's own `.claude/` and
-`.opencode/` with the plain `install` verb, once per harness, as base installs. The sticky rule is
-per ROOT and reaches these two directories: one already holding the installed `kbase` executable at
-`adj-tools/kb-tools/` or in the legacy `agents/kb-tools/` would be a kb install under this recipe
-too, and neither does. No include line is
-written here whatever the install type — `install_kb_include_line` returns without writing when the
-project is this repository.
+is copied byte-verbatim.
+
+The harness resource copy borrows that vocabulary and nothing else from the package path:
+`harness_resource_copies` reads `resources/<harness>/` and writes each file into ROOT with
+`copyfile` and `copymode`, so it lands as the harness ships it — no suffix is stamped, whatever the
+file's type, and a header a file already holds travels with it as the file's own text. A guardrail
+script is the exception to copying every file: it joins the copies only when the probe below
+passes. Before the first write, a target that exists must be a regular file, not a symlink, with a
+line matching `!INSTALLED! .* adjagent` among its first ten; one unreadable or without it refuses
+the install. No component between ROOT and any render or resource target may be a symlink or a
+non-directory (`_blocked_component`); one that is refuses the install in the same refusal, and
+components at or above ROOT are not examined. Package destinations and the `kbase` executable are
+exempt from both checks: this repository owns those entire and replaces them whole. The resource
+files join the same `copies` list as the packages', so the prune's `keep` holds them and the report
+counts them: a harness file never reads as a stale render, and the report line says `copied files`
+for the lot. The copy is one-way, not a mirror — `prune` owns the three rendered surfaces and nothing
+outside them — so a resource this repository stops shipping stays in a consumer until that project
+removes it.
+
+A harness that declares a `guardrail` (`Harness.guardrail`, a `GuardrailHook`) ships a hook the
+install registers rather than only copies; claude declares one, opencode sets `None` because its
+plugin registers itself. The `GuardrailHook` names the `script` under `resources/<harness>/`, the
+`settings` file relative to the project root — `.claude/settings.json` whatever `--subdir` is, the
+only path Claude Code reads — the `container` path in it to the array the entry is an element of
+(`hooks`, `PreToolUse`), an `entry` builder from the harness's path relative to the project to the
+hook entry, and a `claim` that reads an element of that array as `entry` writes it. The entry's
+command is a short `sh` program that `exec`s `perl` on
+`$CLAUDE_PROJECT_DIR/<harness-relpath>/hooks/guardrail.pl` only when that is a readable file, and
+otherwise writes `guardrail hook: no readable script at <path>` to stderr and exits 1. The guard exists because perl exits 2 for a script it
+cannot open, which Claude Code reads as a block: a project that commits `settings.json` but not
+`hooks/`, or loses the directory, would have every Bash call blocked. The interpreter is `perl` on
+`PATH`, never an absolute path, because the settings file is often committed and read on other
+machines. The builder refuses a harness path holding `"`, `$`, a backtick or `\`, which the
+double-quoted word the path sits in would read as shell syntax.
+
+The script is Perl with core `JSON::PP` and nothing else at session time, a port of
+`guardrail.ts`'s `mutation` and its helpers. It reads Claude Code's `PreToolUse` JSON on stdin,
+resolves relative targets lexically against the input's `cwd`, else the project root
+(`$CLAUDE_PROJECT_DIR`, else `cwd`), and treats `.claude-temp` and `test-data/transient` under that
+root as scratch; `guardrail.ts` resolves against the shell call's `workdir`, else the project
+directory. The redirect scan does not read heredoc bodies, which are not shell; a redirect on the
+heredoc's own command line is still seen, and the inline-script write check still reads the body.
+Exit 2 is the block path alone: a failed `use` or `die` in Perl can itself exit 2, which would block
+every Bash call, so every module beyond `strict` and `warnings` is loaded with `require` and the
+whole body runs in an `eval` that writes to stderr and exits 1, which Claude Code reports as a hook
+error without blocking.
+
+- **Probe.** Before `_refuse_foreign_targets`, the install runs the source script once, with
+  `GUARDRAIL_INTERPRETER` and no `CLAUDE_PROJECT_DIR`, on one allowed Bash call, and requires exit
+  0 within `GUARDRAIL_PROBE_SECONDS`. A missing interpreter, a missing module, a broken script and
+  a hang all fail it. A failed probe never refuses the install. It drops the script from the files
+  copied, skips the settings merge and its pre-write check, and reports one line naming the exit
+  status and first stderr line, the timeout, or the `OSError`. A script and entry an earlier
+  install wrote stay, and the line names them — the script when it carries the installed header,
+  the settings file when it holds an element `claim` accepts — since the copy is one-way and prune
+  never removes an `!INSTALLED!` file. The probe is one allowed call, not the case table, which
+  runs in the test suite only.
+- **Settings merge**, which `guardrail_merge` runs as `mcp_merge` runs the MCP entry's, both behind
+  one pre-write read, `_check_settings`, and one path report, `_settings_obstacle`. The read
+  refuses a non-UTF-8 file, and, in plain JSON, a key on the container path of the wrong type,
+  `null` included: for the guardrail a `hooks` that is not an object or a `PreToolUse` that is not
+  an array. `_settings_obstacle` names a symlink at the settings path or below the project on the
+  way to it, dangling or not, which is never written through; a non-directory on that way; and
+  anything but a regular file at the path. The read passes such a path and the merge reports it with
+  the entry printed and leaves it, so neither merge raises after the first write. An absent file is
+  written whole with the one entry. A present file is spliced as the MCP entry's is, every other
+  byte kept, with an array scanner beside `_object` and an element insert beside `_with_member`; an
+  absent `hooks` or `PreToolUse` is created as `_splice` creates a missing container.
+  `install.py` holds the splice and the one, ambiguous or append decision, and no Claude settings
+  layout or command shape: the container, the entry and the recogniser come from the
+  `GuardrailHook`. Ours is a `PreToolUse` element `claim` accepts, a `hooks` array holding a command
+  that equals, in full, what the entry builder writes for some harness directory; no substring
+  counts, so a project's own hook running another `guardrail.pl` is not ours, and a command in an
+  earlier shape is not either. Exactly one such element holding only our command is replaced whole;
+  none is appended. More than one, or one holding our command beside others, is reported for a hand
+  merge and the file left untouched, because replacing it whole would delete the project's own
+  hook. Ours is recognised for any harness directory, so two installs under different `--subdir`
+  values share one settings file and the later replaces the earlier's entry: a project has one
+  guardrail.
+  A JSONC file, or one the splice cannot place with certainty, is reported with the entry printed
+  and left as it stands. Other `PreToolUse` entries are never touched.
+
+The merge runs on every claude install whose probe passes, kb or not, and on
+`install-agents-here`'s: the settings file is the project's own, so it passes through no banner
+check and has no `REPO_ROOT` exemption, unlike the include line below, which is not written when
+the project is this repository.
+
+`just install-agents-here` installs this repository's own `.claude/` and `.opencode/` with the plain
+`install` verb, once per harness, as base installs. The sticky rule is per ROOT and reaches these
+two directories: one already holding the installed `kbase` executable at `skills/kbase/kb-tools/` or
+in the legacy `agents/kb-tools/` would be a kb install under this recipe too, and neither does. No
+include line is written here whatever the install type — `install_kb_include_line` returns without
+writing when the project is this repository.
 
 ## Composition Model
 
@@ -135,36 +242,40 @@ SPEC.md's single-sourcing property holds because of how text is shared, in three
   definition and sits among shared text is written inline in that paragraph around the constant;
   no field, class or profile carries it.
 
-Definitions that ship as a set live in one group module (`mad_referees.py`, `mad_design_topics.py`,
-`mad_debate.py`), and the text only that set shares is the module's private
-constants, so a reader of the module needs nothing behind an import. `clauses.py` holds only text
-shared across sets. A private constant cannot name `clauses.*`; shared text that holds a harness
-string takes a hole filled at the call site, as `_GUEST_CONTRACT` takes `harness_dir` in
-`mad_referees.py`.
+Definitions that ship as a set live in one group module, and the text only that set shares is the
+module's private constants, so a reader of the module needs nothing behind an import; no group
+module is defined today. `clauses.py` holds only text shared across sets. A private constant cannot
+name `clauses.*`; shared text that holds a harness string takes a hole filled at the call site.
 
 ### Holes
 
 The renderer fills one closed set of holes, spelled by `vocabulary.hole`: `@!hrn-<key>!@` for the
-five harness strings (agents file name, project harness directory, project scratch directory, user
-harness directory, MCP tool prefix) and `@!fam-<anchor>!@` for the family overlay anchors a
-definition exposes (`gap-aversion`, `ask-vs-stipulate`). The agents file alone also carries
-`@!agf-<key>!@` for its scope name and its coder-dispatch bullet, a harness callable taking the
-rendered default family's medium tier where the harness can choose a model per dispatch, and
-`None` where it cannot, which drops the paragraph. No prose in the repository contains `@!`.
+six harness strings, in two classes — the five `HarnessText` members, which every harness supplies
+(agents file name, project harness directory, project scratch directory, user harness directory,
+MCP tool prefix), and `OptionalHarnessText`'s one member `recipe_rule`, which a harness supplies as
+text or as the empty string, an empty one dropping the paragraph it stands in — and
+`@!fam-<anchor>!@` for the family overlay anchors a definition exposes (`gap-aversion`,
+`ask-vs-stipulate`). The agents file alone also carries `@!agf-<key>!@` for its scope name and its
+coder-dispatch bullet, a harness callable taking the rendered default family's medium tier where the
+harness can choose a model per dispatch, and `None` where it cannot, which drops the paragraph. No
+prose in the repository contains `@!`.
 
-`render.filled_body` fills a body in one pass over its paragraphs and does not rescan what it
-filled, so a family's overlay text or a harness string cannot introduce a further hole. A
-placeholder-shaped span naming no key is refused, naming the definition and the span. An anchor the
-family does not fill leaves nothing, and a paragraph that fills to nothing is dropped with its blank
-line. The overlay for an anchor is the family's text for the definition's tier-mapped member, else
-the family-wide text, else nothing (`family.py` states the rules for authoring one).
+`render.filled_text` fills a body in one pass over its paragraphs and does not rescan what it
+filled, so a family's overlay text or a harness string cannot introduce a further hole;
+`render.filled_body` runs that fill over a definition's own body. A placeholder-shaped span naming
+no key is refused, naming the definition and the span. Each of three fills may leave nothing: an
+anchor the family does not fill, an optional harness text the harness supplies as the empty string,
+and the agents file's coder-dispatch bullet where the harness cannot choose a model per dispatch
+(`coder_dispatch` is `None`). `filled_text` drops a paragraph that fills to nothing, with its blank
+line. `Render.overlay` gives an anchor's text: the family's text for the definition's tier-mapped
+member, else the family-wide text, else nothing (`family.py` states the rules for authoring one).
 
 ### Kinds
 
 `kind` decides where the definition goes, what frontmatter the harness emits for it, and which
-fields it takes. `folder` is the path below the output root for nested outputs, as in
-`agents/mad/design-topics/`; a skill refuses it, because the directory name is the definition's
-name on both harnesses.
+fields it takes. `folder` is the path below the output root for a nested output, empty where the
+definition's own output sits directly under its surface; a skill refuses it, because the directory
+name is the definition's name on both harnesses.
 
 | Kind | Output | Frontmatter | Fields |
 |---|---|---|---|
@@ -183,14 +294,17 @@ own to say about them. A `Definition` refuses at construction any field outside 
 ### Harnesses and families
 
 A harness is a `Harness` dataclass (`adjagent/harness.py`) holding everything that differs between
-harnesses: the five hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__kbase__`
+harnesses: the six hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__kbase__`
 under claude and `kbase_` under opencode, a server tool's offered name being that prefix plus the
-tool's own — the tool spellings, the model shape it accepts, the text `inherit` renders as
+tool's own, and the sixth, `recipe_rule`, typed `OptionalHarnessText` where the other five are
+`HarnessText` — the tool spellings, the model shape it accepts, the text `inherit` renders as
 (`inherit_text`) with the further `inherit_synonyms` rendering that same text, whether a bare
 `--model-tier-map` value is the whole map (`bare_tier_spec_is_all`), the frontmatter emitter,
 `coder_dispatch`, a callable taking the rendered model and returning the agents file's
 coder-dispatch bullet, or `None` where the harness cannot choose a model per dispatch, and `mcp`
-(`McpSettings`), the project settings file and server entry a kb install registers.
+(`McpSettings`), the project settings file and server entry a kb install registers, and
+`guardrail` (`GuardrailHook` or `None`), the hook script and settings entry a claude install
+registers (Install Consumption Model).
 `inherit_synonyms` and `bare_tier_spec_is_all` both differ between the two harnesses, as the
 strings above do: opencode holds `("default",)` and `True`, with `inherit_text` empty, so a tier
 rendering either word leaves the agent without a model line and so on the project's own model;
@@ -267,19 +381,29 @@ block with one constant line and collapses whitespace inside a paragraph outside
 headings, list items, table rows, fenced blocks and frontmatter stay exact
 (`devtools/render_diff.py` states the rules). `just render <slug>` renders into `rendered/<slug>/`
 and refuses a slug starting with `reference`. A slot is a kb install with itself as project root, so
-beside the definitions it holds the kb-tools package, the harness's MCP entry and the runner include
-line — the whole product, which is what makes a `render-diff` a comparison of the kb half too. Those
-three slots (claude, opencode, and the gemma-4 family, which fills the overlay anchors) are the
-baseline, written only by `just retake-reference`, so a `render-diff` after a change reports that
-change and nothing the baseline already held.
+beside the definitions it holds the kb-tools package, the harness's MCP entry, the runner include
+line and, where the harness ships them, its own resource files — the whole product, which is what
+makes a `render-diff` a comparison of the kb half too. A slot holds the claude hook script only
+where `perl` passes the probe on that machine, so a `render-diff` against a reference taken
+elsewhere can show it. Those three slots (claude, opencode, and the
+gemma-4 family, which fills the overlay anchors) are the baseline, written only by
+`just retake-reference`, so a `render-diff` after a change reports that change and nothing the
+baseline already held.
 
 `tests/test_adjagent.py` holds the package's properties: each kind's frontmatter against literal
 lines, a skill's directory — its two fields and a comment-bannered reference — against literal
-output, every definition under `agents/` extracting frontmatter-free and every participant
-extracting to the contract document, placeholder filling and refusal, overlay resolution, the line
-cap on a rendered agent, and the structural rules (Composition Model).
-`tests/test_adjagent_install.py` holds the install and agents-file cases. Every verb of the
-generator exits 0 on success and 2 on a refusal; there is no verdict code.
+output, every definition under `agents/` extracting frontmatter-free, placeholder filling and
+refusal, overlay resolution, the line cap on a rendered agent, and the structural rules
+(Composition Model).
+`tests/test_adjagent_install.py` holds the install and agents-file cases. The two guardrails are
+held to one behaviour by `tests/test_guardrail.py`, which runs every case of
+`tests/guardrail_cases.json` through `guardrail.pl` under `perl` and through `guardrail.ts` under
+`bun` (`tests/guardrail_ts_runner.ts` loads the plugin outside `bun test`, with its package
+import stubbed), and asserts each implementation's reason equals the table's. A case may name a
+working directory: `guardrail.pl` receives it as the input `cwd` beside `CLAUDE_PROJECT_DIR` set to
+the case's root, as Claude Code sends both, and `guardrail.ts` as the shell call's `workdir`. A
+missing `bun` fails the test rather than skipping it, because a skip would hide drift between the
+two. Every verb of the generator exits 0 on success and 2 on a refusal; there is no verdict code.
 
 ## Sanctioned Invocation
 
@@ -289,7 +413,7 @@ generator exits 0 on success and 2 on a refusal; there is no verdict code.
 `_render-slot`, which calls `install` with `--with-kb` and `--kbase-dist`, and through the stable
 private `render-agents-file HARNESS OUT` recipe, which a later revision calls inside a worktree of an
 earlier one, so its name and two arguments do not change incompatibly. Recipes read a harness's
-values through `python3 -m adjagent harness NAME KEY`, never from a copy of them.
+five `HarnessText` values through `python3 -m adjagent harness NAME KEY`, never from a copy of them.
 
 ## Agents File
 
@@ -316,46 +440,38 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   shell-dsl-coder, platform experts (android/ios/linux/macos/web/windows-app-expert,
   linux-kernel-driver-expert), architect, and — sharing the coding-review domain — security-reviewer
   and tech-writer, which is both the author and the review seat for technical documentation.
-- **MAD set + `agents/mad/`** — mad-review-referee, mad-design-referee, mad-alignment-assessor, the
-  four model-pinned participants (mad-participant-a/b/c/d), and mad-guest-liaison
-  sit directly under `agents/` as dispatchable definitions. What the set reads rather than
-  dispatches goes into `agents/mad/`, outside the dispatch namespace:
-  `agents/mad/participant-contract.md` (the body the four participants share and a guest model
-  receives as its system prompt), and the design referee's own methodology topic set, read at
-  dispatch, `agents/mad/design-topics/`. A topic renders bannered like any other output, and a
-  referee writes the run's own banner-free copy of it into the run directory before dispatching —
-  one strip at the point the brief is assembled, so no seat reads generator metadata and a
-  banner-format change does not reach the seats' text.
-- **kb set + kbase** — the `kbase` skill and the two agents kb-claim-scorer and kb-maintainer: the
-  definitions a base install excludes by name and a kb install delivers. `kbase.py` owns a
-  directory, `skills/kbase/SKILL.md` routing by request and `skills/kbase/references/reading.md` and
-  `skills/kbase/references/build.md` carrying what each route needs; the router is the only text
-  every session pays for, and the rule that a reference is read only when its route is reached is
-  the router's own — its *Route by the request* section says so, and nothing but that text stops a
-  read.
+- **kb set + kbase** — the `kbase` skill alone: the definition a base install excludes by name and
+  a kb install delivers. `kbase.py` owns a directory, `skills/kbase/SKILL.md` routing by request and
+  `skills/kbase/references/reading.md`, `build.md`, `maintaining.md` and `scoring.md` carrying what
+  each route needs; the router is the only text every session pays for, and the rule that a
+  reference is read only when its route is reached is the router's own — its *Route by the request*
+  section says so, and nothing but that text stops a read.
   `clauses.kb_orientation`, carrying the system model (two graphs, the leaf/summary contract,
-  authored-vs-derived metadata, the cast) with a per-definition `role=` clause, goes to the two
-  seats that work a finished KB — the reading reference and kb-maintainer; the build seat,
-  kb-claim-scorer, is told what its own job needs and reaches the rest through its dispatch. The
-  skill and both agents are project-portable — per-project facts live in the consuming project's
-  `kb-root/AGENTS.md`, under every harness. The toolchain they drive is kbase, the binary a kb
-  install writes beside its snippets, and the set's route to it is MCP-only: every operation the
-  set names is a tool of the harness's `kbase` MCP server, offered under that harness's
-  `mcp_tool_prefix`, and the router says so and stops where that server is not connected —
-  registering it, which the install does, is the fix, not a second interface.
-  `clauses.KB_RUNNER_TARGETS` is kb-maintainer's: where the project's runner carries the installed
-  `kb-` targets, `refresh`, `verify` and `stats` are `kb-refresh`, `kb-verify` and `kb-stats`. The
-  consumer's runner targets are this repository's `kb-tools/runner-snippets/` fragments —
-  `kb-verify`, `kb-refresh`, `kb-stats`, `kb-`-prefixed so they cannot collide with a consuming
-  project's own targets — each running the executable it finds from the fragment's own directory.
-- **Liaisons + liaison_tools** — guest-liaison.md (general-purpose) and mad-guest-liaison.md
-  (MAD-only) share `liaison_tools/`'s helpers (`post-openai.py`, `msg-util.py`) for the wire
-  protocol and the messages-file format; each strips a definition's frontmatter for itself with a
-  `sed` range, the operation being one line. `relay-driver.py` — the corpus-relay eval instrument —
-  composes those same helpers (`post-openai.py` as sole transport, `msg-util.py` as sole
-  messages-file mutator) into a scripted READ/LIST/GREP retrieval-eval loop.
+  authored-vs-derived metadata, the cast) with a per-reference `role=` clause, goes to the two
+  references that work a KB the build has finished with — reading, which reports, and maintaining,
+  which modifies; `build.md` and `scoring.md` carry what their own job needs.
+  The skill and its references are project-portable — per-project facts live in the consuming
+  project's `kb-root/AGENTS.md`, under every harness. The toolchain they drive is kbase, the binary
+  a kb install writes beside its snippets, and the set's route to it is MCP-only: every query, write
+  op, `refresh`, `verify`, `build` and `score` the set names is a tool of the harness's `kbase` MCP
+  server, offered under that harness's `mcp_tool_prefix`, and the router says so and stops where
+  that server is not connected — registering it, which the install does, is the fix, not a second
+  interface.
+  Scoring is the one whose call outlives it: `score` starts the run detached and answers once the
+  run's ledger and pid stand, leaving `wait`, `status` and `cancel` to follow — the same three the
+  build leaves. The loop is kbase's own — it enumerates the scoring
+  set, renders the closed, score-free ask text, calls the configured provider, validates one value
+  and lands it through the write ops, and records a run ledger — while `references/scoring.md`
+  carries only the flow a session needs: the two passes, what a run never scores, the ledger and
+  resumption, and what the user sees.
+  `clauses.KB_RUNNER_TARGETS` is the maintaining reference's: where the project's runner carries the
+  installed `kb-` targets, `refresh`, `verify` and `stats` are `kb-refresh`, `kb-verify` and
+  `kb-stats`. The consumer's runner targets are this repository's `kb-tools/runner-snippets/`
+  fragments — `kb-verify`, `kb-refresh`, `kb-stats`, `kb-`-prefixed so they cannot collide with a
+  consuming project's own targets — each running the executable it finds from the fragment's own
+  directory.
 - **Specialists** — applied-mathematician, biz-dev-strategist, economic-historian, literature-scout,
   marketing-comms-expert, ml-engineer, prompt-engineer, prose-architect, theoretical-economist:
-  single-purpose, invoked directly rather than as part of a coding or MAD pipeline.
-  applied-mathematician carries the `fam-ask-vs-stipulate` overlay anchor; `fam-gap-aversion` sits
-  on kb-claim-scorer.
+  single-purpose, invoked directly rather than as part of a coding pipeline.
+  applied-mathematician carries the `fam-ask-vs-stipulate` overlay anchor; `fam-gap-aversion` was
+  authored in the retired `kb-claim-scorer` module and now renders nowhere.

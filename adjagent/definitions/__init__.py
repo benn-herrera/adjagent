@@ -21,10 +21,9 @@ at the call site. Nothing imports a definition module by name.
 A module is named from its output path below `agents/`, `commands/` or
 `skills/`, the folder as a prefix and each "/" and "-" read as "_":
 `python_coder.py` for `agents/python-coder.md`, `kbase.py` for
-`skills/kbase/SKILL.md`. A module of a set is named for the set:
-`mad_design_topics.py` for `agents/mad/design-topics/*.md`, `mad_referees.py`
-for the two `agents/mad-*-referee.md`. The harness agents file, which has no
-output path, is `harness_agents_file.py`.
+`skills/kbase/SKILL.md`. A module of a set is named for the set, not for one
+member's output path. The harness agents file, which has no output path, is
+`harness_agents_file.py`.
 """
 
 import importlib
