@@ -126,7 +126,7 @@ AGENTS_VER := "v0.11.1"
 [doc("updates and installs agent set from adjagents public repo")]
 agents:
   @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
-  @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" fetch --tags || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}"
+  @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" fetch --tags || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}" "{{AGENTS_DIR}}"
   @git -c "advice.detachedHead=false" -C "{{AGENTS_DIR}}" checkout "{{AGENTS_VER}}"
   just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=claude
   just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode --model-tier-map=default
@@ -138,12 +138,12 @@ agents:
 ```make
 .PHONY: agents
 AGENTS_REPO := https://github.com/benn-herrera/adjagent.git
-AGENTS_DIR := .claude/$(basename $(notdir $(AGENTS_REPO)))
+AGENTS_DIR := .$(basename $(notdir $(AGENTS_REPO)))
 AGENTS_VER := v0.11.1
 agents:
 	@mkdir -p $(dir $(AGENTS_DIR))
-	@[[ -d "$(AGENTS_DIR)" ]] && git -C "$(AGENTS_DIR)" fetch --tags || git -C "$(dir $(AGENTS_DIR))" clone $(AGENTS_REPO)
-	@git -c "advice.detachedHead=false" -C "$(AGENTS_DIR)" checkout "${AGENTS_VER}"
+	@[[ -d "$(AGENTS_DIR)" ]] && git -C "$(AGENTS_DIR)" fetch --tags || git -C "$(dir $(AGENTS_DIR))" clone "$(AGENTS_REPO)" "$(AGENTS_DIR)"
+	@git -c "advice.detachedHead=false" -C "$(AGENTS_DIR)" checkout "$(AGENTS_VER)"
 	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=claude
 	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=opencode --model-tier-map=default
 	just --justfile "$(AGENTS_DIR)/justfile" install-agents-file ~/.claude
