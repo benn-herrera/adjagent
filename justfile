@@ -31,7 +31,7 @@ default:
 
 [doc("install into <project>/<subdir>/; <project> is the first non-flag argument, resolved and passed as the project root the harness directory ROOT sits under; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
 install target *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "$@"
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/install.sh "$@"
 
 [doc("install with the kb set as well as the base product: the kb- definitions, the kb-tools package with a kbase from the dist cache beside its runner snippets, and the project-root kbase MCP entry and runner include line; every argument means what it means to install")]
 install-with-kb target *args: _download-kbase-dist

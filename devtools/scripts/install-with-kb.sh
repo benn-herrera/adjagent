@@ -7,5 +7,4 @@
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 
-kbase_bin="$("${PROJECT_ROOT}/devtools/scripts/_kbase-bin.sh")"
-"${PROJECT_ROOT}/devtools/scripts/install.sh" "$@" --with-kb --kbase-dist="${kbase_bin}"
+"${PROJECT_ROOT}/devtools/scripts/install.sh" "$@" --with-kb
