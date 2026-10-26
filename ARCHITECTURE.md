@@ -307,10 +307,10 @@ own to say about them. A `Definition` refuses at construction any field outside 
 
 A harness is a `Harness` dataclass (`adjagent/harness.py`) holding everything that differs between
 harnesses: the six hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__kbase__`
-under claude and `kbase_` under opencode, a server tool's offered name being that prefix plus the
-tool's own, and the sixth, `recipe_rule`, typed `OptionalHarnessText` where the other five are
-`HarnessText` — the tool spellings, the model shape it accepts, the text `inherit` renders as
-(`inherit_text`) with the further `inherit_synonyms` rendering that same text, whether a bare
+under claude, `mcp_kbase_` under mage and `kbase_` under opencode, a server tool's offered name
+being that prefix plus the tool's own, and the sixth, `recipe_rule`, typed `OptionalHarnessText`
+where the other five are `HarnessText` — the tool spellings, the model shape it accepts, the text
+`inherit` renders as (`inherit_text`) with the further `inherit_synonyms` rendering that same text, whether a bare
 `--model-tier-map` value is the whole map (`bare_tier_spec_is_all`), the frontmatter emitter,
 `coder_dispatch`, a callable taking the rendered model and returning the agents file's
 coder-dispatch bullet, or `None` where the harness cannot choose a model per dispatch, `mcp`

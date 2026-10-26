@@ -52,7 +52,7 @@ HARNESS = Harness(
     project_temp_dir=".mage-temp",
     # the harness's own directory: CLAUDE.md sits beside .mcp.json, at the plugin's root
     user_harness_dir=".",
-    mcp_tool_prefix="mcp__kbase__",
+    mcp_tool_prefix="mcp_kbase_",
     recipe_rule=_RECIPE_RULE,
     coder_dispatch=None,
     tools={

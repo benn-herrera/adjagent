@@ -428,6 +428,17 @@ def test_the_manifest_is_the_only_render_of_a_mage_plugin_carrying_the_version()
     assert carriers == []
 
 
+@pytest.mark.parametrize(
+    "harness, tool_name",
+    [(CLAUDE, "mcp__kbase__find"), (MAGE, "mcp_kbase_find"), (OPENCODE, "kbase_find")],
+)
+def test_the_kb_reading_reference_names_the_harness_mcp_tool(harness: Harness, tool_name: str) -> None:
+    """The rendered instruction must name the callable the selected host actually exposes."""
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+    reference = dict(render_all(ctx))[PurePosixPath("skills/kbase/references/reading.md")]
+    assert f"`{tool_name}`" in reference
+
+
 def _routed_references(router: str) -> set[str]:
     """The reference paths the router's tables route to, read off the table cells themselves."""
     routed = set()
