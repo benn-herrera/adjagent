@@ -5,7 +5,8 @@ directory and file names prose spells, the tool spellings, the model shape it
 accepts and the words that render no model at all, whether a map flag's bare
 value names the whole map, the frontmatter lines it reads, the rule a dispatched
 agent follows when running recipes in its shell, the agents file's
-coder-dispatch bullet as a callable over the rendered model, the project
+coder-dispatch bullet as a callable over the rendered model, the files it
+renders beside the definitions, the definitions it renders nothing for, the
 settings file it registers an MCP server in, and the Bash guardrail hook it
 registers, where it has one. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
@@ -35,30 +36,50 @@ class AgentFields:
     governed: tuple[str, ...]  # the image of Harness.tools in table order, de-duplicated
 
 
+@dataclass(frozen=True)
+class HarnessFile:
+    """A file a harness renders into the output root beside the definitions: the path below the root,
+    the builder for its whole text, and the marker a file at that path must hold to be one this
+    repository wrote (a format admitting no comment carries its ownership as a value inside it)."""
+
+    path: str  # harness-relative, e.g. ".claude-plugin/plugin.json"
+    text: Callable[[], str]  # the whole file, final newline included
+    marker: str  # the value inside the file that makes it ours
+
+
 class McpEntryBuilder(Protocol):
     """Builds the `kbase` server entry and the container path it nests under, from the server command
-    string and the project root that the command is named relative to when it sits inside it;
+    string and the directory that the command is named relative to when it sits inside it;
     keyword-only, so the two cannot be swapped."""
 
-    def __call__(self, *, command: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
+    def __call__(self, *, command: str, base: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
+
+
+class McpSite(Enum):
+    """Where a harness's MCP settings file lives: at the project root, where the file is the project's own
+    and the install edits it in place; or at ROOT, where it is the plugin's own, beside `skills/`."""
+
+    PROJECT = "project"
+    HARNESS = "harness"
 
 
 @dataclass(frozen=True)
 class McpSettings:
-    """The project settings file a harness registers the `kbase` MCP server in. `canonical` is the path
-    relative to the project root, created when absent; `alternatives` are the discovered names probed
-    in precedence order, a found one overriding the canonical; `entry` builds the server entry and the
-    container path it nests under."""
+    """The settings file a harness registers the `kbase` MCP server in. `canonical` is the path relative
+    to `site`, created when absent; `alternatives` are the discovered names probed in precedence order,
+    a found one overriding the canonical; `site` is the directory those paths are joined to; `entry`
+    builds the server entry and the container path it nests under."""
 
     canonical: str
     alternatives: tuple[str, ...]
+    site: McpSite
     entry: McpEntryBuilder
 
 
-def project_relative(command: str, project_root: Path) -> str:
-    """`command` named relative to `project_root` in POSIX form. The install root always sits inside the
-    project root, so the settings file names no machine-specific path and a project can track it."""
-    return Path(command).resolve().relative_to(project_root.resolve()).as_posix()
+def command_relative(command: str, base: Path) -> str:
+    """`command` named relative to `base` in POSIX form, so the settings file names no machine-specific
+    path and a project can track it."""
+    return Path(command).resolve().relative_to(base.resolve()).as_posix()
 
 
 class HookClaim(Enum):
@@ -108,15 +129,17 @@ class Harness:
     bare_tier_spec_is_all: bool  # a --model-tier-map value naming no tier is all=<value>
     frontmatter: Callable[[AgentFields], tuple[str, ...]]  # an agent's field lines between the fences
     document_frontmatter: tuple[str, ...]  # a document's field lines between the fences
-    mcp: McpSettings  # the project settings file this harness registers the kbase server in
+    mcp: McpSettings  # the settings file this harness registers the kbase server in
     guardrail: GuardrailHook | None  # the Bash guardrail hook it registers; None where its own file registers itself
+    rendered_files: tuple[HarnessFile, ...] = ()  # files it renders beside the definitions
+    omits: frozenset[str] = frozenset()  # definition names it renders nothing for
 
     def __post_init__(self) -> None:
-        """Refuse a non-IDENTIFIER name, an empty HarnessText field or model_shape, a recipe_rule that is
-        not a string, a coder_dispatch that is neither None nor callable, a tools table not total in Tool
-        order, an MCP settings contract lacking a canonical path, a non-empty alternative name, or a
-        builder, or a guardrail hook lacking a script path, a settings path, a container path, a
-        builder, or a recogniser.
+        """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
+        model_shape, a recipe_rule that is not a string, a coder_dispatch that is neither None nor
+        callable, a tools table not total in Tool order, an MCP settings contract lacking a canonical
+        path, a non-empty alternative name, or a builder, or a guardrail hook lacking a script path, a
+        settings path, a container path, a builder, or a recogniser.
 
         An empty string is refused of the fields a body naming them always renders, since every harness
         supplies each HarnessText and a model shape. `recipe_rule` is an OptionalHarnessText, which a
@@ -124,6 +147,8 @@ class Harness:
         paragraph its placeholder stands in."""
         if re.fullmatch(IDENTIFIER, self.name) is None:
             raise InputError(f"harness '{self.name}': name is not a strict-kebab identifier")
+        if any(re.fullmatch(IDENTIFIER, name) is None for name in self.omits):
+            raise InputError(f"harness '{self.name}': omits holds a name that is not a strict-kebab identifier")
         if not all(self.text(part) for part in HarnessText) or not self.model_shape:
             raise InputError(f"harness '{self.name}': an empty string field")
         if not isinstance(self.recipe_rule, str):

@@ -43,7 +43,7 @@ Every `kb-root/...` path a reference names resolves against the located **KB roo
 **No KB, and this repository holds LaTeX sources.** Not a dead end: it is a build waiting to happen.
 Identify the volume root — the entry whose `usage` is `toplevel` in `00README.json` where the project
 has one, else the `.tex` file carrying `\\documentclass` — put it to the user, and route to
-`references/build.md` once they confirm it. That build has a fast path that spends no inference, and
+`references/building.md` once they confirm it. That build has a fast path that spends no inference, and
 the reference carries it.
 
 **Neither a KB nor a source.** Say so and stop. There is nothing here to probe for, and further
@@ -75,9 +75,10 @@ you to work around.
 | the request | the route |
 | --- | --- |
 | answering from the KB, navigating it, or reporting a recorded claim's strength | `references/reading.md` |
-| building a KB over the LaTeX sources here | `references/build.md` |
+| building a KB over the LaTeX sources here | `references/building.md` |
 | adding, correcting or migrating KB content | `references/maintaining.md` |
 | scoring the KB's rigor and bearings | `references/scoring.md` |
+| how the scoring system works | `references/scoring-system.md` |
 
 Open only the reference the matched row names: the other route's text is not context for this
 request.
@@ -246,7 +247,7 @@ These are rules, not a role: nothing here is about what you *are*, and all of it
   covered, navigate to find out — don't guess.""",
             ),
             SkillFile(
-                path="references/build.md",
+                path="references/building.md",
                 body="""Launch a KB build over the LaTeX volume roots the user names in the background, relay what the
 launch returns, and follow it with `status` on request and `cancel` on the user's word.
 
@@ -425,12 +426,16 @@ them in the canonical tree *correctly* — claim-graph wiring, cross-references,
 regeneration/verification loop — leaving `verify` green. The reading route reads, reasons and reports;
 you modify.
 
-{clauses.kb_orientation(
-    role="you land changes in a KB the build pipeline has already finished with — that pipeline is not rerun for "
-    "your work"
-)}
+{
+                    clauses.kb_orientation(
+                        role="you land changes in a KB the build pipeline has already finished with — that pipeline is not rerun for "
+                        "your work"
+                    )
+                }
 
-{clauses.kb_orientation_docs(when="before editing")} This file tells you how to *apply* the toolchain's rules when
+{
+                    clauses.kb_orientation_docs(when="before editing")
+                } This file tells you how to *apply* the toolchain's rules when
 editing; it does not restate them.
 
 **The request's targets only.** You create files at the targets the request names, and nowhere else.
@@ -617,6 +622,12 @@ already writing this KB, you are the other role below.
 - **Leaf prose.** Leaf text may be edited in parallel, by more than one session at a time, each on
   leaves no other is editing, provided none changes metadata: no register, no claim marker, no
   up-link.""",
+            ),
+            SkillFile(
+                path="references/scoring-system.md",
+                body="""The descriptions of the internals of the scoring system are maintained in
+[STRENGTH_SCORING_SCHEME.md](https://github.com/benn-herrera/kbase/blob/main/STRENGTH_SCORING_SCHEME.md) and
+[RIGOR_AND_BEARING_SCORING_SCHEME.md](https://github.com/benn-herrera/kbase/blob/main/RIGOR_AND_BEARING_SCORING_SCHEME.md)""",
             ),
         ),
     ),

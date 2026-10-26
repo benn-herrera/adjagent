@@ -14,6 +14,7 @@ PYTHONPATH.
 
 import ast
 import inspect
+import json
 import re
 import shutil
 import subprocess
@@ -34,6 +35,7 @@ from adjagent.families.qwen3 import FAMILY as QWEN3_FAMILY
 from adjagent.family import Family, Overlay
 from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
+from adjagent.harnesses.mage import HARNESS as MAGE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.loading import load
 from adjagent.render import (
@@ -47,6 +49,7 @@ from adjagent.render import (
     render_skill_file,
     write_renders,
 )
+from adjagent.version import VERSION
 from adjagent.vocabulary import ALL, TIERS, Anchor, HarnessText, Kind, OptionalHarnessText, Tool, hole
 from devtools import render_diff
 from tests._structure import (
@@ -388,13 +391,41 @@ def test_render_all_emits_every_file_and_include_drops_a_whole_definition() -> N
     skill = {
         PurePosixPath("skills/kbase/SKILL.md"),
         PurePosixPath("skills/kbase/references/reading.md"),
-        PurePosixPath("skills/kbase/references/build.md"),
+        PurePosixPath("skills/kbase/references/building.md"),
         PurePosixPath("skills/kbase/references/scoring.md"),
         PurePosixPath("skills/kbase/references/maintaining.md"),
+        PurePosixPath("skills/kbase/references/scoring-system.md"),
     }
     assert skill <= everything
     without = {path for path, _ in render_all(_CLAUDE_RENDER, include=lambda defn: defn.name != "kbase")}
     assert everything - without == skill
+
+
+# mage's output is a Claude Code plugin directory: claude's vocabulary, one file of its own — the
+# manifest — and nothing for the definition it omits, whose command claude's slot already holds.
+_MAGE_RENDER = Render(harness=MAGE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+_MAGE_MANIFEST = PurePosixPath(".claude-plugin/plugin.json")
+
+
+def test_a_mage_render_writes_the_plugin_tree_straight_into_the_root(tmp_path: Path) -> None:
+    """The installed directory is the plugin itself, so its manifest and its surfaces sit at the root:
+    one grown under another directory is a tree Claude Code does not read."""
+    written = {path.relative_to(tmp_path).as_posix() for path in write_renders(tmp_path, render_all(_MAGE_RENDER))}
+    assert {"agents/python-coder.md", "skills/kbase/SKILL.md", str(_MAGE_MANIFEST)} <= written
+    assert "commands/imgread.md" not in written
+
+
+def test_the_manifest_is_the_three_key_object_carrying_the_version() -> None:
+    """The marketplace reads these three keys and nothing else, its version being the release's."""
+    parsed = json.loads(dict(render_all(_MAGE_RENDER))[_MAGE_MANIFEST])
+    assert parsed == {"name": "adjagent", "version": VERSION, "description": "Adjagent skills, agents, and MCP tools"}
+
+
+def test_the_manifest_is_the_only_render_of_a_mage_plugin_carrying_the_version() -> None:
+    """A bump republishes the manifest alone: a version in a definition or a skill file would churn a
+    render slot on every release and say nothing a plugin manifest does not."""
+    carriers = [path for path, text in render_all(_MAGE_RENDER) if path != _MAGE_MANIFEST and VERSION in text]
+    assert carriers == []
 
 
 def _routed_references(router: str) -> set[str]:

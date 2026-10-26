@@ -23,6 +23,7 @@ from adjagent.errors import InputError
 from adjagent.install import install
 from adjagent.loading import load
 from adjagent.render import render_agents_file, render_all, write_renders
+from adjagent.version import VERSION
 from adjagent.vocabulary import HarnessText, key
 
 
@@ -41,7 +42,7 @@ def _add_tuning_flags(verb: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """One verb, required: `render --out DIR` and `install ROOT [--verbose] [--with-kb]
     [--kbase-dist PATH] [--project-root DIR]`, each with the tuning flags; `install-agents-file
-    HARNESS DIR`; `render-agents-file HARNESS OUT`; `harnesses`; and `harness NAME KEY`.
+    HARNESS DIR`; `render-agents-file HARNESS OUT`; `harnesses`; `version`; and `harness NAME KEY`.
     allow_abbrev=False on every parser."""
     parser = argparse.ArgumentParser(prog="python3 -m adjagent", allow_abbrev=False)
     verbs = parser.add_subparsers(dest="verb", required=True)
@@ -71,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     fresh.add_argument("harness", metavar="HARNESS")
     fresh.add_argument("out", type=Path, metavar="OUT")
     verbs.add_parser("harnesses", help="print every harness name", allow_abbrev=False)
+    verbs.add_parser("version", help="print the version, bare", allow_abbrev=False)
     query = verbs.add_parser("harness", help="print one harness value", allow_abbrev=False)
     query.add_argument("name", metavar="NAME")
     query.add_argument("key", choices=[key(part) for part in HarnessText], metavar="KEY")
@@ -106,6 +108,8 @@ def _run(args: argparse.Namespace) -> None:
         print(f"wrote {args.out}")
     elif args.verb == "harnesses":
         print("\n".join(load("adjagent.harnesses", "HARNESS")))
+    elif args.verb == "version":
+        print(VERSION)
     else:
         print(harness_named(args.name).text(HarnessText("_".join(args.key.split("-")))))
 

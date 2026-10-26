@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from adjagent.harness import AgentFields, Harness, McpSettings, project_relative, quoted
+from adjagent.harness import AgentFields, Harness, McpSettings, McpSite, command_relative, quoted
 from adjagent.vocabulary import Tool
 
 _PROJECT_HARNESS_DIR = ".opencode"
@@ -24,10 +24,10 @@ def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _mcp_entry(*, command: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """A local entry under `mcp.servers` whose argv is the command from `project_relative` and `mcp`.
+def _mcp_entry(*, command: str, base: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """A local entry under `mcp.servers` whose argv is the command from `command_relative` and `mcp`.
     The server is started in the project directory and finds the KB from there, so the argv names no root."""
-    return {"type": "local", "command": [project_relative(command, project_root), "mcp"]}, ("mcp", "servers", "kbase")
+    return {"type": "local", "command": [command_relative(command, base), "mcp"]}, ("mcp", "servers", "kbase")
 
 
 HARNESS = Harness(
@@ -64,6 +64,7 @@ HARNESS = Harness(
     mcp=McpSettings(
         canonical=f"{_PROJECT_HARNESS_DIR}/opencode.jsonc",
         alternatives=(f"{_PROJECT_HARNESS_DIR}/opencode.json", "opencode.jsonc", "opencode.json"),
+        site=McpSite.PROJECT,
         entry=_mcp_entry,
     ),
     # The guardrail plugin it ships registers itself.

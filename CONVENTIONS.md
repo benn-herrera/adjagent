@@ -31,6 +31,18 @@ not here.
   line by line, and `just` echoes every line it runs, `#` included: a note there prints on every
   invocation, so a note explaining the recipe reads as its output. Above the recipe the line is
   never a command line and stays silent under either body.
+- **A recipe body is `devtools/scripts/<recipe-name>.sh`, and the justfile line hands it its
+  variables as an env prefix.** The recipe keeps its name, parameters, `[doc]` string and dependency
+  list; its body is one line running the script, with each variable the script reads passed as
+  `NAME="{{NAME}}"` ahead of the command — `just` variables are not exported, so a script reads
+  nothing it was not handed. The line also passes the variables of the scripts it calls, which then
+  inherit them; no script re-passes an environment it was given. The script guards every variable
+  it reads with `: "${NAME:?...}"`, since `set -u` catches unset and not empty — and that guard
+  message holds no apostrophe, because under the bash 3.2 this host runs as `/bin/bash`, a `'`
+  inside a `${NAME:?word}` opens a quote region and the script stops parsing. Arguments arrive as
+  shell positionals (`"$@"`), never as textual interpolation, which loses word boundaries. A note
+  the body needs travels with it into the script, beside the code it explains; the one-line recipe
+  carries only its `[doc]` string, which does not change because the body moved.
 - **Never comment in a rendered body.** A definition's body, and every constant it interpolates,
   becomes an agent's system prompt; maintainer commentary there ships into every dispatch and is
   read by every seat. A Python `#` comment above a constant is not in the string and is the place
@@ -57,7 +69,9 @@ not here.
   second such set adds its own alternation there, over its output names — a name the pattern misses
   is rendered and shipped by every install. A run that excludes the match renders none of the
   matching definitions, and one already installed is stale: removed from the tree and named in that
-  run's report.
+  run's report. A harness that renders nothing for a definition declares it on `Harness.omits`, which
+  `render_all` applies itself; `NOT_BY_DEFAULT` stays the invocation's filter, over names, passed by
+  the caller.
 - **The runner include line is a byte-level edit of a file the project does not own.** The
   consumer's justfile or Makefile is read and written with `newline=""`, so a rewrite keeps each
   line's own ending instead of translating it to the host's. Only a live line matches: one whose
@@ -69,7 +83,9 @@ not here.
 - **The install's recognizer spells the banner the renderer writes.** `install.py` builds its
   generated-file prefixes from `render.GENERATED_MARK`, so what recognises a generated file reads
   the spelling the renderer writes. A test that plants a literal `!GENERATED!` banner does not hold
-  that binding — a change on either side passes it — so the case plants rendered output.
+  that binding — a change on either side passes it — so the case plants rendered output. A
+  harness-rendered file carries no banner: its `HarnessFile.marker` is what reads it as ours, and the
+  test plants a real render rather than a literal marker, for the same reason.
 - **The install stamps nothing on a file under `adjagent/harnesses/resources/`, which never takes
   the package loop.** `harness_resource_copies` writes each with `copyfile` and `copymode` and
   nothing else, so a consumer receives what the source holds — a header the file already carries
@@ -116,6 +132,12 @@ not here.
   marker lines and refuses while `adjagent/` has uncommitted changes. Your own rules go outside the
   markers, because inside is replaced on every install. Machine-local sections (an auth sandbox,
   host-specific paths) live outside the block in the live file and are never published.
+- **The version lives in `adjagent/version.py` alone, and `just tag` cuts `v<version>` from it.** A
+  bump is a hand edit of that one constant, committed before the tag, since `just tag` refuses while
+  `adjagent/` is uncommitted. No rendered file carries the version except mage's
+  `.claude-plugin/plugin.json`, whose whole purpose is to carry it. No reference slot is rendered for
+  mage, so a bump still churns nothing under `rendered/` and `just render-diff` after one shows
+  nothing.
 - **Obviated code is deleted, not parked.** When a change makes code unnecessary, it goes in the
   same change — not commented out, not left unreferenced behind a "maybe someday", not kept as a
   second implementation nobody calls. Git holds it, and a commit message naming what replaced it is
@@ -126,11 +148,39 @@ not here.
 
 ## Planning and Execution
 
-- **Partly-planned work that isn't ready to execute lives in `ROADMAP_PLANS/`, not in scratch.**
-  `mad-design/` and the repository's other scratch trees are gitignored, so a plan parked there is
-  one power-cycle from gone. A plan worth keeping moves to `ROADMAP_PLANS/`, which is tracked. It's
-  good practice for such a plan to correspond to a `ROADMAP.md` item, but that is a habit, not a
-  rule — nothing requires or checks it.
+Plans are tracked: progress and intent are worth more than a tidy tree, and a plan in an ignored
+file is one power-cycle from gone.
+
+- **`ACTIVE_PLAN.md`** at the repo root is the one plan under way: decisions confirmed at kickoff,
+  work-package boundaries, sequencing and status. Dispatched agents execute out of it; status
+  updates as work packages land. It carries outcomes, their consequences and the principles still
+  steering open choices — not decision history, which lives in commits. When the work lands, its
+  outcomes move into the contract documents and the file is replaced by the next plan.
+- **`ROADMAP_PLANS/`** holds partly-planned work that is not under way: a plan with enough design
+  done that someone could pick it up, usually behind a ROADMAP.md item. A plan leaves when it
+  becomes the active plan, is finished, or is abandoned. A plan there cites only tracked paths.
+- **A plan may name a normative page outside the contract documents, and that page outranks the
+  plan.** The contract documents are THESIS.md, SPEC.md, ARCHITECTURE.md and CONVENTIONS.md. A plan
+  may make a page of its own subject normative, and on that subject the page is the requirement
+  while the plan is the route. Where a plan row and the page disagree, the work implements the page
+  and the plan's line is reported as moved, in the commit that lands it; the page is not edited by
+  the landing, and the contract documents cite it rather than restate it. A plan that needs such a
+  page names it in the plan, so a reader knows which source settles a disagreement.
+- Working drafts and half-formed notes are scratch (`.opencode-temp/`), not plans.
+- Any plan that is activated, regardless of its location, gets a post-sprint review section at the
+  end.
+  - That section contains the review, revision, and burndown steps.
+  - Unless otherwise specified the reviewers are an architect, a coder and a tech-writer reviewing
+    with THESIS.md, SPEC.md, ARCHITECTURE.md, and CONVENTIONS.md as their pre-task reading list. The
+    tech-writer reviews what the change ships as documentation — the contract documents, README, and
+    any page a plan makes normative — for accuracy against the code and for whether a reader without
+    the work thread can act on it.
+  - They do NOT get the plan doc. Their job is to review the changes against standards and
+    suitability for purpose, not rehash the implementation.
+  - Their review brief includes reviewing the tests.
+  - The burndown list is written to a separate `<plan>_REVIEW_BURNDOWN.md` and gets the same prompt
+    engineer review and revision pass as any other document containing agent instructions.
+
 - **A dispatch names its seats before the tool call.** The acting message states the agent count
   and model. More than one seat at the family's highest tier waits for a go that names the count: a
   fan-out's cost shows only as the plan's usage moving, and by then it is spent.
@@ -152,42 +202,22 @@ not here.
   — because a rule honoured completely inside one file is still broken across two. It emits
   candidates and never verdicts, so the run is not finished when it exits zero; it is finished when
   someone has read the list and said which pairs are one idea.
-- **Every activated plan, wherever it lives, ends with a post-sprint review section.** A plan is
-  activated when its execution is approved; its sprint is its execution steps. The section is the
-  plan's last step before its commit and holds review, burn-down and remediation, each with its
-  seat count and model, so approving the plan is the count-naming go the dispatch bullet above
-  requires; each acting message still states count and model, and the main session dispatches.
-  Remediation's count is set by the burn-down, and past one seat at the highest tier it takes its
-  own go. A plan without the section is incomplete.
-  - **Review.** Unless the plan names others, the reviewers are an architect and the coder seat for
-    each language the change touches. The plan adds a security-reviewer when the change touches
-    what writes, prunes or refuses in a consumer's tree (`adjagent/install.py`,
-    `adjagent/agents_file.py`), and a tech-writer when `SPEC.md`, `ARCHITECTURE.md`,
-    `CONVENTIONS.md` or `README.md` changed. Each reviewer's pre-task reading is THESIS.md,
-    SPEC.md, ARCHITECTURE.md and CONVENTIONS.md; none gets the plan. Each gets the diff range and
-    one sentence stating what the change is for. A review judges the change, its tests included,
-    against the project's standards and its fitness for that purpose, not by re-deriving the
-    implementation. A coder's report and the main session's own diff check are not independent
-    review and do not substitute for it.
-  - **The security brief is bounded.** It carries this scope verbatim, naming the surface:
-    *Findings are limited to realistic misuse and failure of [surface] — data loss, a write outside
-    its target, a bypassable refusal, an overwritten consumer file — by an operator and the files
-    already in their tree. Each finding names a concrete failure on that surface; other adversaries
-    and hardening beyond it are out of scope.* Asked open-endedly about security, a reviewer widens
-    the threat model until every change looks unsafe; the bound keeps its findings actionable.
-  - **Burn-down.** An architect synthesizes the findings into one burn-down plan: the reviewing
-    architect, or one the plan names for synthesis alone when none reviews. The burn-down gets a
-    prompt-engineer review, and revision from its findings, before it is dispatched.
-  - **Remediation.** A fix pass works the burn-down; then `just test-changed` and
-    `just sweep-python` re-run, and `just render-diff` where rendered output can change. Only then
-    does the change land.
 - **`just retake-reference` is run only after a content change is accepted.** It overwrites the
   baseline `just render-diff` compares against, so running it earlier erases the change from the
   next comparison.
-- **A plan leaves `ROADMAP_PLANS/` when it is finished, abandoned or superseded — in the same
-  change.** A superseding plan first absorbs every section, decision and piece of evidence it
-  still relies on, stated as its own, and cites nothing in the plan it replaces; then the old plan
-  is deleted. A plan still on disk reads as work waiting to be done.
+
+### Plan dispatchability
+
+A work package is dispatchable only when the following conditions have been met
+
+- It names its scope in files, packages or symbols — never a span of design sections
+- Carries the command and its answer, or the quoted line, for each fact it acts on
+- States its done-line in runner targets
+- Has received a usability review by the prompt engineer (its definition contains the criteria)
+- Has been revised by the architect based on the findings of the prompt engineer
+
+A plan whose packages lack these is not dispatchable. It is not offered for approval as a dispatch
+plan, and none of its packages is dispatched.
 
 ## Adding Definitions
 

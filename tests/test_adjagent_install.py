@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 import pytest
 
@@ -25,6 +26,7 @@ from adjagent.errors import InputError
 from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
 from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
+from adjagent.harnesses.mage import HARNESS as MAGE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.install import (
     HARNESS_RESOURCES_SOURCE,
@@ -38,6 +40,7 @@ from adjagent.install import (
 )
 from adjagent.loading import load
 from adjagent.render import definitions, filled_body, render_agents_file, render_all, render_definition
+from adjagent.version import VERSION
 from adjagent.vocabulary import Kind
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
@@ -222,11 +225,26 @@ def test_the_user_directory_writes_the_native_file_and_no_redirect(tmp_path: Pat
     assert _files(tmp_path) == {"CLAUDE.md": render_agents_file(harness, scope="Global").encode()}
 
 
+def test_a_relative_user_directory_is_the_destination_itself(tmp_path: Path) -> None:
+    """Mage's `.` names the directory being installed into — the native file, no `AGENTS.md`
+    redirect — and leaves a harness whose user directory is absolute writing `AGENTS.md` elsewhere."""
+    _install(tmp_path, MAGE)
+    assert _files(tmp_path) == {"CLAUDE.md": render_agents_file(MAGE, scope="Global").encode()}
+    project = tmp_path / "project"
+    project.mkdir()
+    _install(project, CLAUDE)
+    assert _files(project) == {
+        "AGENTS.md": render_agents_file(CLAUDE, scope=project.name).encode(),
+        "CLAUDE.md": b"@AGENTS.md\n",
+    }
+
+
 # The definition install. A consumer project receives the product under its harness directory, and —
 # when the install includes kb — the kb-tools package in the kbase skill's own directory, with the
 # `kbase` MCP entry and the runner include line.
 
 _CLAUDE_RENDER = Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+_MAGE_RENDER = Render(harness=MAGE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
 _OPENCODE_RENDER = build_render(harness="opencode", family="claude", tier_spec="all=inherit", alias_spec=None)
 _NEW_BANNER = "---\n# !GENERATED! from adjagent/definitions/gone.py — x\n# !TUNING! y\n---\n\nbody\n"
 _OLD_BANNER = "---\n#\n# !GENERATED! from templates/agents/gone.tmpl.md\n# !TUNING! y\n#\n---\n\nbody\n"
@@ -235,13 +253,14 @@ _COMMENT_BANNER = "<!-- !GENERATED! from adjagent/definitions/kbase.py — x -->
 _KBASE_BYTES = b"KBASE-STUB-v1\n"
 # The kb set is the kbase skill alone, so its definition-side footprint is empty.
 _KB_DEFINITIONS: tuple[str, ...] = ()
-# The kbase skill's files: one definition owning a directory, so a run keeps or drops all five.
+# The kbase skill's files: one definition owning a directory, so a run keeps or drops all six.
 _KB_SKILL_FILES = (
     "skills/kbase/SKILL.md",
     "skills/kbase/references/reading.md",
-    "skills/kbase/references/build.md",
+    "skills/kbase/references/building.md",
     "skills/kbase/references/scoring.md",
     "skills/kbase/references/maintaining.md",
+    "skills/kbase/references/scoring-system.md",
 )
 
 
@@ -351,11 +370,25 @@ def test_a_resource_copy_skips_the_unshipped_vocabulary(tmp_path: Path, monkeypa
 
 def test_the_resources_tree_is_not_read_as_a_harness_module() -> None:
     """`resources/` holds no `__init__.py`, so `pkgutil` lists it as a tree rather than a module and
-    `load` returns the two harnesses. A `resources` package appearing later would break that, so the
+    `load` returns every harness module. A `resources` package appearing later would break that, so the
     same case pins the tree's presence: a resource tree that went missing fails here too, rather than
     the plugin copy silently landing nothing."""
-    assert sorted(load("adjagent.harnesses", "HARNESS")) == ["claude", "opencode"]
+    assert sorted(load("adjagent.harnesses", "HARNESS")) == ["claude", "mage", "opencode"]
     assert (REPO_ROOT / HARNESS_RESOURCES_SOURCE / "opencode").is_dir()
+
+
+def test_every_harness_omits_a_name_the_package_discovers() -> None:
+    """`omits` is matched against definition names by string, so a name nothing discovers drops nothing
+    and ships the file it was meant to, silently. Each name is checked against discovery instead."""
+    discovered = {defn.name for _, defn in definitions()}
+    harnesses = cast(dict[str, Harness], load("adjagent.harnesses", "HARNESS"))
+    unknown = [
+        (harness_name, omitted)
+        for harness_name, harness in harnesses.items()
+        for omitted in sorted(harness.omits)
+        if omitted not in discovered
+    ]
+    assert unknown == []
 
 
 @pytest.mark.parametrize(
@@ -529,6 +562,14 @@ def test_a_non_executable_installed_kbase_is_refused_with_nothing_written(tmp_pa
     assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
 
 
+def test_the_version_verb_prints_the_constant_and_nothing_else(capsys) -> None:
+    """A recipe parses this line to cut the tag, so it is the constant alone: no `v`, no suffix, no
+    prose, one line — and the constant carries that shape, which a manifest would inherit too."""
+    main(["version"])
+    assert capsys.readouterr().out == f"{VERSION}\n"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
+
+
 def test_the_cli_with_kb_flag_installs_the_kb_skill_files_and_the_skill_kb_tools_destination(
     tmp_path: Path,
 ) -> None:
@@ -696,8 +737,8 @@ def test_the_mcp_command_is_relative_to_the_project_under_both_harnesses(tmp_pat
     project = tmp_path / "project"
     project.mkdir()
     executable = str((project / expected).resolve())
-    claude_entry, _ = CLAUDE.mcp.entry(command=executable, project_root=project)
-    opencode_entry, _ = OPENCODE.mcp.entry(command=executable, project_root=project)
+    claude_entry, _ = CLAUDE.mcp.entry(command=executable, base=project)
+    opencode_entry, _ = OPENCODE.mcp.entry(command=executable, base=project)
     assert claude_entry["command"] == expected
     assert opencode_entry["command"] == [expected, "mcp"]
 
@@ -764,7 +805,11 @@ def test_the_opencode_mcp_entry_lands_in_the_discovered_file_in_the_v2_shape(tmp
             ".opencode",
             _OPENCODE_RENDER,
             ".opencode/opencode.jsonc",
-            {"mcp": {"servers": {"kbase": {"type": "local", "command": [".opencode/skills/kbase/kb-tools/kbase", "mcp"]}}}},
+            {
+                "mcp": {
+                    "servers": {"kbase": {"type": "local", "command": [".opencode/skills/kbase/kb-tools/kbase", "mcp"]}}
+                }
+            },
         ),
     ],
     ids=["claude", "opencode"],
@@ -782,6 +827,148 @@ def test_the_mcp_settings_file_is_created_when_absent(
     assert "--kb-root" not in text
 
 
+# mage's settings file is the plugin's own, at ROOT: its paths, and the command inside it, are named
+# relative to ROOT rather than to the project the plugin is installed under.
+
+
+def test_a_mage_kb_install_keeps_its_mcp_entry_beside_the_plugin_at_root(tmp_path: Path) -> None:
+    """ROOT is the plugin's own directory, so the settings file and the command in it resolve against
+    ROOT — the project root holds no `.mcp.json` at all — and the manifest is still the three-key one
+    carrying VERSION. No runner include line is written and no `Makefile` created at either root: a
+    plugin is not a repo project."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    settings = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+    assert settings == {"mcpServers": {"kbase": {"command": "skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}
+    installed = root / settings["mcpServers"]["kbase"]["command"]
+    assert installed.read_bytes() == _KBASE_BYTES
+    assert os.access(installed, os.X_OK)
+    assert not (project / ".mcp.json").exists()
+    manifest = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    assert set(manifest) == {"name", "version", "description"}
+    assert manifest["version"] == VERSION
+    assert not (root / "Makefile").exists()
+    assert not (project / "Makefile").exists()
+
+
+def test_a_mage_install_includes_kb_without_the_flag(tmp_path: Path) -> None:
+    """A plugin's product is the kb set, so a plain mage install is a kb install: no `with_kb` argument
+    is passed and the settings file lands beside the plugin carrying the entry, with the executable
+    copied to the tree the command in it names."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    settings = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+    assert settings == {"mcpServers": {"kbase": {"command": "skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}
+    installed = root / settings["mcpServers"]["kbase"]["command"]
+    assert installed.read_bytes() == _KBASE_BYTES
+    assert os.access(installed, os.X_OK)
+    assert not (project / ".mcp.json").exists()
+
+
+def test_a_mage_install_without_a_kbase_source_refuses(tmp_path: Path) -> None:
+    """The set is not optional for a plugin, so an install with nothing to install it from is refused by
+    the source check that names the flag supplying one — before the first write, leaving ROOT as it
+    stands."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    before = _files(tmp_path)
+    with pytest.raises(InputError, match="--kbase-dist"):
+        _definition_install(root, _MAGE_RENDER, project_root=project)
+    assert _files(tmp_path) == before
+
+
+def test_a_later_mage_install_over_a_kb_root_leaves_the_mcp_entry_standing(tmp_path: Path) -> None:
+    """ROOT's top-level settings file is outside every prune surface, so a later install neither
+    removes it nor rewrites it: with the executable it finds installed as its source, it re-splices the
+    same entry, byte for byte."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    written = (root / ".mcp.json").read_text(encoding="utf-8")
+    _definition_install(root, _MAGE_RENDER, project_root=project)
+    assert (root / ".mcp.json").read_text(encoding="utf-8") == written
+
+
+# A mage install is a plugin directory that is carried or published from where it stands: nothing in it
+# names this machine, nothing in it fires a hook, and the manifest is owned by the marker it states.
+
+_MAGE_MANIFEST = ".claude-plugin/plugin.json"
+
+
+def test_a_mage_install_names_no_absolute_path_and_no_home_directory(tmp_path: Path) -> None:
+    """Every path the plugin's own configuration writes — the MCP command included, which takes a kb
+    install to be written — is named against the directory the plugin lands in, because that directory
+    moves. The `~/` search is over those two files alone: a definition's prose names `~/.config` in
+    order to forbid hardcoding it, so a tree-wide search reports the advice rather than a path. Read as
+    bytes: a copied executable is not text."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    files = _files(root)
+    ours = (_MAGE_MANIFEST, ".mcp.json")
+    assert set(ours) <= set(files)
+    absolute = str(root.resolve()).encode()
+    assert [relative for relative, data in files.items() if absolute in data] == []
+    assert [relative for relative in ours if b"~/" in files[relative]] == []
+
+
+def test_a_mage_install_ships_no_hook_and_writes_no_settings_file(tmp_path: Path) -> None:
+    """mage has no guardrail, so no script lands under ROOT and no guardrail settings file appears
+    either beside the plugin or at the project it installs into — as an opencode install writes none."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    assert not (root / "hooks").exists()
+    assert not (project / ".claude/settings.json").exists()
+    assert not (root / ".claude/settings.json").exists()
+
+
+def test_a_second_mage_install_passes_over_its_own_manifest_byte_identical(tmp_path: Path) -> None:
+    """The manifest is JSON, which no generated banner rides in front of, so the marker the file states
+    about itself is what makes it ours: an install over one this repository wrote is not refused and
+    not pruned, and rewrites the same bytes — the second install finding the first one's executable as
+    its kbase source."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    manifest = root / _MAGE_MANIFEST
+    written = manifest.read_bytes()
+    _definition_install(root, _MAGE_RENDER, project_root=project)
+    assert manifest.read_bytes() == written
+
+
+def test_an_operators_manifest_without_the_marker_is_refused_with_nothing_written(tmp_path: Path) -> None:
+    """A plugin of another name at that path is the operator's own, so the install refuses it whole and
+    names it, writing nothing — no render lands before the refusal."""
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    manifest = root / _MAGE_MANIFEST
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"name": "other"}\n', encoding="utf-8")
+    before = _files(tmp_path)
+    with pytest.raises(InputError, match=re.escape(f"'{manifest}'")):
+        _definition_install(root, _MAGE_RENDER, project_root=project)
+    assert _files(tmp_path) == before
+
+
+def test_a_verbose_mage_install_lists_the_manifest_as_written(tmp_path: Path, capsys) -> None:
+    project = tmp_path
+    root = project / "plugins/adjagent"
+    root.mkdir(parents=True)
+    capsys.readouterr()
+    install(root, _MAGE_RENDER, verbose=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    assert f"wrote {root / _MAGE_MANIFEST}" in capsys.readouterr().out.splitlines()
+
+
 def test_an_mcp_file_carrying_jsonc_comments_is_reported_and_left_untouched(tmp_path: Path, capsys) -> None:
     root = tmp_path / ".opencode"
     root.mkdir()
@@ -797,7 +984,7 @@ def test_an_mcp_file_carrying_jsonc_comments_is_reported_and_left_untouched(tmp_
 def _built_entry(harness: Harness, project: Path, root: Path) -> dict:
     """The `kbase` entry `harness`'s builder makes for `root` installed under `project` — the value the
     splice is expected to have placed, read from the builder rather than restated."""
-    entry, _ = harness.mcp.entry(command=str(root.resolve() / "skills/kbase/kb-tools/kbase"), project_root=project)
+    entry, _ = harness.mcp.entry(command=str(root.resolve() / "skills/kbase/kb-tools/kbase"), base=project)
     return entry
 
 

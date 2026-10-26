@@ -4,7 +4,16 @@ import re
 from pathlib import Path
 
 from adjagent.errors import InputError
-from adjagent.harness import AgentFields, GuardrailHook, Harness, HookClaim, McpSettings, project_relative, quoted
+from adjagent.harness import (
+    AgentFields,
+    GuardrailHook,
+    Harness,
+    HookClaim,
+    McpSettings,
+    McpSite,
+    command_relative,
+    quoted,
+)
 from adjagent.vocabulary import Tool
 
 
@@ -31,9 +40,9 @@ never hands back with a background command running. If a recipe times out, the a
 instead of rerunning it in the background."""
 
 
-def _mcp_entry(*, command: str, project_root: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """A `command`/`args` entry under `mcpServers`, its command from `project_relative`."""
-    return {"command": project_relative(command, project_root), "args": ["mcp"]}, ("mcpServers", "kbase")
+def _mcp_entry(*, command: str, base: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """A `command`/`args` entry under `mcpServers`, its command from `command_relative`."""
+    return {"command": command_relative(command, base), "args": ["mcp"]}, ("mcpServers", "kbase")
 
 
 _GUARDRAIL_SCRIPT = "hooks/guardrail.pl"
@@ -61,7 +70,7 @@ def _guardrail_entry(harness_relpath: str) -> dict[str, object]:
     if re.search(f"[{_UNQUOTABLE}]", harness_relpath):
         raise InputError(
             f"harness directory '{harness_relpath}' holds a character the guardrail hook command cannot "
-            "quote (\", $, ` or \\) — install into a directory without one"
+            'quote (", $, ` or \\) — install into a directory without one'
         )
     prefix = "" if harness_relpath == "." else f"{harness_relpath}/"
     command = f"{_GUARDRAIL_COMMAND_HEAD}{prefix}{_GUARDRAIL_COMMAND_TAIL}"
@@ -112,7 +121,7 @@ HARNESS = Harness(
     bare_tier_spec_is_all=False,
     frontmatter=_frontmatter,
     document_frontmatter=(),
-    mcp=McpSettings(canonical=".mcp.json", alternatives=(), entry=_mcp_entry),
+    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.PROJECT, entry=_mcp_entry),
     # Claude Code reads project hooks from this one path, whatever directory the harness is installed in.
     guardrail=GuardrailHook(
         script=_GUARDRAIL_SCRIPT,

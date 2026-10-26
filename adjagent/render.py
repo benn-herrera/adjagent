@@ -1,7 +1,7 @@
-"""The renderer: every discovered definition to its file text, its banner, and
-the writer. Holds no prose, knows no individual definition, fills a body's
-placeholders in one pass and never rescans what it filled, and writes the
-rendered definitions."""
+"""The renderer: every discovered definition to its file text, its banner, the
+files a harness renders beside them, and the writer. Holds no prose, knows no
+individual definition, fills a body's placeholders in one pass and never rescans
+what it filled, and writes the rendered definitions and harness files."""
 
 import dataclasses
 import re
@@ -163,17 +163,27 @@ def render_skill_file(defn: Definition, file: SkillFile, ctx: Render, *, module:
     )
 
 
+def harness_renders(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:
+    """(path, text) for every file `ctx.harness` renders into the output root, sorted by path; empty for
+    a harness that renders none."""
+    return tuple(sorted((PurePosixPath(file.path), file.text()) for file in ctx.harness.rendered_files))
+
+
 def render_all(
     ctx: Render, *, include: Callable[[Definition], bool] | None = None
 ) -> tuple[tuple[PurePosixPath, str], ...]:
-    """(output path, text) for every file every included definition produces, sorted by path: a
-    definition's own output, then each of its supporting files."""
+    """(output path, text) for every file every included definition produces — a definition's own
+    output, then each of its supporting files — and then the files `ctx.harness` renders of its own,
+    sorted by path. `include` is composed with `ctx.harness.omits`, so a name the harness renders
+    nothing for is dropped whatever the caller's filter says."""
+    keep = lambda defn: defn.name not in ctx.harness.omits and (include is None or include(defn))
     rendered: list[tuple[PurePosixPath, str]] = []
-    for module, defn in definitions(include=include):
+    for module, defn in definitions(include=keep):
         rendered.append((defn.output_path, render_definition(defn, ctx, module=module)))
         rendered += [
             (defn.file_output_path(file), render_skill_file(defn, file, ctx, module=module)) for file in defn.files
         ]
+    rendered += harness_renders(ctx)
     return tuple(sorted(rendered))
 
 

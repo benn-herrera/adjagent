@@ -121,7 +121,9 @@ def test_guardrail_cases_carry_only_known_fields() -> None:
     ],
     ids=["pl", "ts"],
 )
-def test_guardrail_scratch_list_holds_its_harness_temp_dir(script: Path, harness_scratch: str, scratch_list: str) -> None:
+def test_guardrail_scratch_list_holds_its_harness_temp_dir(
+    script: Path, harness_scratch: str, scratch_list: str
+) -> None:
     """Each script spells its scratch trees itself; the harness's temp directory, which the case table
     exempts as `@scratch@`, must be among them."""
     found = re.search(scratch_list, script.read_text(encoding="utf-8"), re.MULTILINE)
@@ -130,9 +132,7 @@ def test_guardrail_scratch_list_holds_its_harness_temp_dir(script: Path, harness
 
 
 @pytest.mark.parametrize("index", range(len(_CASES)), ids=_IDS)
-def test_guardrail_ts_gives_the_case_tables_reason(
-    index: int, ts_results: dict[int, tuple[Path, str | None]]
-) -> None:
+def test_guardrail_ts_gives_the_case_tables_reason(index: int, ts_results: dict[int, tuple[Path, str | None]]) -> None:
     root, reason = ts_results[index]
     assert reason == _fill(_CASES[index]["reason"], _TS_SCRATCH, root)
 

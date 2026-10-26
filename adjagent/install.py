@@ -13,12 +13,13 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable, Iterable
-from pathlib import Path
+from functools import partial
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple, cast
 
 from adjagent.context import Render
 from adjagent.errors import InputError
-from adjagent.harness import GuardrailHook, Harness, HookClaim
+from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite
 from adjagent.loading import load
 from adjagent.render import GENERATED_MARK, GENERATED_NOTICE, render_all, write_renders
 
@@ -227,6 +228,16 @@ def _is_our_resource(path: Path) -> bool:
     return any(_RESOURCE_BANNER.search(line) for line in head)
 
 
+def _is_our_harness_file(path: Path, *, marker: str) -> bool:
+    """A harness-rendered file this repository wrote: the marker the file states about itself appears in
+    it. A file that cannot be read or decoded is not ours."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return marker in text
+
+
 def _blocked_component(target: Path, *, base: Path) -> Path | None:
     """The outermost path strictly between `base` and `target` that exists as a symlink or as anything
     but a directory — a write below it would land elsewhere or fail — or None. `base` and everything
@@ -251,17 +262,23 @@ def _foreign_on_path(target: Path, *, root: Path, ours: Callable[[Path], bool]) 
 
 
 def _refuse_foreign_targets(
-    root: Path, *, render_targets: Iterable[Path], resource_targets: Iterable[Path]
+    root: Path,
+    *,
+    render_targets: Iterable[Path],
+    resource_targets: Iterable[Path],
+    harness_targets: Iterable[tuple[Path, str]],
 ) -> None:
     """Refuse an install that would overwrite a file it did not write, or write below a path under
-    `root` that is a symlink or not a directory. A target passes as `_foreign_on_path` reads it, a
-    render needing its generated banner and a resource its installed header. Every failing path is
-    named once in the one refusal, so the operator clears them in one pass."""
-    failing = (
-        _foreign_on_path(target, root=root, ours=ours)
-        for targets, ours in ((render_targets, _is_ours), (resource_targets, _is_our_resource))
-        for target in targets
-    )
+    `root` that is a symlink or not a directory. A target passes as `_foreign_on_path` reads it, judged
+    by the claim its class makes of it: a render by its generated banner, a resource by its installed
+    header, a harness-rendered file — `(path, marker)` — by the marker that file states about itself.
+    Every failing path is named once in the one refusal, so the operator clears them in one pass."""
+    claims = [
+        *((target, _is_ours) for target in render_targets),
+        *((target, _is_our_resource) for target in resource_targets),
+        *((target, partial(_is_our_harness_file, marker=marker)) for target, marker in harness_targets),
+    ]
+    failing = (_foreign_on_path(target, root=root, ours=ours) for target, ours in claims)
     foreign = list(dict.fromkeys(path for path in failing if path is not None))
     if foreign:
         named = ", ".join(f"'{target}'" for target in foreign)
@@ -281,7 +298,12 @@ def prune(root: Path, *, keep: set[Path]) -> list[Path]:
     than pruned, and the `kbase` executable beside it carries no banner of ours at all. Every file
     under a surface is thus either ours or untouched. The would-ship vocabulary is name-based and
     covers `kb-` names and `kbase`, so a kb definition this run did not write — an install without kb —
-    is stale and removed, while one the run wrote is in `keep`."""
+    is stale and removed, while one the run wrote is in `keep`.
+
+    A file at ROOT's top level is outside every surface, and so outside this walk: a harness-rendered
+    file such as the plugin manifest, and the harness's own settings file where it lives at ROOT, are
+    neither pruned nor read as a stale render. The manifest is rendered on every install that emits it,
+    and the settings file is only ever spliced, so neither has a stale form to remove."""
     stale = [
         path
         for surface in SURFACES
@@ -670,20 +692,20 @@ def _splice_element(text: str, *, container: tuple[str, ...], entry: dict, repla
         return None
 
 
-def _mcp_settings_file(project: Path, *, harness: Harness) -> Path:
-    """The settings file `harness` registers its MCP entry in under `project`: the first discovered
+def _mcp_settings_file(base: Path, *, harness: Harness) -> Path:
+    """The settings file `harness` registers its MCP entry in under `base`: the first discovered
     alternative, else the canonical path, whether or not it exists yet."""
-    canonical = project / harness.mcp.canonical
-    candidates = [project / alternative for alternative in harness.mcp.alternatives] + [canonical]
+    canonical = base / harness.mcp.canonical
+    candidates = [base / alternative for alternative in harness.mcp.alternatives] + [canonical]
     return next((path for path in candidates if os.path.lexists(path)), canonical)
 
 
-def _settings_obstacle(target: Path, *, project: Path) -> str | None:
+def _settings_obstacle(target: Path, *, base: Path) -> str | None:
     """Why the settings file at `target` cannot be created or edited in place, naming the path that
     stands in the way; None where `target` is a regular file or absent. A symlink at it or on its path
-    below `project`, dangling or not, is never written through — what it reaches is not this project's
+    below `base`, dangling or not, is never written through — what it reaches is not this project's
     alone — and a non-directory on that path, or anything but a regular file at it, cannot hold it."""
-    blocked = _blocked_component(target, base=project)
+    blocked = _blocked_component(target, base=base)
     if blocked is not None:
         return f"{blocked} is {'a symlink' if blocked.is_symlink() else 'not a directory'}"
     if target.is_symlink():
@@ -693,17 +715,17 @@ def _settings_obstacle(target: Path, *, project: Path) -> str | None:
     return None
 
 
-def _settings_to_read(target: Path, *, project: Path) -> bool:
+def _settings_to_read(target: Path, *, base: Path) -> bool:
     """Whether a merge would read `target`: it exists, and `_settings_obstacle` names nothing."""
-    return _settings_obstacle(target, project=project) is None and target.is_file()
+    return _settings_obstacle(target, base=base) is None and target.is_file()
 
 
-def _check_settings(target: Path, *, project: Path, container: tuple[str, ...], leaf: type) -> None:
+def _check_settings(target: Path, *, base: Path, container: tuple[str, ...], leaf: type) -> None:
     """Read a settings file a merge will edit before an install's first write: an unreadable or
     undecodable one, or a plain-JSON one holding the wrong type on `container`'s path, is refused there,
     not raised out of the write phase with renders already landed. One the merge will only report — a
     JSONC file, or one `_settings_obstacle` names — passes."""
-    if not _settings_to_read(target, project=project):
+    if not _settings_to_read(target, base=base):
         return
     plain = _plain_json_object(target)
     if plain is not None:
@@ -725,11 +747,13 @@ def _plain_json_object(target: Path) -> tuple[str, dict] | None:
     return (text, data) if isinstance(data, dict) else None
 
 
-def mcp_merge(project: Path, *, harness: Harness, command: str) -> None:
-    """Register the `kbase` server in `harness`'s project settings file under `project` — also the
-    project root the entry is built against, so a command inside it is named relative to it: the first
-    discovered alternative, else the canonical path — created when no file the contract names exists.
-    The entry lands at the contract's container path.
+def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
+    """Register the `kbase` server in `harness`'s MCP settings file under `base`: the first discovered
+    alternative, else the canonical path — created when no file the contract names exists. `base` is
+    also the directory the entry is built against, so a command inside it is named relative to it and
+    the file names no machine-specific path. It is the project root for a harness whose settings file
+    is the project's own, and ROOT for one whose file is the plugin's. The entry lands at the
+    contract's container path.
 
     An existing file is edited, never reserialized: the entry's own slot is spliced into the text as it
     stands, so every other byte — other entries, key order, indentation, line endings, number and
@@ -737,10 +761,10 @@ def mcp_merge(project: Path, *, harness: Harness, command: str) -> None:
     a rewrite would destroy), one naming a key the entry must pass through twice, one the splice
     cannot delimit, and a path `_settings_obstacle` names are each reported and left untouched, with
     the entry printed for the operator to merge by hand."""
-    entry, container = harness.mcp.entry(command=command, project_root=project)
-    target = _mcp_settings_file(project, harness=harness)
+    entry, container = harness.mcp.entry(command=command, base=base)
+    target = _mcp_settings_file(base, harness=harness)
     by_hand = f"merge this entry by hand: {json.dumps(entry)}"
-    obstacle = _settings_obstacle(target, project=project)
+    obstacle = _settings_obstacle(target, base=base)
     if obstacle is not None:
         print(f"{target} not written: {obstacle} — left untouched; {by_hand}")
         return
@@ -820,7 +844,7 @@ def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str,
     printed to merge by hand."""
     target = project / guardrail.settings
     by_hand = f"merge this entry by hand: {json.dumps(entry)}"
-    obstacle = _settings_obstacle(target, project=project)
+    obstacle = _settings_obstacle(target, base=project)
     if obstacle is not None:
         print(f"{target} not written: {obstacle} — left untouched; {by_hand}")
         return
@@ -861,7 +885,7 @@ def _earlier_guardrail(script: Path, *, project: Path, guardrail: GuardrailHook)
     named."""
     left = [script] if _is_our_resource(script) else []
     settings = project / guardrail.settings
-    if not _settings_to_read(settings, project=project):
+    if not _settings_to_read(settings, base=project):
         return left
     try:
         plain = _plain_json_object(settings)
@@ -1036,39 +1060,56 @@ def install(
     kbase_dist: Path | None = None,
     project_root: Path | None = None,
 ) -> None:
-    """Render, replace each package destination whole with a stamped copy, copy the harness's own
-    resource files into ROOT as they stand, write the renders over what is there, then prune. An
-    install that includes kb — `with_kb` names it, or an installed `kbase` binary stands at the current
+    """Render every included definition and every file the harness renders of its own into ROOT,
+    replace each package destination whole with a stamped copy, copy the harness's own resource files
+    into ROOT as they stand, write the renders over what is there, then prune. An install that includes
+    kb — `with_kb` names it, the harness is one whose files sit at its own root, which is a plugin and
+    always takes the kb set, or an installed `kbase` binary stands at the current
     `skills/kbase/kb-tools` destination or the `agents/kb-tools` one an earlier version used (the
     sticky rule, per ROOT and not per project) — also writes the kb-tools package, the harness's
-    `kbase` MCP entry and the consumer's runner include line; every install removes each tree an
-    earlier version installed. A harness with a guardrail hook has its script run once on this machine
-    first: when that run succeeds the script ships with the other resources and every install
-    registers it in the project's settings file; when it fails, neither happens, the install goes on,
-    and the report names why and what an earlier install left in place. A file at a render or resource
-    target that does not carry this repository's banner for its kind, or a symlink or non-directory
-    between ROOT and such a target, refuses the install; package destinations are replaced whole
-    unchecked. A refusal of the root, of the render, of a target it would overwrite, of the kbase
-    source, of the runner file, of the MCP settings file, of the harness directory the guardrail entry
-    cannot name or of the guardrail settings file writes nothing; a settings path that is a symlink or
-    not a regular file is reported and left alone."""
+    `kbase` MCP entry and, for a harness whose files sit in a project subdirectory, the consumer's
+    runner include line, none being written or created for a harness installed at its own root, which
+    is a plugin rather than a repo project; the entry goes in the harness's own MCP
+    settings file, which sits at the project root or, under a harness whose file is the plugin's, at
+    ROOT, its command named relative to that directory. Every install removes each tree an earlier
+    version installed. A harness with a guardrail hook has its script run once on this machine first:
+    when that run succeeds the script ships with the other resources and every install registers it in
+    the project's settings file; when it fails, neither happens, the install goes on, and the report
+    names why and what an earlier install left in place. A file at a render, harness-file or resource
+    target that does not carry what that class of file states as its origin — this repository's
+    generated banner or installed header, or the marker a harness-rendered file states about itself —
+    or a symlink or non-directory between ROOT and such a target, refuses the install; package
+    destinations are replaced whole unchecked. A refusal of the root, of the render, of a target it
+    would overwrite, of the kbase source, of the runner file, of the MCP settings file, of the harness
+    directory the guardrail entry cannot name or of the guardrail settings file writes nothing; a
+    settings path that is a symlink or not a regular file is reported and left alone."""
     _refuse_root(root)
     project = root.resolve() if project_root is None else Path(project_root).resolve()
+    # The settings file's own base: a harness that keeps its file at ROOT resolves its paths and names
+    # its command relative to ROOT, every other to the project root.
+    mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
     harness_relpath = _harness_relpath(root, project)
     # A per-ROOT diagnostic on the file's presence alone: a tree whose executable is absent must not
     # turn a plain install into one that rewrites the consumer's runner and MCP configuration, so no
-    # mode and no tree shape is read. What the install copies from is a different question — there the
+    # mode and no tree shape is read — of a harness installed under a project. A harness whose files
+    # sit at ROOT is a plugin whose product is the kb set, so there the set is always included and only
+    # the source is left to find. What the install copies from is a different question — there the
     # MCP entry would register a command that cannot start, so `_kbase_source` is stricter, and its
     # refusal is the place that reports it.
-    kb_included = with_kb or any(
-        (root / destination / KBASE_BASENAME).is_file() for destination in (KB_TOOLS_PACKAGE, LEGACY_KB_TOOLS_PACKAGE)
+    kb_included = (
+        with_kb
+        or ctx.harness.user_harness_dir == "."
+        or any(
+            (root / destination / KBASE_BASENAME).is_file()
+            for destination in (KB_TOOLS_PACKAGE, LEGACY_KB_TOOLS_PACKAGE)
+        )
     )
     # Every check runs before the first write: the root refusal and harness relpath above, then the
-    # render, the guardrail probe that decides whether its script is a resource target, each render and
-    # resource target the install would overwrite and the paths below ROOT it would write through, the
-    # kbase source an install including kb copies from, that install's runner file and MCP settings
-    # file, and — when the probe passed — the guardrail entry built for this harness directory and the
-    # guardrail settings file.
+    # render, the guardrail probe that decides whether its script is a resource target, each render,
+    # harness-file and resource target the install would overwrite and the paths below ROOT it would
+    # write through, the kbase source an install including kb copies from, that install's runner file
+    # and MCP settings file, and — when the probe passed — the guardrail entry built for this harness
+    # directory and the guardrail settings file.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
     package_files = package_copies(root, kb_included=kb_included)
     resource_files = harness_resource_copies(root, harness=ctx.harness.name)
@@ -1079,10 +1120,18 @@ def install(
         guardrail_skipped = _guardrail_probe(script, project=project, temp_dir=ctx.harness.project_temp_dir)
         if guardrail_skipped is not None:
             resource_files = [(source, target) for source, target in resource_files if source != script]
+    # The harness's own rendered files are a class of their own at the refusal: their ownership is the
+    # marker each states, not a banner a JSON manifest has no way to carry.
+    harness_markers = {PurePosixPath(file.path): file.marker for file in ctx.harness.rendered_files}
     _refuse_foreign_targets(
         root,
-        render_targets=[root.joinpath(*relative.parts) for relative, _ in renders],
+        render_targets=[root.joinpath(*relative.parts) for relative, _ in renders if relative not in harness_markers],
         resource_targets=[target for _, target in resource_files],
+        harness_targets=[
+            (root.joinpath(*relative.parts), harness_markers[relative])
+            for relative, _ in renders
+            if relative in harness_markers
+        ],
     )
     # Everything this install copies, in one list: `keep` and the report below count a harness's own
     # files with the packages', so neither reads as a stale render.
@@ -1092,13 +1141,13 @@ def install(
     kbase_command = str(root.resolve() / KB_TOOLS_PACKAGE / KBASE_BASENAME)
     if kb_included:
         _check_runner(project)
-        _, mcp_container = ctx.harness.mcp.entry(command=kbase_command, project_root=project)
-        mcp_target = _mcp_settings_file(project, harness=ctx.harness)
-        _check_settings(mcp_target, project=project, container=mcp_container, leaf=object)
+        _, mcp_container = ctx.harness.mcp.entry(command=kbase_command, base=mcp_base)
+        mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
+        _check_settings(mcp_target, base=mcp_base, container=mcp_container, leaf=object)
     guardrail_entry: dict[str, object] | None = None
     if guardrail is not None and guardrail_skipped is None:
         guardrail_entry = guardrail.entry(harness_relpath)
-        _check_settings(project / guardrail.settings, project=project, container=guardrail.container, leaf=list)
+        _check_settings(project / guardrail.settings, base=project, container=guardrail.container, leaf=list)
 
     for _, destination in SHIPPED_PACKAGES:
         shutil.rmtree(root / destination, ignore_errors=True)
@@ -1147,8 +1196,11 @@ def install(
         for path in [*(target for _, target in copies), *([dist_target] if dist_target is not None else []), *written]:
             print(f"wrote {path}")
     if kb_included:
-        mcp_merge(project, harness=ctx.harness, command=kbase_command)
-        install_kb_include_line(project, harness_relpath=harness_relpath)
+        mcp_merge(mcp_base, harness=ctx.harness, command=kbase_command)
+        # A harness whose files sit at its own root is a plugin, not a repo project, so it has no
+        # consumer runner file to include the snippets in and none is created.
+        if ctx.harness.user_harness_dir != ".":
+            install_kb_include_line(project, harness_relpath=harness_relpath)
     if guardrail is None:
         return
     if guardrail_entry is not None:

@@ -10,7 +10,7 @@ kb-tools/               shipped package, delivered only by a kb install — the 
 .tool-dist-cache/       gitignored — the signed kbase release a recipe downloads, <version>/kbase[.exe], which `install-with-kb` installs (justfile KBASE_VERSION, TOOL_DIST_CACHE)
 rendered/               gitignored build product — this repo's own render tree, one slot per render, and the three `reference*` slots `render-diff` compares against (justfile RENDERED); created on demand
 adjagent/               the generator package, run as python3 -m adjagent — definitions as Python values rendered into a named output root; the package docstring lists its modules
-  harnesses/resources/  one directory per harness, named for it — the files that harness ships into its project harness directory, copied into ROOT as they stand and never rendered (HARNESS_RESOURCES_SOURCE, adjagent/install.py); `opencode/plugins/guardrail.ts` and `claude/hooks/guardrail.pl` today, and no `__init__.py`, so `load` still reads one harness per module
+  harnesses/resources/  one directory per harness, named for it — the files that harness ships into its project harness directory, copied into ROOT as they stand and never rendered (HARNESS_RESOURCES_SOURCE, adjagent/install.py); `opencode/plugins/guardrail.ts` and `claude/hooks/guardrail.pl` today, and no `__init__.py`, so `load` still reads one harness per module; mage ships none
 devtools/               repository-maintenance tooling — project space, never installed; imported from the repository root as `devtools.*`
   render_diff.py        the text comparison of two rendered slots (justfile `render-diff`); reads rendered output only and never imports the generator
   dupe_sweep/           the duplication sweep, run as `python3 -m devtools.dupe_sweep` — enumerates one-idea-two-places candidates over the owned python trees (justfile `sweep-python`)
@@ -54,7 +54,8 @@ The two install types differ by one filter and three emissions. The filter is `N
 `^(kb-|kbase$)`, applied to the definition's name — its declared name, not a rendered file's stem —
 before anything about it is rendered: a base install drops every match whole, so no file of a
 dropped definition is written, and the skill's directory is never created by a run that excludes
-it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes beside its
+it. A harness whose `user_harness_dir` is `.` is always a kb install, so the filter never applies
+to it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes beside its
 `--kbase-dist`, or is sticky: the installed `kbase` executable standing under ROOT — at
 `skills/kbase/kb-tools/kbase`, `kbase.exe` where that is the installed name, or at the
 `agents/kb-tools/` an earlier version installed there — already includes kb, per ROOT rather than
@@ -70,7 +71,8 @@ either the install refuses with `InputError` naming the path and its remedies �
 install kb first — rather than register a command that cannot start. The underscore
 `agents/kb_tools/` tree is not a signal; it never held an executable.
 
-A kb install writes three things beyond the renders:
+A kb install writes three things beyond the renders — two under a harness whose
+`user_harness_dir` is `.`, with no runner include line and no `Makefile`:
 
 - **The kb-tools package**, assembled from two sources: the `runner-snippets/` fragments copied from
   `kb-tools/`, and the executable the distribution names, which replaces the destination whole. The
@@ -79,27 +81,33 @@ A kb install writes three things beyond the renders:
   skill's `SKILL.md` or references beside it. With no distribution named, the executable already
   installed stays where it is and only the snippets are refreshed; one an earlier version installed
   under `agents/kb-tools/` is copied across before that tree is removed.
-- **The `kbase` server entry**, merged into the harness's own project settings file (`Harness.mcp`):
-  claude's `.mcp.json`, or for opencode the first discovered of `.opencode/opencode.json`,
-  `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. Under both harnesses
-  the entry's command is the installed executable's path relative to the project root, which ROOT
-  always sits inside, so the settings file names no machine-specific path and a project can track
-  it. Its argument list is `mcp` alone and names no KB path: the server locates the KB from the working directory it is started in,
-  so it has to be started in the project root. An existing settings file is edited in place: the
-  entry's own slot is spliced into the text as it stands, so every other byte — other entries, key
-  order, indentation, line endings — is kept, while a file this install creates is written whole.
+- **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): claude's
+  `.mcp.json`, at the plugin root under mage — `McpSettings.site` names the directory, `HARNESS`
+  there and `PROJECT` for the other two — or for opencode the first discovered of
+  `.opencode/opencode.json`, `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc`
+  created. Under every harness the entry's command is the installed executable's path relative to
+  the directory that harness's settings file is resolved against — the project root, or, under mage,
+  ROOT — so the settings file names no machine-specific path and a project can track it. Its argument
+  list is `mcp` alone and names no KB path: the server locates the KB from the working directory it
+  is started in, so it has to be started in the project root. An existing settings file is edited in
+  place: the entry's own slot is spliced into the text as it stands, so every other byte — other
+  entries, key order, indentation, line endings — is kept, while a file this install creates is
+  written whole.
   One that is not plain JSON — JSONC comments a splice would destroy — or that the splice cannot
   place with certainty, or whose path `_settings_obstacle` names, is reported with the entry
   printed, and left as it stands.
 - **The runner include line**, appended to the project's justfile or Makefile — or to a `Makefile`
   created carrying it, where the project has neither: the non-fatal `import?` or `-include` form
-  naming the installed snippets. One line only: a line naming another harness is reported and left
-  alone, and one naming this harness under a path an earlier version installed is rewritten in place.
+  naming the installed snippets. Written only for a harness whose user directory is not `.`:
+  a plugin is not a repo project, so mage gets no line and no `Makefile`. One line only: a line
+  naming another harness is reported and left alone, and one naming this harness under a path an
+  earlier version installed is rewritten in place.
 
 An install renders every included definition — its own output, then each supporting file a skill
-lists — replaces each destination the `SHIPPED_PACKAGES` table names whole with a copy, copies each
-file the installing harness ships into ROOT as it stands — bar a guardrail script whose probe
-fails (below) — writes the renders over what is there, and
+lists — and every file the harness itself renders (mage's manifest), bar a definition the harness
+declares it renders nothing for (`Harness.omits`), replaces each destination the `SHIPPED_PACKAGES`
+table names whole with a copy, copies each file the installing harness ships into ROOT as it stands
+— bar a guardrail script whose probe fails (below) — writes the renders over what is there, and
 removes each file under `agents/`, `commands/` or `skills/` that this run did not write, that would
 ship, and that is ours by its own carrier: a frontmatter block holding a `!GENERATED!` line, or a
 comment line opening with it, which is how a skill's supporting file holds its banner. It then
@@ -138,13 +146,15 @@ files join the same `copies` list as the packages', so the prune's `keep` holds 
 counts them: a harness file never reads as a stale render, and the report line says `copied files`
 for the lot. The copy is one-way, not a mirror — `prune` owns the three rendered surfaces and nothing
 outside them — so a resource this repository stops shipping stays in a consumer until that project
-removes it.
+removes it. A harness-rendered file is a third target class beside those two: recognised by the
+marker it states about itself, and refused where a file at its path does not hold it.
 
 A harness that declares a `guardrail` (`Harness.guardrail`, a `GuardrailHook`) ships a hook the
 install registers rather than only copies; claude declares one, opencode sets `None` because its
-plugin registers itself. The `GuardrailHook` names the `script` under `resources/<harness>/`, the
-`settings` file relative to the project root — `.claude/settings.json` whatever `--subdir` is, the
-only path Claude Code reads — the `container` path in it to the array the entry is an element of
+plugin registers itself, and mage sets `None` and ships no hook at all. The `GuardrailHook` names the
+`script` under `resources/<harness>/`, the `settings` file relative to the project root —
+`.claude/settings.json` whatever `--subdir` is, the only path Claude Code reads — the `container`
+path in it to the array the entry is an element of
 (`hooks`, `PreToolUse`), an `entry` builder from the harness's path relative to the project to the
 hook entry, and a `claim` that reads an element of that array as `entry` writes it. The entry's
 command is a short `sh` program that `exec`s `perl` on
@@ -213,7 +223,9 @@ the project is this repository.
 two directories: one already holding the installed `kbase` executable at `skills/kbase/kb-tools/` or
 in the legacy `agents/kb-tools/` would be a kb install under this recipe too, and neither does. No
 include line is written here whatever the install type — `install_kb_include_line` returns without
-writing when the project is this repository.
+writing when the project is this repository. Nor is one written for a harness whose
+`project_harness_dir` is `.`: the install skips that call there, because a plugin is not a repo
+project, so a mage kb install writes no include line and creates no `Makefile`.
 
 ## Composition Model
 
@@ -275,20 +287,20 @@ member, else the family-wide text, else nothing (`family.py` states the rules fo
 `kind` decides where the definition goes, what frontmatter the harness emits for it, and which
 fields it takes. `folder` is the path below the output root for a nested output, empty where the
 definition's own output sits directly under its surface; a skill refuses it, because the directory
-name is the definition's name on both harnesses.
+name is the definition's name on every harness.
 
 | Kind | Output | Frontmatter | Fields |
 |---|---|---|---|
 | agent | `agents/<folder>/<name>.md` | the harness's agent fields, the model from `tier` through the tier map | `description`, `tools`, `tier` required; `color` optional |
 | document | `agents/<folder>/<name>.md` | the harness's document fields: none under claude, `mode: subagent` and `disable: true` under opencode | none of the agent fields |
 | command | `commands/<folder>/<name>.md` | no field lines, and no blank line after the closing fence | none of the agent fields |
-| skill | `skills/<name>/SKILL.md`, then `skills/<name>/<file.path>` for each `SkillFile` | `name` and `description`, the two fields both harnesses read, between the banner and the closing fence | `description` required; no `tools`, `tier` or `color`; `files` optional |
+| skill | `skills/<name>/SKILL.md`, then `skills/<name>/<file.path>` for each `SkillFile` | `name` and `description`, the two fields every harness reads, between the banner and the closing fence | `description` required; no `tools`, `tier` or `color`; `files` optional |
 | agents file | none | none; renders to a block, see Agents File | none of the agent fields |
 
 Every rendered definition's own output opens with a frontmatter block carrying the banner; a skill's
 supporting files open with the comment form of it (see Banner). The skill row's two field lines are
 the renderer's own (`render._field_lines`), not the harness's: they are deliberately
-harness-invariant, because both harnesses read the same two fields and neither has anything of its
+harness-invariant, because every harness reads the same two fields and none has anything of its
 own to say about them. A `Definition` refuses at construction any field outside its kind's contract.
 
 ### Harnesses and families
@@ -301,16 +313,19 @@ tool's own, and the sixth, `recipe_rule`, typed `OptionalHarnessText` where the 
 (`inherit_text`) with the further `inherit_synonyms` rendering that same text, whether a bare
 `--model-tier-map` value is the whole map (`bare_tier_spec_is_all`), the frontmatter emitter,
 `coder_dispatch`, a callable taking the rendered model and returning the agents file's
-coder-dispatch bullet, or `None` where the harness cannot choose a model per dispatch, and `mcp`
-(`McpSettings`), the project settings file and server entry a kb install registers, and
-`guardrail` (`GuardrailHook` or `None`), the hook script and settings entry a claude install
-registers (Install Consumption Model).
-`inherit_synonyms` and `bare_tier_spec_is_all` both differ between the two harnesses, as the
-strings above do: opencode holds `("default",)` and `True`, with `inherit_text` empty, so a tier
-rendering either word leaves the agent without a model line and so on the project's own model;
-claude holds `()` and `False`, `inherit_text` `inherit`, and refuses a bare tier-map value as no
-`tier=value` pair. A family is a `Family` dataclass (`adjagent/family.py`) holding the tier map and
-the overlays by anchor. An instance is one module, in `adjagent/harnesses/` or
+coder-dispatch bullet, or `None` where the harness cannot choose a model per dispatch, `mcp`
+(`McpSettings`), the settings file and server entry a kb install registers, its `site` (`McpSite`)
+naming the directory that file sits in — the project root, or, under mage, ROOT — `guardrail`
+(`GuardrailHook` or `None`), the hook script and settings entry a claude install registers (Install
+Consumption Model), `rendered_files` (`HarnessFile`), the files it renders of its own beside the
+definitions — mage's manifest — and `omits`, the definition names it renders nothing for.
+`inherit_synonyms` and `bare_tier_spec_is_all` differ between claude and opencode, as the strings
+above do, and mage holds claude's assumed values (model pattern, aliases, tool spellings,
+frontmatter) as copies it may revise independently: opencode holds `("default",)` and `True`, with
+`inherit_text` empty, so a tier rendering either word leaves the agent without a model line and so
+on the project's own model; claude holds `()` and `False`, `inherit_text` `inherit`, and refuses a
+bare tier-map value as no `tier=value` pair. A family is a `Family` dataclass (`adjagent/family.py`)
+holding the tier map and the overlays by anchor. An instance is one module, in `adjagent/harnesses/` or
 `adjagent/families/`, defining `HARNESS` or `FAMILY`, with no class in it. `loading.load` reads the
 modules of a package in name order and keys each by its module name with `_` read as `-`
 (`gemma_4.py` is `gemma-4`). The constructor is the validator: an instance missing a field, or a
@@ -388,7 +403,9 @@ where `perl` passes the probe on that machine, so a `render-diff` against a refe
 elsewhere can show it. Those three slots (claude, opencode, and the
 gemma-4 family, which fills the overlay anchors) are the baseline, written only by
 `just retake-reference`, so a `render-diff` after a change reports that change and nothing the
-baseline already held.
+baseline already held. No mage slot is taken: the manifest carries `VERSION`, so a mage baseline
+would churn on every bump (CONVENTIONS.md, the version bullet). A mage render is inspected ad hoc
+with `just render mage --harness=mage`.
 
 `tests/test_adjagent.py` holds the package's properties: each kind's frontmatter against literal
 lines, a skill's directory — its two fields and a comment-bannered reference — against literal
@@ -407,13 +424,21 @@ two. Every verb of the generator exits 0 on success and 2 on a refusal; there is
 
 ## Sanctioned Invocation
 
-`just install`, `just install-with-kb`, `just install-agents-here`, `just render`,
-`just retake-reference` and `just install-agents-file <dir> [harness]` reach `python3 -m adjagent`:
-`install-agents-here` through `install`; `render` and `retake-reference` through the private
-`_render-slot`, which calls `install` with `--with-kb` and `--kbase-dist`, and through the stable
-private `render-agents-file HARNESS OUT` recipe, which a later revision calls inside a worktree of an
-earlier one, so its name and two arguments do not change incompatibly. Recipes read a harness's
-five `HarnessText` values through `python3 -m adjagent harness NAME KEY`, never from a copy of them.
+A recipe body is a script in `devtools/scripts/`, named for its recipe, and the recipe is the line
+that runs it, handing it the variables it reads as an env prefix. `just install`,
+`just install-with-kb`, `just install-agents-here`, `just render`, `just retake-reference`,
+`just install-agents-file <dir> [harness]` and `just tag` reach `python3 -m adjagent`:
+`install-agents-here` through `install.sh`; `render` and `retake-reference` through the private
+`_render-slot.sh`, which calls `install.sh` with `--with-kb` and `--kbase-dist`, and through the
+stable private `render-agents-file HARNESS OUT` script, which a later revision calls inside a
+worktree of an earlier one, so its name and two arguments do not change incompatibly; and `tag`
+through `version`, which prints the version bare and nothing else, so the `v` of `v<version>` is the
+recipe's. Scripts read a harness's five `HarnessText` values through
+`python3 -m adjagent harness NAME KEY`, never from a copy of them — `_harness-value.sh` is the one
+reader — and the version through `python3 -m adjagent version`, never restated in a recipe or a
+script. `just tag` reads it there to create the lightweight tag `v<version>`: it refuses while
+`adjagent/` has uncommitted changes and again while that tag already exists, and it pushes nothing.
+CONVENTIONS.md states where the version is written down, and the order a bump takes against its tag.
 
 ## Agents File
 
@@ -441,8 +466,9 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   linux-kernel-driver-expert), architect, and — sharing the coding-review domain — security-reviewer
   and tech-writer, which is both the author and the review seat for technical documentation.
 - **kb set + kbase** — the `kbase` skill alone: the definition a base install excludes by name and
-  a kb install delivers. `kbase.py` owns a directory, `skills/kbase/SKILL.md` routing by request and
-  `skills/kbase/references/reading.md`, `build.md`, `maintaining.md` and `scoring.md` carrying what
+  a kb install delivers — except under mage, which always includes it. `kbase.py` owns a directory,
+  `skills/kbase/SKILL.md` routing by request and
+  `skills/kbase/references/reading.md`, `building.md`, `maintaining.md`, `scoring.md`, and `scoring-system.md` carrying what
   each route needs; the router is the only text every session pays for, and the rule that a
   reference is read only when its route is reached is the router's own — its *Route by the request*
   section says so, and nothing but that text stops a read.

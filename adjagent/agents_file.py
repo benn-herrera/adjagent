@@ -59,7 +59,9 @@ def marker_span(text: str, *, where: str) -> tuple[list[str], int, int]:
 
 
 def _in_user_dir(harness: Harness, directory: Path) -> bool:
-    return Path(harness.user_harness_dir).expanduser().resolve() == directory.resolve()
+    """A relative user directory is resolved against `directory`, so mage's `.` is the destination
+    itself; an absolute one is unaffected, since joining with an absolute path yields it."""
+    return (directory / Path(harness.user_harness_dir).expanduser()).resolve() == directory.resolve()
 
 
 def scope_name(harness: Harness, directory: Path) -> str:

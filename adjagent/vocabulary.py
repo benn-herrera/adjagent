@@ -51,7 +51,7 @@ class Kind(Enum):
     """What a definition renders as. An agent is dispatchable and carries the harness's agent
     frontmatter; a document is read by agents and carries the harness's document frontmatter; a
     command carries no field lines; a skill renders a directory — `skills/<name>/SKILL.md`, carrying
-    the two fields both harnesses read, and the supporting files it lists, each opened by a comment
+    the two fields every harness reads, and the supporting files it lists, each opened by a comment
     banner; an agents file renders to a block that an installer wraps the operator's text around; it
     has no output path and no frontmatter."""
 
