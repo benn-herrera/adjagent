@@ -31,7 +31,7 @@ in, in this order:
 
 Neither probe passing is a finding, not a failure. The `.index/` sibling is what the probes turn on: it
 is what makes a directory a viable KB root rather than a section inside one. Each probe tests only that
-`.index/` exists; what it holds is metadata (below). Do not search the tree for a KB — section
+`.index/` exists, never what it holds. Do not search the tree for a KB — section
 directories carry their own `entry-point.md`, and a search finds the wrong one.
 
 Every `kb-root/...` path a reference names resolves against the located **KB root**.
@@ -51,21 +51,26 @@ looking only costs the user time.
 
 ## KB metadata goes through kbase
 
-KB metadata is read and written only through kbase itself — the `kbase` server's tools, and the `kb-`
-runner targets and `wait` lines that run its executable. It is everything under the KB root's
-`.index/`, every `claim-graph*.svg` under the KB root and the `claim-rigor.md` registers — never open,
-list, grep or count these — and, in every other `.md` file under the KB root, its `---`-fenced
-frontmatter, its claim markers and its `(strength X)` annotations. A document's prose is yours to
+Under the KB root, the claim markers in the documents are metadata. A document's prose is yours to
 read, and reading it passes over these: take no value from them, and never grep or count them. A
-value metadata carries comes from a query, never off the file, and no metadata byte is typed by hand
-— a frontmatter block in a new file included. The one exception is composing a
-`set-frontmatter` call: it replaces the whole block, so read the block it replaces and restate every
-field you keep.
+value metadata carries comes from a query, never off the file, and no metadata byte is typed by
+hand.
+
+## kbase's own text governs
+
+kbase's own text — its server instructions, each tool's description, usage guidelines and
+constraints — is authoritative. Whatever it states — a limit, an order, a prohibition — is a rule,
+not a suggestion, and where this skill disagrees with it, kbase's text governs. `kb-root/AGENTS.md`
+likewise governs this skill where they disagree.
 
 ## Route by the request
 
-Every route below needs the `kbase` MCP server connected; where that server is not, say so and stop —
-registering it, which the install does, is the fix, not a second interface.
+Every route below needs the `kbase` MCP server's tools offered to you. Where they are not, say so
+and stop: a server switched off, never enabled or never registered all mean kbase is not to be used
+here. Run its executable or its `kb-` runner targets only when the user directs you to — what they
+named, and nothing more. A `wait` line a kbase tool's result hands you is that tool's own
+continuation: run it as the reference says. Turning the server on is the user's call, not a gap for
+you to work around.
 
 | the request | the route |
 | --- | --- |
@@ -197,9 +202,8 @@ without it.
 - `weak-points` — highest-leverage rework targets (shaky *and* load-bearing)
 - `stats` — the summary dashboard
 
-**A list result is capped, and says so.** A list query returns `limit` results from `offset` (default 50,
-`0` means all) and reports `count` and `truncated`; where `truncated` is true, re-issue the query at the
-offset plus what came back, before treating the list as complete.
+**A list result is capped, and says so.** A list query is capped and reports `count` and `truncated`;
+where `truncated` is true, re-issue at the next offset before treating the list as complete.
 
 **Assisting derivations.** When the user builds or checks a derivation, trace the strength of the chain
 it rests on (`deps` on the claim) and surface the **weakest link** explicitly — a weak node or a low
@@ -249,9 +253,9 @@ launch returns, and follow it with `status` on request and `cancel` on the user'
 ## What the build takes
 
 The volume roots the user names are the whole input, each spelled relative to the repository root and
-passed in the order given, one `volume-root` per source. The KB root is always `kb-root/`, a name the
-tool hard-codes and takes no override for. Anything else the user typed is not an input — not a further
-source, and nothing this reference carries into the launch; say so rather than folding it into the call.
+passed in the order given, one `volume-root` per source. Anything else the user typed is not an
+input — not a further source, and nothing this reference carries into the launch; say so rather than
+folding it into the call.
 
 ## The fast path
 
@@ -294,33 +298,27 @@ The result is one of three:
 
 ## Choosing models
 
-When the refusal leaves `models.decision` or `models.text` unset and the user names no id, recommend
-both from what `models` listed: for `text`, a small instruct model of the 9B-12B class — it writes the
-overview passage, and a larger one earns its place only when inference is fast and the material is very
-complex; for `decision`, a small or medium reasoning model — `clef`, `d3`, `openjev` or a flash sibling
-— where the catalog holds one.
+When the refusal leaves `models.decision` or `models.text` unset and the user names no id, read
+`kbase://model-hints` for what each role wants. The choice is the user's.
 
-The decision model answers one ask per candidate link: many asks, each cheap. On a local endpoint a
-flash sibling is the better default; take the full id where the endpoint is hosted or the user says
-quality outranks wall clock.
+The decision model answers one ask per candidate link — many asks, each cheap — so the number of
+links, not the model alone, sets that walk's wall clock.
 
-Where `show-config` reports the entry's `decisions-flavor` as `systemone` — oMLX's surface — every id
-`models` listed is accepted on the decision surface; under `decisions` the server accepts a narrow set
-it alone names, so use only an id it names. A model built for reasoning nonetheless does better on
-multiple-choice questions than a general instruct model.
+Say what would move either choice that `kbase://model-hints` sets out — the larger text model, the
+non-flash decision id — because the user can judge the material and the wall clock, and the session
+cannot.
 
-Say what would move either choice — the larger text model, the non-flash decision id — because the
-user can judge the material and the wall clock, and the session cannot.
-
-Both ids go in the single `model-map` call above. An id the user names fills its role and this guidance
-fills the other; a pair they name is used as given — say once if `models` did not list one, then write
+Both ids go in the single `model-map` call above, from the ids `models` listed. An id the user names
+fills its role; for the role they leave open, propose one id `models` listed that matches the
+capability `kbase://model-hints` states for it, and say what would move it — the call needs one per
+category it dials. Where `kbase://model-hints` is not offered, say so and leave that role's choice to
+the user rather than writing an id nobody named. Say once if `models` did not list one, then write
 what they chose.
 
 ## Following it
 
 `status` on the user's request: relay its `state`, the stage under `current` and the `resume` command
-where it carries one. `cancel` only on the user's word, and relay what it returns. A launch while a
-build runs is refused (`lock`).""",
+where it carries one. `cancel` only on the user's word, and relay what it returns.""",
             ),
             SkillFile(
                 path="references/scoring.md",
@@ -333,17 +331,10 @@ A pass walks the KB's scoring set itself: it enumerates every item the pass cove
 per item, validates the value it got, lands that one value, and ledgers the run. The enumeration is
 the tool's — do not draw up a list of items, hand it ids, or answer any of its asks yourself.
 
-## Two passes, one quantity each
+## One quantity per ask
 
-| the pass | the quantity | the items |
-| --- | --- | --- |
-| `pass: rigor` | local rigor | every claim, analysis and experiment |
-| `pass: bearing` | bearing | `supports`, `lifts` and `refutes` edges |
-
-One quantity per ask; the asks are never merged. A run covers both passes in one walk unless there
-is a specific reason for one — a single edited subtree, or a pass that is failing and is being
-isolated — and `pass` is how that reason is expressed. A text edit puts a node's rigor and the
-bearing of every edge that touches it on the table together, so the two belong in one run by default.
+One quantity per ask; the asks are never merged. Scope a run to one pass — `pass` — for a single
+edited subtree, or for a pass that is failing and is being isolated.
 
 ## The model
 
@@ -430,7 +421,7 @@ re-run.""",
             SkillFile(
                 path="references/maintaining.md",
                 body=f"""You maintain an existing knowledge base. You take finished work and incremental corrections and land
-them in the canonical tree *correctly* — frontmatter, claim-graph wiring, cross-references, and the
+them in the canonical tree *correctly* — claim-graph wiring, cross-references, and the
 regeneration/verification loop — leaving `verify` green. The reading route reads, reasons and reports;
 you modify.
 
@@ -457,10 +448,10 @@ mechanical rendering of one extent of the corpus — repair it against that exte
 that says more than the source says (a summary, a rationale, an analysis) in its own document,
 cross-referenced from the leaf, rather than over the rendering.
 
-**You supply values; the call writes the bytes.** A document's frontmatter block, a register entry and
-every field in it, an in-body claim marker, a premise bullet, an analysis-to-claim pair — each is
-written by one write-op tool that renders the format itself, proves what it composed by reading it
-back, and refuses rather than writing anything it cannot prove.
+**You supply values; the call writes the bytes.** A register entry and every field in it, an in-body
+claim marker, a premise bullet, an analysis-to-claim pair — each is written by one write-op tool that
+renders the format itself, proves what it composed by reading it back, and refuses rather than
+writing anything it cannot prove.
 
 - **One entry per call.** A call carries one entry's values and writes that entry.
 - **An insert mints the id and returns it.** There is no separate mint step and no id for you to
@@ -501,7 +492,7 @@ wire its claim-graph nodes, and leave the source doc behind (or note it for remo
 
 **Editorial boundary (default — surface, don't decide unilaterally):**
 - **PARK, do not promote:** inbox / rolling-capture / audit-changelog / session-log material parks
-  to `session/`; it does **not** become a no-claim leaf at a canonical path. (If a session doc is
+  to `session/`; it does **not** become a leaf at a canonical path. (If a session doc is
   process residue, it stays process residue.)
 - **Promote:** a finished, leaf-shaped *result/derivation* with a clear taxonomy home.
 - When the canonical-vs-park call, or where a promoted leaf belongs in the tree, is **ambiguous**,
@@ -512,17 +503,13 @@ wire its claim-graph nodes, and leave the source doc behind (or note it for remo
 
 A leaf you add by hand carries the same three parts a built one does:
 - The up-link, on every document you write below the entry point: `[↑ Parent Name](<parent>)` on
-  the first line after the frontmatter's closing `---`, or the first line where the document has
-  none — `↑` is U+2191, the machine-checkable marker; `<parent>` is the parent document, spelled
-  relative to the document carrying the link: the `index.md` of its own directory, or for an
+  the first line — `↑` is U+2191, the machine-checkable marker; `<parent>` is the parent document,
+  spelled relative to the document carrying the link: the `index.md` of its own directory, or for an
   `index.md` itself the one a directory above. Directly under `kb-root/` that parent is
   `entry-point.md`, so a domain index up-links to `../entry-point.md`; there is no
   `kb-root/index.md` to point at.
-- A frontmatter block — the `---`-fenced YAML block opening the document, written only by
-  `set-frontmatter`: the document's `kind` — its topography position, `leaf`/`index`/`entry-point` —
-  and, on a content leaf, either the claim ids it hosts or the reason it hosts none. A leaf hosting
-  more than one claim also takes a marker per claim, placed by `mark-claim-in-leaf` from a locator
-  in the leaf's own words.
+- A marker per claim the document hosts, placed by `mark-claim-in-leaf` from a locator in the leaf's
+  own words.
 - Cross-references use the `> Related:` blockquote form — never paraphrase the target.
 
 Incremental edits preserve the existing structure; do not reformat beyond the change. **Preserve
@@ -540,7 +527,7 @@ When a migration or edit adds/changes a node:
   key already entered is adopted with the same values and refused with others, which is what makes a
   work three volumes cite one node. Take the key from the citing leaf's own citation; never coin one.
 - **`rests-on` membership** is yours to decide: the framework premises (the axioms the KB's own
-  `axioms.md` declares, cited as `Axiom <label>`) and the `clm-`/`exp-` ids the derivation actually
+  `axioms.md` declares, cited as `axm-<label>`) and the `clm-`/`exp-` ids the derivation actually
   consumes, supplied at insert or added later with `add-rests-on`. An `ana-` premise is refused: an
   analysis lifts or refutes, never supports. A target that does not resolve is refused, so a dangling
   edge is not a state you can leave behind.
@@ -575,28 +562,26 @@ When a migration or edit adds/changes a node:
   `bearing` and `context` — restoring a recorded value, not scoring one. `demoted` edges are not
   theirs to touch.
 - **A claim that should not exist** — a duplicate of one already in the graph, or one a correction
-  withdraws — comes out in order: a leaf whose only claim it is gets restated no-claim through
-  `set-frontmatter`, then `drop-claim-edges`, `drop-inbound-edges`, and `drop-claim-node`, which
-  deletes the entry, its marker and its id in every leaf. That last op refuses, writing nothing,
-  while any edge still names the node, where it would empty a leaf's `claims`, and while any line
-  under `kb-root/` still names it — each named as `path:line`, prose for you to edit by hand before
-  calling again. The `rests-on` bullets you drop were dependents' warrants: re-point each one
-  that still holds onto the claim that replaces it, or the dependent is left resting on nothing. A
-  re-pointed bullet enters at a `*pending*` bearing.
+  withdraws — comes out in order: `drop-claim-edges`, `drop-inbound-edges`, and `drop-claim-node`,
+  which deletes the entry, its marker and its id in every leaf. That last op refuses, writing
+  nothing, while any edge still names the node and while any line under `kb-root/` still names it —
+  each named as `path:line`, prose for you to edit by hand before calling again. The `rests-on`
+  bullets you drop were dependents' warrants: re-point each one that still holds onto the claim that
+  replaces it, or the dependent is left resting on nothing. A re-pointed bullet enters at a
+  `*pending*` bearing.
 - **An `exp-` node's edges** — `supports`, `lifts` or `refutes` — respect the `exp-`
   design/originate/control gate (re-analyses of outside data are `ana-`/`clm-`, never `exp-`).
 
 ## The regen → verify loop (always, before you call it done)
 
-1. `refresh` — regenerates the whole derived layer. Idempotent, and a write-op call ends with one, so
-   what it is for is the change no tool wrote: run it after you edit a document's body directly.
-2. `verify` — the gate, read-only: runs both the link + id-validity check and the claim-graph metadata
-   check. A fault carrying the remedy `kbase refresh` means a body edit went unrefreshed; a fault
-   that is yours to repair — a missing `claims`/`no-claim`, a dangling id, a real cycle — you repair
-   by calling the op that owns that field — for `claims`/`no-claim`, `set-frontmatter`. A broken
-   link from a canonical leaf, or a dead `clm-`/`exp-`/`ana-` id, also gates here. A `demoted` edge
-   is a finding rather than a fault: it arrives under `findings`, with the outcome `done`, listing a
-   cut edge.
+1. `refresh` — idempotent, and a write-op call ends with one, so what it is for is the change no tool
+   wrote: run it after you edit a document's body directly.
+2. `verify` — the gate. A fault carrying the remedy `kbase refresh` means a body edit went
+   unrefreshed: call the `refresh` tool. A dangling id is repaired in the prose that names it, by
+   hand. A real cycle is broken with `drop-claim-edges`: the edge that closes it comes off, and the
+   edges that still hold are re-added, per *Edges come off a whole class at a time*. A `demoted` edge is a
+   finding rather than a fault: it arrives under `findings`, with the outcome `done`, listing a cut
+   edge.
 
 Done means `verify` returns `done`. If you cannot get there, stop and report the failing check
 verbatim.
@@ -621,7 +606,7 @@ verbatim.
 ## One live writer
 
 A KB has at most one writer at a time. Metadata — every write-op call, `refresh`, anything that
-touches a frontmatter block, a register or the index — comes from that one writer, live and
+touches a record, a register or the index — comes from that one writer, live and
 serially: a metadata change cascades mechanically through the whole KB on refresh, and the ops are
 fast, so a second writer gains nothing and puts the whole KB at risk. The user's task decides which
 role you hold: where it asks you to land changes, you are the writer; where another session is
@@ -630,8 +615,8 @@ already writing this KB, you are the other role below.
   as the op to call and the values it takes — to the user or to the writer, who applies the changes
   in one coordinated pass. Run no write op and no `refresh`.
 - **Leaf prose.** Leaf text may be edited in parallel, by more than one session at a time, each on
-  leaves no other is editing, provided none changes metadata: no frontmatter, no register, no claim
-  marker, no up-link.""",
+  leaves no other is editing, provided none changes metadata: no register, no claim marker, no
+  up-link.""",
             ),
         ),
     ),

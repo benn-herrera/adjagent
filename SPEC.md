@@ -31,11 +31,11 @@ just install-with-kb <path-to-consuming-project> [the same arguments]
 ```
 
 A **base install** — `just install` — delivers every definition this repository produces except the
-kb set: the one agent whose name begins with `kb-`, and the `kbase` skill. It also delivers each
-package `SHIPPED_PACKAGES` names (Deployed Surfaces, below) to its destination there, beside the
-definition surfaces; the table holds no row today, so no install of this version delivers one.
+kb set: the `kbase` skill. It also delivers each package `SHIPPED_PACKAGES` names (Deployed
+Surfaces, below) to its destination there, beside the definition surfaces; the table holds no row
+today, so no install of this version delivers one.
 A **kb install** — `just install-with-kb`, or any install carrying `--with-kb` — adds the kb set —
-the one `kb-` agent, and the `kbase` skill with every supporting file it lists — together with the
+the `kbase` skill with every supporting file it lists — together with the
 `kb-tools/` package (the signed `kbase` executable beside its runner snippets, inside the `kbase`
 skill's own directory), the harness's `kbase` MCP server entry in the project's own settings file,
 and one runner include line in the project's own justfile or Makefile, never into this repository's

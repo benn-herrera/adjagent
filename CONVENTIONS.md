@@ -137,6 +137,16 @@ not here.
 - **The gate after a change is `just test-changed [base]`.** It runs only the test surfaces the
   change touches (the mapping lives in the justfile's `TEST_SURFACE_MAP`); bare `just test` is the
   full run. Cross-surface coupling is removed, not paid for by running unrelated surfaces.
+- **`just render-diff [a] [b]` takes its two slots positionally and reports pairs, not spans.** Both
+  slots are positional parameters with defaults: `just render-diff` compares `reference` against
+  `latest`, and `just render-diff my-slot` compares `my-slot` against `latest`. A slot is a bare
+  word — `a=reference` is read as the first slot's own name, so the run fails on a slot that does
+  not exist. A file present on one side only is reported `Only in <dir>: <name>`, so there is no
+  second file to hand `diff -u`: read it under the slot that holds it. A pair's changed spans come
+  from `diff -u` on its own two files under `rendered/<slot>/`. The list is a footprint, not the
+  change: `reference` holds what was accepted at the last `just retake-reference`, so a pair carries
+  every change accepted since as well, and the pair of names says nothing about which of them one
+  run made.
 - **A checkpoint is not complete until the sweep has run.** `just sweep-python` enumerates what no
   single file can report — one concept with two implementations, one constant with two definitions
   — because a rule honoured completely inside one file is still broken across two. It emits
@@ -195,6 +205,14 @@ not here.
   `description` is required and is all the model sees before it loads the skill; its `files` are the
   supporting files, each a kebab path ending `.md` below the skill's directory, opened by the comment
   banner. A definition's output paths are unique — its own, and each supporting file's.
+- **A skill's reference carries only what its tool's offered surface does not.** A session sees the
+  server instructions, each tool's description and its parameter descriptions, and each resource's
+  text once it reads it — the listing carries a resource's uri, name and mimeType only — so a
+  reference that restates one is a second source for text its consumer already reads, and the two
+  drift the moment either moves. The offered surface is the one `justfile`'s `KBASE_VERSION` pins, so
+  a bump of that pin is the moment to re-read the references. What a table can hold is guarded —
+  `tests/test_kbase_retired_forms.py` holds the retired forms — and nothing checks the rest for
+  sync. Prose only the tool's README carries is not offered to a session, and stays in the reference.
 - **What `render-diff` shows.** The first `just render-diff` after adding a definition shows its
   whole file — for a skill, each of its files — as `Only in`.
 - **Where the rest is.** The composition model is in ARCHITECTURE.md; the `adjagent` package and

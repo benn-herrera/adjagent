@@ -454,20 +454,23 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   project's `kb-root/AGENTS.md`, under every harness. The toolchain they drive is kbase, the binary
   a kb install writes beside its snippets, and the set's route to it is MCP-only: every query, write
   op, `refresh`, `verify`, `build` and `score` the set names is a tool of the harness's `kbase` MCP
-  server, offered under that harness's `mcp_tool_prefix`, and the router says so and stops where
-  that server is not connected — registering it, which the install does, is the fix, not a second
-  interface.
+  server, offered under that harness's `mcp_tool_prefix`, and the one value outside its tools is
+  that server's `kbase://model-hints` resource, read by uri. The router says so and stops where that
+  server's tools are not offered — the executable and the `kb-` runner targets run only on the
+  user's direction — and defers to kbase's own text, and to `kb-root/AGENTS.md`, wherever the skill
+  disagrees with them.
   Scoring is the one whose call outlives it: `score` starts the run detached and answers once the
   run's ledger and pid stand, leaving `wait`, `status` and `cancel` to follow — the same three the
-  build leaves. The loop is kbase's own — it enumerates the scoring
-  set, renders the closed, score-free ask text, calls the configured provider, validates one value
-  and lands it through the write ops, and records a run ledger — while `references/scoring.md`
-  carries only the flow a session needs: the two passes, what a run never scores, the ledger and
-  resumption, and what the user sees.
+  build leaves. The loop is kbase's own — it enumerates the scoring set, renders the closed,
+  score-free ask text, calls the configured provider, validates one value and lands it through the
+  write ops, and records a run ledger — while `references/scoring.md` carries what kbase's own text
+  does not: one quantity per ask and when a run is scoped to one pass, the model decision and what
+  the run costs, the two values a run never scores and whose they are, and the ledger and
+  resumption.
   `clauses.KB_RUNNER_TARGETS` is the maintaining reference's: where the project's runner carries the
   installed `kb-` targets, `refresh`, `verify` and `stats` are `kb-refresh`, `kb-verify` and
-  `kb-stats`. The consumer's runner targets are this repository's `kb-tools/runner-snippets/`
-  fragments — `kb-verify`, `kb-refresh`, `kb-stats`, `kb-`-prefixed so they cannot collide with a
+  `kb-stats`, run only on the user's direction. The consumer's runner targets are this repository's
+  `kb-tools/runner-snippets/` fragments — `kb-verify`, `kb-refresh`, `kb-stats`, `kb-`-prefixed so they cannot collide with a
   consuming project's own targets — each running the executable it finds from the fragment's own
   directory.
 - **Specialists** — applied-mathematician, biz-dev-strategist, economic-historian, literature-scout,

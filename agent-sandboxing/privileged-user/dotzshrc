@@ -26,10 +26,8 @@ alias claude='echo use au and then claude.'
 alias claude-reaper='echo use au and then claude-reaper.'
 alias opencode='echo use au and then opencode.'
 
-# Network git runs here with your credentials; everything else belongs in the agent shell.
+# Reminder to use agent-user shell for git operations
 function git() {
-  case "${1:-}" in
-    clone|fetch|pull|push|lfs|status|version|help|--help|--version|"") command git "$@" ;;
-    *) printf '%s\n' "git ${1}: not from this shell; use the agent shell (au)" >&2; return 1 ;;
-  esac
+  print "\ngit ${1}: *reminder* you are running as your privileged self.\n" >&2;
+  command git "${@}"
 }
