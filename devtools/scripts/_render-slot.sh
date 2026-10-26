@@ -12,12 +12,14 @@ set -euo pipefail
 
 slug="${1}"
 shift
-harness="claude"
-for arg in "$@"; do
+harness=""
+args=("${@+"${@}"}")
+for arg in "${args[@]+"${args[@]}"}"; do
     if [[ "${arg}" == --harness=* ]]; then
         harness="${arg#--harness=}"
     fi
 done
+[[ -z "${harness}" ]] && { harness="claude" && args+=("--harness=${harness}"); } || true
 agents_file="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" agents-file)"
 project_harness_dir="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" project-harness-dir)"
 user_harness_dir="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" user-harness-dir)"
@@ -37,4 +39,4 @@ else
 fi
 "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" "${harness}" "${agents_target}"
 kbase_bin="$("${PROJECT_ROOT}/devtools/scripts/_kbase-bin.sh")"
-"${PROJECT_ROOT}/devtools/scripts/install.sh" "${out}" --subdir= --with-kb --kbase-dist="${kbase_bin}" ${@+"${@}"}
+"${PROJECT_ROOT}/devtools/scripts/install.sh" "${out}" --subdir= --with-kb --kbase-dist="${kbase_bin}" "${args[@]}"
