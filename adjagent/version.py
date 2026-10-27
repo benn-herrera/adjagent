@@ -5,4 +5,4 @@ file carries it except mage's `.claude-plugin/plugin.json`, whose purpose is to;
 is rendered for mage, so a bump still churns nothing under `rendered/`.
 """
 
-VERSION = "0.12.4"
+VERSION = "0.12.5"

@@ -41,8 +41,9 @@ HARNESS_RESOURCES_SOURCE = "adjagent/harnesses/resources"
 # that run may take before it counts as failed.
 GUARDRAIL_INTERPRETER = "perl"
 GUARDRAIL_PROBE_SECONDS = 5.0
-# The kb toolchain's package: the runner snippets from this repository beside a `kbase` executable,
-# delivered inside the kbase skill's own directory, shipped there only when the install includes kb.
+# The kb toolchain's package: this repository's `kb-tools/` — the runner snippets and the signature
+# spot check — beside a `kbase` executable and its detached signature, delivered inside the kbase
+# skill's own directory, shipped there only when the install includes kb.
 KB_TOOLS_PACKAGE = "skills/kbase/kb-tools"
 KB_TOOLS_SOURCE = "kb-tools"
 RUNNER_SNIPPETS = "runner-snippets"
@@ -51,6 +52,10 @@ KB_TOOLS_SNIPPETS = f"{KB_TOOLS_PACKAGE}/{RUNNER_SNIPPETS}"
 # `kb.mk` — and the suffix that makes a line a line for that runner.
 KB_SNIPPET_NAMES = {"just": "kb.just", "make": "kb.mk"}
 KBASE_BASENAME = "kbase.exe" if os.name == "nt" else "kbase"
+# The detached signature the release installer leaves beside the executable, named for it, and the name
+# it is installed under; `kb-tools/verify-kbase-signature.sh` checks the one `.asc` beside it.
+SIGNATURE_SUFFIX = ".asc"
+KBASE_SIGNATURE = f"{KBASE_BASENAME}{SIGNATURE_SUFFIX}"
 # The pre-1.0 underscore destination: the one legacy tree whose removal a run that excluded kb reports
 # with advice, so it is named for that message as well as being the first LEGACY_KB_DIRS entry.
 LEGACY_KB_TOOLS = "agents/kb_tools"
@@ -126,22 +131,16 @@ def excluded(name: str) -> bool:
 
 def package_copies(root: Path, *, kb_included: bool) -> list[tuple[Path, Path]]:
     """(source file, target under `root`) for every file the shipped packages deliver: the always-
-    shipped table, and — when kb is included — the kb-tools runner snippets, which land under that
-    package's destination. The `kbase` executable is not here: the install writes it from the source
-    `--kbase-dist` names, or leaves the one already installed alone."""
-    always = [
+    shipped table, and — when kb is included — every file of `kb-tools/`, the runner snippets and the
+    signature spot check, which land under that package's destination. The `kbase` executable and its
+    signature are not here: the install writes them from the source `--kbase-dist` names, or leaves the
+    ones already installed alone."""
+    packages = [*SHIPPED_PACKAGES, *([(KB_TOOLS_SOURCE, KB_TOOLS_PACKAGE)] if kb_included else [])]
+    return [
         (source, root / destination / source.relative_to(REPO_ROOT / package))
-        for package, destination in SHIPPED_PACKAGES
+        for package, destination in packages
         for source in sorted((REPO_ROOT / package).rglob("*"))
         if source.is_file() and _shipped(source.relative_to(REPO_ROOT / package))
-    ]
-    if not kb_included:
-        return always
-    snippets = REPO_ROOT / KB_TOOLS_SOURCE / RUNNER_SNIPPETS
-    return always + [
-        (source, root / KB_TOOLS_PACKAGE / RUNNER_SNIPPETS / source.relative_to(snippets))
-        for source in sorted(snippets.rglob("*"))
-        if source.is_file() and _shipped(source.relative_to(snippets))
     ]
 
 
@@ -295,10 +294,10 @@ def prune(root: Path, *, keep: set[Path]) -> list[Path]:
     The kb-tools package is the one destination inside a surface — `skills/kbase/kb-tools/` — and no
     destination is carved out by name. It needs none: a copied package file opens with the
     `!INSTALLED!` banner rather than the generated one `_is_ours` reads, so it is untouched here rather
-    than pruned, and the `kbase` executable beside it carries no banner of ours at all. Every file
-    under a surface is thus either ours or untouched. The would-ship vocabulary is name-based and
-    covers `kb-` names and `kbase`, so a kb definition this run did not write — an install without kb —
-    is stale and removed, while one the run wrote is in `keep`.
+    than pruned, and the `kbase` executable and its signature beside it carry no banner of ours at all.
+    Every file under a surface is thus either ours or untouched. The would-ship vocabulary is
+    name-based and covers `kb-` names and `kbase`, so a kb definition this run did not write — an
+    install without kb — is stale and removed, while one the run wrote is in `keep`.
 
     A file at ROOT's top level is outside every surface, and so outside this walk: a harness-rendered
     file such as the plugin manifest, and the harness's own settings file where it lives at ROOT, are
@@ -367,22 +366,38 @@ def _kbase_source(root: Path, kbase_dist: Path | None) -> tuple[Path, bool]:
     )
 
 
-def _kbase_copy(root: Path, source: Path) -> tuple[Path, bytes]:
-    """(the executable to copy, its bytes) for a source this run installs at the kb-tools destination.
-    The bytes are read here, before the first write, because a source inside a destination this run
-    replaces whole would be deleted before it could be read; such a source is refused instead."""
+class _KbaseCopy(NamedTuple):
+    """The executable a run installs at the kb-tools destination, read before the first write: its
+    source and bytes, the detached signature expected beside it, and that signature's bytes — None
+    where no file stands there."""
+
+    source: Path
+    data: bytes
+    signature: Path
+    signature_data: bytes | None
+
+
+def _kbase_copy(root: Path, source: Path) -> _KbaseCopy:
+    """The executable at `source` and its `<source>.asc` signature, for a run that installs them at the
+    kb-tools destination. The bytes are read here, before the first write, because a file inside a
+    destination this run replaces whole would be deleted before it could be read; such a file is
+    refused instead. A missing signature is no refusal: the executable installs without one."""
+    signature = source.with_name(f"{source.name}{SIGNATURE_SUFFIX}")
     replaced = [root / destination for _, destination in SHIPPED_PACKAGES] + [root / KB_TOOLS_PACKAGE]
-    resolved = source.resolve()
-    for destination in replaced:
-        if resolved.is_relative_to(destination.resolve()):
-            raise InputError(
-                f"the kbase source '{source}' is inside '{destination}', which this install replaces — "
-                "pass a source outside the install root"
-            )
+    for path in (source, signature):
+        resolved = path.resolve()
+        for destination in replaced:
+            if resolved.is_relative_to(destination.resolve()):
+                raise InputError(
+                    f"the kbase source '{path}' is inside '{destination}', which this install replaces — "
+                    "pass a source outside the install root"
+                )
     try:
-        return source, source.read_bytes()
+        data = source.read_bytes()
+        signature_data = signature.read_bytes() if signature.is_file() else None
     except OSError as exc:
-        raise InputError(f"the kbase source '{source}' cannot be read: {exc}") from exc
+        raise InputError(f"the kbase source '{exc.filename}' cannot be read: {exc}") from exc
+    return _KbaseCopy(source, data, signature, signature_data)
 
 
 _JSON_TYPE_NAMES = {dict: "an object", list: "an array"}
@@ -1151,19 +1166,24 @@ def install(
 
     for _, destination in SHIPPED_PACKAGES:
         shutil.rmtree(root / destination, ignore_errors=True)
-    dist_target: Path | None = None
+    kbase_written: list[Path] = []
     if kbase_copy is not None:
         # The executable to copy — `--kbase-dist`'s, or the legacy tree's — replaces the destination
-        # whole, beside the snippets.
-        executable, data = kbase_copy
+        # whole, beside the snippets, with its signature where one stands beside the source.
         destination = root / KB_TOOLS_PACKAGE
         shutil.rmtree(destination, ignore_errors=True)
+        destination.mkdir(parents=True)
         dist_target = destination / KBASE_BASENAME
-        dist_target.parent.mkdir(parents=True, exist_ok=True)
-        dist_target.write_bytes(data)
-        shutil.copymode(executable, dist_target)
+        dist_target.write_bytes(kbase_copy.data)
+        shutil.copymode(kbase_copy.source, dist_target)
+        kbase_written.append(dist_target)
+        if kbase_copy.signature_data is not None:
+            signature_target = destination / KBASE_SIGNATURE
+            signature_target.write_bytes(kbase_copy.signature_data)
+            kbase_written.append(signature_target)
     elif kbase is not None:
-        # The sticky install refreshes the snippets and leaves the installed executable alone.
+        # The sticky install refreshes the snippets and leaves the installed executable and its
+        # signature alone.
         shutil.rmtree(root / KB_TOOLS_PACKAGE / RUNNER_SNIPPETS, ignore_errors=True)
     for source, target in package_files:
         data = source.read_bytes()
@@ -1188,12 +1208,14 @@ def install(
     pruned = prune(root, keep={*written, *(target for _, target in copies)})
     print(
         f"installed: {len(written)} rendered files, "
-        f"{len(copies) + int(dist_target is not None)} copied files → {root}"
+        f"{len(copies) + len(kbase_written)} copied files → {root}"
     )
+    if kbase_copy is not None and kbase_copy.signature_data is None:
+        print(f"no kbase signature at {kbase_copy.signature} — installed the executable without one")
     for path in pruned:
         print(f"pruned {path}")
     if verbose:
-        for path in [*(target for _, target in copies), *([dist_target] if dist_target is not None else []), *written]:
+        for path in [*(target for _, target in copies), *kbase_written, *written]:
             print(f"wrote {path}")
     if kb_included:
         mcp_merge(mcp_base, harness=ctx.harness, command=kbase_command)

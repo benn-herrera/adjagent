@@ -509,6 +509,96 @@ def test_a_kbase_dist_inside_the_destination_it_replaces_is_refused_and_the_tree
     assert _files(tmp_path) == before
 
 
+_SIGNATURE_BYTES = b"-----BEGIN PGP SIGNATURE-----\nstand-in\n-----END PGP SIGNATURE-----\n"
+
+
+def _signed_kbase_exe(tmp_path: Path) -> Path:
+    """A stand-in `kbase` executable with a stand-in detached signature beside it, as the release
+    installer leaves them in the dist cache."""
+    dist = _kbase_exe(tmp_path)
+    (tmp_path / "kbase.asc").write_bytes(_SIGNATURE_BYTES)
+    return dist
+
+
+def _copied_count(out: str) -> int:
+    """The copied-file count an install's report line states."""
+    match = re.search(r"(\d+) copied files", out)
+    assert match is not None, out
+    return int(match.group(1))
+
+
+def test_a_kbase_dist_signature_is_installed_beside_the_executable_byte_verbatim(tmp_path: Path, capsys) -> None:
+    """The `.asc` beside a `--kbase-dist` lands beside the installed executable under its name, with no
+    banner, and the report counts and lists it: one more copied file than the same install unsigned."""
+    signed_root = tmp_path / "signed" / ".claude"
+    signed_root.mkdir(parents=True)
+    unsigned_root = tmp_path / "unsigned" / ".claude"
+    unsigned_root.mkdir(parents=True)
+    dists = tmp_path / "dists"
+    (dists / "signed").mkdir(parents=True)
+    (dists / "unsigned").mkdir()
+    capsys.readouterr()
+    install(
+        signed_root,
+        _CLAUDE_RENDER,
+        verbose=True,
+        with_kb=True,
+        kbase_dist=_signed_kbase_exe(dists / "signed"),
+        project_root=signed_root.parent,
+    )
+    signed_out = capsys.readouterr().out
+    _definition_install(
+        unsigned_root, with_kb=True, kbase_dist=_kbase_exe(dists / "unsigned"), project_root=unsigned_root.parent
+    )
+    unsigned_out = capsys.readouterr().out
+    signature = signed_root / "skills/kbase/kb-tools/kbase.asc"
+    assert signature.read_bytes() == _SIGNATURE_BYTES
+    assert f"wrote {signature}" in signed_out
+    assert "no kbase signature" not in signed_out
+    assert _copied_count(signed_out) == _copied_count(unsigned_out) + 1
+
+
+def test_a_missing_kbase_signature_is_reported_and_the_install_goes_on(tmp_path: Path, capsys) -> None:
+    """A source with no `.asc` beside it installs the executable all the same, and the report names the
+    signature path it looked for."""
+    root = tmp_path / ".claude"
+    root.mkdir()
+    dist = _kbase_exe(tmp_path)
+    capsys.readouterr()
+    _definition_install(root, with_kb=True, kbase_dist=dist, project_root=tmp_path)
+    assert (root / "skills/kbase/kb-tools/kbase").read_bytes() == _KBASE_BYTES
+    assert not (root / "skills/kbase/kb-tools/kbase.asc").exists()
+    assert f"no kbase signature at {tmp_path / 'kbase.asc'}" in capsys.readouterr().out
+
+
+def test_a_sticky_install_keeps_the_installed_signature_and_refreshes_the_verify_script(tmp_path: Path) -> None:
+    """A run carrying no new executable leaves the installed signature where it stands, as it leaves
+    the executable, while the verify script beside them is delivered again."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    _definition_install(root, with_kb=True, kbase_dist=_signed_kbase_exe(tmp_path), project_root=project)
+    script = root / "skills/kbase/kb-tools/verify-kbase-signature.sh"
+    script.unlink()
+    _definition_install(root, project_root=project)
+    assert (root / "skills/kbase/kb-tools/kbase.asc").read_bytes() == _SIGNATURE_BYTES
+    assert (root / "skills/kbase/kb-tools/kbase").read_bytes() == _KBASE_BYTES
+    assert script.is_file()
+
+
+def test_a_kb_install_ships_the_verify_script_stamped_below_its_shebang_and_executable(tmp_path: Path) -> None:
+    root = tmp_path / ".claude"
+    root.mkdir()
+    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
+    script = root / "skills/kbase/kb-tools/verify-kbase-signature.sh"
+    lines = script.read_text(encoding="utf-8").split("\n")
+    source = (REPO_ROOT / "kb-tools/verify-kbase-signature.sh").read_text(encoding="utf-8").split("\n")
+    assert lines[0] == source[0] and lines[0].startswith("#!")
+    assert lines[1].startswith("# !INSTALLED! from kb-tools/verify-kbase-signature.sh — ")
+    assert lines[2:] == source[1:]
+    assert os.access(script, os.X_OK)
+
+
 def test_the_current_kb_tools_destination_makes_a_plain_install_sticky(tmp_path: Path) -> None:
     """A plain install into a root already carrying the kb-tools destination is a kb install: the kbase
     skill's files and the installed executable stay."""

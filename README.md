@@ -35,6 +35,9 @@ For the kb set (`just install-with-kb`, whose `kbase` release the recipe downloa
 - graphviz - optional, for rendering claim graph diagrams as SVG
 - a way to reach a model - a build that spends inference needs one; today that is a provider
   configuration; `kbase score` always spends inference; a `--no-inference` build needs none
+- gpg and network access - optional, for re-checking the installed binary against its release
+  signature with `skills/kbase/kb-tools/verify-kbase-signature.sh`, which locates the signer's key
+  over WKD; the release is already verified when the recipe downloads it
 
 Clone this repo anywhere, then install the deployed surfaces into the consuming project — from
 **this** repo's root:
@@ -368,8 +371,9 @@ adjagent/                 the generator and every definition, run as `python3 -m
                           harness directory as they stand (opencode/plugins/guardrail.ts,
                           claude/hooks/guardrail.pl)
   families/               one module per model family, each defining FAMILY
-kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
-                          a kb install only; installed beside the kbase binary as
+kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk) and the
+                          signature spot check (verify-kbase-signature.sh), delivered by a kb install
+                          only; installed beside the kbase binary and its signature as
                           skills/kbase/kb-tools/, inside the kbase skill's own directory
 .tool-dist-cache/         gitignored — the kbase release `install-with-kb` downloads and installs
 devtools/render_diff.py   compares two rendered slots by text; reads only rendered output

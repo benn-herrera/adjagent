@@ -6,8 +6,8 @@ SPEC.md. Cites SPEC's requirements rather than restating them.
 ## Repo Layout
 
 ```
-kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, and nothing importable; installed beside the kbase executable under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
-.tool-dist-cache/       gitignored — the signed kbase release a recipe downloads, <version>/kbase[.exe], which `install-with-kb` installs (justfile KBASE_VERSION, TOOL_DIST_CACHE)
+kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, and verify-kbase-signature.sh, the spot check of the installed signature; nothing importable; installed beside the kbase executable under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
+.tool-dist-cache/       gitignored — the signed kbase release a recipe downloads and verifies, kbase-<version>/kbase[.exe] beside its kbase[.exe].asc signature, both of which `install-with-kb` installs (justfile KBASE_VERSION, TOOL_DIST_CACHE)
 rendered/               gitignored build product — this repo's own render tree, one slot per render, and the three `reference*` slots `render-diff` compares against (justfile RENDERED); created on demand
 adjagent/               the generator package, run as python3 -m adjagent — definitions as Python values rendered into a named output root; the package docstring lists its modules
   harnesses/resources/  one directory per harness, named for it — the files that harness ships into its project harness directory, copied into ROOT as they stand and never rendered (HARNESS_RESOURCES_SOURCE, adjagent/install.py); `opencode/plugins/guardrail.ts` and `claude/hooks/guardrail.pl` today, and no `__init__.py`, so `load` still reads one harness per module; mage ships none
@@ -74,13 +74,19 @@ install kb first — rather than register a command that cannot start. The under
 A kb install writes three things beyond the renders — two under a harness whose
 `user_harness_dir` is `.`, with no runner include line and no `Makefile`:
 
-- **The kb-tools package**, assembled from two sources: the `runner-snippets/` fragments copied from
-  `kb-tools/`, and the executable the distribution names, which replaces the destination whole. The
+- **The kb-tools package**, assembled from two sources: every file of `kb-tools/` — the
+  `runner-snippets/` fragments and `verify-kbase-signature.sh` — taking the package copy below, and
+  the executable the distribution names, which replaces the destination whole. `_kbase_copy` reads
+  that executable and the `<executable>.asc` beside it before the first write, refusing either where
+  it sits inside a destination this run replaces; the signature lands byte-verbatim as
+  `KBASE_SIGNATURE`, and a source without one installs unsigned, the report naming the path it
+  lacked (SPEC.md, Deployed Surfaces, states what the signature is for). The
   destination is `KB_TOOLS_PACKAGE` — `skills/kbase/kb-tools/`, its own directory inside the `kbase`
   skill's, within the `skills/` surface — so a replacement covers that directory and never the
   skill's `SKILL.md` or references beside it. With no distribution named, the executable already
-  installed stays where it is and only the snippets are refreshed; one an earlier version installed
-  under `agents/kb-tools/` is copied across before that tree is removed.
+  installed stays where it is with its signature and only the `kb-tools/` files are refreshed; one an
+  earlier version installed under `agents/kb-tools/` is copied across, with its signature where one
+  stands beside it, before that tree is removed.
 - **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): claude's
   `.mcp.json`, at the plugin root under mage — `McpSettings.site` names the directory, `HARNESS`
   there and `PROJECT` for the other two — or for opencode the first discovered of
@@ -140,8 +146,8 @@ passes. Before the first write, a target that exists must be a regular file, not
 line matching `!INSTALLED! .* adjagent` among its first ten; one unreadable or without it refuses
 the install. No component between ROOT and any render or resource target may be a symlink or a
 non-directory (`_blocked_component`); one that is refuses the install in the same refusal, and
-components at or above ROOT are not examined. Package destinations and the `kbase` executable are
-exempt from both checks: this repository owns those entire and replaces them whole. The resource
+components at or above ROOT are not examined. Package destinations and the `kbase` executable and
+signature are exempt from both checks: this repository owns those entire and replaces them whole. The resource
 files join the same `copies` list as the packages', so the prune's `keep` holds them and the report
 counts them: a harness file never reads as a stale render, and the report line says `copied files`
 for the lot. The copy is one-way, not a mirror — `prune` owns the three rendered surfaces and nothing

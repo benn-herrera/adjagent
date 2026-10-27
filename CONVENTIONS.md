@@ -51,7 +51,8 @@ not here.
   source.** SPEC.md states what an install ships and to which destination (Deployed Surfaces), and
   what a re-install replaces (Write Safety); ARCHITECTURE.md's Repo Layout holds the trees each is
   sourced from, the gitignored dist cache among them. The next install replaces what it wrote, bar
-  the installed `kbase` executable a run carrying no new one leaves standing — so a change belongs
+  the installed `kbase` executable and its signature, which a run carrying no new executable leaves
+  standing — so a change belongs
   at the source, not in the copy. Before an edit brief names a path, `git ls-files <path>` settles
   which it is, and the brief names the source. Running definitions point at the copy, which is how a
   brief comes to name it.
@@ -116,8 +117,9 @@ not here.
   name — never the `kb-tools/` directory it sits in: a destination holding no file of that name is a
   base install, while one holding a `kbase` that cannot run still selects the kb set, and the source
   check is what refuses it, writing nothing. The choice is per ROOT — the harness directory — not
-  per project, so a later plain `just install` into that directory refreshes the snippets and leaves
-  the installed executable where it stands, rather than emptying the directory. A plain install
+  per project, so a later plain `just install` into that directory refreshes the `kb-tools/` files and
+  leaves the installed executable and its signature where they stand, rather than emptying the
+  directory. A plain install
   includes kb exactly when its ROOT holds that executable, at `skills/kbase/kb-tools/` or in the
   `agents/kb-tools/` an earlier version installed.
 - **An install parameter and its CLI flag are one change.** `just install` reaches the verb only

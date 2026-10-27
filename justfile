@@ -21,7 +21,7 @@ import 'python.just'
 
 GEN := "adjagent"
 
-KBASE_VERSION := "v0.8.0"
+KBASE_VERSION := "v0.8.1"
 TOOL_DIST_CACHE := justfile_dir() / ".tool-dist-cache"
 
 default:
