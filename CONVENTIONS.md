@@ -243,9 +243,8 @@ plan, and none of its packages is dispatched.
   reference that restates one is a second source for text its consumer already reads, and the two
   drift the moment either moves. The offered surface is the one the minimum kbase version provides
   (`KBASE_MIN_VERSION` in `adjagent/definitions/kbase.py`), so a change of that minimum is the
-  moment to re-read the references. What a table can hold is guarded —
-  `tests/test_kbase_retired_forms.py` holds the retired forms — and nothing checks the rest for
-  sync. Prose only the tool's README carries is not offered to a session, and stays in the reference.
+  moment to re-read the references. Nothing checks a reference for sync with that surface. Prose
+  only the tool's README carries is not offered to a session, and stays in the reference.
 - **What `render-diff` shows.** The first `just render-diff` after adding a definition shows its
   whole file — for a skill, each of its files — as `Only in`.
 - **Where the rest is.** The composition model is in ARCHITECTURE.md; the `adjagent` package and
