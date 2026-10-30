@@ -31,4 +31,4 @@ if git rev-parse --verify --quiet "refs/tags/${tag}" > /dev/null; then
     exit 1
 fi
 GPG_TTY=$(tty) git tag -s "${tag}" -m"release ${tag}"
-printf '%s\n' "created tag ${tag} at $(git rev-parse --short HEAD)"
+git tag -v "${tag}"
