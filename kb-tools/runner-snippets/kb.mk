@@ -13,32 +13,36 @@
 # the installed tree is absent — not yet installed, or removed — the
 # consumer's Makefile keeps working and only these KB targets go missing.
 #
-# Assumed consumer layout: the repo root (where make runs) contains kb-root/,
-# and this fragment sits beside the installed `kbase` executable under
-# <harness-dir>/skills/kbase/kb-tools/. kbase finds the KB from the working
-# directory, so these targets run from the repo root.
+# Assumed consumer layout: the repo root (where make runs) contains kb-root/.
+# kbase finds the KB from the working directory, so these targets run from
+# the repo root.
 #
-# The binary is found from this fragment's own location: the snippets
-# directory's parent is the installed kb-tools directory, and kbase sits
-# there (`kbase.exe` on Windows). The path is absolute — `$(abspath)` makes
-# it so, and the assignment is `:=` because the last word of MAKEFILE_LIST is
-# this file only while it is being read — so it resolves to the installed
-# executable however the consumer invokes make.
+# The targets run `kbase` from PATH; the user installs it themselves — the kbase skill's
+# references/installing.md walks through it.
 #
 # Target names carry a `kb-` prefix, so they cannot collide with a project's
 # own verify/refresh/stats. Plain POSIX recipe lines — no SHELL override;
 # existing recipes keep their own shell.
 #
 # Targets:
-#   kb-verify          verify KB link integrity and claim-graph metadata
-#   kb-refresh         refresh mechanically maintained KB metadata
-#   kb-stats           print KB claim-graph stats
+#   kb-help:            show help on kb make targets
+#   kb-init:            create a new, empty KB. refuses if kb-root exists
+#   kb-verify:          verify KB link integrity and claim-graph metadata
+#   kb-refresh:         refresh mechanically maintained KB metadata
+#   kb-stats:           print KB claim-graph stats
+#   kb-score:           run an inference scoring pass over the KB
+#   kb-export-latex:    generate a LaTeX file set from the KB
 
-KB_TOOLS_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../)
-EXE := $(if $(findstring Windows,$(OS)),.exe,)
-KBASE := $(KB_TOOLS_DIR)/kbase$(EXE)
+# KB
+KBASE := kbase
 
-.PHONY: kb-verify kb-refresh kb-stats
+.PHONY: kb-help kb-init kb-verify kb-refresh kb-stats kb-score kb-export-latex
+
+kb-help:
+	@grep '^#   kb-' "$(lastword $(MAKEFILE_LIST))" | sed 's:^#: :'
+
+kb-init:
+	$(KBASE) init
 
 kb-verify:
 	@$(KBASE) verify
@@ -48,3 +52,9 @@ kb-refresh:
 
 kb-stats:
 	$(KBASE) stats
+
+kb-score:
+	$(KBASE) score
+
+kb-export-latex:
+	$(KBASE) export-latex

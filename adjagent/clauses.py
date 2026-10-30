@@ -17,6 +17,7 @@ PROJECT_TEMP_DIR = "@!hrn-project-temp-dir!@"
 USER_HARNESS_DIR = "@!hrn-user-harness-dir!@"
 MCP_TOOL_PREFIX = "@!hrn-mcp-tool-prefix!@"
 RECIPE_RULE = "@!hrn-recipe-rule!@"
+KBASE_PROJECT_RULE = "@!hrn-kbase-project-rule!@"
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
 

@@ -50,10 +50,8 @@ not here.
 - **An untracked file under `.claude/`, `.opencode/` or `rendered/` is render or install output, not
   source.** SPEC.md states what an install ships and to which destination (Deployed Surfaces), and
   what a re-install replaces (Write Safety); ARCHITECTURE.md's Repo Layout holds the trees each is
-  sourced from, the gitignored dist cache among them. The next install replaces what it wrote, bar
-  the installed `kbase` executable and its signature, which a run carrying no new executable leaves
-  standing — so a change belongs
-  at the source, not in the copy. Before an edit brief names a path, `git ls-files <path>` settles
+  sourced from. The next install replaces what it wrote, `skills/kbase/kb-tools/` whole — so a
+  change belongs at the source, not in the copy. Before an edit brief names a path, `git ls-files <path>` settles
   which it is, and the brief names the source. Running definitions point at the copy, which is how a
   brief comes to name it.
 - **A set a default install excludes is excluded by its definitions' names, held in
@@ -112,16 +110,10 @@ not here.
   ships them, and the walk is the one place they are caught. `_refuse_root` holds the same set of
   trees — a shipped package's, the kb toolchain's, `adjagent/harnesses/resources/` — because a
   ROOT inside one is refused rather than filled with the product it is itself copying from.
-- **An install whose ROOT already holds the installed `kbase` executable installs the kb set.** The
-  signal is the file — `skills/kbase/kb-tools/kbase`, `kbase.exe` where that is the installed
-  name — never the `kb-tools/` directory it sits in: a destination holding no file of that name is a
-  base install, while one holding a `kbase` that cannot run still selects the kb set, and the source
-  check is what refuses it, writing nothing. The choice is per ROOT — the harness directory — not
-  per project, so a later plain `just install` into that directory refreshes the `kb-tools/` files and
-  leaves the installed executable and its signature where they stand, rather than emptying the
-  directory. A plain install
-  includes kb exactly when its ROOT holds that executable, at `skills/kbase/kb-tools/` or in the
-  `agents/kb-tools/` an earlier version installed.
+- **An install whose ROOT already holds a kb install installs the kb set.** The signal is a file,
+  never the `kb-tools/` directory (ARCHITECTURE.md, Install Consumption Model, names the file). The
+  choice is per ROOT — the harness directory — not per project, so a later plain `just install`
+  into that directory refreshes the kb set rather than emptying it.
 - **An install parameter and its CLI flag are one change.** `just install` reaches the verb only
   through the flags `adjagent/cli.py` declares in `build_parser`, so a parameter added to
   `install()` alone ships a capability no recipe can ask for. The flag lands in the same change. The
@@ -208,6 +200,14 @@ file is one power-cycle from gone.
   baseline `just render-diff` compares against, so running it earlier erases the change from the
   next comparison.
 
+### Plan work rating and dispatch
+- Every plan rates each dispatch **mechanical** or **expert**
+  - The rating decides the model: a mechanical dispatch runs on a stepped-down model, an expert one inherits the coordinator's model. 
+  - Rate what the dispatch must decide, not how much it types
+    - mechanical: a package whose work is settled by the plan's own text — a rename, a transcription, a test that mirrors a stated rule
+    - expert: one that must choose between defensible options, diagnose behaviour, or write model-facing prose
+- Mechanical tasks are dispatched to a stepped-down model as specified in the global AGENTS.md or CLAUDE.md
+
 ### Plan dispatchability
 
 A work package is dispatchable only when the following conditions have been met
@@ -241,8 +241,9 @@ plan, and none of its packages is dispatched.
   server instructions, each tool's description and its parameter descriptions, and each resource's
   text once it reads it — the listing carries a resource's uri, name and mimeType only — so a
   reference that restates one is a second source for text its consumer already reads, and the two
-  drift the moment either moves. The offered surface is the one `justfile`'s `KBASE_VERSION` pins, so
-  a bump of that pin is the moment to re-read the references. What a table can hold is guarded —
+  drift the moment either moves. The offered surface is the one the minimum kbase version provides
+  (`KBASE_MIN_VERSION` in `adjagent/definitions/kbase.py`), so a change of that minimum is the
+  moment to re-read the references. What a table can hold is guarded —
   `tests/test_kbase_retired_forms.py` holds the retired forms — and nothing checks the rest for
   sync. Prose only the tool's README carries is not offered to a session, and stays in the reference.
 - **What `render-diff` shows.** The first `just render-diff` after adding a definition shows its

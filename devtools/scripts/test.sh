@@ -2,7 +2,7 @@
 # `test`'s body. PYTHONPATH is the repository root, here and in the tests: `adjagent` and
 # `devtools` are top-level packages under it, and the tests import `adjagent` from that root the
 # same way `sweep-python` runs `devtools.dupe_sweep`. Nothing an install writes is importable — the
-# installed tree holds runner snippets and the `kbase` binary, not a python package.
+# installed tree holds runner snippets, not a python package.
 #
 # `surface` is always positional parameter $1 (the justfile sets positional-arguments); the pytest
 # arguments follow it from $2, and are forwarded as the separate words `just` received them as, so

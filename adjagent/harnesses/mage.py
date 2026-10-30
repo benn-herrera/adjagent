@@ -2,9 +2,8 @@
 
 import json
 import re
-from pathlib import Path
 
-from adjagent.harness import AgentFields, Harness, HarnessFile, McpSettings, McpSite, command_relative, quoted
+from adjagent.harness import AgentFields, Harness, HarnessFile, McpSettings, McpSite, quoted
 from adjagent.version import VERSION
 from adjagent.vocabulary import Tool
 
@@ -37,10 +36,21 @@ _RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the she
 never hands back with a background command running. If a recipe times out, the agent hands back naming it
 instead of rerunning it in the background."""
 
+_KBASE_PROJECT_RULE = """This session's kbase server serves many projects and locates none of its own: every kbase tool call
+passes `project-dir`, the project's absolute path — the git worktree root that holds `kb-root/` or
+will — and a call without it fails. Establish that path before anything else, asking the user where
+nothing in the session names it, and run the probes above with `.` read as that path rather than as
+the directory you are standing in."""
 
-def _mcp_entry(*, command: str, base: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """A `command`/`args` entry under `mcpServers`, its command from `command_relative`."""
-    return {"command": command_relative(command, base), "args": ["mcp"]}, ("mcpServers", "kbase")
+
+def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """A `command`/`args` entry under `mcpServers`. An application harness starts the server outside any
+    one project, so `--project-dir-required` makes every tool call name its project with `project-dir`
+    rather than fall back to the server's working directory."""
+    return {"command": command, "args": ["mcp", "--project-dir-required"]}, (
+        "mcpServers",
+        "kbase",
+    )
 
 
 HARNESS = Harness(
@@ -54,6 +64,7 @@ HARNESS = Harness(
     user_harness_dir=".",
     mcp_tool_prefix="mcp_kbase_",
     recipe_rule=_RECIPE_RULE,
+    kbase_project_rule=_KBASE_PROJECT_RULE,
     coder_dispatch=None,
     tools={
         Tool.READ: ("Read",),

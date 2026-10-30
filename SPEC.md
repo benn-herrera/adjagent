@@ -24,7 +24,9 @@ A supporting file has no frontmatter. A consuming project receives the install p
 surfaces together with the packages delivered alongside them by explicit mapping (below), the files
 the installing harness ships (below), and, under mage, one file more, `.claude-plugin/plugin.json`,
 the manifest a plugin is discovered by, rendered and neither a surface nor a definition — by
-**install**: one deployment shape, two types, and no other:
+**install**, one of two deployment shapes; the other, the mage plugin distribution (below), is a
+release artifact an install builds and a consumer unpacks. Install has two types, and no
+other:
 
 ```sh
 just install <path-to-consuming-project> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME] [--verbose]
@@ -38,27 +40,31 @@ beside the definition surfaces; the table holds no row today, so no install of t
 delivers one.
 A **kb install** — `just install-with-kb`, or any install carrying `--with-kb` — adds the kb set —
 the `kbase` skill with every supporting file it lists — together with the
-`kb-tools/` package (the signed `kbase` executable and its signature beside the runner snippets and
-the signature spot check, inside the `kbase` skill's own directory), the harness's `kbase` MCP server entry in the harness's MCP settings file —
-the project's own, or, under mage, the plugin's at ROOT — and one runner include line in the
+`kb-tools/` package (the runner snippets, inside the `kbase` skill's own directory), the harness's
+`kbase` MCP server entry in the harness's MCP settings file — the project's own, or, under mage, the
+plugin's at ROOT — and one runner include line in the
 project's own justfile or Makefile, never into this repository's own — except a plugin harness,
 which is not a repo project and writes no runner include line and creates no `Makefile`.
 The choice is sticky per harness directory: an install whose ROOT already
-holds the installed `kbase` executable — at `skills/kbase/kb-tools/kbase` or `kbase.exe`, or in the
-`agents/kb-tools/` an earlier version wrote — is a kb install, refreshing the runner snippets and
-the spot check and reusing the executable and signature installed there unless the invocation
-carries a new executable. The signal is that
-executable, never the directory holding it. Exclusion is decided once per definition, on its name,
+holds a kb install is a kb install. The signal is a file, never the `kb-tools/` directory
+(ARCHITECTURE.md, Install Consumption Model, names it). Exclusion is decided once per definition, on its name,
 and never per rendered file: a base install keeps no kb-set definition it finds — under that type
 the definition is stale, every file of it generated here is removed and named in the report, and a
 skill's directory is removed once that leaves it empty, so no run leaves a *generated* router
 standing beside generated references it dropped. A mage install is always a kb install, so the
 exclusion never applies to it. A file under `skills/<name>/` that carries no
 generated banner is its project's own and is never touched. Either type removes each tree an earlier
-version installed — `agents/kb_tools/` (underscore), `agents/kb-tools/` and `agents/liaison_tools/`
-— naming each it removed, and reporting the underscore tree's removal on a run that excluded kb. A
-kb install with no `kbase` executable to write — none named as a distribution, none already
-installed — refuses, writing nothing.
+version installed under a harness directory, naming each it removed (ARCHITECTURE.md lists them),
+and a run that excluded kb reports the removal of the pre-1.0 kb helper tree. A
+kb install replaces `skills/kbase/kb-tools/` whole, so a `kbase` executable and `.asc` an earlier
+version installed there are removed.
+
+No install writes, copies, verifies or locates a `kbase` executable. The user installs kbase
+themselves (README.md, Usage, Install), and every harness's `kbase` MCP entry
+names the bare command `kbase`, resolved from `PATH`; under mage the entry keeps its
+`--project-dir-required` argument. Version 0.9.0 is the minimum kbase this product is written for,
+and nothing checks it. The kb set is supported on macOS and Linux, where kbase installs through
+Homebrew as `benn-herrera/kbase/kbase`; native Windows is unsupported for it, and no code detects Windows.
 
 The kb set scores through the `kbase` server rather than through an agent: `score` is a tool of that
 server, and the `kbase` skill drives it. Its call answers once the run's ledger and pid stand, not
@@ -68,8 +74,9 @@ re-running it resumes. It never supplies two scores — a work's rigor and a `fo
 bearing, both because the work lies outside the corpus. The user authors those through `set-rigor`
 and `set-bearing`.
 
-The generator and install need Python 3.11 or later on the host; the kb set's toolchain is a binary
-and needs no Python. `README.md` states what that binary asks of the host.
+The generator and install need Python 3.11 or later on the host; the kb set's toolchain is the
+`kbase` executable the user installs, which needs no Python. `README.md` states what it asks of the
+host.
 
 An install writes into the project's harness directory — `.claude/` by default, or the selected
 `--harness`'s `project-harness-dir` (`.opencode/` for `opencode`; mage installs under its `adjagent`
@@ -153,7 +160,7 @@ The repository's fourth file class is a **shipped package**: plain code, never r
 carrying a `!GENERATED!` banner in this repository, its tests beside it where it has them, installed
 by explicit mapping to a frozen destination under the install ROOT — frozen because an installed
 consumer's own artifacts, such as the runner include line an install writes into the consumer's
-justfile or Makefile, and the path the `kbase` MCP entry registers, name that destination directly
+justfile or Makefile, name that destination directly
 and cannot be asked to notice a source-side rearrangement. Its installed copy is stamped like any
 other install emission whose filetype admits a comment: the `!INSTALLED!` banner, not `!GENERATED!`
 — a shipped package is source taken as-is, never a render. `SHIPPED_PACKAGES` is the table of those
@@ -162,15 +169,9 @@ under the install ROOT it lands at, beside the three definition surfaces, under 
 holds no row today, so no install of this version delivers one. `kb-tools/` is a shipped package
 installed at its own stated destination rather than by that table: `skills/kbase/kb-tools/`, inside
 the `kbase` skill's own directory and so inside the `skills/` surface — the one package destination
-outside `adj-tools/`, a skill carrying its tooling in its own directory — its runner snippets and
-`verify-kbase-signature.sh` beside the `kbase` executable an install writes, and not an importable
-package either, read by the consumer through the runner include line and the `kbase` MCP server the
-same install writes. The executable is verified against its release signature when the release is
-fetched, never by the install; an install that writes it also writes the detached signature it
-was fetched with, byte-verbatim and unstamped, as `kbase.asc` (`kbase.exe.asc`) beside it, so
-`verify-kbase-signature.sh` can re-check the installed binary in place. That spot check needs `gpg`
-and network access on the host, to locate the signer's key over WKD. A source with no signature
-beside it still installs, and the report names the signature path it lacked. No package is a
+outside `adj-tools/`, a skill carrying its tooling in its own directory — holding only the runner
+snippets, and not an importable package either, read by the consumer through the runner include
+line. The snippets run `kbase` from `PATH`. No package is a
 definition: `adj-tools/` is outside the dispatch namespace entirely, and a package under a skill's
 directory is neither its `SKILL.md` nor a supporting file it lists.
 
@@ -197,6 +198,32 @@ harness directory is, keeping every other byte of that file (Write Safety, below
 the script only where it stands readable: where it is missing — a project that commits the settings
 file but not the script — a Bash call reports the missing path on stderr and proceeds, and is not
 blocked.
+
+## Mage Plugin Distribution
+
+The mage plugin is also delivered as a release. `just mage-dist` builds, from the working tree as it
+stands — it makes no git check — two files into `dist/`, which is gitignored:
+
+- `adjagent-mage-v<V>.tgz`, the plugin: one top-level `adjagent/` directory holding what
+  `install --harness=mage` writes. It holds the plugin only, with no `kbase` executable, so one
+  tarball serves every platform;
+- `adjagent-mage-v<V>.tgz.asc`, its detached armored signature, made with the signer's default `gpg`
+  secret key.
+
+`<V>` is what `python3 -m adjagent version` prints. The build refuses, before anything is removed or
+written, a version not of the form `major.minor.patch`. Past that refusal, a re-run at the same
+version replaces the two files, and a build that fails, signing included, leaves neither output of
+that version and no `stage/` directory. The build signs with `gpg` and its default secret key, so the
+operator runs it. It uploads, tags and pushes nothing: the operator publishes the two files by hand
+to release `v<V>` of `benn-herrera/adjagent`.
+
+The consumer downloads the tarball, may check it with `gpg --verify` against its `.asc`, and unpacks
+it into `~/Mage/Skills/`; README.md gives the steps. No consumer installer is shipped, and nothing
+checks the signature for the consumer.
+
+The plugin's `.mcp.json` command is the bare `kbase`, resolved from `PATH` like every harness's
+(Deployed Surfaces, above). Mage provides its servers access to system tools, so the name resolves
+there.
 
 ## Generation System
 
@@ -269,9 +296,8 @@ a directory, on the path from ROOT to such a target, since a write would pass th
 there; what stands at or above ROOT is the operator's own and is not examined. It removes — naming each in its
 report — every file under a deployed surface that it did not write and that carries a generated
 banner, and with them any directory that leaves empty; a file with neither banner is never touched.
-A shipped package's destination is replaced whole; the one thing a kb install leaves standing is the
-`kbase` executable a previous install wrote, with its signature, which it rewrites only when it
-carries a new executable. A
+A shipped package's destination is replaced whole, `skills/kbase/kb-tools/` included: a `kbase`
+executable and signature an earlier version installed there do not survive a kb install. A
 file a harness ships is replaced whole on each install when the file already at its path carries
 `!INSTALLED! … adjagent` in its first ten lines; any other file there refuses the install the same
 way. It is never removed: the copy is one-way and no mirror, so a file this repository stops

@@ -41,32 +41,29 @@ HARNESS_RESOURCES_SOURCE = "adjagent/harnesses/resources"
 # that run may take before it counts as failed.
 GUARDRAIL_INTERPRETER = "perl"
 GUARDRAIL_PROBE_SECONDS = 5.0
-# The kb toolchain's package: this repository's `kb-tools/` — the runner snippets and the signature
-# spot check — beside a `kbase` executable and its detached signature, delivered inside the kbase
-# skill's own directory, shipped there only when the install includes kb.
-KB_TOOLS_PACKAGE = "skills/kbase/kb-tools"
+KBASE_SKILL_DIR = "skills/kbase"
+# The kbase skill's router: carrying this repository's banner, it is what marks ROOT as a kb install.
+KBASE_ROUTER = f"{KBASE_SKILL_DIR}/SKILL.md"
+# The kb toolchain's package: this repository's `kb-tools/`, delivered inside the kbase skill's own
+# directory, shipped there only when the install includes kb.
+KB_TOOLS_PACKAGE = f"{KBASE_SKILL_DIR}/kb-tools"
 KB_TOOLS_SOURCE = "kb-tools"
 RUNNER_SNIPPETS = "runner-snippets"
 KB_TOOLS_SNIPPETS = f"{KB_TOOLS_PACKAGE}/{RUNNER_SNIPPETS}"
 # The snippet each runner's include line pulls in — a justfile imports `kb.just`, a Makefile includes
 # `kb.mk` — and the suffix that makes a line a line for that runner.
 KB_SNIPPET_NAMES = {"just": "kb.just", "make": "kb.mk"}
-KBASE_BASENAME = "kbase.exe" if os.name == "nt" else "kbase"
-# The detached signature the release installer leaves beside the executable, named for it, and the name
-# it is installed under; `kb-tools/verify-kbase-signature.sh` checks the one `.asc` beside it.
-SIGNATURE_SUFFIX = ".asc"
-KBASE_SIGNATURE = f"{KBASE_BASENAME}{SIGNATURE_SUFFIX}"
-# The pre-1.0 underscore destination: the one legacy tree whose removal a run that excluded kb reports
-# with advice, so it is named for that message as well as being the first LEGACY_KB_DIRS entry.
+# The command every harness's `kbase` MCP entry names: the bare name, resolved from PATH, where the
+# user's own kbase install puts it.
+KBASE_NAME = "kbase"
+# The pre-1.0 underscore kb helper tree: the one legacy tree whose removal a run that excluded kb
+# reports with advice, so it is named for that message.
 LEGACY_KB_TOOLS = "agents/kb_tools"
-# The hyphenated destination the kb-tools package moved out of.
-LEGACY_KB_TOOLS_PACKAGE = "agents/kb-tools"
-# Every tree the kb toolchain has been installed into: the pre-1.0 underscore helper tree, then the
-# hyphenated destination it moved to. Each is removed on every install whatever this one installs.
-LEGACY_KB_DIRS = (LEGACY_KB_TOOLS, LEGACY_KB_TOOLS_PACKAGE)
-# Every tree an earlier version installed that this one removes, whatever it installs: the kb trees,
-# and the liaison_tools package's old home under a definition surface.
-LEGACY_TREES = (*LEGACY_KB_DIRS, "agents/liaison_tools")
+# Every tree an earlier version left under a harness directory that this one removes, whatever it
+# installs: the pre-1.0 kb helper tree, the v0.11.x kb-tools destination, the hyphenated
+# `agents/kb-tools` an unreleased build wrote, and the liaison_tools package's old home under a
+# definition surface.
+LEGACY_TREES = (LEGACY_KB_TOOLS, "adj-tools/kb-tools", "agents/kb-tools", "agents/liaison_tools")
 LEGACY_KB_TOOLS_MESSAGE = "legacy kb_tools removed. if you are using kb functionality install using `install-with-kb`"
 # A runner include line is recognized by the shape of the path it names, never by a list of spellings:
 # any path ending `<directory>/runner-snippets/<that runner's snippet>`, so a tree no release here
@@ -129,16 +126,18 @@ def excluded(name: str) -> bool:
     return NOT_BY_DEFAULT.match(name) is not None
 
 
+def _packages(*, kb_included: bool) -> list[tuple[str, str]]:
+    """(source directory, destination below ROOT) for every package this install ships: the always-
+    shipped table, and — when kb is included — `kb-tools/` at its destination."""
+    return [*SHIPPED_PACKAGES, *([(KB_TOOLS_SOURCE, KB_TOOLS_PACKAGE)] if kb_included else [])]
+
+
 def package_copies(root: Path, *, kb_included: bool) -> list[tuple[Path, Path]]:
-    """(source file, target under `root`) for every file the shipped packages deliver: the always-
-    shipped table, and — when kb is included — every file of `kb-tools/`, the runner snippets and the
-    signature spot check, which land under that package's destination. The `kbase` executable and its
-    signature are not here: the install writes them from the source `--kbase-dist` names, or leaves the
-    ones already installed alone."""
-    packages = [*SHIPPED_PACKAGES, *([(KB_TOOLS_SOURCE, KB_TOOLS_PACKAGE)] if kb_included else [])]
+    """(source file, target under `root`) for every file the shipped packages deliver, each landing
+    under its package's destination."""
     return [
         (source, root / destination / source.relative_to(REPO_ROOT / package))
-        for package, destination in packages
+        for package, destination in _packages(kb_included=kb_included)
         for source in sorted((REPO_ROOT / package).rglob("*"))
         if source.is_file() and _shipped(source.relative_to(REPO_ROOT / package))
     ]
@@ -185,8 +184,7 @@ def _refuse_root(root: Path) -> None:
         raise InputError(f"install root '{root}' is not an existing directory")
     resolved = root.resolve()
     sources = [
-        *(REPO_ROOT / package for package, _ in SHIPPED_PACKAGES),
-        REPO_ROOT / KB_TOOLS_SOURCE,
+        *(REPO_ROOT / package for package, _ in _packages(kb_included=True)),
         REPO_ROOT / HARNESS_RESOURCES_SOURCE,
     ]
     if resolved == REPO_ROOT or any(resolved.is_relative_to(source) for source in sources):
@@ -294,9 +292,8 @@ def prune(root: Path, *, keep: set[Path]) -> list[Path]:
     The kb-tools package is the one destination inside a surface — `skills/kbase/kb-tools/` — and no
     destination is carved out by name. It needs none: a copied package file opens with the
     `!INSTALLED!` banner rather than the generated one `_is_ours` reads, so it is untouched here rather
-    than pruned, and the `kbase` executable and its signature beside it carry no banner of ours at all.
-    Every file under a surface is thus either ours or untouched. The would-ship vocabulary is
-    name-based and covers `kb-` names and `kbase`, so a kb definition this run did not write — an
+    than pruned. Every file under a surface is thus either ours or untouched. The would-ship
+    vocabulary is name-based and covers `kb-` names and `kbase`, so a kb definition this run did not write — an
     install without kb — is stale and removed, while one the run wrote is in `keep`.
 
     A file at ROOT's top level is outside every surface, and so outside this walk: a harness-rendered
@@ -321,83 +318,6 @@ def prune(root: Path, *, keep: set[Path]) -> list[Path]:
             parent.rmdir()
             parent = parent.parent
     return stale
-
-
-def _runs(path: Path) -> bool:
-    """Whether `path` is a regular file this user can execute."""
-    return path.is_file() and os.access(path, os.X_OK)
-
-
-def _executable_in(directory: Path) -> Path | None:
-    """The `kbase` executable under `directory`, under either platform's name, when it can run."""
-    return next(
-        (directory / name for name in ("kbase", "kbase.exe") if _runs(directory / name)),
-        None,
-    )
-
-
-def _kbase_source(root: Path, kbase_dist: Path | None) -> tuple[Path, bool]:
-    """(the `kbase` executable to install, whether it is a file to copy to the destination) for an
-    install that includes kb. A `--kbase-dist` must name an existing executable carrying the installed
-    basename, and is copied to the kb-tools destination; with no flag, the executable already installed
-    there is the source and is left where it stands, while a file there that cannot run is no source and
-    the legacy lookup follows. An executable an earlier version installed under a legacy tree, under
-    either platform's name, is copied the same way, so the first install after the destination moved
-    carries it across. None existing is refused."""
-    installed = root / KB_TOOLS_PACKAGE / KBASE_BASENAME
-    if kbase_dist is not None:
-        if kbase_dist.name != KBASE_BASENAME or not _runs(kbase_dist):
-            raise InputError(
-                f"--kbase-dist '{kbase_dist}' is not an executable named '{KBASE_BASENAME}' — the MCP "
-                "entry registers that name, so a source under any other one installs nothing runnable"
-            )
-        return kbase_dist, True
-    if _runs(installed):
-        return installed, False
-    for relative in LEGACY_KB_DIRS:
-        legacy = _executable_in(root / relative)
-        if legacy is not None:
-            return legacy, True
-    state = "exists but is not an executable file" if installed.exists() else "does not exist"
-    raise InputError(
-        f"kb is included but no kbase executable is available: '{installed}' {state}, no "
-        "legacy tree holds one, and no --kbase-dist was passed — pass --kbase-dist=<path>, or "
-        "install kb first"
-    )
-
-
-class _KbaseCopy(NamedTuple):
-    """The executable a run installs at the kb-tools destination, read before the first write: its
-    source and bytes, the detached signature expected beside it, and that signature's bytes — None
-    where no file stands there."""
-
-    source: Path
-    data: bytes
-    signature: Path
-    signature_data: bytes | None
-
-
-def _kbase_copy(root: Path, source: Path) -> _KbaseCopy:
-    """The executable at `source` and its `<source>.asc` signature, for a run that installs them at the
-    kb-tools destination. The bytes are read here, before the first write, because a file inside a
-    destination this run replaces whole would be deleted before it could be read; such a file is
-    refused instead. A missing signature is no refusal: the executable installs without one."""
-    signature = source.with_name(f"{source.name}{SIGNATURE_SUFFIX}")
-    replaced = [root / destination for _, destination in SHIPPED_PACKAGES] + [root / KB_TOOLS_PACKAGE]
-    for path in (source, signature):
-        resolved = path.resolve()
-        for destination in replaced:
-            if resolved.is_relative_to(destination.resolve()):
-                raise InputError(
-                    f"the kbase source '{path}' is inside '{destination}', which this install replaces — "
-                    "pass a source outside the install root"
-                )
-    try:
-        data = source.read_bytes()
-        signature_data = signature.read_bytes() if signature.is_file() else None
-    except OSError as exc:
-        raise InputError(f"the kbase source '{exc.filename}' cannot be read: {exc}") from exc
-    return _KbaseCopy(source, data, signature, signature_data)
 
 
 _JSON_TYPE_NAMES = {dict: "an object", list: "an array"}
@@ -765,10 +685,9 @@ def _plain_json_object(target: Path) -> tuple[str, dict] | None:
 def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
     """Register the `kbase` server in `harness`'s MCP settings file under `base`: the first discovered
     alternative, else the canonical path — created when no file the contract names exists. `base` is
-    also the directory the entry is built against, so a command inside it is named relative to it and
-    the file names no machine-specific path. It is the project root for a harness whose settings file
-    is the project's own, and ROOT for one whose file is the plugin's. The entry lands at the
-    contract's container path.
+    the project root for a harness whose settings file is the project's own, and ROOT for one whose
+    file is the plugin's. The entry names `command` as given and lands at the contract's container
+    path.
 
     An existing file is edited, never reserialized: the entry's own slot is spliced into the text as it
     stands, so every other byte — other entries, key order, indentation, line endings, number and
@@ -776,7 +695,7 @@ def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
     a rewrite would destroy), one naming a key the entry must pass through twice, one the splice
     cannot delimit, and a path `_settings_obstacle` names are each reported and left untouched, with
     the entry printed for the operator to merge by hand."""
-    entry, container = harness.mcp.entry(command=command, base=base)
+    entry, container = harness.mcp.entry(command=command)
     target = _mcp_settings_file(base, harness=harness)
     by_hand = f"merge this entry by hand: {json.dumps(entry)}"
     obstacle = _settings_obstacle(target, base=base)
@@ -1072,59 +991,44 @@ def install(
     *,
     verbose: bool,
     with_kb: bool = False,
-    kbase_dist: Path | None = None,
     project_root: Path | None = None,
 ) -> None:
     """Render every included definition and every file the harness renders of its own into ROOT,
     replace each package destination whole with a stamped copy, copy the harness's own resource files
     into ROOT as they stand, write the renders over what is there, then prune. An install that includes
     kb — `with_kb` names it, the harness is one whose files sit at its own root, which is a plugin and
-    always takes the kb set, or an installed `kbase` binary stands at the current
-    `skills/kbase/kb-tools` destination or the `agents/kb-tools` one an earlier version used (the
-    sticky rule, per ROOT and not per project) — also writes the kb-tools package, the harness's
-    `kbase` MCP entry and, for a harness whose files sit in a project subdirectory, the consumer's
-    runner include line, none being written or created for a harness installed at its own root, which
-    is a plugin rather than a repo project; the entry goes in the harness's own MCP
-    settings file, which sits at the project root or, under a harness whose file is the plugin's, at
-    ROOT, its command named relative to that directory. Every install removes each tree an earlier
-    version installed. A harness with a guardrail hook has its script run once on this machine first:
-    when that run succeeds the script ships with the other resources and every install registers it in
-    the project's settings file; when it fails, neither happens, the install goes on, and the report
-    names why and what an earlier install left in place. A file at a render, harness-file or resource
-    target that does not carry what that class of file states as its origin — this repository's
-    generated banner or installed header, or the marker a harness-rendered file states about itself —
-    or a symlink or non-directory between ROOT and such a target, refuses the install; package
-    destinations are replaced whole unchecked. A refusal of the root, of the render, of a target it
-    would overwrite, of the kbase source, of the runner file, of the MCP settings file, of the harness
-    directory the guardrail entry cannot name or of the guardrail settings file writes nothing; a
-    settings path that is a symlink or not a regular file is reported and left alone."""
+    always takes the kb set, or ROOT holds the evidence of an earlier kb install (the sticky rule, per
+    ROOT and not per project: the kbase skill's router carrying this repository's banner) — also
+    replaces the kb-tools destination whole with the package, so nothing an earlier version placed
+    there survives, and writes the harness's `kbase` MCP entry
+    and, for a harness whose files sit in a project subdirectory, the consumer's runner include line,
+    none being written or created for a harness installed at its own root, which is a plugin rather
+    than a repo project. The entry's command is the bare `kbase`, resolved from PATH, and goes in the
+    harness's own MCP settings file, which sits at the project root or, under a harness whose file is
+    the plugin's, at ROOT. Every install removes each tree an earlier version installed. A harness with
+    a guardrail hook has its script run once on this machine first: when that run succeeds the script
+    ships with the other resources and every install registers it in the project's settings file; when
+    it fails, neither happens, the install goes on, and the report names why and what an earlier
+    install left in place. A file at a render, harness-file or resource target that does not carry what
+    that class of file states as its origin — this repository's generated banner or installed header,
+    or the marker a harness-rendered file states about itself — or a symlink or non-directory between
+    ROOT and such a target, refuses the install; package destinations are replaced whole unchecked. A
+    refusal of the root, of the render, of a target it would overwrite, of the runner file, of the MCP
+    settings file, of the harness directory the guardrail entry cannot name or of the guardrail
+    settings file writes nothing; a settings path that is a symlink or not a regular file is reported
+    and left alone."""
     _refuse_root(root)
     project = root.resolve() if project_root is None else Path(project_root).resolve()
-    # The settings file's own base: a harness that keeps its file at ROOT resolves its paths and names
-    # its command relative to ROOT, every other to the project root.
+    # The settings file's own base: a harness that keeps its file at ROOT resolves its paths against
+    # ROOT, every other against the project root.
     mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
     harness_relpath = _harness_relpath(root, project)
-    # A per-ROOT diagnostic on the file's presence alone: a tree whose executable is absent must not
-    # turn a plain install into one that rewrites the consumer's runner and MCP configuration, so no
-    # mode and no tree shape is read — of a harness installed under a project. A harness whose files
-    # sit at ROOT is a plugin whose product is the kb set, so there the set is always included and only
-    # the source is left to find. What the install copies from is a different question — there the
-    # MCP entry would register a command that cannot start, so `_kbase_source` is stricter, and its
-    # refusal is the place that reports it.
-    kb_included = (
-        with_kb
-        or ctx.harness.user_harness_dir == "."
-        or any(
-            (root / destination / KBASE_BASENAME).is_file()
-            for destination in (KB_TOOLS_PACKAGE, LEGACY_KB_TOOLS_PACKAGE)
-        )
-    )
+    kb_included = with_kb or ctx.harness.user_harness_dir == "." or _is_ours(root / KBASE_ROUTER)
     # Every check runs before the first write: the root refusal and harness relpath above, then the
     # render, the guardrail probe that decides whether its script is a resource target, each render,
     # harness-file and resource target the install would overwrite and the paths below ROOT it would
-    # write through, the kbase source an install including kb copies from, that install's runner file
-    # and MCP settings file, and — when the probe passed — the guardrail entry built for this harness
-    # directory and the guardrail settings file.
+    # write through, an install including kb's runner file and MCP settings file, and — when the probe
+    # passed — the guardrail entry built for this harness directory and the guardrail settings file.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
     package_files = package_copies(root, kb_included=kb_included)
     resource_files = harness_resource_copies(root, harness=ctx.harness.name)
@@ -1151,12 +1055,9 @@ def install(
     # Everything this install copies, in one list: `keep` and the report below count a harness's own
     # files with the packages', so neither reads as a stale render.
     copies = [*package_files, *resource_files]
-    kbase = _kbase_source(root, kbase_dist) if kb_included else None
-    kbase_copy = _kbase_copy(root, kbase[0]) if kbase is not None and kbase[1] else None
-    kbase_command = str(root.resolve() / KB_TOOLS_PACKAGE / KBASE_BASENAME)
     if kb_included:
         _check_runner(project)
-        _, mcp_container = ctx.harness.mcp.entry(command=kbase_command, base=mcp_base)
+        _, mcp_container = ctx.harness.mcp.entry(command=KBASE_NAME)
         mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
         _check_settings(mcp_target, base=mcp_base, container=mcp_container, leaf=object)
     guardrail_entry: dict[str, object] | None = None
@@ -1164,27 +1065,8 @@ def install(
         guardrail_entry = guardrail.entry(harness_relpath)
         _check_settings(project / guardrail.settings, base=project, container=guardrail.container, leaf=list)
 
-    for _, destination in SHIPPED_PACKAGES:
+    for _, destination in _packages(kb_included=kb_included):
         shutil.rmtree(root / destination, ignore_errors=True)
-    kbase_written: list[Path] = []
-    if kbase_copy is not None:
-        # The executable to copy — `--kbase-dist`'s, or the legacy tree's — replaces the destination
-        # whole, beside the snippets, with its signature where one stands beside the source.
-        destination = root / KB_TOOLS_PACKAGE
-        shutil.rmtree(destination, ignore_errors=True)
-        destination.mkdir(parents=True)
-        dist_target = destination / KBASE_BASENAME
-        dist_target.write_bytes(kbase_copy.data)
-        shutil.copymode(kbase_copy.source, dist_target)
-        kbase_written.append(dist_target)
-        if kbase_copy.signature_data is not None:
-            signature_target = destination / KBASE_SIGNATURE
-            signature_target.write_bytes(kbase_copy.signature_data)
-            kbase_written.append(signature_target)
-    elif kbase is not None:
-        # The sticky install refreshes the snippets and leaves the installed executable and its
-        # signature alone.
-        shutil.rmtree(root / KB_TOOLS_PACKAGE / RUNNER_SNIPPETS, ignore_errors=True)
     for source, target in package_files:
         data = source.read_bytes()
         if source.suffix in STAMPED_SUFFIXES:
@@ -1206,19 +1088,14 @@ def install(
             if relative == LEGACY_KB_TOOLS and not kb_included:
                 print(LEGACY_KB_TOOLS_MESSAGE)
     pruned = prune(root, keep={*written, *(target for _, target in copies)})
-    print(
-        f"installed: {len(written)} rendered files, "
-        f"{len(copies) + len(kbase_written)} copied files → {root}"
-    )
-    if kbase_copy is not None and kbase_copy.signature_data is None:
-        print(f"no kbase signature at {kbase_copy.signature} — installed the executable without one")
+    print(f"installed: {len(written)} rendered files, {len(copies)} copied files → {root}")
     for path in pruned:
         print(f"pruned {path}")
     if verbose:
-        for path in [*(target for _, target in copies), *kbase_written, *written]:
+        for path in [*(target for _, target in copies), *written]:
             print(f"wrote {path}")
     if kb_included:
-        mcp_merge(mcp_base, harness=ctx.harness, command=kbase_command)
+        mcp_merge(mcp_base, harness=ctx.harness, command=KBASE_NAME)
         # A harness whose files sit at its own root is a plugin, not a repo project, so it has no
         # consumer runner file to include the snippets in and none is created.
         if ctx.harness.user_harness_dir != ".":

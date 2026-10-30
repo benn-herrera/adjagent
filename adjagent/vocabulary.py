@@ -79,6 +79,7 @@ class OptionalHarnessText(Enum):
     nothing fills it to the empty string, which drops the paragraph the placeholder stands in."""
 
     RECIPE_RULE = "recipe_rule"
+    KBASE_PROJECT_RULE = "kbase_project_rule"
 
 
 class AgentsFileText(Enum):

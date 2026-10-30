@@ -395,6 +395,7 @@ def test_render_all_emits_every_file_and_include_drops_a_whole_definition() -> N
         PurePosixPath("skills/kbase/references/scoring.md"),
         PurePosixPath("skills/kbase/references/maintaining.md"),
         PurePosixPath("skills/kbase/references/scoring-system.md"),
+        PurePosixPath("skills/kbase/references/installing.md"),
     }
     assert skill <= everything
     without = {path for path, _ in render_all(_CLAUDE_RENDER, include=lambda defn: defn.name != "kbase")}
@@ -538,6 +539,16 @@ def test_a_coder_and_a_platform_expert_render_the_recipe_rule_under_claude_and_d
     assert f"\n\n{paragraph}\n\n" in under_claude
     assert paragraph not in under_opencode
     assert "\n\n\n" not in under_opencode
+
+
+def test_the_kbase_project_rule_paragraph_renders_under_mage_and_drops_under_claude() -> None:
+    body = f"before\n\n{hole(OptionalHarnessText.KBASE_PROJECT_RULE)}\n\nafter"
+    defn = Definition(name="probe", kind=Kind.COMMAND, body=body)
+    under_mage = filled_body(defn, Render(harness=MAGE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT))
+    under_claude = filled_body(defn, Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT))
+    assert MAGE.kbase_project_rule
+    assert under_mage == f"before\n\n{MAGE.kbase_project_rule}\n\nafter"
+    assert under_claude == "before\n\nafter"
 
 
 _TUNED = Family(

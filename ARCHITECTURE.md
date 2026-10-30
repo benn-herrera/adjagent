@@ -6,8 +6,8 @@ SPEC.md. Cites SPEC's requirements rather than restating them.
 ## Repo Layout
 
 ```
-kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, and verify-kbase-signature.sh, the spot check of the installed signature; nothing importable; installed beside the kbase executable under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
-.tool-dist-cache/       gitignored — the signed kbase release a recipe downloads and verifies, kbase-<version>/kbase[.exe] beside its kbase[.exe].asc signature, both of which `install-with-kb` installs (justfile KBASE_VERSION, TOOL_DIST_CACHE)
+kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, which run `kbase` from `PATH`; nothing importable; installed under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
+dist/                   gitignored build product — what `just mage-dist` writes: the mage plugin tarball and its detached signature, plus `stage/` while a build runs, removed when it ends (`DIST_DIR`, devtools/scripts/mage-dist.sh); created on demand
 rendered/               gitignored build product — this repo's own render tree, one slot per render, and the three `reference*` slots `render-diff` compares against (justfile RENDERED); created on demand
 adjagent/               the generator package, run as python3 -m adjagent — definitions as Python values rendered into a named output root; the package docstring lists its modules
   harnesses/resources/  one directory per harness, named for it — the files that harness ships into its project harness directory, copied into ROOT as they stand and never rendered (HARNESS_RESOURCES_SOURCE, adjagent/install.py); `opencode/plugins/guardrail.ts` and `claude/hooks/guardrail.pl` today, and no `__init__.py`, so `load` still reads one harness per module; mage ships none
@@ -28,6 +28,7 @@ devtools/               repository-maintenance tooling — project space, never 
     cli.py              argparse surface and dispatch
   tests/                the dupe_sweep test suite, including its import-structure test (`just test dupe_sweep`)
 tests/                  the root test suite, `adjagent` and the repository-wide checks, run as the `adjagent` surface (`just test adjagent`) — project space, never installed
+  stubs/                the stub `gpg` that `tests/test_mage_dist.py` puts first on `PATH` — no key, no real keyring — and which answers only the signing call
 ```
 
 The three deployed surfaces are absent from this listing because they are absent from the repository
@@ -36,11 +37,10 @@ The three deployed surfaces are absent from this listing because they are absent
 ## Install Consumption Model
 
 `just install` wraps `python3 -m adjagent install <project>/<subdir>` (`adjagent/install.py`);
-`just install-with-kb` wraps the same verb with `--with-kb` and a `--kbase-dist` naming the release
-its recipe caches under the gitignored `.tool-dist-cache/`. It refuses, with nothing written, a ROOT
+`just install-with-kb` wraps the same verb with `--with-kb`. The verb takes no `kbase` argument: it
+writes, copies, verifies and locates no `kbase` executable. It refuses, with nothing written, a ROOT
 that is this repository or inside a source it copies from — a shipped package's, the kb toolchain's,
-or a harness's resource tree — and a ROOT outside the project root it is given; a kb install with no
-`kbase` executable to write refuses the same way. So does a render or harness-resource target
+or a harness's resource tree — and a ROOT outside the project root it is given. So does a render or harness-resource target
 holding a file without this repository's banner, or with a symlink or non-directory on its path
 below ROOT; a harness settings file that is not UTF-8 or holds the wrong type, `null` included,
 where the entry goes — the MCP settings file on a kb install, and the guardrail's
@@ -55,47 +55,38 @@ The two install types differ by one filter and three emissions. The filter is `N
 before anything about it is rendered: a base install drops every match whole, so no file of a
 dropped definition is written, and the skill's directory is never created by a run that excludes
 it. A harness whose `user_harness_dir` is `.` is always a kb install, so the filter never applies
-to it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes beside its
-`--kbase-dist`, or is sticky: the installed `kbase` executable standing under ROOT — at
-`skills/kbase/kb-tools/kbase`, `kbase.exe` where that is the installed name, or at the
-`agents/kb-tools/` an earlier version installed there — already includes kb, per ROOT rather than
-per project, so a later base-typed invocation refreshes that package instead of dropping it. The
-test is that file's presence, and presence alone: the mode is never read, the runner snippets and any
-include fragment beside it are never inspected, so a destination holding no file of that name — an
-empty `kb-tools/` directory, or one whose executable was never placed — is a base install. Presence
-alone cuts the other way too: a `kbase` sitting there that cannot run — empty, or not executable —
-still selects the kb set, and the source check below is what refuses the install. Selecting what a
-kb install copies from is stricter, and the installed binary must run: a file there that cannot
-execute is no source, the legacy `agents/kb-tools/` is consulted, and with nothing runnable there
-either the install refuses with `InputError` naming the path and its remedies — `--kbase-dist`, or
-install kb first — rather than register a command that cannot start. The underscore
-`agents/kb_tools/` tree is not a signal; it never held an executable.
+to it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes, or is sticky, per
+ROOT rather than per project, so a later base-typed invocation refreshes the kb set instead of
+dropping it. The predicate, at `kb_included` in `install`, is `with_kb`, or `user_harness_dir == "."`, or
+`_is_ours` (the generated-banner test) of the router, `KBASE_ROUTER` — `skills/kbase/SKILL.md`. The
+router is the whole of the sticky signal, because no release installed a `kbase` executable without
+also installing the generated router beside it. The test reads the router's banner and nothing
+else: the mode is never read, and the runner snippets are never inspected, so a destination holding
+a `kb-tools/` directory and no router — or an empty one — is a base install. A `SKILL.md` without
+the generated banner is its project's own and signals nothing. No legacy tree is a signal.
 
 A kb install writes three things beyond the renders — two under a harness whose
 `user_harness_dir` is `.`, with no runner include line and no `Makefile`:
 
-- **The kb-tools package**, assembled from two sources: every file of `kb-tools/` — the
-  `runner-snippets/` fragments and `verify-kbase-signature.sh` — taking the package copy below, and
-  the executable the distribution names, which replaces the destination whole. `_kbase_copy` reads
-  that executable and the `<executable>.asc` beside it before the first write, refusing either where
-  it sits inside a destination this run replaces; the signature lands byte-verbatim as
-  `KBASE_SIGNATURE`, and a source without one installs unsigned, the report naming the path it
-  lacked (SPEC.md, Deployed Surfaces, states what the signature is for). The
-  destination is `KB_TOOLS_PACKAGE` — `skills/kbase/kb-tools/`, its own directory inside the `kbase`
-  skill's, within the `skills/` surface — so a replacement covers that directory and never the
-  skill's `SKILL.md` or references beside it. With no distribution named, the executable already
-  installed stays where it is with its signature and only the `kb-tools/` files are refreshed; one an
-  earlier version installed under `agents/kb-tools/` is copied across, with its signature where one
-  stands beside it, before that tree is removed.
+- **The kb-tools package**: every file of `kb-tools/` — the `runner-snippets/` fragments — taking the
+  package copy below. The destination is `KB_TOOLS_PACKAGE` — `skills/kbase/kb-tools/`, its own
+  directory inside the `kbase` skill's, within the `skills/` surface — and is removed whole before
+  the copy, so an executable and `.asc` an earlier version installed there go, while the skill's
+  `SKILL.md` and references beside it are not touched. Package destinations come from one list,
+  `_packages`, which `package_copies`, the clearing before the copy and `_refuse_root` all read:
+  the `SHIPPED_PACKAGES` table, and `kb-tools/` at `KB_TOOLS_PACKAGE` when kb is included. kbase itself reaches the host by the
+  user's own install (README.md); the skill's `references/installing.md` walks a session through it.
 - **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): claude's
   `.mcp.json`, at the plugin root under mage — `McpSettings.site` names the directory, `HARNESS`
   there and `PROJECT` for the other two — or for opencode the first discovered of
   `.opencode/opencode.json`, `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc`
-  created. Under every harness the entry's command is the installed executable's path relative to
-  the directory that harness's settings file is resolved against — the project root, or, under mage,
-  ROOT — so the settings file names no machine-specific path and a project can track it. Its argument
+  created. Under every harness the entry's command is `KBASE_NAME`, the bare `kbase`, which the
+  host resolves from `PATH`, so the settings file names no machine-specific path and a project can
+  track it. Each harness's entry builder takes the command and nothing else. Its argument
   list is `mcp` alone and names no KB path: the server locates the KB from the working directory it
-  is started in, so it has to be started in the project root. An existing settings file is edited in
+  is started in, so it has to be started in the project root. Mage, an application harness started
+  outside any one project, adds `--project-dir-required` (`harnesses/mage.py`), under which every
+  tool call names its project with `project-dir` and the server locates none of its own. An existing settings file is edited in
   place: the entry's own slot is spliced into the text as it stands, so every other byte — other
   entries, key order, indentation, line endings — is kept, while a file this install creates is
   written whole.
@@ -111,8 +102,8 @@ A kb install writes three things beyond the renders — two under a harness whos
 
 An install renders every included definition — its own output, then each supporting file a skill
 lists — and every file the harness itself renders (mage's manifest), bar a definition the harness
-declares it renders nothing for (`Harness.omits`), replaces each destination the `SHIPPED_PACKAGES`
-table names whole with a copy, copies each file the installing harness ships into ROOT as it stands
+declares it renders nothing for (`Harness.omits`), replaces each destination `_packages` names
+whole with a copy, copies each file the installing harness ships into ROOT as it stands
 — bar a guardrail script whose probe fails (below) — writes the renders over what is there, and
 removes each file under `agents/`, `commands/` or `skills/` that this run did not write, that would
 ship, and that is ours by its own carrier: a frontmatter block holding a `!GENERATED!` line, or a
@@ -123,10 +114,11 @@ kb toolchain's sits inside one — `skills/kbase/kb-tools/`, in the
 `kbase` skill's own directory — where every file it holds is stamped installed or left unstamped,
 never generated, so every file under a surface is still either ours or untouched. A kb-set name is
 inside that would-ship vocabulary, so under a base install one this run did not write is stale and
-goes — every one of its files, a skill's included. Every install also removes each tree an earlier
-version installed under a harness directory — `agents/kb_tools/`, `agents/kb-tools/` and
-`agents/liaison_tools/` — naming each it removed, and reporting the underscore tree's removal on a
-run that excludes kb. A render that fails writes nothing. There is no hash or backup of a modified
+goes — every one of its files, a skill's included. Every install also removes each tree in
+`LEGACY_TREES`, naming each it removed: `agents/kb_tools/` (the pre-1.0 kb helper tree),
+`adj-tools/kb-tools/` (where v0.11.x installed the kb toolchain), `agents/kb-tools/` (written only
+by an unreleased build) and `agents/liaison_tools/`. A run that excludes kb reports the removal of
+`agents/kb_tools/` with the advice to install with kb. A render that fails writes nothing. There is no hash or backup of a modified
 file: a local edit that keeps the banner lives only until the next install, which rewrites the file
 it touched or prunes it, while a file at a render target that has lost the banner, or is a directory
 or symlink, refuses the install; where the consuming project tracks the installed set, its git is
@@ -146,8 +138,8 @@ passes. Before the first write, a target that exists must be a regular file, not
 line matching `!INSTALLED! .* adjagent` among its first ten; one unreadable or without it refuses
 the install. No component between ROOT and any render or resource target may be a symlink or a
 non-directory (`_blocked_component`); one that is refuses the install in the same refusal, and
-components at or above ROOT are not examined. Package destinations and the `kbase` executable and
-signature are exempt from both checks: this repository owns those entire and replaces them whole. The resource
+components at or above ROOT are not examined. Package destinations are exempt from both checks:
+this repository owns those entire and replaces them whole. The resource
 files join the same `copies` list as the packages', so the prune's `keep` holds them and the report
 counts them: a harness file never reads as a stale render, and the report line says `copied files`
 for the lot. The copy is one-way, not a mirror — `prune` owns the three rendered surfaces and nothing
@@ -226,8 +218,8 @@ the project is this repository.
 
 `just install-agents-here` installs this repository's own `.claude/` and `.opencode/` with the plain
 `install` verb, once per harness, as base installs. The sticky rule is per ROOT and reaches these
-two directories: one already holding the installed `kbase` executable at `skills/kbase/kb-tools/` or
-in the legacy `agents/kb-tools/` would be a kb install under this recipe too, and neither does. No
+two directories: one already holding a generated `skills/kbase/SKILL.md` would be a kb install
+under this recipe too, and neither does. No
 include line is written here whatever the install type — `install_kb_include_line` returns without
 writing when the project is this repository. Nor is one written for a harness whose
 `project_harness_dir` is `.`: the install skips that call there, because a plugin is not a repo
@@ -268,10 +260,12 @@ name `clauses.*`; shared text that holds a harness string takes a hole filled at
 ### Holes
 
 The renderer fills one closed set of holes, spelled by `vocabulary.hole`: `@!hrn-<key>!@` for the
-six harness strings, in two classes — the five `HarnessText` members, which every harness supplies
+seven harness strings, in two classes — the five `HarnessText` members, which every harness supplies
 (agents file name, project harness directory, project scratch directory, user harness directory,
-MCP tool prefix), and `OptionalHarnessText`'s one member `recipe_rule`, which a harness supplies as
-text or as the empty string, an empty one dropping the paragraph it stands in — and
+MCP tool prefix), and `OptionalHarnessText`'s two members, `recipe_rule` (the rule a dispatched
+agent follows running recipes) and `kbase_project_rule` (how a kbase call names its project where
+the server serves many), which a harness supplies as text or as the empty string, an empty one
+dropping the paragraph it stands in — and
 `@!fam-<anchor>!@` for the family overlay anchors a definition exposes (`gap-aversion`,
 `ask-vs-stipulate`). The agents file alone also carries `@!agf-<key>!@` for its scope name and its
 coder-dispatch bullet, a harness callable taking the rendered default family's medium tier where the
@@ -312,10 +306,11 @@ own to say about them. A `Definition` refuses at construction any field outside 
 ### Harnesses and families
 
 A harness is a `Harness` dataclass (`adjagent/harness.py`) holding everything that differs between
-harnesses: the six hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__kbase__`
+harnesses: the seven hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__kbase__`
 under claude, `mcp_kbase_` under mage and `kbase_` under opencode, a server tool's offered name
-being that prefix plus the tool's own, and the sixth, `recipe_rule`, typed `OptionalHarnessText`
-where the other five are `HarnessText` — the tool spellings, the model shape it accepts, the text
+being that prefix plus the tool's own, and the last two, `recipe_rule` and `kbase_project_rule`
+(supplied under mage alone, whose server is started `--project-dir-required`), typed
+`OptionalHarnessText` where the other five are `HarnessText` — the tool spellings, the model shape it accepts, the text
 `inherit` renders as (`inherit_text`) with the further `inherit_synonyms` rendering that same text, whether a bare
 `--model-tier-map` value is the whole map (`bare_tier_spec_is_all`), the frontmatter emitter,
 `coder_dispatch`, a callable taking the rendered model and returning the agents file's
@@ -433,9 +428,9 @@ two. Every verb of the generator exits 0 on success and 2 on a refusal; there is
 A recipe body is a script in `devtools/scripts/`, named for its recipe, and the recipe is the line
 that runs it, handing it the variables it reads as an env prefix. `just install`,
 `just install-with-kb`, `just install-agents-here`, `just render`, `just retake-reference`,
-`just install-agents-file <dir> [harness]` and `just tag` reach `python3 -m adjagent`:
+`just install-agents-file <dir> [harness]`, `just mage-dist` and `just tag` reach `python3 -m adjagent`:
 `install-agents-here` through `install.sh`; `render` and `retake-reference` through the private
-`_render-slot.sh`, which calls `install.sh` with `--with-kb` and `--kbase-dist`, and through the
+`_render-slot.sh`, which calls `install.sh` with `--with-kb`, and through the
 stable private `render-agents-file HARNESS OUT` script, which a later revision calls inside a
 worktree of an earlier one, so its name and two arguments do not change incompatibly; and `tag`
 through `version`, which prints the version bare and nothing else, so the `v` of `v<version>` is the
@@ -445,6 +440,28 @@ reader — and the version through `python3 -m adjagent version`, never restated
 script. `just tag` reads it there to create the lightweight tag `v<version>`: it refuses while
 `adjagent/` has uncommitted changes and again while that tag already exists, and it pushes nothing.
 CONVENTIONS.md states where the version is written down, and the order a bump takes against its tag.
+
+`just mage-dist` (SPEC.md, Mage Plugin Distribution) runs `mage-dist.sh` with `PROJECT_ROOT` and
+`GEN` and depends on no other recipe. `resolve_names` validates before anything is removed or
+written: the version's shape. It reads the agents file name and the plugin directory through
+`_harness-value.sh mage`, as `_render-slot.sh` does. It then removes any stale `stage/` and the two
+outputs of this version, and sets an exit trap that removes `stage/` and both outputs, so a build
+that fails at any step, signing included, leaves none of them. Once signing succeeds the trap is
+replaced by one that removes `stage/` alone, so only a signed tarball outlives the script. It rebuilds `dist/stage/adjagent`: `install.sh` with `--subdir= --harness=mage`, then the
+agents file from `render-agents-file.sh mage`, never `install-agents-file`, which refuses while
+generator sources are uncommitted and so would make a build depend on the tree's cleanliness. It
+tars `adjagent/` from the stage with `COPYFILE_DISABLE=1` and `--no-xattrs`, so the tarball carries
+neither AppleDouble entries nor extended-attribute pax headers (`test_build_layout` checks the
+latter), and signs it with `gpg --yes --detach-sign --armor` and gpg's default secret key. The
+tarball holds no `kbase` executable and no installer: its `kb-tools/` holds `runner-snippets/`
+alone, and its `.mcp.json` command is `kbase` (`test_build_layout`). `DIST_DIR` overrides `dist/`
+for tests only.
+
+The tests run the script against the stub `gpg` of `tests/stubs/`, which answers only the signing
+call and writes an `.asc` naming the tarball it signs, which `test_build_layout` checks. A signing
+failure is tested with a failing `gpg` first on `PATH`: neither output and no `stage/` remains. The
+real signed build is the operator's: no test or agent runs it
+against real `gpg`, and no test checks a signature.
 
 ## Agents File
 
@@ -474,7 +491,7 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
 - **kb set + kbase** — the `kbase` skill alone: the definition a base install excludes by name and
   a kb install delivers — except under mage, which always includes it. `kbase.py` owns a directory,
   `skills/kbase/SKILL.md` routing by request and
-  `skills/kbase/references/reading.md`, `building.md`, `maintaining.md`, `scoring.md`, and `scoring-system.md` carrying what
+  `skills/kbase/references/reading.md`, `building.md`, `maintaining.md`, `scoring.md`, `scoring-system.md` and `installing.md` carrying what
   each route needs; the router is the only text every session pays for, and the rule that a
   reference is read only when its route is reached is the router's own — its *Route by the request*
   section says so, and nothing but that text stops a read.
@@ -483,14 +500,27 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   references that work a KB the build has finished with — reading, which reports, and maintaining,
   which modifies; `build.md` and `scoring.md` carry what their own job needs.
   The skill and its references are project-portable — per-project facts live in the consuming
-  project's `kb-root/AGENTS.md`, under every harness. The toolchain they drive is kbase, the binary
-  a kb install writes beside its snippets, and the set's route to it is MCP-only: every query, write
+  project's `kb-root/AGENTS.md`, under every harness. The toolchain they drive is kbase, the executable the user installs
+  with Homebrew (no install writes it), and the set's route to it is MCP-only: every query, write
   op, `refresh`, `verify`, `build` and `score` the set names is a tool of the harness's `kbase` MCP
   server, offered under that harness's `mcp_tool_prefix`, and the one value outside its tools is
-  that server's `kbase://model-hints` resource, read by uri. The router says so and stops where that
-  server's tools are not offered — the executable and the `kb-` runner targets run only on the
-  user's direction — and defers to kbase's own text, and to `kb-root/AGENTS.md`, wherever the skill
-  disagrees with them.
+  that server's `kbase://model-hints` resource, read by uri. The router says so. When a request
+  matches a route-table row other than installing and the server's tools are not offered, the router
+  runs `command -v kbase` — a `PATH` lookup that runs nothing, so outside the rule that kbase runs
+  only on the user's word — and reports what it found. No path: kbase is not installed, how it
+  installs, and `references/installing.md` if the user wants the walkthrough. A path: kbase is
+  installed and its MCP server is not running here, so the user enables, restarts or reconnects it
+  in their harness, and `references/installing.md` covers a restart that does not bring the tools
+  back. No other turn mentions installing kbase, and the installing row (`installing or upgrading
+  kbase`) is the route that needs no tools. `installing.md` has the session show the Homebrew
+  commands, read `kbase --version` against the minimum, name native Windows as unsupported, ask for
+  a restart of the MCP server, and, for tools still not offered after one, tell the user the harness
+  process may not find `kbase` on its own `PATH` and have them put Homebrew's `bin` directory on it;
+  it runs a command only when the user asks it to. The minimum version and the formula are written
+  once, as `KBASE_MIN_VERSION` and `KBASE_TAP_FORMULA` in `kbase.py`, and filled into the router
+  and that reference. The executable and
+  the `kb-` runner targets run only on the user's direction, and the skill defers to kbase's own text, and to
+  `kb-root/AGENTS.md`, wherever it disagrees with them.
   Scoring is the one whose call outlives it: `score` starts the run detached and answers once the
   run's ledger and pid stand, leaving `wait`, `status` and `cancel` to follow — the same three the
   build leaves. The loop is kbase's own — it enumerates the scoring set, renders the closed,
@@ -503,8 +533,7 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   installed `kb-` targets, `refresh`, `verify` and `stats` are `kb-refresh`, `kb-verify` and
   `kb-stats`, run only on the user's direction. The consumer's runner targets are this repository's
   `kb-tools/runner-snippets/` fragments — `kb-verify`, `kb-refresh`, `kb-stats`, `kb-`-prefixed so they cannot collide with a
-  consuming project's own targets — each running the executable it finds from the fragment's own
-  directory.
+  consuming project's own targets — each running `kbase` from `PATH`.
 - **Specialists** — applied-mathematician, biz-dev-strategist, economic-historian, literature-scout,
   marketing-comms-expert, ml-engineer, prompt-engineer, prose-architect, theoretical-economist:
   single-purpose, invoked directly rather than as part of a coding pipeline.

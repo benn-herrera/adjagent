@@ -38,5 +38,4 @@ else
     : > "${out}/RENDER-FLAGS.txt"
 fi
 "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" "${harness}" "${agents_target}"
-kbase_bin="$("${PROJECT_ROOT}/devtools/scripts/_kbase-bin.sh")"
-"${PROJECT_ROOT}/devtools/scripts/install.sh" "${out}" --subdir= --with-kb --kbase-dist="${kbase_bin}" "${args[@]}"
+"${PROJECT_ROOT}/devtools/scripts/install.sh" "${out}" --subdir= --with-kb "${args[@]}"

@@ -41,8 +41,8 @@ def _add_tuning_flags(verb: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """One verb, required: `render --out DIR` and `install ROOT [--verbose] [--with-kb]
-    [--kbase-dist PATH] [--project-root DIR]`, each with the tuning flags; `install-agents-file
-    HARNESS DIR`; `render-agents-file HARNESS OUT`; `harnesses`; `version`; and `harness NAME KEY`.
+    [--project-root DIR]`, each with the tuning flags; `install-agents-file HARNESS DIR`;
+    `render-agents-file HARNESS OUT`; `harnesses`; `version`; and `harness NAME KEY`.
     allow_abbrev=False on every parser."""
     parser = argparse.ArgumentParser(prog="python3 -m adjagent", allow_abbrev=False)
     verbs = parser.add_subparsers(dest="verb", required=True)
@@ -55,7 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
     installing.add_argument(
         "--with-kb", action="store_true", help="install the kb definitions and the kb-tools package"
     )
-    installing.add_argument("--kbase-dist", type=Path, metavar="PATH", help="the signed kbase executable to install")
     installing.add_argument(
         "--project-root",
         type=Path,
@@ -97,7 +96,6 @@ def _run(args: argparse.Namespace) -> None:
             _tuned(args),
             verbose=args.verbose,
             with_kb=args.with_kb,
-            kbase_dist=args.kbase_dist,
             project_root=args.project_root,
         )
     elif args.verb == "install-agents-file":

@@ -14,27 +14,26 @@
 # removed — the consumer's justfile keeps working and only these KB recipes
 # go missing.
 #
-# Assumed consumer layout: the repo root (where just runs) contains kb-root/,
-# and this fragment sits beside the installed `kbase` executable under
-# <harness-dir>/skills/kbase/kb-tools/. kbase finds the KB from the working
-# directory, so these recipes run from the repo root.
+# Assumed consumer layout: the repo root (where just runs) contains kb-root/.
+# kbase finds the KB from the working directory, so these recipes run from
+# the repo root.
 #
-# The binary is found from this fragment's own location: the snippets
-# directory's parent is the installed kb-tools directory, and kbase sits
-# there (`kbase.exe` on Windows). The path is absolute, so it resolves to the
-# installed executable however the consumer invokes just.
+# The recipes run `kbase` from PATH; the user installs it themselves — the kbase skill's
+# references/installing.md walks through it.
 #
 # Recipe names carry a `kb-` prefix, so they cannot collide with a project's
 # own verify/refresh/stats. Plain recipe lines, no `set shell` — nothing here
 # needs bash.
-#
-# Recipes:
-#   kb-verify          verify KB link integrity and claim-graph metadata
-#   kb-refresh         refresh mechanically maintained KB metadata
-#   kb-stats           print KB claim-graph stats
 
-KB_TOOLS_DIR := parent_directory(source_directory())
-KBASE := KB_TOOLS_DIR + "/kbase" + (if os_family() == "windows" { ".exe" } else { "" })
+KBASE := "kbase"
+
+[doc("show help on kb just recipes")]
+kb-help:
+    @just --justfile "{{justfile()}}" --list | grep -E '^[ \t]+kb-'
+
+[doc("create a new, empty KB. refuses if kb-root exists")]
+kb-init:
+    "{{KBASE}}" init
 
 [doc("verify KB link integrity and claim-graph metadata")]
 kb-verify:
@@ -47,3 +46,11 @@ kb-refresh:
 [doc("print KB claim-graph stats")]
 kb-stats:
     "{{KBASE}}" stats
+
+[doc("run an inference scoring pass over the KB")]
+kb-score:
+  "{{KBASE}}" score
+
+[doc("generate a LaTeX file set from the KB")]
+kb-export-latex:
+    "{{KBASE}}" export-latex

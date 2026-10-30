@@ -21,9 +21,6 @@ import 'python.just'
 
 GEN := "adjagent"
 
-KBASE_VERSION := "v0.8.1"
-TOOL_DIST_CACHE := justfile_dir() / ".tool-dist-cache"
-
 default:
     @just --list | grep -v '\[dev\]'
     @echo "===="
@@ -31,36 +28,15 @@ default:
 
 [doc("install into <project>/<subdir>/; <project> is the first non-flag argument, resolved and passed as the project root the harness directory ROOT sits under; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
 install target *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/install.sh "$@"
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "$@"
 
-[doc("install with the kb set as well as the base product: the kb- definitions, the kb-tools package with a kbase from the dist cache beside its runner snippets, and the project-root kbase MCP entry and runner include line; every argument means what it means to install")]
-install-with-kb target *args: _download-kbase-dist
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/install-with-kb.sh "$@"
-
-[private]
-_download-kbase-dist:
-  @TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/_download-kbase-dist.sh
-
-[private]
-_kbase-bin:
-    @TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/_kbase-bin.sh
-
-[private]
-_harness-value harness key:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-value.sh "$@"
-
-[private]
-_harness-names:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-names.sh
+[doc("install with the kb set as well as the base product: the kb- definitions, the kb-tools package of runner snippets, and the project-root kbase MCP entry (the bare `kbase` command, which the user installs with Homebrew) and runner include line; every argument means what it means to install")]
+install-with-kb target *args:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install-with-kb.sh "$@"
 
 [doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis")]
 install-agents-file dir harness="":
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install-agents-file.sh "$@"
-
-[doc("tag the current commit v<version>, <version> read from `python3 -m adjagent version`; refuses while adjagent/ has uncommitted changes or the tag already exists, and never pushes")]
-tag:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/tag.sh
-
 
 ##
 ##
@@ -79,21 +55,37 @@ tag:
 # not a privileged tree.
 RENDERED_DIR := "rendered"
 
+[doc("tag the current commit v<version>, <version> read from `python3 -m adjagent version`; refuses while adjagent/ has uncommitted changes or the tag already exists, and never pushes")]
+tag:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/tag.sh
+
+[doc("build the mage plugin from the working tree into dist/ (override with DIST_DIR) as adjagent-mage-v<version>.tgz with a detached .asc signed by the release key; removes stale outputs and the stage on exit; uploads nothing")]
+mage-dist:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/mage-dist.sh
+
 [doc("[dev] render the full install product, kb set included, into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug), plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/, or at the slot root for a plugin (`mage`) — refuses a slug starting with reference; every --* flag, --harness included, forwards verbatim to `python3 -m adjagent install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
-render *args: _download-kbase-dist
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/render.sh "$@"
+render *args:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/render.sh "$@"
 
 [private]
 _render-slot slug *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/_render-slot.sh "$@"
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh "$@"
 
 [doc("[dev] re-take the three oracle slots rendered/reference, reference-opencode and reference-gemma from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
-retake-reference: _download-kbase-dist
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" TOOL_DIST_CACHE="{{TOOL_DIST_CACHE}}" KBASE_VERSION="{{KBASE_VERSION}}" ./devtools/scripts/retake-reference.sh
+retake-reference:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/retake-reference.sh
 
 [private]
 render-agents-file harness out:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/render-agents-file.sh "$@"
+
+[private]
+_harness-value harness key:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-value.sh "$@"
+
+[private]
+_harness-names:
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-names.sh
 
 # Reports and never gates: a difference between two slots is the expected
 # outcome of doing work, so differences exit zero. Only a comparison that could

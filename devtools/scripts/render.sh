@@ -26,10 +26,9 @@
 # nothing touched: those slots are the pre-1.0 oracle until stage 6 re-renders them.
 #
 # A slot is rendered with the kb set as well as the base product — the kb definitions, the kb-tools
-# package with the dist `kbase`, and the slot's own MCP entry (the slot is its own project root) — so
-# a `render-diff` compares the kb half too, and `_download-kbase-dist` runs before the slot is
-# touched. A plugin's slot (`mage`) carries no runner include line and no `Makefile`, its harness
-# writing neither.
+# package, and the slot's own MCP entry (the slot is its own project root) — so a `render-diff`
+# compares the kb half too. A plugin's slot (`mage`) carries no runner include line and no
+# `Makefile`, its harness writing neither.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Stands in for gpg. Only `--yes --detach-sign --armor <file>` is spoken: it writes <file>.asc
+# naming the file and its checksum, and any other invocation fails.
+set -uo pipefail
+
+function die() {
+  printf 'stub gpg: %s\n' "${1}" >&2
+  exit 2
+}
+
+file="" detach=0 armor=0 overwrite=0
+while [[ "$#" -gt 0 ]]; do
+  case "${1}" in
+    --detach-sign) detach=1; shift ;;
+    --armor) armor=1; shift ;;
+    --yes) overwrite=1; shift ;;
+    -*) die "unexpected option: ${1}" ;;
+    *) file="${1}"; shift ;;
+  esac
+done
+[[ "${detach}" -eq 1 && "${armor}" -eq 1 ]] || die "a signing call is not --detach-sign --armor"
+[[ -f "${file}" ]] || die "no such file: ${file}"
+if [[ -e "${file}.asc" && "${overwrite}" -eq 0 ]]; then
+  die "${file}.asc exists and this call carries no --yes"
+fi
+{
+  printf '%s\n' 'stub-signature v1'
+  printf 'file %s\n' "$(basename "${file}")"
+  printf 'cksum %s\n' "$(cksum < "${file}")"
+} > "${file}.asc"

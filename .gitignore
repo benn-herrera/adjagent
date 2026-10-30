@@ -15,8 +15,8 @@ __pycache__/
 .venv/
 mad-design/
 
-# binary tool distribution download cache
-.tool-dist-cache/
+# where plugin tarballs land
+dist/
 
 # this repo's own render tree (justfile RENDERED): a build product, produced
 # on demand by the same install path a consuming project gets. Never committed.

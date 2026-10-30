@@ -1,7 +1,6 @@
 """The claude harness."""
 
 import re
-from pathlib import Path
 
 from adjagent.errors import InputError
 from adjagent.harness import (
@@ -11,7 +10,6 @@ from adjagent.harness import (
     HookClaim,
     McpSettings,
     McpSite,
-    command_relative,
     quoted,
 )
 from adjagent.vocabulary import Tool
@@ -40,9 +38,9 @@ never hands back with a background command running. If a recipe times out, the a
 instead of rerunning it in the background."""
 
 
-def _mcp_entry(*, command: str, base: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """A `command`/`args` entry under `mcpServers`, its command from `command_relative`."""
-    return {"command": command_relative(command, base), "args": ["mcp"]}, ("mcpServers", "kbase")
+def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
+    """A `command`/`args` entry under `mcpServers`."""
+    return {"command": command, "args": ["mcp"]}, ("mcpServers", "kbase")
 
 
 _GUARDRAIL_SCRIPT = "hooks/guardrail.pl"
@@ -102,6 +100,7 @@ HARNESS = Harness(
     user_harness_dir="~/.claude",
     mcp_tool_prefix="mcp__kbase__",
     recipe_rule=_RECIPE_RULE,
+    kbase_project_rule="",
     coder_dispatch=_coder_dispatch,
     tools={
         Tool.READ: ("Read",),

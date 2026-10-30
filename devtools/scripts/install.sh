@@ -68,12 +68,6 @@ fi
 # assure harness arg present
 [[ "${args[*]+"${args[*]}"}" != *--harness=* ]] && args+=(--harness="${harness}") || true
 
-# mage always gets kb
-[[ "${harness}" == "mage" && "${args[*]}" != "--with-kb" ]] && args+=("--with-kb") || true
-
-# assure kbase dist available when installing kb
-[[ "${args[*]+"${args[*]}"}" == *--with-kb* ]] && args+=(--kbase-dist="$("${PROJECT_ROOT}/devtools/scripts/_kbase-bin.sh")") || true
-
 # pwd -P so a symlinked path resolves to the tree the install reads; the
 # harness arguments name paths from the project root, not from ROOT. The
 # assignment's status is `cd`'s own, so an unenterable directory stops the

@@ -7,6 +7,9 @@ edited there. The generator owns the guarantees — one source for every shared 
 additive-only model tuning, the whole tree regenerated on each install; the rendered set does the
 work — coder and platform specialists, knowledge-base construction and tooling.
 
+## Developer
+<https://keyoxide.org/wkd/benn@bennherrera.dev>
+
 ## Usage
 
 This section is for installing the product into your own project and using what it delivers. For
@@ -28,16 +31,20 @@ Base requirements:
 - `perl` with core `JSON::PP` — optional, for the claude Bash guardrail; without it the install
   skips that hook and installs everything else ([Bash guardrail](#bash-guardrail)).
 
-For the kb set (`just install-with-kb`, whose `kbase` release the recipe downloads):
+For the kb set (`just install-with-kb`):
 
+- kbase 0.9.0 or later, installed by you — no install writes it. On macOS or Linux:
+  `brew install benn-herrera/kbase/kbase`; `kbase --version` prints the bare version, and
+  `brew upgrade benn-herrera/kbase/kbase` brings an older one up. The harness's `kbase` MCP entry
+  runs the bare command `kbase`, so it has to be on `PATH`, and the MCP server has to be
+  (re)started after an install or upgrade before its tools appear. Nothing checks the version.
+  Native Windows is unsupported for the kb set for now. An agent session can walk you through all of
+  this: the `kbase` skill's `references/installing.md`.
 - pandoc 3.12 - LaTeX <-> Markdown, host tool, not shipped; a build refuses one out of range
 - git - a KB lives in a git repository, and a build records each stage boundary as a commit
 - graphviz - optional, for rendering claim graph diagrams as SVG
 - a way to reach a model - a build that spends inference needs one; today that is a provider
   configuration; `kbase score` always spends inference; a `--no-inference` build needs none
-- gpg and network access - optional, for re-checking the installed binary against its release
-  signature with `skills/kbase/kb-tools/verify-kbase-signature.sh`, which locates the signer's key
-  over WKD; the release is already verified when the recipe downloads it
 
 Clone this repo anywhere, then install the deployed surfaces into the consuming project — from
 **this** repo's root:
@@ -52,7 +59,7 @@ beside them under `adj-tools/`; no such package is shipped today. Files a harnes
 too, copied unchanged and unstamped: they are not renders of this project's definitions. Claude and
 opencode ship one, a Bash guardrail, claude's only where `perl` passes the install's check ("Bash
 guardrail", below); mage ships none. The kb set is not in a base install: `just
-install-with-kb ~/projects/foo` adds the `kbase` skill under `skills/`, with the `kbase` toolchain in
+install-with-kb ~/projects/foo` adds the `kbase` skill under `skills/`, with the runner snippets in
 `skills/kbase/kb-tools/` beneath it ("Knowledge Base Set", below) — except mage, whose plugin always
 installs with it. The definitions are rendered by that invocation and the tool packages are copied.
 Test suites and caches stay behind.
@@ -87,11 +94,44 @@ file more, `.opencode/plugins/guardrail.ts`, copied as it stands. A mage install
 trees at the top level of its own `adjagent` directory under the target — `<plugins-parent>/adjagent`
 — with the manifest at `.claude-plugin/plugin.json` beside them, rendered rather than copied, and no
 hook: mage ships none.
-A kb install adds the `kbase` skill at `skills/kbase/`, with the `kbase` toolchain in
-`skills/kbase/kb-tools/` beneath it (the skill carries its own tooling), the `kbase` MCP entry — at
-the project root, or, under mage, at the plugin root — and one include line in the project's justfile
+A kb install adds the `kbase` skill at `skills/kbase/`, with the runner snippets in
+`skills/kbase/kb-tools/` beneath it (the skill carries its own tooling), the `kbase` MCP entry,
+whose command is the bare `kbase` — at the project root, or, under mage, at the plugin root — and
+one include line in the project's justfile
 or Makefile. A mage install writes no include line and creates no `Makefile`: a plugin is not a repo
 project, so there is no consumer runner to append one to.
+
+### Mage plugin release
+
+The mage plugin is also published as a release: a tarball and its detached signature. The tarball
+holds the plugin only; the plugin's `kbase` MCP command is the bare `kbase`, so you install kbase
+yourself (see Install, above). Contract: [SPEC.md](SPEC.md), Mage Plugin Distribution.
+
+#### Installing a release
+
+1. Download `adjagent-mage-v<version>.tgz` from the release `v<version>` of
+   [benn-herrera/adjagent](https://github.com/benn-herrera/adjagent/releases), and optionally its
+   `adjagent-mage-v<version>.tgz.asc`.
+2. Optionally check the tarball against the signature. Fetch the release signer's public key over
+   WKD (the developer's key is linked under Developer, above), then verify:
+
+   ```sh
+   gpg --auto-key-locate wkd --locate-external-keys benn@bennherrera.dev
+   gpg --verify adjagent-mage-v<version>.tgz.asc adjagent-mage-v<version>.tgz
+   ```
+
+3. Unpack it into Mage's skills directory, removing any earlier copy first:
+
+   ```sh
+   rm -rf ~/Mage/Skills/adjagent
+   tar -xzf adjagent-mage-v<version>.tgz -C ~/Mage/Skills/
+   ```
+
+   The tarball has one top-level `adjagent/` directory, so this leaves `~/Mage/Skills/adjagent`.
+4. Install kbase if you have not: the Homebrew command and the minimum version are under Install,
+   above. Native Windows is unsupported for the kb set, which a mage plugin always carries.
+5. Restart Mage so it starts the plugin's `kbase` MCP server; the plugin's entry finds `kbase` on
+   `PATH`. Do the same after installing or upgrading kbase while Mage is running.
 
 ### Bash guardrail
 
@@ -133,8 +173,8 @@ and the skill to use it. Add `.mcp.json` to `.gitignore` if you use this recipe.
 #### Justfile
 ```just
 AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
-AGENTS_DIR := ".claude" / file_stem(AGENTS_REPO)
-AGENTS_VER := "v0.11.1"
+AGENTS_DIR := "." + file_stem(AGENTS_REPO)
+AGENTS_VER := "v0.12.5"
 [doc("updates and installs agent set from adjagents public repo")]
 agents:
   @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
@@ -151,7 +191,7 @@ agents:
 .PHONY: agents
 AGENTS_REPO := https://github.com/benn-herrera/adjagent.git
 AGENTS_DIR := .$(basename $(notdir $(AGENTS_REPO)))
-AGENTS_VER := v0.11.1
+AGENTS_VER := v0.12.5
 agents:
 	@mkdir -p $(dir $(AGENTS_DIR))
 	@[[ -d "$(AGENTS_DIR)" ]] && git -C "$(AGENTS_DIR)" fetch --tags || git -C "$(dir $(AGENTS_DIR))" clone "$(AGENTS_REPO)" "$(AGENTS_DIR)"
@@ -301,7 +341,7 @@ not.
   * `kbase` skill, `references/building.md` - drives kbase's `build` tool: reports the refusal, or the
     launch that entered a stage — its `state-dir`, `pid`, `resume` and `wait` lines, `wait` run in
     the background to hear the build end; then `status` on request, `cancel` on your word
-  * kbase - the builder itself, a Go binary this repository installs but does not ship as source:
+  * kbase - the builder itself, a Go binary you install with Homebrew; this repository neither ships nor installs it:
     `kbase build` runs the stages in order, spends inference through its own provider configuration,
     and makes each stage boundary a commit in your repository
   * `kbase` skill, `references/maintaining.md` - the write side: leaf edits, claim-graph wiring and
@@ -314,17 +354,18 @@ not.
 
 #### KB toolchain
 
-The kb set drives **kbase**, a Go binary, not a Python package. `just install-with-kb` delivers it to
-`.claude/skills/kbase/kb-tools/kbase` by default (`.opencode/skills/kbase/kb-tools/kbase` under
-opencode; `skills/kbase/kb-tools/kbase` at the plugin root under mage) — inside the skill's own
-directory, the path the include line and the MCP entry name — and beside it the two runner fragments.
-kbase's own documentation is its repository, [benn-herrera/kbase](https://github.com/benn-herrera/kbase);
+The kb set drives **kbase**, a Go binary, not a Python package. You install it yourself
+(see Install, above) and `just install-with-kb` does not touch it. What the install delivers is the two runner fragments, to
+`.claude/skills/kbase/kb-tools/runner-snippets/` by default (`.opencode/skills/kbase/kb-tools/runner-snippets/`
+under opencode; `skills/kbase/kb-tools/runner-snippets/` at the plugin root under mage), inside the
+skill's own directory; they run `kbase` from `PATH`. kbase's own documentation is its repository, [benn-herrera/kbase](https://github.com/benn-herrera/kbase);
 `INTEGRATING_KBASE_VIA_MCP.md` there is the wiring guide. The same install:
 
 1. Registers a `kbase` MCP server in the harness's own settings file — `.mcp.json` under Claude Code
    and at the plugin root under mage; under opencode the first of `.opencode/opencode.json`,
    `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. The entry's command is
-   the installed binary, run as `kbase mcp`; it names no KB path. Every query, write op, `refresh`,
+   the bare `kbase` from `PATH`, run as `kbase mcp` (`kbase mcp --project-dir-required` under mage); it
+   names no KB path. Every query, write op, `refresh`,
    `verify`, `build` and `score` the set names is a tool of that server, offered under the harness's
    own prefix — `mcp__kbase__stats` under Claude Code, `kbase_stats` under opencode. A settings file
    carrying JSONC comments, or a settings path that is a symlink or not a regular file, is reported
@@ -338,16 +379,23 @@ kbase's own documentation is its repository, [benn-herrera/kbase](https://github
 
 The route is MCP-only for every verb, scoring among them: the `score` tool starts its run detached
 and answers once the run's ledger and pid stand, and the run is followed with `status`, `wait` and
-`cancel`. Where the server is not connected the skill says so and stops, and registering it, which
-the install does, is the fix, not a second interface. The KB lives in `kb-root/` at the repository
+`cancel`. When you ask for KB work and the server's tools are not offered, the skill looks for
+`kbase` on `PATH` (it runs nothing) and tells you which it is: not installed, with how to install it,
+or installed with its MCP server not running here, which you enable, restart or reconnect in your
+harness. If a restart does not bring the tools back, the harness process may not find `kbase` on its
+own `PATH`, which can differ from your shell's; `references/installing.md` walks through both cases.
+It never reaches for a second interface. The KB lives in `kb-root/` at the repository
 root, and the entry names no path to it: `kbase mcp` locates the KB from the working directory it
 is started in, as every kbase subcommand does, so the server must be started in the project
-directory.
+directory. Under mage, an application serving many projects, the server is started with
+`--project-dir-required` instead: each tool call names its project with `project-dir`.
 
-The choice is sticky: a directory already holding the installed `kbase` executable at
-`skills/kbase/kb-tools/` — or the `agents/kb-tools/` an earlier version installed — is a kb install,
-so a later `just install` into it refreshes the fragments and keeps kb rather than dropping it. A
-plain `just install` into a directory without that executable writes nothing of the kb set — no
+The choice is sticky: a directory already holding a kb install is one, so a later `just install`
+into it refreshes the kb set rather than dropping it (the signal is a file, never the `kb-tools/`
+directory; [ARCHITECTURE.md](ARCHITECTURE.md), Install Consumption Model, names it). A kb install
+replaces `skills/kbase/kb-tools/` whole, so a `kbase` binary and `.asc` an earlier version put there
+are removed, and any install removes the other trees an earlier version installed, naming each. A
+plain `just install` into a directory holding no kb install writes nothing of the kb set — no
 `skills/kbase/` tree, no kb-tools tree, no MCP entry and no include line — and removes each file of
 one it finds as stale.
 
@@ -356,9 +404,9 @@ one it finds as stale.
 This section is for working on this repository itself — the generator, its definitions, and the
 shipped tool packages. If you are installing the product into a project, see Usage, above.
 
-Beyond the install requirements, the test suite needs `bun` and `perl` on `PATH`: the guardrail
-parity test (`tests/test_guardrail.py`) runs one case table through both guardrails and fails, not
-skips, without `bun`. The two guardrails change together ([CONVENTIONS.md](CONVENTIONS.md)).
+Beyond the install requirements, the test suite needs `bun` and `perl` on `PATH`: the
+guardrail parity test (`tests/test_guardrail.py`) runs one case table through both guardrails and
+fails, not skips, without `bun`. The two guardrails change together ([CONVENTIONS.md](CONVENTIONS.md)).
 
 ### Repository Layout
 
@@ -371,11 +419,10 @@ adjagent/                 the generator and every definition, run as `python3 -m
                           harness directory as they stand (opencode/plugins/guardrail.ts,
                           claude/hooks/guardrail.pl)
   families/               one module per model family, each defining FAMILY
-kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk) and the
-                          signature spot check (verify-kbase-signature.sh), delivered by a kb install
-                          only; installed beside the kbase binary and its signature as
-                          skills/kbase/kb-tools/, inside the kbase skill's own directory
-.tool-dist-cache/         gitignored — the kbase release `install-with-kb` downloads and installs
+kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
+                          a kb install only as skills/kbase/kb-tools/, inside the kbase skill's own
+                          directory
+dist/                     gitignored — what `just mage-dist` writes (see "Releasing the mage plugin")
 devtools/render_diff.py   compares two rendered slots by text; reads only rendered output
 rendered/                 gitignored build product — `just render [slug]` puts a render here per
                           slot; the three `reference*` slots are the baseline `just render-diff`
@@ -413,7 +460,7 @@ text with holes, read top to bottom as the file it renders.
   accepted; it re-takes the baseline slots `render-diff` compares against.
 
 Other targets: `just render [slug]` renders the full install product — kb set included, so the slot
-carries the `kbase` skill under `skills/` with the `kbase` toolchain in `skills/kbase/kb-tools/`
+carries the `kbase` skill under `skills/` with the runner snippets in `skills/kbase/kb-tools/`
 beneath it, the harness's MCP entry and, for claude and opencode, a `Makefile` include line — into
 `rendered/<slug>/` (slug defaults to `latest`), plus the harness agents file under
 `rendered/<slug>/harness/<name>/` — `CLAUDE.md` by default, or another harness's with
@@ -427,6 +474,28 @@ each file's banner replaced by one constant line, and reports differences withou
 test suite (the `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
 `just test-changed [base]` runs only the surfaces the uncommitted tree (plus, given `base`, the
 commits since it) touches, and says which paths chose each.
+
+### Releasing the mage plugin
+
+`just mage-dist` writes two files to `dist/`: `adjagent-mage-v<version>.tgz` and its detached
+`.asc` signature. What the consumer does is under Usage, "Mage plugin release"; the contract is
+[SPEC.md](SPEC.md), Mage Plugin Distribution.
+
+The build needs `gpg` holding your signing key as its default secret key; it signs with that key
+and pins no fingerprint, so a rotated key needs no code change. It removes the previous outputs and
+its `stage/`, and builds from the working tree as it stands, with no git check. A build that fails,
+signing included, leaves neither output and no `stage/`.
+
+To release:
+
+1. Bump the version and commit it ([CONVENTIONS.md](CONVENTIONS.md), the version bullet).
+2. `just test`.
+3. `just mage-dist`.
+4. `just tag`, which creates the local tag `v<version>` and pushes nothing; push it yourself.
+5. Create the release `v<version>` on GitHub and upload the two files. The recipe uploads, tags
+   and pushes nothing.
+6. Smoke check: from an empty scratch directory, download the uploaded tarball and its `.asc` from
+   the release, `gpg --verify` the one against the other, and list the tarball (`tar -tzf`).
 
 ### Authoring a Family
 

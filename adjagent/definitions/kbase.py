@@ -9,6 +9,9 @@ from adjagent import clauses
 from adjagent.definition import Definition, SkillFile
 from adjagent.vocabulary import Kind
 
+KBASE_MIN_VERSION = "0.9.0"
+KBASE_TAP_FORMULA = "benn-herrera/kbase/kbase"
+
 DEFINITIONS = (
     Definition(
         name="kbase",
@@ -17,10 +20,11 @@ DEFINITIONS = (
             "Use when the user asks what this repository records about a result, claim, derivation, citation or "
             "strength — whatever they call the store — or when they point at .tex sources here, a repository of "
             "papers, to index into one, or when they ask to score the KB's rigor and bearings, or when "
-            "they hand over a correction, a finished result or a migration to land in the KB; NOT for "
+            "they hand over a correction, a finished result or a migration to land in the KB, or when they "
+            "ask to install or upgrade kbase itself; NOT for "
             "questions about code, configuration, or documents, except a KB."
         ),
-        body="""## Locate the KB
+        body=f"""## Locate the KB
 
 Before reading anything, establish where the KB is. The probes run from the directory you are standing
 in, in this order:
@@ -34,7 +38,9 @@ is what makes a directory a viable KB root rather than a section inside one. Eac
 `.index/` exists, never what it holds. Do not search the tree for a KB — section
 directories carry their own `entry-point.md`, and a search finds the wrong one.
 
-Every `kb-root/...` path a reference names resolves against the located **KB root**.
+{clauses.KBASE_PROJECT_RULE}
+
+In every path a reference names, `kb-root/` stands for the located **KB root**.
 
 ## One of three outcomes
 
@@ -65,12 +71,21 @@ likewise governs this skill where they disagree.
 
 ## Route by the request
 
-Every route below needs the `kbase` MCP server's tools offered to you. Where they are not, say so
-and stop: a server switched off, never enabled or never registered all mean kbase is not to be used
-here. Run its executable or its `kb-` runner targets only when the user directs you to — what they
-named, and nothing more. A `wait` line a kbase tool's result hands you is that tool's own
-continuation: run it as the reference says. Turning the server on is the user's call, not a gap for
-you to work around.
+Every route except `references/installing.md` needs the `kbase` MCP server's tools offered to you.
+When a request matches a row below other than installing, and those tools are not offered, run
+`command -v kbase` — a `PATH` lookup that runs nothing — and tell the user what it found:
+
+- **Nothing:** kbase is not installed. On macOS or Linux it installs with Homebrew,
+  `brew install {KBASE_TAP_FORMULA}`, version {KBASE_MIN_VERSION} or later. Open
+  `references/installing.md` if they want the walkthrough.
+- **A path:** kbase is installed, but its MCP server is not running here. The user enables it, or
+  restarts or reconnects it, in their harness. If a restart does not bring the tools back, open
+  `references/installing.md`: it covers that case.
+
+Outside that check, mention installing kbase only when the user asks about it. Run `kbase` itself or
+its `kb-` runner targets only when the user directs you to — what they named, and nothing more. A
+`wait` line a kbase tool's result hands you is that tool's own continuation: run it as the reference
+says. Turning the server on is the user's call, not a gap for you to work around.
 
 | the request | the route |
 | --- | --- |
@@ -79,6 +94,7 @@ you to work around.
 | adding, correcting or migrating KB content | `references/maintaining.md` |
 | scoring the KB's rigor and bearings | `references/scoring.md` |
 | how the scoring system works | `references/scoring-system.md` |
+| installing or upgrading kbase | `references/installing.md` |
 
 Open only the reference the matched row names: the other route's text is not context for this
 request.
@@ -87,15 +103,11 @@ request.
 
 The conversation continues across topics: there is no handoff to perform and no session file to write
 between them. Write a reading log only when the user asks for one. Never change directory once you are
-underway — kbase resolves the KB, a build's volume roots and its bibliography files from the working
-directory, so a `cd` either loses the KB or resolves later paths against another root.""",
+underway: a KB root the probes located from where you stand is relative to it, and a `cd` loses it.""",
         files=(
             SkillFile(
                 path="references/reading.md",
                 body=f"""{clauses.kb_orientation(role="you are the reading seat of a finished KB — you navigate it, reason about what it says, and write nothing")}
-
-**Paths in this reference.** Started from the project root, the `kb-root/` prefix is literal; started
-from `kb-root/` itself, drop it — those paths are then relative to where you already stand.
 
 {clauses.kb_orientation_docs(when="at session start")}
 
@@ -253,10 +265,11 @@ launch returns, and follow it with `status` on request and `cancel` on the user'
 
 ## What the build takes
 
-The volume roots the user names are the whole input, each spelled relative to the repository root and
-passed in the order given, one `volume-root` per source. Anything else the user typed is not an
-input — not a further source, and nothing this reference carries into the launch; say so rather than
-folding it into the call.
+The volume roots the user names are the whole input, each passed as an absolute path, one
+`volume-root` per source. The order they come in is not part of it: kbase orders them itself, and the
+result does not depend on the order given. Anything else the user typed is not an input — not a
+further source, and nothing this reference carries into the launch; say so rather than folding it
+into the call.
 
 ## The fast path
 
@@ -270,12 +283,15 @@ spine seed, declared claims, equations, the validation gate and readiness all st
 leaves out is the model's share — no discovered claims, no unmarked references, no co-linear
 culling, no dependencies attributed by the model, no overview passage — and the result carries a
 note naming each step it skipped. State that trade when you offer it: this is the structure, not a
-complete KB. The full build follows on the same KB afterwards if the user wants the rest.
+complete KB. State its cost as well: a fast-path trail is a finished one, so a resume over it changes
+nothing and the dropped steps never run on it. The full build afterwards is a start over (*Resuming
+and starting over*, below) whose fresh `build` leaves `no-inference` off: it begins from scratch and
+keeps no stage of the fast run.
 
 ## Launch
 
-Call the `build` tool with one `volume-root` per source, in the order given. Tell the user before you
-call it that every stage boundary of the build is a commit in their repository.
+Call the `build` tool with one `volume-root` per source. Tell the user before you call it that every
+stage boundary of the build is a commit in their repository.
 
 The result is one of three:
 
@@ -286,9 +302,11 @@ The result is one of three:
   ends and then prints the store's `status` document, and that is how you learn the build ended —
   relay the outcome when it returns.
 - **`refused`** — nothing started. The items name what is wrong, each with a remedy where one exists;
-  relay them, and the launch ends there. A `check: provider` item is a configuration gap: call the
-  `show-config` tool and relay its document rather than reading the file yourself to explain the
-  refusal, so the user can fix the file the item's `path` names in the layer `show-config` reports.
+  relay them, and the launch ends there. A `check: inputs` item is a build trail already standing in
+  the repository: *Resuming and starting over* says what follows it. A `check: provider` item is a
+  configuration gap: call the `show-config` tool and relay its document rather than reading the file
+  yourself to explain the refusal, so the user can fix the file the item's `path` names in the layer
+  `show-config` reports.
   Then offer to set it up: `configure` with `create` writes annotated templates for both files where
   none stands; once `providers.toml` names an endpoint, `models` lists that provider's ids and
   `configure` with `model-map` writes the choice.
@@ -319,7 +337,21 @@ what they chose.
 ## Following it
 
 `status` on the user's request: relay its `state`, the stage under `current` and the `resume` command
-where it carries one. `cancel` only on the user's word, and relay what it returns.""",
+where it carries one. `cancel` only on the user's word, and relay what it returns.
+
+## Resuming and starting over
+
+- **A resume** is `build` with `resume` true and no `volume-root`: it continues with the inputs the
+  trail records. Given a volume root it is refused, `check: usage`; over a finished trail it returns
+  `unchanged`.
+- **A `check: inputs` refusal** answers volume roots given over a trail that already stands. Relay
+  the remedies it carries — continue with a resume, or start over — and let the user choose between
+  them. Where the trail records no `started-at`, the refusal names no `rewind-build`; relay the way
+  to start over that it does name.
+- **Starting over** is `rewind-build` with `target` `started-at`. It changes nothing: relay its
+  `commands`, the reset for the user to run, and the paths under `dirty` that reset would discard
+  where it lists any. Once the user has run it, call `build` with the volume roots they name — a
+  fresh build.""",
             ),
             SkillFile(
                 path="references/scoring.md",
@@ -628,6 +660,51 @@ already writing this KB, you are the other role below.
                 body="""The descriptions of the internals of the scoring system are maintained in
 [STRENGTH_SCORING_SCHEME.md](https://github.com/benn-herrera/kbase/blob/main/STRENGTH_SCORING_SCHEME.md) and
 [RIGOR_AND_BEARING_SCORING_SCHEME.md](https://github.com/benn-herrera/kbase/blob/main/RIGOR_AND_BEARING_SCORING_SCHEME.md)""",
+            ),
+            SkillFile(
+                path="references/installing.md",
+                body=f"""Walk the user through installing or upgrading kbase, the executable the `kbase` MCP server runs.
+This skill needs kbase {KBASE_MIN_VERSION} or later.
+
+Show each command below for the user to run. Run one yourself only when the user asks you to run
+that command.
+
+## Platform
+
+kbase installs through Homebrew on macOS and Linux. Native Windows has no supported install yet: say
+so, and stop.
+
+## Where kbase stands
+
+`kbase --version` prints the installed version bare, with no `v` — `{KBASE_MIN_VERSION}`, say. What it
+prints decides the next step:
+
+| `kbase --version` | next step |
+| --- | --- |
+| no `kbase` found | install |
+| a version earlier than {KBASE_MIN_VERSION} | upgrade |
+| {KBASE_MIN_VERSION} or later | none to install; where the tools are not offered, restart the server |
+
+## Install or upgrade
+
+- Install: `brew install {KBASE_TAP_FORMULA}`
+- Upgrade: `brew upgrade {KBASE_TAP_FORMULA}`
+
+Then check `kbase --version` against the table again.
+
+## Restart the server
+
+The harness starts the `kbase` MCP server with the bare command `kbase`, found on `PATH`, and only
+when the server starts: a kbase installed or upgraded since is not the one serving this session. Ask
+the user to restart or reconnect the kbase MCP server in their harness. Its tools are offered once it
+is running, and every other route needs them.
+
+## Tools still not offered after a restart
+
+With kbase {KBASE_MIN_VERSION} or later installed and the server restarted, tools still not offered
+mean the harness process does not find `kbase` on its own `PATH`, which can differ from the `PATH` of
+the user's shell. The user puts Homebrew's `bin` directory, `$(brew --prefix)/bin`, on the `PATH` the
+harness starts with, then restarts the harness itself: the server inherits that `PATH` from it.""",
             ),
         ),
     ),

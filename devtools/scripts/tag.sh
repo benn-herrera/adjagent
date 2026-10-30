@@ -30,5 +30,5 @@ if git rev-parse --verify --quiet "refs/tags/${tag}" > /dev/null; then
     printf '%s\n' "error: tag '${tag}' already exists — bump adjagent/version.py before tagging again" >&2
     exit 1
 fi
-git tag "${tag}"
+GPG_TTY=$(tty) git tag -s "${tag}" -m"release ${tag}"
 printf '%s\n' "created tag ${tag} at $(git rev-parse --short HEAD)"

@@ -30,6 +30,7 @@ from adjagent.harnesses.mage import HARNESS as MAGE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.install import (
     HARNESS_RESOURCES_SOURCE,
+    KBASE_NAME,
     REPO_ROOT,
     _is_our_resource,
     _named_harnesses,
@@ -253,7 +254,7 @@ _COMMENT_BANNER = "<!-- !GENERATED! from adjagent/definitions/kbase.py — x -->
 _KBASE_BYTES = b"KBASE-STUB-v1\n"
 # The kb set is the kbase skill alone, so its definition-side footprint is empty.
 _KB_DEFINITIONS: tuple[str, ...] = ()
-# The kbase skill's files: one definition owning a directory, so a run keeps or drops all six.
+# The kbase skill's files: one definition owning a directory, so a run keeps or drops all seven.
 _KB_SKILL_FILES = (
     "skills/kbase/SKILL.md",
     "skills/kbase/references/reading.md",
@@ -261,23 +262,8 @@ _KB_SKILL_FILES = (
     "skills/kbase/references/scoring.md",
     "skills/kbase/references/maintaining.md",
     "skills/kbase/references/scoring-system.md",
+    "skills/kbase/references/installing.md",
 )
-
-
-def _kbase_exe(tmp_path: Path, *, name: str = "kbase") -> Path:
-    """A stand-in `kbase` executable: known bytes with the executable bit set."""
-    path = tmp_path / name
-    path.write_bytes(_KBASE_BYTES)
-    path.chmod(0o755)
-    return path
-
-
-def _unexecutable(tmp_path: Path) -> Path:
-    """A stand-in `kbase` file with the executable bit clear."""
-    path = tmp_path / "kbase"
-    path.write_bytes(_KBASE_BYTES)
-    path.chmod(0o644)
-    return path
 
 
 def _definition_install(
@@ -285,10 +271,9 @@ def _definition_install(
     ctx: Render = _CLAUDE_RENDER,
     *,
     with_kb: bool = False,
-    kbase_dist: Path | None = None,
     project_root: Path | None = None,
 ) -> None:
-    install(root, ctx, verbose=False, with_kb=with_kb, kbase_dist=kbase_dist, project_root=project_root)
+    install(root, ctx, verbose=False, with_kb=with_kb, project_root=project_root)
 
 
 # The harness resources: the files a harness ships for its own harness directory, copied into ROOT as
@@ -429,7 +414,6 @@ def test_a_default_install_writes_no_kb_definition_and_no_kb_side_config(tmp_pat
         *_KB_DEFINITIONS,
         *_KB_SKILL_FILES,
         "skills/kbase/kb-tools/runner-snippets/kb.just",
-        "skills/kbase/kb-tools/kbase",
     ):
         assert relative not in files
     assert not (root / "skills").exists()
@@ -445,8 +429,7 @@ def test_a_kb_install_writes_the_kb_definitions_the_package_the_mcp_entry_and_th
     root = project / ".claude"
     root.mkdir()
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
-    dist = _kbase_exe(tmp_path)
-    _definition_install(root, with_kb=True, kbase_dist=dist, project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES):
         assert (root / relative).is_file()
     kb_just = (root / "skills/kbase/kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
@@ -455,16 +438,8 @@ def test_a_kb_install_writes_the_kb_definitions_the_package_the_mcp_entry_and_th
     assert kb_just[0].startswith("# !INSTALLED! from kb-tools/runner-snippets/kb.just — ")
     assert kb_just[1:] == source_just
     assert kb_mk[0].startswith("# !INSTALLED! from kb-tools/runner-snippets/kb.mk — ")
-    kbase = root / "skills/kbase/kb-tools/kbase"
-    assert kbase.read_bytes() == dist.read_bytes() == _KBASE_BYTES
-    assert os.access(kbase, os.X_OK)
     assert json.loads((project / ".mcp.json").read_text(encoding="utf-8")) == {
-        "mcpServers": {
-            "kbase": {
-                "command": ".claude/skills/kbase/kb-tools/kbase",
-                "args": ["mcp"],
-            }
-        }
+        "mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}
     }
     assert (project / "justfile").read_text(encoding="utf-8") == (
         "# mine\n\nimport? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
@@ -474,149 +449,68 @@ def test_a_kb_install_writes_the_kb_definitions_the_package_the_mcp_entry_and_th
     assert "appended the KB include line" in captured.out
 
 
-@pytest.mark.parametrize(
-    "dist",
-    [lambda tmp: tmp / "gone", lambda tmp: _unexecutable(tmp), lambda tmp: _kbase_exe(tmp, name="kbase.bin")],
-    ids=["missing", "not-executable", "wrong-name"],
-)
-def test_a_kbase_dist_that_cannot_be_installed_is_refused_with_nothing_written(tmp_path: Path, dist) -> None:
-    """A `--kbase-dist` the install cannot use is a refusal, never a silent fall-through to the
-    installed binary — the caller asked for that file."""
-    root = tmp_path / ".claude"
-    root.mkdir()
-    source = dist(tmp_path)
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="--kbase-dist"):
-        _definition_install(root, with_kb=True, kbase_dist=source, project_root=tmp_path)
-    assert _files(tmp_path) == before
-
-
-def test_a_kbase_dist_inside_the_destination_it_replaces_is_refused_and_the_tree_survives(
-    tmp_path: Path,
-) -> None:
-    """The source is read before the first write: a dist inside a destination this run deletes would
-    otherwise be gone before it could be copied, leaving nothing installed."""
-    project = tmp_path
-    root = project / ".claude"
-    installed = root / "skills/kbase/kb-tools/kbase"
-    installed.parent.mkdir(parents=True)
-    installed.write_bytes(_KBASE_BYTES)
-    installed.chmod(0o755)
-    (project / "justfile").write_text("# mine\n", encoding="utf-8")
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="is inside"):
-        _definition_install(root, with_kb=True, kbase_dist=installed, project_root=project)
-    assert _files(tmp_path) == before
-
-
-_SIGNATURE_BYTES = b"-----BEGIN PGP SIGNATURE-----\nstand-in\n-----END PGP SIGNATURE-----\n"
-
-
-def _signed_kbase_exe(tmp_path: Path) -> Path:
-    """A stand-in `kbase` executable with a stand-in detached signature beside it, as the release
-    installer leaves them in the dist cache."""
-    dist = _kbase_exe(tmp_path)
-    (tmp_path / "kbase.asc").write_bytes(_SIGNATURE_BYTES)
-    return dist
-
-
-def _copied_count(out: str) -> int:
-    """The copied-file count an install's report line states."""
-    match = re.search(r"(\d+) copied files", out)
-    assert match is not None, out
-    return int(match.group(1))
-
-
-def test_a_kbase_dist_signature_is_installed_beside_the_executable_byte_verbatim(tmp_path: Path, capsys) -> None:
-    """The `.asc` beside a `--kbase-dist` lands beside the installed executable under its name, with no
-    banner, and the report counts and lists it: one more copied file than the same install unsigned."""
-    signed_root = tmp_path / "signed" / ".claude"
-    signed_root.mkdir(parents=True)
-    unsigned_root = tmp_path / "unsigned" / ".claude"
-    unsigned_root.mkdir(parents=True)
-    dists = tmp_path / "dists"
-    (dists / "signed").mkdir(parents=True)
-    (dists / "unsigned").mkdir()
-    capsys.readouterr()
-    install(
-        signed_root,
-        _CLAUDE_RENDER,
-        verbose=True,
-        with_kb=True,
-        kbase_dist=_signed_kbase_exe(dists / "signed"),
-        project_root=signed_root.parent,
-    )
-    signed_out = capsys.readouterr().out
-    _definition_install(
-        unsigned_root, with_kb=True, kbase_dist=_kbase_exe(dists / "unsigned"), project_root=unsigned_root.parent
-    )
-    unsigned_out = capsys.readouterr().out
-    signature = signed_root / "skills/kbase/kb-tools/kbase.asc"
-    assert signature.read_bytes() == _SIGNATURE_BYTES
-    assert f"wrote {signature}" in signed_out
-    assert "no kbase signature" not in signed_out
-    assert _copied_count(signed_out) == _copied_count(unsigned_out) + 1
-
-
-def test_a_missing_kbase_signature_is_reported_and_the_install_goes_on(tmp_path: Path, capsys) -> None:
-    """A source with no `.asc` beside it installs the executable all the same, and the report names the
-    signature path it looked for."""
-    root = tmp_path / ".claude"
-    root.mkdir()
-    dist = _kbase_exe(tmp_path)
-    capsys.readouterr()
-    _definition_install(root, with_kb=True, kbase_dist=dist, project_root=tmp_path)
-    assert (root / "skills/kbase/kb-tools/kbase").read_bytes() == _KBASE_BYTES
-    assert not (root / "skills/kbase/kb-tools/kbase.asc").exists()
-    assert f"no kbase signature at {tmp_path / 'kbase.asc'}" in capsys.readouterr().out
-
-
-def test_a_sticky_install_keeps_the_installed_signature_and_refreshes_the_verify_script(tmp_path: Path) -> None:
-    """A run carrying no new executable leaves the installed signature where it stands, as it leaves
-    the executable, while the verify script beside them is delivered again."""
-    project = tmp_path
-    root = project / ".claude"
-    root.mkdir()
-    _definition_install(root, with_kb=True, kbase_dist=_signed_kbase_exe(tmp_path), project_root=project)
-    script = root / "skills/kbase/kb-tools/verify-kbase-signature.sh"
-    script.unlink()
-    _definition_install(root, project_root=project)
-    assert (root / "skills/kbase/kb-tools/kbase.asc").read_bytes() == _SIGNATURE_BYTES
-    assert (root / "skills/kbase/kb-tools/kbase").read_bytes() == _KBASE_BYTES
-    assert script.is_file()
-
-
-def test_a_kb_install_ships_the_verify_script_stamped_below_its_shebang_and_executable(tmp_path: Path) -> None:
-    root = tmp_path / ".claude"
-    root.mkdir()
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
-    script = root / "skills/kbase/kb-tools/verify-kbase-signature.sh"
-    lines = script.read_text(encoding="utf-8").split("\n")
-    source = (REPO_ROOT / "kb-tools/verify-kbase-signature.sh").read_text(encoding="utf-8").split("\n")
-    assert lines[0] == source[0] and lines[0].startswith("#!")
-    assert lines[1].startswith("# !INSTALLED! from kb-tools/verify-kbase-signature.sh — ")
-    assert lines[2:] == source[1:]
-    assert os.access(script, os.X_OK)
-
-
-def test_the_current_kb_tools_destination_makes_a_plain_install_sticky(tmp_path: Path) -> None:
-    """A plain install into a root already carrying the kb-tools destination is a kb install: the kbase
-    skill's files and the installed executable stay."""
+def test_an_installed_kbase_router_makes_a_plain_install_sticky(tmp_path: Path) -> None:
+    """A plain install into a root whose kbase router carries this repository's banner is a kb install:
+    the kbase skill's files and the kb-tools package stay."""
     project = tmp_path
     root = project / ".claude"
     root.mkdir()
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     _definition_install(root, project_root=project)
     after = _files(root)
-    for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES):
+    for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES, "skills/kbase/kb-tools/runner-snippets/kb.just"):
         assert relative in after
-    assert after["skills/kbase/kb-tools/kbase"] == _KBASE_BYTES
 
 
-def test_a_kb_tools_tree_without_the_executable_is_not_sticky(tmp_path: Path) -> None:
-    """The executable is the signal, not the directory: a tree whose kb-tools destination holds no
-    `kbase` executable is not a kb install's evidence, so a plain install stays plain — no kb
+def test_a_sticky_install_removes_the_executable_an_earlier_version_installed(tmp_path: Path) -> None:
+    """A root the router makes a kb install, still holding the `kbase` executable and its signature an
+    earlier version placed in kb-tools/, loses both — the destination is replaced whole — and its MCP
+    entry names the bare command rather than the installed executable."""
+    project = tmp_path
+    root = project / ".claude"
+    root.mkdir()
+    _definition_install(root, with_kb=True, project_root=project)
+    executable = root / "skills/kbase/kb-tools/kbase"
+    executable.write_bytes(_KBASE_BYTES)
+    signature = executable.with_name("kbase.asc")
+    signature.write_bytes(b"-----BEGIN PGP SIGNATURE-----\n")
+    (project / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"kbase": {"command": ".claude/skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}),
+        encoding="utf-8",
+    )
+    _definition_install(root, project_root=project)
+    assert not executable.exists() and not signature.exists()
+    assert (root / "skills/kbase/kb-tools/runner-snippets/kb.just").is_file()
+    settings = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    assert settings == {"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}}
+
+
+def test_a_projects_own_unbannered_kbase_skill_leaves_a_plain_install_plain(tmp_path: Path) -> None:
+    """The router counts only when it carries this repository's banner: a `skills/kbase/SKILL.md` the
+    project wrote is not a kb install's evidence — no kb definitions, no MCP entry, and the runner file
+    and that file untouched."""
+    project = tmp_path
+    root = project / ".claude"
+    router = root / "skills/kbase/SKILL.md"
+    router.parent.mkdir(parents=True)
+    mine = "---\nname: kbase\ndescription: mine\n---\n\nmy own skill\n"
+    router.write_text(mine, encoding="utf-8")
+    (project / "justfile").write_text("# mine\n", encoding="utf-8")
+    _definition_install(root, project_root=project)
+    files = _files(root)
+    for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES):
+        if relative != "skills/kbase/SKILL.md":
+            assert relative not in files
+    assert not (root / "skills/kbase/kb-tools").exists()
+    assert router.read_text(encoding="utf-8") == mine
+    assert not (project / ".mcp.json").exists()
+    assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
+
+
+def test_a_kb_tools_tree_without_the_router_is_not_sticky(tmp_path: Path) -> None:
+    """The router is the signal, not the directory: a tree whose kb-tools destination holds files but
+    no kbase router beside it is not a kb install's evidence, so a plain install stays plain — no kb
     definitions, no MCP entry, no runner include line, and the tree left as it was found."""
     project = tmp_path
     root = project / ".claude"
@@ -633,25 +527,6 @@ def test_a_kb_tools_tree_without_the_executable_is_not_sticky(tmp_path: Path) ->
     assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
 
 
-def test_a_non_executable_installed_kbase_is_refused_with_nothing_written(tmp_path: Path) -> None:
-    """The sticky rule keys on the file existing, so a copy whose executable bit was never set still
-    selects kb — but it is no source, no legacy tree holds one and no --kbase-dist was passed, so the
-    refusal names the file's state rather than claiming it absent, and writes nothing."""
-    project = tmp_path
-    root = project / ".claude"
-    installed = root / "skills/kbase/kb-tools/kbase"
-    installed.parent.mkdir(parents=True)
-    installed.write_bytes(_KBASE_BYTES)
-    installed.chmod(0o644)
-    (project / "justfile").write_text("# mine\n", encoding="utf-8")
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="exists but is not an executable file"):
-        _definition_install(root, project_root=project)
-    assert _files(tmp_path) == before
-    assert not (project / ".mcp.json").exists()
-    assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
-
-
 def test_the_version_verb_prints_the_constant_and_nothing_else(capsys) -> None:
     """A recipe parses this line to cut the tag, so it is the constant alone: no `v`, no suffix, no
     prose, one line — and the constant carries that shape, which a manifest would inherit too."""
@@ -664,48 +539,13 @@ def test_the_cli_with_kb_flag_installs_the_kb_skill_files_and_the_skill_kb_tools
     tmp_path: Path,
 ) -> None:
     """`--with-kb` reaches `install()`: driven through the CLI entry point, the flag's own effect —
-    the kbase skill's files, the runner snippets and the copied `kbase` — is what appears under ROOT."""
+    the kbase skill's files and the runner snippets — is what appears under ROOT."""
     root = tmp_path / ".claude"
     root.mkdir()
-    dist = _kbase_exe(tmp_path)
-    main(["install", str(root), "--harness=claude", "--with-kb", f"--kbase-dist={dist}"])
+    main(["install", str(root), "--harness=claude", "--with-kb"])
     assert all((root / relative).is_file() for relative in _KB_SKILL_FILES)
     snippets = root / "skills/kbase/kb-tools/runner-snippets"
     assert (snippets / "kb.just").is_file() and (snippets / "kb.mk").is_file()
-    kbase = root / "skills/kbase/kb-tools/kbase"
-    assert kbase.read_bytes() == _KBASE_BYTES
-    assert os.access(kbase, os.X_OK)
-
-
-def test_the_legacy_agents_kb_tools_destination_makes_a_plain_install_sticky(tmp_path: Path, capsys) -> None:
-    """A tree an earlier version installed is a kb install's evidence and its source: the binary is
-    copied to the new destination before the old tree is removed, and the snippets are refreshed."""
-    project = tmp_path
-    root = project / ".claude"
-    legacy = root / "agents/kb-tools"
-    snippets = legacy / "runner-snippets"
-    snippets.mkdir(parents=True)
-    (snippets / "kb.just").write_text("# stale snippet\n", encoding="utf-8")
-    (snippets / "gone.just").write_text("# stale\n", encoding="utf-8")
-    legacy_kbase = legacy / "kbase"
-    legacy_kbase.write_bytes(_KBASE_BYTES)
-    legacy_kbase.chmod(0o755)
-    (project / "justfile").write_text("# mine\n", encoding="utf-8")
-    capsys.readouterr()
-    _definition_install(root, project_root=project)
-    for relative in _KB_SKILL_FILES:
-        assert (root / relative).is_file()
-    installed_kbase = root / "skills/kbase/kb-tools/kbase"
-    assert installed_kbase.read_bytes() == _KBASE_BYTES and os.access(installed_kbase, os.X_OK)
-    assert not legacy.exists()
-    out = capsys.readouterr().out
-    assert f"removed legacy tree {legacy}" in out
-    new_snippets = root / "skills/kbase/kb-tools/runner-snippets"
-    assert not (new_snippets / "gone.just").exists()
-    kb_just = (new_snippets / "kb.just").read_text(encoding="utf-8")
-    assert kb_just.startswith("# !INSTALLED! from kb-tools/runner-snippets/kb.just — ")
-    assert "# stale snippet" not in kb_just and "kb-verify" in kb_just
-    assert not any(line.startswith("pruned ") and "kb-" in line for line in out.splitlines())
 
 
 def test_an_excluded_run_prunes_a_stale_kb_definition_it_did_not_write(tmp_path: Path, capsys) -> None:
@@ -728,26 +568,27 @@ def test_a_kb_install_prunes_a_stale_reference_and_keeps_a_user_file(tmp_path: P
     mine = root / "skills/kbase/notes.md"
     mine.write_text("---\nmine\n---\n", encoding="utf-8")
     capsys.readouterr()
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
+    _definition_install(root, with_kb=True, project_root=tmp_path)
     assert not stale.exists()
     assert mine.read_text(encoding="utf-8") == "---\nmine\n---\n"
     assert all((root / relative).is_file() for relative in _KB_SKILL_FILES)
     assert f"pruned {stale}" in capsys.readouterr().out
 
 
-def test_a_plain_install_prunes_every_file_a_kb_install_wrote_for_the_skill(tmp_path: Path, capsys) -> None:
-    """A skill is one keep/drop decision: no run leaves the router standing beside its references gone."""
+def test_a_plain_install_prunes_every_kbase_reference_left_without_its_router(tmp_path: Path, capsys) -> None:
+    """A skill is one keep/drop decision: a ROOT holding the skill's references without its router —
+    the router being the sticky signal — is a plain install, and every reference goes."""
     root = tmp_path / ".claude"
-    for relative in _KB_SKILL_FILES:
+    references = [relative for relative in _KB_SKILL_FILES if not relative.endswith("SKILL.md")]
+    for relative in references:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        body = _NEW_BANNER if path.name == "SKILL.md" else f"{_COMMENT_BANNER}\n\nbody\n"
-        path.write_text(body, encoding="utf-8")
+        path.write_text(f"{_COMMENT_BANNER}\n\nbody\n", encoding="utf-8")
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     assert not (root / "skills/kbase").exists()
     pruned = {line for line in capsys.readouterr().out.splitlines() if line.startswith("pruned ")}
-    assert pruned == {f"pruned {root / relative}" for relative in _KB_SKILL_FILES}
+    assert pruned == {f"pruned {root / relative}" for relative in references}
 
 
 def test_prune_recognizes_the_banner_the_renderer_writes(tmp_path: Path, capsys) -> None:
@@ -798,13 +639,18 @@ def test_prune_leaves_a_symlink_standing(tmp_path: Path) -> None:
 def test_every_install_removes_each_legacy_tree_and_names_it(tmp_path: Path, capsys, kb: bool) -> None:
     project = tmp_path
     root = project / ".claude"
-    planted = ("agents/kb_tools/kb_util.py", "agents/kb-tools/stale.py", "agents/liaison_tools/liaison_util.py")
+    planted = (
+        "agents/kb_tools/kb_util.py",
+        "adj-tools/kb-tools/stale.py",
+        "agents/kb-tools/stale.py",
+        "agents/liaison_tools/liaison_util.py",
+    )
     for relative in planted:
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_text("# legacy\n", encoding="utf-8")
     capsys.readouterr()
     if kb:
-        _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+        _definition_install(root, with_kb=True, project_root=project)
     else:
         _definition_install(root, project_root=project)
     out = capsys.readouterr().out
@@ -816,26 +662,10 @@ def test_every_install_removes_each_legacy_tree_and_names_it(tmp_path: Path, cap
     assert (message in out) == (not kb)
 
 
-@pytest.mark.parametrize(
-    "expected",
-    [".claude/skills/kbase/kb-tools/kbase", "skills/kbase/kb-tools/kbase"],
-    ids=["harness-dir", "project-is-root"],
-)
-def test_the_mcp_command_is_relative_to_the_project_under_both_harnesses(tmp_path: Path, expected: str) -> None:
-    """The command is named relative to the project root with POSIX separators, so the settings file
-    can be tracked — including a root that is the project itself."""
-    project = tmp_path / "project"
-    project.mkdir()
-    executable = str((project / expected).resolve())
-    claude_entry, _ = CLAUDE.mcp.entry(command=executable, base=project)
-    opencode_entry, _ = OPENCODE.mcp.entry(command=executable, base=project)
-    assert claude_entry["command"] == expected
-    assert opencode_entry["command"] == [expected, "mcp"]
-
-
 def test_the_mcp_merge_keeps_every_unrelated_key(tmp_path: Path) -> None:
-    """The entry is replaced where it stands — the absolute command an earlier version wrote does not
-    survive, so an upgraded project needs no hand edit — and every key beside it is kept."""
+    """The entry is replaced where it stands — the installed-executable command an earlier version
+    wrote does not survive, so an upgraded project needs no hand edit — and every key beside it is
+    kept."""
     project = tmp_path
     root = project / ".claude"
     root.mkdir()
@@ -845,20 +675,17 @@ def test_the_mcp_merge_keeps_every_unrelated_key(tmp_path: Path) -> None:
                 "permissions": {"allow": ["Bash"]},
                 "mcpServers": {
                     "other": {"command": "x"},
-                    "kbase": {"command": f"{project.resolve()}/.claude/skills/kbase/kb-tools/kbase", "args": []},
+                    "kbase": {"command": ".claude/skills/kbase/kb-tools/kbase", "args": ["mcp"]},
                 },
             }
         ),
         encoding="utf-8",
     )
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     data = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
     assert data["permissions"] == {"allow": ["Bash"]}
     assert data["mcpServers"]["other"] == {"command": "x"}
-    assert data["mcpServers"]["kbase"] == {
-        "command": ".claude/skills/kbase/kb-tools/kbase",
-        "args": ["mcp"],
-    }
+    assert data["mcpServers"]["kbase"] == {"command": "kbase", "args": ["mcp"]}
 
 
 def test_the_opencode_mcp_entry_lands_in_the_discovered_file_in_the_v2_shape(tmp_path: Path) -> None:
@@ -869,15 +696,12 @@ def test_the_opencode_mcp_entry_lands_in_the_discovered_file_in_the_v2_shape(tmp
     discovered.write_text(
         json.dumps({"theme": "omlx", "mcp": {"servers": {"other": {"type": "local"}}}}), encoding="utf-8"
     )
-    _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=project)
     text = discovered.read_text(encoding="utf-8")
     data = json.loads(text)
     assert data["theme"] == "omlx"
     assert data["mcp"]["servers"]["other"] == {"type": "local"}
-    assert data["mcp"]["servers"]["kbase"] == {
-        "type": "local",
-        "command": [".opencode/skills/kbase/kb-tools/kbase", "mcp"],
-    }
+    assert data["mcp"]["servers"]["kbase"] == {"type": "local", "command": ["kbase", "mcp"]}
     assert "enabled" not in text
     assert not (root / "opencode.jsonc").exists()
 
@@ -889,17 +713,13 @@ def test_the_opencode_mcp_entry_lands_in_the_discovered_file_in_the_v2_shape(tmp
             ".claude",
             _CLAUDE_RENDER,
             ".mcp.json",
-            {"mcpServers": {"kbase": {"command": ".claude/skills/kbase/kb-tools/kbase", "args": ["mcp"]}}},
+            {"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}},
         ),
         (
             ".opencode",
             _OPENCODE_RENDER,
             ".opencode/opencode.jsonc",
-            {
-                "mcp": {
-                    "servers": {"kbase": {"type": "local", "command": [".opencode/skills/kbase/kb-tools/kbase", "mcp"]}}
-                }
-            },
+            {"mcp": {"servers": {"kbase": {"type": "local", "command": ["kbase", "mcp"]}}}},
         ),
     ],
     ids=["claude", "opencode"],
@@ -909,7 +729,7 @@ def test_the_mcp_settings_file_is_created_when_absent(
 ) -> None:
     root = tmp_path / harness_dir
     root.mkdir()
-    _definition_install(root, ctx, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
+    _definition_install(root, ctx, with_kb=True, project_root=tmp_path)
     text = (tmp_path / canonical).read_text(encoding="utf-8")
     assert json.loads(text) == kbase_entry
     assert "enabled" not in text
@@ -917,24 +737,21 @@ def test_the_mcp_settings_file_is_created_when_absent(
     assert "--kb-root" not in text
 
 
-# mage's settings file is the plugin's own, at ROOT: its paths, and the command inside it, are named
-# relative to ROOT rather than to the project the plugin is installed under.
+# mage's settings file is the plugin's own, at ROOT rather than at the project the plugin is installed
+# under.
 
 
 def test_a_mage_kb_install_keeps_its_mcp_entry_beside_the_plugin_at_root(tmp_path: Path) -> None:
-    """ROOT is the plugin's own directory, so the settings file and the command in it resolve against
-    ROOT — the project root holds no `.mcp.json` at all — and the manifest is still the three-key one
-    carrying VERSION. No runner include line is written and no `Makefile` created at either root: a
-    plugin is not a repo project."""
+    """ROOT is the plugin's own directory, so the settings file resolves against ROOT — the project root
+    holds no `.mcp.json` at all — and the manifest is still the three-key one carrying VERSION. No
+    runner include line is written and no `Makefile` created at either root: a plugin is not a repo
+    project."""
     project = tmp_path
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
-    _definition_install(root, _MAGE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _MAGE_RENDER, with_kb=True, project_root=project)
     settings = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
-    assert settings == {"mcpServers": {"kbase": {"command": "skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}
-    installed = root / settings["mcpServers"]["kbase"]["command"]
-    assert installed.read_bytes() == _KBASE_BYTES
-    assert os.access(installed, os.X_OK)
+    assert settings == {"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp", "--project-dir-required"]}}}
     assert not (project / ".mcp.json").exists()
     manifest = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
     assert set(manifest) == {"name", "version", "description"}
@@ -945,41 +762,26 @@ def test_a_mage_kb_install_keeps_its_mcp_entry_beside_the_plugin_at_root(tmp_pat
 
 def test_a_mage_install_includes_kb_without_the_flag(tmp_path: Path) -> None:
     """A plugin's product is the kb set, so a plain mage install is a kb install: no `with_kb` argument
-    is passed and the settings file lands beside the plugin carrying the entry, with the executable
-    copied to the tree the command in it names."""
+    is passed and the settings file lands beside the plugin carrying the entry, beside the kbase skill
+    and its kb-tools package."""
     project = tmp_path
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
-    _definition_install(root, _MAGE_RENDER, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _MAGE_RENDER, project_root=project)
     settings = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
-    assert settings == {"mcpServers": {"kbase": {"command": "skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}
-    installed = root / settings["mcpServers"]["kbase"]["command"]
-    assert installed.read_bytes() == _KBASE_BYTES
-    assert os.access(installed, os.X_OK)
+    assert settings == {"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp", "--project-dir-required"]}}}
+    assert all((root / relative).is_file() for relative in _KB_SKILL_FILES)
+    assert (root / "skills/kbase/kb-tools/runner-snippets/kb.just").is_file()
     assert not (project / ".mcp.json").exists()
-
-
-def test_a_mage_install_without_a_kbase_source_refuses(tmp_path: Path) -> None:
-    """The set is not optional for a plugin, so an install with nothing to install it from is refused by
-    the source check that names the flag supplying one — before the first write, leaving ROOT as it
-    stands."""
-    project = tmp_path
-    root = project / "plugins/adjagent"
-    root.mkdir(parents=True)
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="--kbase-dist"):
-        _definition_install(root, _MAGE_RENDER, project_root=project)
-    assert _files(tmp_path) == before
 
 
 def test_a_later_mage_install_over_a_kb_root_leaves_the_mcp_entry_standing(tmp_path: Path) -> None:
     """ROOT's top-level settings file is outside every prune surface, so a later install neither
-    removes it nor rewrites it: with the executable it finds installed as its source, it re-splices the
-    same entry, byte for byte."""
+    removes it nor rewrites it: it re-splices the same entry, byte for byte."""
     project = tmp_path
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
-    _definition_install(root, _MAGE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _MAGE_RENDER, with_kb=True, project_root=project)
     written = (root / ".mcp.json").read_text(encoding="utf-8")
     _definition_install(root, _MAGE_RENDER, project_root=project)
     assert (root / ".mcp.json").read_text(encoding="utf-8") == written
@@ -992,15 +794,13 @@ _MAGE_MANIFEST = ".claude-plugin/plugin.json"
 
 
 def test_a_mage_install_names_no_absolute_path_and_no_home_directory(tmp_path: Path) -> None:
-    """Every path the plugin's own configuration writes — the MCP command included, which takes a kb
-    install to be written — is named against the directory the plugin lands in, because that directory
-    moves. The `~/` search is over those two files alone: a definition's prose names `~/.config` in
-    order to forbid hardcoding it, so a tree-wide search reports the advice rather than a path. Read as
-    bytes: a copied executable is not text."""
+    """Nothing the plugin writes names the directory it lands in, because that directory moves. The `~/`
+    search is over the manifest and the MCP settings file alone: a definition's prose names `~/.config` in
+    order to forbid hardcoding it, so a tree-wide search reports the advice rather than a path."""
     project = tmp_path
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
-    _definition_install(root, _MAGE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _MAGE_RENDER, with_kb=True, project_root=project)
     files = _files(root)
     ours = (_MAGE_MANIFEST, ".mcp.json")
     assert set(ours) <= set(files)
@@ -1015,7 +815,7 @@ def test_a_mage_install_ships_no_hook_and_writes_no_settings_file(tmp_path: Path
     project = tmp_path
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
-    _definition_install(root, _MAGE_RENDER, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _MAGE_RENDER, project_root=project)
     assert not (root / "hooks").exists()
     assert not (project / ".claude/settings.json").exists()
     assert not (root / ".claude/settings.json").exists()
@@ -1024,12 +824,11 @@ def test_a_mage_install_ships_no_hook_and_writes_no_settings_file(tmp_path: Path
 def test_a_second_mage_install_passes_over_its_own_manifest_byte_identical(tmp_path: Path) -> None:
     """The manifest is JSON, which no generated banner rides in front of, so the marker the file states
     about itself is what makes it ours: an install over one this repository wrote is not refused and
-    not pruned, and rewrites the same bytes — the second install finding the first one's executable as
-    its kbase source."""
+    not pruned, and rewrites the same bytes."""
     project = tmp_path
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
-    _definition_install(root, _MAGE_RENDER, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _MAGE_RENDER, project_root=project)
     manifest = root / _MAGE_MANIFEST
     written = manifest.read_bytes()
     _definition_install(root, _MAGE_RENDER, project_root=project)
@@ -1055,7 +854,7 @@ def test_a_verbose_mage_install_lists_the_manifest_as_written(tmp_path: Path, ca
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
     capsys.readouterr()
-    install(root, _MAGE_RENDER, verbose=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    install(root, _MAGE_RENDER, verbose=True, project_root=project)
     assert f"wrote {root / _MAGE_MANIFEST}" in capsys.readouterr().out.splitlines()
 
 
@@ -1066,15 +865,15 @@ def test_an_mcp_file_carrying_jsonc_comments_is_reported_and_left_untouched(tmp_
     prior = '{\n  // my own server\n  "mcp": {"servers": {}}\n}\n'
     discovered.write_text(prior, encoding="utf-8")
     capsys.readouterr()
-    _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
+    _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=tmp_path)
     assert discovered.read_text(encoding="utf-8") == prior
     assert f"{discovered} carries JSONC comments — left untouched; merge this entry by hand:" in capsys.readouterr().out
 
 
-def _built_entry(harness: Harness, project: Path, root: Path) -> dict:
-    """The `kbase` entry `harness`'s builder makes for `root` installed under `project` — the value the
-    splice is expected to have placed, read from the builder rather than restated."""
-    entry, _ = harness.mcp.entry(command=str(root.resolve() / "skills/kbase/kb-tools/kbase"), base=project)
+def _built_entry(harness: Harness) -> dict:
+    """The `kbase` entry `harness`'s builder makes for the bare `kbase` command — the value the splice
+    is expected to have placed, read from the builder rather than restated."""
+    entry, _ = harness.mcp.entry(command=KBASE_NAME)
     return entry
 
 
@@ -1095,12 +894,12 @@ def test_the_mcp_splice_leaves_every_byte_outside_the_entry_slot(tmp_path: Path)
         "}\n"
     )
     (project / ".mcp.json").write_text(seed, encoding="utf-8")
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     text = (project / ".mcp.json").read_text(encoding="utf-8")
     head, other, tail = seed.partition('"other": {"command": "x", "args": [1, 2.50, true]}')
     assert other and text.startswith(head) and text.endswith(tail)
     before = json.loads(seed)
-    before["mcpServers"]["kbase"] = _built_entry(CLAUDE, project, root)
+    before["mcpServers"]["kbase"] = _built_entry(CLAUDE)
     assert json.loads(text) == before
 
 
@@ -1110,10 +909,10 @@ def test_a_compact_one_line_mcp_file_gains_the_entry_inline(tmp_path: Path) -> N
     root = project / ".claude"
     root.mkdir()
     (project / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     text = (project / ".mcp.json").read_text(encoding="utf-8")
     assert "\n" not in text
-    assert json.loads(text) == {"mcpServers": {"kbase": _built_entry(CLAUDE, project, root)}}
+    assert json.loads(text) == {"mcpServers": {"kbase": _built_entry(CLAUDE)}}
 
 
 def test_a_settings_file_without_the_container_gains_it_whole(tmp_path: Path) -> None:
@@ -1124,13 +923,13 @@ def test_a_settings_file_without_the_container_gains_it_whole(tmp_path: Path) ->
     root.mkdir()
     seed = '{\n  "permissions": {"allow": ["Bash"]}\n}\n'
     (project / ".mcp.json").write_text(seed, encoding="utf-8")
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     text = (project / ".mcp.json").read_text(encoding="utf-8")
     assert text.startswith('{\n  "permissions": {"allow": ["Bash"]},\n  "mcpServers": ')
     assert text.endswith("\n}\n")
     assert json.loads(text) == {
         "permissions": {"allow": ["Bash"]},
-        "mcpServers": {"kbase": _built_entry(CLAUDE, project, root)},
+        "mcpServers": {"kbase": _built_entry(CLAUDE)},
     }
 
 
@@ -1143,11 +942,11 @@ def test_an_existing_kbase_entry_is_replaced_where_it_stands(tmp_path: Path) -> 
     prior = '{"command": "/old/absolute/kbase", "args": ["mcp", "--kb-root", "/old"]}'
     seed = f'{{\n  "mcpServers": {{\n    "kbase": {prior},\n    "other": {{"command": "x"}}\n  }}\n}}\n'
     (project / ".mcp.json").write_text(seed, encoding="utf-8")
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     text = (project / ".mcp.json").read_text(encoding="utf-8")
     head, found, tail = seed.partition(prior)
     assert found and text.startswith(head) and text.endswith(tail)
-    assert json.loads(text)["mcpServers"] == {"kbase": _built_entry(CLAUDE, project, root), "other": {"command": "x"}}
+    assert json.loads(text)["mcpServers"] == {"kbase": _built_entry(CLAUDE), "other": {"command": "x"}}
 
 
 def test_a_crlf_mcp_file_keeps_its_line_endings(tmp_path: Path) -> None:
@@ -1158,10 +957,10 @@ def test_a_crlf_mcp_file_keeps_its_line_endings(tmp_path: Path) -> None:
     root.mkdir()
     seed = '{\r\n  "mcpServers": {\r\n  }\r\n}\r\n'
     (project / ".mcp.json").write_bytes(seed.encode("utf-8"))
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     raw = (project / ".mcp.json").read_bytes()
     assert b"\n" not in raw.replace(b"\r\n", b"")
-    assert json.loads(raw.decode("utf-8")) == {"mcpServers": {"kbase": _built_entry(CLAUDE, project, root)}}
+    assert json.loads(raw.decode("utf-8")) == {"mcpServers": {"kbase": _built_entry(CLAUDE)}}
 
 
 def test_a_duplicate_container_key_is_reported_and_left_byte_identical(tmp_path: Path, capsys) -> None:
@@ -1173,10 +972,10 @@ def test_a_duplicate_container_key_is_reported_and_left_byte_identical(tmp_path:
     seed = '{"mcpServers": {"other": {"command": "x"}}, "mcpServers": {}}\n'
     (project / ".mcp.json").write_text(seed, encoding="utf-8")
     capsys.readouterr()
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     assert (project / ".mcp.json").read_text(encoding="utf-8") == seed
     out = capsys.readouterr().out
-    entry = _built_entry(CLAUDE, project, root)
+    entry = _built_entry(CLAUDE)
     assert f"{project / '.mcp.json'} could not be edited safely — left untouched; merge this entry by hand:" in out
     assert json.dumps(entry) in out
 
@@ -1191,18 +990,18 @@ def test_the_opencode_container_is_spliced_into_a_plain_json_file(tmp_path: Path
     discovered = root / "opencode.json"
     seed = '{\n  "theme": "omlx",\n  "mcp": {\n    "servers": {\n      "other": {"type": "local"}\n    }\n  }\n}\n'
     discovered.write_text(seed, encoding="utf-8")
-    _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=project)
     text = discovered.read_text(encoding="utf-8")
     head, other, tail = seed.partition('"other": {"type": "local"}')
     assert other and text.startswith(head) and text.endswith(tail)
-    assert json.loads(text)["mcp"]["servers"]["kbase"] == _built_entry(OPENCODE, project, root)
+    assert json.loads(text)["mcp"]["servers"]["kbase"] == _built_entry(OPENCODE)
 
 
 def test_the_include_line_is_appended_to_an_existing_justfile(tmp_path: Path) -> None:
     root = tmp_path / ".claude"
     root.mkdir()
     (tmp_path / "justfile").write_text("default:\n  @echo hi\n", encoding="utf-8")
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
+    _definition_install(root, with_kb=True, project_root=tmp_path)
     assert (tmp_path / "justfile").read_text(encoding="utf-8") == (
         "default:\n  @echo hi\n\nimport? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     )
@@ -1211,7 +1010,7 @@ def test_the_include_line_is_appended_to_an_existing_justfile(tmp_path: Path) ->
 def test_a_makefile_is_created_when_the_project_has_neither_runner_file(tmp_path: Path) -> None:
     root = tmp_path / ".opencode"
     root.mkdir()
-    _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=tmp_path)
+    _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=tmp_path)
     text = (tmp_path / "Makefile").read_text(encoding="utf-8")
     assert text.startswith("# Makefile — created by the adjagent installer.\n")
     assert "-include .opencode/skills/kbase/kb-tools/runner-snippets/kb.mk\n" in text
@@ -1223,12 +1022,12 @@ def test_a_second_harness_writes_no_include_line_and_reports_the_first(tmp_path:
     first = project / ".claude"
     first.mkdir()
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
-    _definition_install(first, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(first, with_kb=True, project_root=project)
     before = (project / "justfile").read_bytes()
     second = project / ".opencode"
     second.mkdir()
     capsys.readouterr()
-    _definition_install(second, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(second, _OPENCODE_RENDER, with_kb=True, project_root=project)
     assert (project / "justfile").read_bytes() == before
     out = capsys.readouterr().out
     assert "no include line written" in out and "'claude'" in out
@@ -1256,7 +1055,7 @@ def test_an_include_line_for_this_harness_under_any_tree_is_rewritten_in_place(
     root.mkdir()
     (project / "justfile").write_text(f"default:\n  @echo hi\n\nimport? '.claude/{snippets_path}/kb.just'\n")
     capsys.readouterr()
-    _definition_install(root, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, with_kb=True, project_root=project)
     text = (project / "justfile").read_text(encoding="utf-8")
     assert text == "default:\n  @echo hi\n\nimport? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     assert text.count("runner-snippets") == 1
@@ -1275,7 +1074,7 @@ def test_an_include_line_for_another_harness_is_reported_and_left(tmp_path: Path
     line = f"import? '.claude/{snippets_path}/kb.just'"
     (project / "justfile").write_text(f"{line}\n", encoding="utf-8")
     capsys.readouterr()
-    _definition_install(root, _OPENCODE_RENDER, with_kb=True, kbase_dist=_kbase_exe(tmp_path), project_root=project)
+    _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=project)
     assert (project / "justfile").read_text(encoding="utf-8") == f"{line}\n"
     out = capsys.readouterr().out
     assert "no include line written" in out and "'claude'" in out
@@ -1351,10 +1150,9 @@ def test_a_non_utf8_runner_file_is_refused_before_the_first_write(tmp_path: Path
     root = tmp_path / ".claude"
     root.mkdir()
     (tmp_path / "justfile").write_bytes(b"\xff\xfe default:\n")
-    dist = _kbase_exe(tmp_path)
     before = _files(tmp_path)
     with pytest.raises(InputError, match="justfile"):
-        _definition_install(root, with_kb=True, kbase_dist=dist, project_root=tmp_path)
+        _definition_install(root, with_kb=True, project_root=tmp_path)
     assert _files(tmp_path) == before
 
 
@@ -1363,15 +1161,6 @@ def test_the_repositorys_own_project_root_gets_no_include_line() -> None:
     install_kb_include_line(REPO_ROOT, harness_relpath=".claude")
     assert (REPO_ROOT / "justfile").read_bytes() == before
     assert not (REPO_ROOT / "Makefile").exists()
-
-
-def test_kb_included_with_no_kbase_source_is_refused_with_nothing_written(tmp_path: Path) -> None:
-    root = tmp_path / ".claude"
-    root.mkdir()
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="no kbase executable"):
-        _definition_install(root, with_kb=True, project_root=tmp_path)
-    assert _files(tmp_path) == before
 
 
 @pytest.mark.parametrize(
@@ -1433,7 +1222,7 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     project = tmp_path_factory.mktemp("consumer")
     root = project / ".claude"
     root.mkdir()
-    install(root, _CLAUDE_RENDER, verbose=False, with_kb=True, kbase_dist=_kbase_exe(project), project_root=project)
+    install(root, _CLAUDE_RENDER, verbose=False, with_kb=True, project_root=project)
     return root
 
 
@@ -1537,13 +1326,12 @@ def test_a_reinstall_overwrites_its_own_renders_kb_skill_files_included(tmp_path
     file's comment carrier each pass, and the render replaces the edit."""
     root = tmp_path / ".claude"
     root.mkdir()
-    dist = _kbase_exe(tmp_path)
-    _definition_install(root, with_kb=True, kbase_dist=dist, project_root=tmp_path)
+    _definition_install(root, with_kb=True, project_root=tmp_path)
     edited = ("agents/python-coder.md", "skills/kbase/references/reading.md")
     for relative in edited:
         with (root / relative).open("a", encoding="utf-8") as handle:
             handle.write("a local edit\n")
-    _definition_install(root, with_kb=True, kbase_dist=dist, project_root=tmp_path)
+    _definition_install(root, with_kb=True, project_root=tmp_path)
     for relative in edited:
         assert (root / relative).read_text(encoding="utf-8") == _rendered(_CLAUDE_RENDER, relative)
 
@@ -1609,10 +1397,9 @@ def test_mcp_settings_the_merge_cannot_use_are_refused_before_the_first_write(
     root = tmp_path / ".claude"
     root.mkdir()
     (tmp_path / ".mcp.json").write_bytes(settings)
-    dist = _kbase_exe(tmp_path)
     before = _files(tmp_path)
     with pytest.raises(InputError, match=re.escape(message)):
-        _definition_install(root, with_kb=True, kbase_dist=dist, project_root=tmp_path)
+        _definition_install(root, with_kb=True, project_root=tmp_path)
     assert _files(tmp_path) == before
 
 
@@ -1945,7 +1732,7 @@ def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_stan
     plant(project / planted, outside)
     before = (_standing(project / planted), _files(outside))
     capsys.readouterr()
-    _definition_install(root, ctx, with_kb=kb, kbase_dist=_kbase_exe(tmp_path) if kb else None, project_root=project)
+    _definition_install(root, ctx, with_kb=kb if kb else None, project_root=project)
     assert (_standing(project / planted), _files(outside)) == before
     out = capsys.readouterr().out
     assert any(f"{project / planted} {reason}" in line and _BY_HAND in line for line in out.splitlines())

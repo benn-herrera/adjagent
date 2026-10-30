@@ -17,7 +17,6 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Protocol
 
 from adjagent.errors import InputError
@@ -48,11 +47,10 @@ class HarnessFile:
 
 
 class McpEntryBuilder(Protocol):
-    """Builds the `kbase` server entry and the container path it nests under, from the server command
-    string and the directory that the command is named relative to when it sits inside it;
-    keyword-only, so the two cannot be swapped."""
+    """Builds the `kbase` server entry and the container path it nests under, from the server command,
+    which the entry names as given."""
 
-    def __call__(self, *, command: str, base: Path) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
+    def __call__(self, *, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
 
 
 class McpSite(Enum):
@@ -74,12 +72,6 @@ class McpSettings:
     alternatives: tuple[str, ...]
     site: McpSite
     entry: McpEntryBuilder
-
-
-def command_relative(command: str, base: Path) -> str:
-    """`command` named relative to `base` in POSIX form, so the settings file names no machine-specific
-    path and a project can track it."""
-    return Path(command).resolve().relative_to(base.resolve()).as_posix()
 
 
 class HookClaim(Enum):
@@ -118,6 +110,7 @@ class Harness:
     user_harness_dir: str  # "~/.claude" / "~/.config/opencode"
     mcp_tool_prefix: str  # "mcp__kbase__" / "kbase_"; this prefix + the tool's own name is its offered name
     recipe_rule: str  # the rule a dispatched agent follows running recipes in its shell; "" where there is none
+    kbase_project_rule: str  # how a kbase call names its project where the server serves many; "" where it serves one
     coder_dispatch: (
         Callable[[str], str] | None
     )  # the agents file's coder-dispatch bullet, built from the rendered model; None where the harness cannot choose a model per dispatch
@@ -136,23 +129,24 @@ class Harness:
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
-        model_shape, a recipe_rule that is not a string, a coder_dispatch that is neither None nor
+        model_shape, an OptionalHarnessText field that is not a string, a coder_dispatch that is neither None nor
         callable, a tools table not total in Tool order, an MCP settings contract lacking a canonical
         path, a non-empty alternative name, or a builder, or a guardrail hook lacking a script path, a
         settings path, a container path, a builder, or a recogniser.
 
         An empty string is refused of the fields a body naming them always renders, since every harness
-        supplies each HarnessText and a model shape. `recipe_rule` is an OptionalHarnessText, which a
-        harness imposes or does not, so there "" is a value rather than a missing one: it drops the
-        paragraph its placeholder stands in."""
+        supplies each HarnessText and a model shape. An OptionalHarnessText is a rule a harness imposes
+        or does not, so there "" is a value rather than a missing one: it drops the paragraph its
+        placeholder stands in."""
         if re.fullmatch(IDENTIFIER, self.name) is None:
             raise InputError(f"harness '{self.name}': name is not a strict-kebab identifier")
         if any(re.fullmatch(IDENTIFIER, name) is None for name in self.omits):
             raise InputError(f"harness '{self.name}': omits holds a name that is not a strict-kebab identifier")
         if not all(self.text(part) for part in HarnessText) or not self.model_shape:
             raise InputError(f"harness '{self.name}': an empty string field")
-        if not isinstance(self.recipe_rule, str):
-            raise InputError(f"harness '{self.name}': recipe_rule must be a string")
+        for part in OptionalHarnessText:
+            if not isinstance(self.text(part), str):
+                raise InputError(f"harness '{self.name}': {part.value} must be a string")
         if self.coder_dispatch is not None and not callable(self.coder_dispatch):
             raise InputError(f"harness '{self.name}': coder_dispatch must be a callable or None")
         if tuple(self.tools) != tuple(Tool) or not all(self.tools.values()):
