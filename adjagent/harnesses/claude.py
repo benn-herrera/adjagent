@@ -63,7 +63,7 @@ _GUARDRAIL_COMMAND = re.compile(
 
 
 def _guardrail_entry(harness_relpath: str) -> dict[str, object]:
-    """The PreToolUse entry running the guardrail on every Bash call, named from `$CLAUDE_PROJECT_DIR`.
+    """The PreToolUse entry running the guardrail on every Bash and file-tool call, named from `$CLAUDE_PROJECT_DIR`.
     A harness directory holding a character the double-quoted word would read as syntax is refused."""
     if re.search(f"[{_UNQUOTABLE}]", harness_relpath):
         raise InputError(
@@ -72,7 +72,7 @@ def _guardrail_entry(harness_relpath: str) -> dict[str, object]:
         )
     prefix = "" if harness_relpath == "." else f"{harness_relpath}/"
     command = f"{_GUARDRAIL_COMMAND_HEAD}{prefix}{_GUARDRAIL_COMMAND_TAIL}"
-    return {"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}
+    return {"matcher": "Bash|Read|Write|Edit|NotebookEdit|Grep|Glob", "hooks": [{"type": "command", "command": command}]}
 
 
 def _guardrail_claim(element: object) -> HookClaim:

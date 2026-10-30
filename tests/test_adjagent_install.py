@@ -1456,6 +1456,19 @@ def test_a_reinstall_replaces_our_entry_in_place_and_a_second_changes_no_byte(tm
     assert f"{settings} already registers the guardrail hook" in capsys.readouterr().out
 
 
+def test_an_earlier_bash_only_entry_is_replaced_in_place(tmp_path: Path, capsys) -> None:
+    """The entry an install from before the file tools were matched wrote is ours: it is replaced whole,
+    ahead of the project's hook, and the operator is not sent to merge by hand."""
+    earlier = {"matcher": "Bash", "hooks": _hook_entry(".claude")["hooks"]}
+    seed = json.dumps({"hooks": {"PreToolUse": [earlier, json.loads(_SED_HOOK)]}}, indent=2) + "\n"
+    root = _claude_root(tmp_path, seed)
+    capsys.readouterr()
+    _definition_install(root, project_root=tmp_path)
+    settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"] == [_hook_entry(".claude"), json.loads(_SED_HOOK)]
+    assert _BY_HAND not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "pre_tool_use",
     [

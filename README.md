@@ -28,8 +28,8 @@ Base requirements:
 
 - **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with the 
   standard library's `tomllib`, which first shipped in 3.11.
-- `perl` with core `JSON::PP` — optional, for the claude Bash guardrail; without it the install
-  skips that hook and installs everything else ([Bash guardrail](#bash-guardrail)).
+- `perl` with core `JSON::PP` — optional, for the claude guardrail; without it the install
+  skips that hook and installs everything else ([Guardrail](#guardrail)).
 
 For the kb set (`just install-with-kb`):
 
@@ -57,8 +57,8 @@ That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` — eve
 install carries, the agent set and the slash commands — and copies each package the installer ships
 beside them under `adj-tools/`; no such package is shipped today. Files a harness ships come along
 too, copied unchanged and unstamped: they are not renders of this project's definitions. Claude and
-opencode ship one, a Bash guardrail, claude's only where `perl` passes the install's check ("Bash
-guardrail", below); mage ships none. The kb set is not in a base install: `just
+opencode ship one, a guardrail, claude's only where `perl` passes the install's check
+("Guardrail", below); mage ships none. The kb set is not in a base install: `just
 install-with-kb ~/projects/foo` adds the `kbase` skill under `skills/`, with the runner snippets in
 `skills/kbase/kb-tools/` beneath it ("Knowledge Base Set", below) — except mage, whose plugin always
 installs with it. The definitions are rendered by that invocation and the tool packages are copied.
@@ -83,7 +83,7 @@ install refuses, writing nothing, to overwrite a file at one of its paths that c
 this project's, such as your own `agents/python-coder.md`, or to write below a symlink or a
 non-directory on the way to one; the refusal names each such path, and you move or remove them and
 install again. A harness's shipped file is replaced on each install, unless its install-time run
-fails (see "Bash guardrail"), and never pruned, so one this project stops shipping stays in your
+fails (see "Guardrail"), and never pruned, so one this project stops shipping stays in your
 tree until you remove it.
 
 Claude Code reads agent definitions from `.claude/agents/`, slash commands from `.claude/commands/`
@@ -133,9 +133,9 @@ yourself (see Install, above). Contract: [SPEC.md](SPEC.md), Mage Plugin Distrib
 5. Restart Mage so it starts the plugin's `kbase` MCP server; the plugin's entry finds `kbase` on
    `PATH`. Do the same after installing or upgrading kbase while Mage is running.
 
-### Bash guardrail
+### Guardrail
 
-Claude and opencode each ship a hook that blocks Bash commands which change a file behind the Edit
+Claude and opencode each ship a hook that blocks shell commands which change a file behind the Edit
 and Write tools: in-place `sed`, `perl` or `ruby` edits, redirects (`>`, `>>`), `tee`, `cp` and `mv`
 onto an existing file, and inline `python`, `node`, `perl` or `ruby` scripts that write. Writes into
 `.claude-temp/` and `test-data/transient` are allowed. A relative path is judged against the
@@ -143,14 +143,23 @@ directory the command runs in, and a heredoc's body is not read as shell. The ho
 agents habitually use; it is not a boundary against a command written to evade it. opencode's is a
 plugin that registers itself.
 
+On a kb install, the hook also keeps sessions out of `kb-root/.index/`, where kbase keeps its
+records: read them with kbase's `query` tool and change them with its `write` tool. It refuses a
+file-tool call on a path there, a shell command naming one, and a recursive search rooted in
+`kb-root/` that could reach one; the refusal says how to exclude `.index` from the search. A path is
+judged where its symlinks lead. `test -e`, `test -d`, `test -f`, `[ -e … ]` and `stat` on those paths
+are allowed. The check is on only while the harness directory holds the kbase skill's `SKILL.md`, and
+the hook looks for it on every call, so a base install never sees it.
+
 Claude's is `.claude/hooks/guardrail.pl`, which needs `perl` on `PATH` with core `JSON::PP` when a
 session runs it. The install runs it once to check, and without perl or the module, or if the run
 takes more than a few seconds, it skips the hook, reports the reason in one line and installs
 everything else; a script and entry from an earlier install are left in place and named. The install
-adds one `PreToolUse` entry for Bash to `.claude/settings.json`, the file Claude Code reads whatever
-`--subdir` is. The entry runs the script under `$CLAUDE_PROJECT_DIR` only if it is a readable file:
-where it is missing, for example because you committed `settings.json` but not `.claude/hooks/`, a
-Bash call prints `guardrail hook: no readable script at <path>` and goes ahead, rather than being
+adds one `PreToolUse` entry for Bash and the file tools (Read, Write, Edit, NotebookEdit, Grep, Glob)
+to `.claude/settings.json`, the file Claude Code reads whatever `--subdir` is; an entry an earlier
+install wrote for Bash alone is replaced by it. The entry runs the script under `$CLAUDE_PROJECT_DIR`
+only if it is a readable file: where it is missing, for example because you committed `settings.json`
+but not `.claude/hooks/`, a call prints `guardrail hook: no readable script at <path>` and goes ahead, rather than being
 blocked. An existing file keeps every other byte, including your own hooks, and a re-install
 replaces that one entry in place; only an entry written by an install is replaced, so a hook of
 yours that runs some other `guardrail.pl` is left alone. A project has one entry: installing under

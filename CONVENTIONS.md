@@ -97,8 +97,9 @@ not here.
   above its own. This tree is the master for what it ships — an installed copy is never edited,
   and no other repository's copy is a source.
 - **The two guardrail implementations change together.** `guardrail.ts` (opencode) and
-  `guardrail.pl` (claude) are meant to block exactly the same Bash commands, and nothing at runtime
-  compares them. A behaviour change edits both and `tests/guardrail_cases.json` in one change, and
+  `guardrail.pl` (claude) are meant to block exactly the same calls, and nothing at runtime compares
+  them. That covers the mutation check on shell commands and the `.index/` read check on shell and
+  file-tool calls alike. A behaviour change edits both and `tests/guardrail_cases.json` in one change, and
   `tests/test_guardrail.py` is what holds them to it: it runs the table through each, under `bun`
   and `perl`, and fails, not skips, without `bun`. The guardrail catches the in-place edit and
   redirect forms agents habitually use and points them to the edit tools; it is not a boundary

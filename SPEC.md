@@ -188,15 +188,27 @@ and forbid edits — as the file's own text, which travels with it. A harness sh
 is not an error. A harness file may be conditional on a run at install time: claude's hook is
 delivered only when one run of the script on the installing machine succeeds within a few seconds,
 and is otherwise skipped, with the reason reported and the rest of the install unaffected. Both
-guardrails block the same Bash commands — those that change a file behind the edit tools, such as
-in-place `sed`, `perl` or `ruby` edits, redirects, `tee`, `cp` or `mv` onto an existing file, and
-inline scripts that write — and allow writes into scratch. A relative target is judged against the
-working directory of the call, scratch against the project directory, and a heredoc's body is not
-read as shell. Claude's runs at session time and needs perl with core `JSON::PP`; an install also
-registers it as a `PreToolUse` entry for Bash in the project's `.claude/settings.json`, whatever the
-harness directory is, keeping every other byte of that file (Write Safety, below). The entry runs
-the script only where it stands readable: where it is missing — a project that commits the settings
-file but not the script — a Bash call reports the missing path on stderr and proceeds, and is not
+guardrails block the same calls. Their mutation check blocks shell commands that change a file
+behind the edit tools, such as in-place `sed`, `perl` or `ruby` edits, redirects, `tee`, `cp` or
+`mv` onto an existing file, and inline scripts that write, and allows writes into scratch. A
+relative target is judged lexically against the working directory of the call, scratch against the
+project directory, and a heredoc's body is not read as shell. Their `.index/` check is active only
+where the harness directory holds the kbase skill's `SKILL.md`, which they look for on every call,
+so a base install is never refused by it. It refuses a call that reaches into
+`<project>/kb-root/.index/`, whose records kbase's own tools read and change:
+- a shell command with a word naming a path there, existence checks (`test`, `[`, `stat`) excepted
+- a recursive `grep`, `rg`, `find`, `ls -R` or `tree` rooted in `kb-root/` that does not exclude
+  `.index`
+- a file-tool call whose path lies there: Claude's Read, Write, Edit and NotebookEdit, opencode's
+  read, write, edit and patch
+- a Grep or Glob rooted in `kb-root/` whose file filter could match a record
+
+This check follows symlinks, so a link into `.index/` is refused. Claude's runs at session time and
+needs perl with core `JSON::PP`; an install also registers it as a `PreToolUse` entry for Bash and the
+file tools (Read, Write, Edit, NotebookEdit, Grep, Glob) in the project's `.claude/settings.json`,
+whatever the harness directory is, keeping every other byte of that file (Write Safety, below). The
+entry runs the script only where it stands readable: where it is missing — a project that commits the
+settings file but not the script — a call reports the missing path on stderr and proceeds, and is not
 blocked.
 
 ## Mage Plugin Distribution
