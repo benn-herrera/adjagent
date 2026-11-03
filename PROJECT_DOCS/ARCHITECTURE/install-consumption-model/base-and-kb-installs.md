@@ -1,0 +1,52 @@
+### Base and kb installs
+
+The two install types differ by one filter and three emissions. The filter is `NOT_BY_DEFAULT`,
+`^(kb-|kbase$)`, applied to the definition's name — its declared name, not a rendered file's stem —
+before anything about it is rendered: a base install drops every match whole, so no file of a
+dropped definition is written, and the skill's directory is never created by a run that excludes
+it. A harness whose `user_harness_dir` is `.` is always a kb install, so the filter never applies
+to it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes, or is sticky, per
+ROOT rather than per project, so a later base-typed invocation refreshes the kb set instead of
+dropping it. The predicate, at `kb_included` in `install`, is `with_kb`, or `user_harness_dir == "."`, or
+`_is_ours` (the generated-banner test) of the router, `KBASE_ROUTER` — `skills/kbase/SKILL.md`. The
+router is the whole of the sticky signal, because no release installed a `kbase` executable without
+also installing the generated router beside it. The test reads the router's banner and nothing
+else: the mode is never read, and the runner snippets are never inspected, so a destination holding
+a `kb-tools/` directory and no router — or an empty one — is a base install. A `SKILL.md` without
+the generated banner is its project's own and signals nothing. No legacy tree is a signal.
+
+A kb install writes three things beyond the renders — two under a harness whose
+`user_harness_dir` is `.`, with no runner include line and no `Makefile`:
+
+- **The kb-tools package**: every file of `kb-tools/` — the `runner-snippets/` fragments — taking the
+  package copy below. The destination is `KB_TOOLS_PACKAGE` — `skills/kbase/kb-tools/`, its own
+  directory inside the `kbase` skill's, within the `skills/` surface — and is removed whole before
+  the copy, so an executable and `.asc` an earlier version installed there go, while the skill's
+  `SKILL.md` and references beside it are not touched. Package destinations come from one list,
+  `_packages`, which `package_copies`, the clearing before the copy and `_refuse_root` all read:
+  the `SHIPPED_PACKAGES` table, and `kb-tools/` at `KB_TOOLS_PACKAGE` when kb is included. kbase itself reaches the host by the
+  user's own install (README.md); the skill's `references/installing.md` walks a session through it.
+- **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): claude's
+  `.mcp.json`, at the plugin root under mage — `McpSettings.site` names the directory, `HARNESS`
+  there and `PROJECT` for the other two — or for opencode the first discovered of
+  `.opencode/opencode.json`, `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc`
+  created. Under every harness the entry's command is `KBASE_NAME`, the bare `kbase`, which the
+  host resolves from `PATH`, so the settings file names no machine-specific path and a project can
+  track it. Each harness's entry builder takes the command and nothing else. Its argument
+  list is `mcp` alone and names no KB path: the server locates the KB from the working directory it
+  is started in, so it has to be started in the project root. Mage, an application harness started
+  outside any one project, adds `--project-dir-required` (`harnesses/mage.py`), under which every
+  tool call names its project with `project-dir` and the server locates none of its own. An existing settings file is edited in
+  place: the entry's own slot is spliced into the text as it stands, so every other byte — other
+  entries, key order, indentation, line endings — is kept, while a file this install creates is
+  written whole.
+  One that is not plain JSON — JSONC comments a splice would destroy — or that the splice cannot
+  place with certainty, or whose path `_settings_obstacle` names, is reported with the entry
+  printed, and left as it stands.
+- **The runner include line**, appended to the project's justfile or Makefile — or to a `Makefile`
+  created carrying it, where the project has neither: the non-fatal `import?` or `-include` form
+  naming the installed snippets. Written only for a harness whose user directory is not `.`:
+  a plugin is not a repo project, so mage gets no line and no `Makefile`. One line only: a line
+  naming another harness is reported and left alone, and one naming this harness under a path an
+  earlier version installed is rewritten in place.
+

@@ -7,7 +7,7 @@ value names the whole map, the frontmatter lines it reads, the rule a dispatched
 agent follows when running recipes in its shell, the agents file's
 coder-dispatch bullet as a callable over the rendered model, the files it
 renders beside the definitions, the definitions it renders nothing for, the
-settings file it registers an MCP server in, and the Bash guardrail hook it
+settings file it registers an MCP server in, and the guardrail hook it
 registers, where it has one. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
 renderer maps tools to spellings and computes the governed keys.
@@ -85,7 +85,7 @@ class HookClaim(Enum):
 
 @dataclass(frozen=True)
 class GuardrailHook:
-    """The Bash guardrail hook a harness ships and registers in a project settings file. `script` is the
+    """The guardrail hook a harness ships and registers in a project settings file. `script` is the
     hook script's path under `resources/<harness>/`, which is also its path under the harness directory;
     `settings` is the settings file relative to the project root; `container` is the path in it to the
     array the entry is an element of; `entry` builds the entry from the harness directory's path
@@ -110,7 +110,7 @@ class Harness:
     user_harness_dir: str  # "~/.claude" / "~/.config/opencode"
     mcp_tool_prefix: str  # "mcp__kbase__" / "kbase_"; this prefix + the tool's own name is its offered name
     recipe_rule: str  # the rule a dispatched agent follows running recipes in its shell; "" where there is none
-    kbase_project_rule: str  # how a kbase call names its project where the server serves many; "" where it serves one
+    kbase_project_rule: str  # how a kbase session locates its project where the server serves many; "" otherwise
     coder_dispatch: (
         Callable[[str], str] | None
     )  # the agents file's coder-dispatch bullet, built from the rendered model; None where the harness cannot choose a model per dispatch
@@ -123,7 +123,7 @@ class Harness:
     frontmatter: Callable[[AgentFields], tuple[str, ...]]  # an agent's field lines between the fences
     document_frontmatter: tuple[str, ...]  # a document's field lines between the fences
     mcp: McpSettings  # the settings file this harness registers the kbase server in
-    guardrail: GuardrailHook | None  # the Bash guardrail hook it registers; None where its own file registers itself
+    guardrail: GuardrailHook | None  # the guardrail hook it registers; None where its own file registers itself
     rendered_files: tuple[HarnessFile, ...] = ()  # files it renders beside the definitions
     omits: frozenset[str] = frozenset()  # definition names it renders nothing for
 

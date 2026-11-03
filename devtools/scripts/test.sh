@@ -11,19 +11,33 @@
 # directory. A flag alone does not narrow: pytest gets the directory plus the flags. A path outside
 # the surface's directory is refused. The word after a flag that takes a separate value (`-k expr`)
 # is that value, never a path.
+#
+# The `docs` surface is the markdown link check (`just check-links` with its default roots), not
+# pytest, so it takes no pytest arguments. The full run (no surface) runs it after pytest, and
+# fails when either fails.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${VENV_PYTHON:?VENV_PYTHON is empty or unset — run this script through its justfile recipe}"
+: "${JUST:?JUST is empty or unset — run this script through its justfile recipe}"
+: "${JUSTFILE:?JUSTFILE is empty or unset — run this script through its justfile recipe}"
 
 surface="${1}"
 # A surface is a name, never a flag: `just` binds a leading flag to the surface parameter, so a
 # caller reaching this check with `-k` meant to pass a flag and needs the explicit empty surface.
+check_links=0
 case "${surface}" in
-    "") dirs=(tests devtools/tests) ;;
+    "") dirs=(tests devtools/tests); check_links=1 ;;
     adjagent) dirs=(tests) ;;
     dupe_sweep) dirs=(devtools/tests) ;;
+    docs)
+        if [[ "$#" -gt 1 ]]; then
+            printf '%s\n' "error: test surface 'docs' is the link check and takes no pytest arguments" >&2
+            exit 1
+        fi
+        exec "${JUST}" --justfile "${JUSTFILE}" check-links
+        ;;
     *)
-        printf '%s\n' "error: unknown test surface '${surface}' — valid values: adjagent, dupe_sweep; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" ${surface}" >&2
+        printf '%s\n' "error: unknown test surface '${surface}' — valid values: adjagent, dupe_sweep, docs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" ${surface}" >&2
         exit 1
         ;;
 esac
@@ -61,4 +75,9 @@ if [[ "${has_path}" -eq 1 ]]; then
 else
     targets=("${dirs[@]}")
 fi
-PYTHONPATH="${root}" "${VENV_PYTHON}" -m pytest ${targets[@]+"${targets[@]}"} "${@:2}"
+status=0
+PYTHONPATH="${root}" "${VENV_PYTHON}" -m pytest ${targets[@]+"${targets[@]}"} "${@:2}" || status=$?
+if [[ "${check_links}" -eq 1 ]]; then
+    "${JUST}" --justfile "${JUSTFILE}" check-links || status=1
+fi
+exit "${status}"

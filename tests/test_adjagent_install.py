@@ -18,6 +18,7 @@ from typing import cast
 
 import pytest
 
+from adjagent import __version__
 from adjagent.agents_file import install_agents_file, marker_span, scope_name
 from adjagent.cli import main
 from adjagent.context import Render, build_render
@@ -41,7 +42,6 @@ from adjagent.install import (
 )
 from adjagent.loading import load
 from adjagent.render import definitions, filled_body, render_agents_file, render_all, render_definition
-from adjagent.version import VERSION
 from adjagent.vocabulary import Kind
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
@@ -531,8 +531,8 @@ def test_the_version_verb_prints_the_constant_and_nothing_else(capsys) -> None:
     """A recipe parses this line to cut the tag, so it is the constant alone: no `v`, no suffix, no
     prose, one line — and the constant carries that shape, which a manifest would inherit too."""
     main(["version"])
-    assert capsys.readouterr().out == f"{VERSION}\n"
-    assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
+    assert capsys.readouterr().out == f"{__version__}\n"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)
 
 
 def test_the_cli_with_kb_flag_installs_the_kb_skill_files_and_the_skill_kb_tools_destination(
@@ -743,7 +743,7 @@ def test_the_mcp_settings_file_is_created_when_absent(
 
 def test_a_mage_kb_install_keeps_its_mcp_entry_beside_the_plugin_at_root(tmp_path: Path) -> None:
     """ROOT is the plugin's own directory, so the settings file resolves against ROOT — the project root
-    holds no `.mcp.json` at all — and the manifest is still the three-key one carrying VERSION. No
+    holds no `.mcp.json` at all — and the manifest is still the three-key one carrying `__version__`. No
     runner include line is written and no `Makefile` created at either root: a plugin is not a repo
     project."""
     project = tmp_path
@@ -755,7 +755,7 @@ def test_a_mage_kb_install_keeps_its_mcp_entry_beside_the_plugin_at_root(tmp_pat
     assert not (project / ".mcp.json").exists()
     manifest = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
     assert set(manifest) == {"name", "version", "description"}
-    assert manifest["version"] == VERSION
+    assert manifest["version"] == __version__
     assert not (root / "Makefile").exists()
     assert not (project / "Makefile").exists()
 
@@ -1456,6 +1456,19 @@ def test_a_reinstall_replaces_our_entry_in_place_and_a_second_changes_no_byte(tm
     assert f"{settings} already registers the guardrail hook" in capsys.readouterr().out
 
 
+def test_an_earlier_bash_only_entry_is_replaced_in_place(tmp_path: Path, capsys) -> None:
+    """The entry an install from before the file tools were matched wrote is ours: it is replaced whole,
+    ahead of the project's hook, and the operator is not sent to merge by hand."""
+    earlier = {"matcher": "Bash", "hooks": _hook_entry(".claude")["hooks"]}
+    seed = json.dumps({"hooks": {"PreToolUse": [earlier, json.loads(_SED_HOOK)]}}, indent=2) + "\n"
+    root = _claude_root(tmp_path, seed)
+    capsys.readouterr()
+    _definition_install(root, project_root=tmp_path)
+    settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"] == [_hook_entry(".claude"), json.loads(_SED_HOOK)]
+    assert _BY_HAND not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "pre_tool_use",
     [
@@ -1565,7 +1578,7 @@ def test_the_registered_command_runs_the_script_the_install_wrote(tmp_path: Path
 
 def test_a_missing_script_does_not_block_and_names_the_path(tmp_path: Path) -> None:
     """Perl exits 2 on a script it cannot open, which Claude Code reads as a block, so a settings file
-    committed without the hooks directory would block every Bash call. The registered command instead
+    committed without the hooks directory would block every call the matcher names. The registered command instead
     exits with another status and names the missing script."""
     root = _claude_root(tmp_path)
     _definition_install(root, project_root=tmp_path)

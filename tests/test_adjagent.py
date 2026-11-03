@@ -49,7 +49,6 @@ from adjagent.render import (
     render_skill_file,
     write_renders,
 )
-from adjagent.version import VERSION
 from adjagent.vocabulary import ALL, TIERS, Anchor, HarnessText, Kind, OptionalHarnessText, Tool, hole
 from devtools import render_diff
 from tests._structure import (
@@ -419,19 +418,25 @@ def test_a_mage_render_writes_the_plugin_tree_straight_into_the_root(tmp_path: P
 def test_the_manifest_is_the_three_key_object_carrying_the_version() -> None:
     """The marketplace reads these three keys and nothing else, its version being the release's."""
     parsed = json.loads(dict(render_all(_MAGE_RENDER))[_MAGE_MANIFEST])
-    assert parsed == {"name": "adjagent", "version": VERSION, "description": "Adjagent skills, agents, and MCP tools"}
+    assert parsed == {
+        "name": "adjagent",
+        "version": adjagent.__version__,
+        "description": "Adjagent skills, agents, and MCP tools",
+    }
 
 
 def test_the_manifest_is_the_only_render_of_a_mage_plugin_carrying_the_version() -> None:
     """A bump republishes the manifest alone: a version in a definition or a skill file would churn a
     render slot on every release and say nothing a plugin manifest does not."""
-    carriers = [path for path, text in render_all(_MAGE_RENDER) if path != _MAGE_MANIFEST and VERSION in text]
+    carriers = [
+        path for path, text in render_all(_MAGE_RENDER) if path != _MAGE_MANIFEST and adjagent.__version__ in text
+    ]
     assert carriers == []
 
 
 @pytest.mark.parametrize(
     "harness, tool_name",
-    [(CLAUDE, "mcp__kbase__find"), (MAGE, "mcp_kbase_find"), (OPENCODE, "kbase_find")],
+    [(CLAUDE, "mcp__kbase__query"), (MAGE, "mcp_kbase_query"), (OPENCODE, "kbase_query")],
 )
 def test_the_kb_reading_reference_names_the_harness_mcp_tool(harness: Harness, tool_name: str) -> None:
     """The rendered instruction must name the callable the selected host actually exposes."""

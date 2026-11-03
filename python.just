@@ -18,5 +18,6 @@ _venv:
     set -euo pipefail
     if [[ ! -x "{{VENV_PYTHON}}" ]]; then
         python3 -m venv "{{VENV}}"
-        "{{VENV_PYTHON}}" -m pip install pip pytest==9.1.1 isort==9.0.2 black==26.5.1 flake8==7.4.1
+        "{{VENV_PYTHON}}" -m pip install pip --upgrade
+        "{{VENV_PYTHON}}" -m pip install pytest==9.1.1 isort==9.0.2 black==26.5.1 flake8==7.4.1 git+https://github.com/benn-herrera/docdicer
     fi

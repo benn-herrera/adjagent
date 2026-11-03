@@ -28,12 +28,12 @@ Base requirements:
 
 - **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with the 
   standard library's `tomllib`, which first shipped in 3.11.
-- `perl` with core `JSON::PP` — optional, for the claude Bash guardrail; without it the install
-  skips that hook and installs everything else ([Bash guardrail](#bash-guardrail)).
+- `perl` with core `JSON::PP` — optional, for the claude guardrail; without it the install
+  skips that hook and installs everything else ([Guardrail](#guardrail)).
 
 For the kb set (`just install-with-kb`):
 
-- kbase 0.9.0 or later, installed by you — no install writes it. On macOS or Linux:
+- kbase 0.10.0 or later, installed by you — no install writes it. On macOS or Linux:
   `brew install benn-herrera/kbase/kbase`; `kbase --version` prints the bare version, and
   `brew upgrade benn-herrera/kbase/kbase` brings an older one up. The harness's `kbase` MCP entry
   runs the bare command `kbase`, so it has to be on `PATH`, and the MCP server has to be
@@ -57,8 +57,8 @@ That produces `agents/` and `commands/` inside `~/projects/foo/.claude/` — eve
 install carries, the agent set and the slash commands — and copies each package the installer ships
 beside them under `adj-tools/`; no such package is shipped today. Files a harness ships come along
 too, copied unchanged and unstamped: they are not renders of this project's definitions. Claude and
-opencode ship one, a Bash guardrail, claude's only where `perl` passes the install's check ("Bash
-guardrail", below); mage ships none. The kb set is not in a base install: `just
+opencode ship one, a guardrail, claude's only where `perl` passes the install's check
+("Guardrail", below); mage ships none. The kb set is not in a base install: `just
 install-with-kb ~/projects/foo` adds the `kbase` skill under `skills/`, with the runner snippets in
 `skills/kbase/kb-tools/` beneath it ("Knowledge Base Set", below) — except mage, whose plugin always
 installs with it. The definitions are rendered by that invocation and the tool packages are copied.
@@ -83,7 +83,7 @@ install refuses, writing nothing, to overwrite a file at one of its paths that c
 this project's, such as your own `agents/python-coder.md`, or to write below a symlink or a
 non-directory on the way to one; the refusal names each such path, and you move or remove them and
 install again. A harness's shipped file is replaced on each install, unless its install-time run
-fails (see "Bash guardrail"), and never pruned, so one this project stops shipping stays in your
+fails (see "Guardrail"), and never pruned, so one this project stops shipping stays in your
 tree until you remove it.
 
 Claude Code reads agent definitions from `.claude/agents/`, slash commands from `.claude/commands/`
@@ -133,24 +133,34 @@ yourself (see Install, above). Contract: [SPEC.md](SPEC.md), Mage Plugin Distrib
 5. Restart Mage so it starts the plugin's `kbase` MCP server; the plugin's entry finds `kbase` on
    `PATH`. Do the same after installing or upgrading kbase while Mage is running.
 
-### Bash guardrail
+### Guardrail
 
-Claude and opencode each ship a hook that blocks Bash commands which change a file behind the Edit
+Claude and opencode each ship a hook that blocks shell commands which change a file behind the Edit
 and Write tools: in-place `sed`, `perl` or `ruby` edits, redirects (`>`, `>>`), `tee`, `cp` and `mv`
 onto an existing file, and inline `python`, `node`, `perl` or `ruby` scripts that write. Writes into
-`.claude-temp/` and `test-data/transient` are allowed. A relative path is judged against the
+`test-data/transient` are allowed, and into `.claude-temp/` under claude or `.opencode-temp/` under
+opencode. A relative path is judged against the
 directory the command runs in, and a heredoc's body is not read as shell. The hook catches the forms
 agents habitually use; it is not a boundary against a command written to evade it. opencode's is a
 plugin that registers itself.
+
+On a kb install, the hook also keeps sessions out of `kb-root/.index/`, where kbase keeps its
+records: read them with kbase's `query` tool and change them with its `write` tool. It refuses a
+file-tool call on a path there, a shell command naming one, and a recursive search rooted in
+`kb-root/` that could reach one; the refusal says how to exclude `.index` from the search. A path is
+judged where its symlinks lead. `test -e`, `test -d`, `test -f`, `[ -e … ]` and `stat` on those paths
+are allowed. The check is on only while the harness directory holds the kbase skill's `SKILL.md`, and
+the hook looks for it on every call, so a base install never sees it.
 
 Claude's is `.claude/hooks/guardrail.pl`, which needs `perl` on `PATH` with core `JSON::PP` when a
 session runs it. The install runs it once to check, and without perl or the module, or if the run
 takes more than a few seconds, it skips the hook, reports the reason in one line and installs
 everything else; a script and entry from an earlier install are left in place and named. The install
-adds one `PreToolUse` entry for Bash to `.claude/settings.json`, the file Claude Code reads whatever
-`--subdir` is. The entry runs the script under `$CLAUDE_PROJECT_DIR` only if it is a readable file:
-where it is missing, for example because you committed `settings.json` but not `.claude/hooks/`, a
-Bash call prints `guardrail hook: no readable script at <path>` and goes ahead, rather than being
+adds one `PreToolUse` entry for Bash and the file tools (Read, Write, Edit, NotebookEdit, Grep, Glob)
+to `.claude/settings.json`, the file Claude Code reads whatever `--subdir` is; an entry an earlier
+install wrote for Bash alone is replaced by it. The entry runs the script under `$CLAUDE_PROJECT_DIR`
+only if it is a readable file: where it is missing, for example because you committed `settings.json`
+but not `.claude/hooks/`, a call prints `guardrail hook: no readable script at <path>` and goes ahead, rather than being
 blocked. An existing file keeps every other byte, including your own hooks, and a re-install
 replaces that one entry in place; only an entry written by an install is replaced, so a hook of
 yours that runs some other `guardrail.pl` is left alone. A project has one entry: installing under
@@ -174,7 +184,7 @@ and the skill to use it. Add `.mcp.json` to `.gitignore` if you use this recipe.
 ```just
 AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
 AGENTS_DIR := "." + file_stem(AGENTS_REPO)
-AGENTS_VER := "v0.12.5"
+AGENTS_VER := "v0.12.7"
 [doc("updates and installs agent set from adjagents public repo")]
 agents:
   @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
@@ -191,7 +201,7 @@ agents:
 .PHONY: agents
 AGENTS_REPO := https://github.com/benn-herrera/adjagent.git
 AGENTS_DIR := .$(basename $(notdir $(AGENTS_REPO)))
-AGENTS_VER := v0.12.5
+AGENTS_VER := v0.12.7
 agents:
 	@mkdir -p $(dir $(AGENTS_DIR))
 	@[[ -d "$(AGENTS_DIR)" ]] && git -C "$(AGENTS_DIR)" fetch --tags || git -C "$(dir $(AGENTS_DIR))" clone "$(AGENTS_REPO)" "$(AGENTS_DIR)"
@@ -315,7 +325,7 @@ Single-purpose agents invoked directly for non-coding work.
 
 The `kbase` skill and portable tooling for building, navigating, and maintaining a knowledge base —
 a navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph
-metadata spine. The set is one skill, `kbase`, with four references, project-portable: per-project
+metadata spine. The set is one skill, `kbase`, with the references its router routes to, project-portable: per-project
 facts live in the consuming project's `kb-root/AGENTS.md`, not in the skill's text. The set is
 **generated** from its definition module, and a base install omits it — `just install-with-kb` is
 what delivers it. Under mage it is always delivered; a plain mage install without a kbase source
@@ -338,14 +348,13 @@ not.
     `references/reading.md` carrying navigation, claim rigor and strength, and cross-references
 
 * Building/Modifying Knowledge Base
-  * `kbase` skill, `references/building.md` - drives kbase's `build` tool: reports the refusal, or the
-    launch that entered a stage — its `state-dir`, `pid`, `resume` and `wait` lines, `wait` run in
-    the background to hear the build end; then `status` on request, `cancel` on your word
+  * `kbase` skill, `references/building.md` - drives kbase's `build` tool: relays the launch or its refusal, and runs the `wait` line a launch returns in the
+    background to hear the build end; then `status` on request, `cancel` on your word
   * kbase - the builder itself, a Go binary you install with Homebrew; this repository neither ships nor installs it:
     `kbase build` runs the stages in order, spends inference through its own provider configuration,
     and makes each stage boundary a commit in your repository
   * `kbase` skill, `references/maintaining.md` - the write side: leaf edits, claim-graph wiring and
-    the refresh→verify loop, for a correction or a migration a session lands by hand
+    the `verify` loop, for a correction or a migration a session lands by hand
   * `kbase` skill, `references/scoring.md` - scoring the KB's rigor and bearings: the `score` tool
     walks the KB's scoring set itself, one question per item, and records a run ledger it resumes
     from; a work's rigor and a `founds` edge's bearing are yours to author, never a run's
@@ -359,27 +368,25 @@ The kb set drives **kbase**, a Go binary, not a Python package. You install it y
 `.claude/skills/kbase/kb-tools/runner-snippets/` by default (`.opencode/skills/kbase/kb-tools/runner-snippets/`
 under opencode; `skills/kbase/kb-tools/runner-snippets/` at the plugin root under mage), inside the
 skill's own directory; they run `kbase` from `PATH`. kbase's own documentation is its repository, [benn-herrera/kbase](https://github.com/benn-herrera/kbase);
-`INTEGRATING_KBASE_VIA_MCP.md` there is the wiring guide. The same install:
+its README's section "Using kbase from an agent harness (MCP)" is the wiring guide. The same install:
 
 1. Registers a `kbase` MCP server in the harness's own settings file — `.mcp.json` under Claude Code
    and at the plugin root under mage; under opencode the first of `.opencode/opencode.json`,
    `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. The entry's command is
    the bare `kbase` from `PATH`, run as `kbase mcp` (`kbase mcp --project-dir-required` under mage); it
-   names no KB path. Every query, write op, `refresh`,
-   `verify`, `build` and `score` the set names is a tool of that server, offered under the harness's
-   own prefix — `mcp__kbase__stats` under Claude Code, `kbase_stats` under opencode. A settings file
-   carrying JSONC comments, or a settings path that is a symlink or not a regular file, is reported
-   with the entry printed for you to merge by hand.
+   names no KB path. Each of its tools is offered under the harness's own prefix —
+   kbase's `query` tool is `mcp__kbase__query` under Claude Code and `kbase_query` under opencode. A settings file carrying JSONC comments, or a settings path that is a symlink or not a
+   regular file, is reported with the entry printed for you to merge by hand.
 2. Appends one include line to the project's justfile or Makefile — creating a `Makefile` where there
    is neither: `import? '<harness-dir>/skills/kbase/kb-tools/runner-snippets/kb.just'` (just 1.33 or
    later) or the `-include` form naming `kb.mk`. Both are non-fatal, so a consumer's runner keeps
-   working if the tree is absent, and `just`/`make` then carry `kb-verify`, `kb-refresh` and
+   working if the tree is absent, and `just`/`make` then carry `kb-verify`, `kb-update-format` and
    `kb-stats`. Under mage this step does not run: no include line and no `Makefile`, because a plugin
    is not a repo project.
 
 The route is MCP-only for every verb, scoring among them: the `score` tool starts its run detached
-and answers once the run's ledger and pid stand, and the run is followed with `status`, `wait` and
-`cancel`. When you ask for KB work and the server's tools are not offered, the skill looks for
+and answers once it has started; the session follows the run with `status` and `cancel`, and runs
+the `wait` command line the answer carries in the background. When you ask for KB work and the server's tools are not offered, the skill looks for
 `kbase` on `PATH` (it runs nothing) and tells you which it is: not installed, with how to install it,
 or installed with its MCP server not running here, which you enable, restart or reconnect in your
 harness. If a restart does not bring the tools back, the harness process may not find `kbase` on its
@@ -405,8 +412,8 @@ This section is for working on this repository itself — the generator, its def
 shipped tool packages. If you are installing the product into a project, see Usage, above.
 
 Beyond the install requirements, the test suite needs `bun` and `perl` on `PATH`: the
-guardrail parity test (`tests/test_guardrail.py`) runs one case table through both guardrails and
-fails, not skips, without `bun`. The two guardrails change together ([CONVENTIONS.md](CONVENTIONS.md)).
+guardrail parity test (`tests/test_guardrail.py`) runs one case table through both guardrails,
+each case under every guardrail its `harness` field allows, and fails, not skips, without `bun`. The two guardrails change together ([CONVENTIONS.md](CONVENTIONS.md)).
 
 ### Repository Layout
 
@@ -424,6 +431,10 @@ kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, 
                           directory
 dist/                     gitignored — what `just mage-dist` writes (see "Releasing the mage plugin")
 devtools/render_diff.py   compares two rendered slots by text; reads only rendered output
+devtools/scripts/         the shell scripts behind the justfile recipes
+agent-sandboxing/         setup for running a coding agent as an unprivileged local user
+PROJECT_DOCS/             the contract trees (THESIS, SPEC, ARCHITECTURE, CONVENTIONS), one
+                          `entry-point.md` per volume; the root `*.md` files are pointers to them
 rendered/                 gitignored build product — `just render [slug]` puts a render here per
                           slot; the three `reference*` slots are the baseline `just render-diff`
                           compares against, written only by `just retake-reference`
@@ -471,7 +482,8 @@ so the plugin's root is the slot itself, and a plugin writes no include line. A 
 `just render-diff [a] [b]` compares two slots — reference against latest by default — by text, with
 each file's banner replaced by one constant line, and reports differences without failing on them.
 `just test` runs the full tooling
-test suite (the `adjagent` and `dupe_sweep` surfaces, auto-provisioning a `.venv`).
+test suite (the `adjagent`, `dupe_sweep` and `docs` surfaces, the last being `just check-links`,
+auto-provisioning a `.venv`).
 `just test-changed [base]` runs only the surfaces the uncommitted tree (plus, given `base`, the
 commits since it) touches, and says which paths chose each.
 
@@ -488,10 +500,11 @@ signing included, leaves neither output and no `stage/`.
 
 To release:
 
-1. Bump the version and commit it ([CONVENTIONS.md](CONVENTIONS.md), the version bullet).
+1. Bump `__version__` in `adjagent/__init__.py` and commit it ([CONVENTIONS.md](CONVENTIONS.md), Version has one home).
 2. `just test`.
 3. `just mage-dist`.
-4. `just tag`, which creates the local tag `v<version>` and pushes nothing; push it yourself.
+4. `just tag`, which creates the local signed tag `v<version>` and pushes nothing; push it yourself.
+   It needs a gpg secret key and a TTY.
 5. Create the release `v<version>` on GitHub and upload the two files. The recipe uploads, tags
    and pushes nothing.
 6. Smoke check: from an empty scratch directory, download the uploaded tarball and its `.asc` from
@@ -536,12 +549,12 @@ family, seat, tier map and harness it was rendered for. A skill's supporting fil
 frontmatter, so it carries the same two lines as HTML comments on its first two lines. There is no
 content hash; a project that tracks the rendered output sees drift in its `git diff`, and one that
 does not loses any local edit to the next install. See
-[CONVENTIONS.md](CONVENTIONS.md#adding-definitions) for how to add one.
+[CONVENTIONS.md](PROJECT_DOCS/CONVENTIONS/adding-definitions/index.md) for how to add one.
 
 ## Third Party Acknowledgements
 
 The deployed runtime (`agents/`, `commands/`, `skills/`) is stdlib-only Python and shell with no
-third-party dependencies. `pytest`, `black`, and `isort` are dev/test-only tools, installed into a
+third-party dependencies. `pytest`, `black`, `isort` and `flake8` are dev/test-only tools, installed into a
 local `.venv` by the `just test` and `just format-python` recipes.
 
 pandoc (John MacFarlane and contributors) and Graphviz `dot` (Graphviz authors) are run as external programs and are not bundled.

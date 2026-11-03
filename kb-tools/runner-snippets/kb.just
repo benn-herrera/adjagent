@@ -22,7 +22,7 @@
 # references/installing.md walks through it.
 #
 # Recipe names carry a `kb-` prefix, so they cannot collide with a project's
-# own verify/refresh/stats. Plain recipe lines, no `set shell` — nothing here
+# own verify/stats. Plain recipe lines, no `set shell` — nothing here
 # needs bash.
 
 KBASE := "kbase"
@@ -39,9 +39,9 @@ kb-init:
 kb-verify:
     @"{{KBASE}}" verify
 
-[doc("refresh mechanically maintained KB metadata")]
-kb-refresh:
-    "{{KBASE}}" refresh
+[doc("convert the KB to the current format and re-derive its pages and sheets; needs a clean kb-root")]
+kb-update-format:
+    "{{KBASE}}" update-format
 
 [doc("print KB claim-graph stats")]
 kb-stats:
@@ -49,7 +49,7 @@ kb-stats:
 
 [doc("run an inference scoring pass over the KB")]
 kb-score:
-  "{{KBASE}}" score
+    "{{KBASE}}" score
 
 [doc("generate a LaTeX file set from the KB")]
 kb-export-latex:

@@ -1,0 +1,39 @@
+## Generation System
+
+The mechanism behind every definition in the deployed surfaces guarantees three observable
+properties, independent of how they are implemented (see ARCHITECTURE.md):
+
+- **Single-sourcing.** Text shared across two or more definitions has exactly one source. Wherever
+  rendered output shares text across definitions, that text is identical by construction — not by
+  maintenance discipline that could silently drift apart.
+- **Additive-only model tuning.** A family's tuning may extend a definition's base text at declared
+  anchor points; it can never replace, suppress, or fork that text. A definition whose
+  anchors the loaded family does not fill is byte-identical, below its banner, to its base render.
+- **Tier-keyed tuning, with recorded provenance.** Every agent definition declares a tier —
+  one of `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability — and the family's tier
+  map, the one model source on every harness, resolves it: the tier's family member is both what
+  the definition is tuned against and the model it renders with. The tier map comes from the family,
+  or whole from the tier-map argument. Each map argument covers all five tiers, naming each or
+  giving one value for all and naming any exceptions; one leaving a tier unnamed is refused, with no
+  fallback to the family. An optional alias map, with no
+  default, renders an alias in place of each tier's member and changes nothing else, so what a
+  definition is tuned for and what it dispatches on may diverge; it exists for a harness that
+  resolves aliases through its own remapping, such as Claude Code's `ANTHROPIC_*` model variables,
+  and any harness may use it. A tier-map value naming no tier and holding neither `=` nor `,` has a
+  third reading — the whole map, that one value for every tier — on a harness whose vocabulary reads
+  a bare value so; a harness whose vocabulary does not refuses it as no `tier=value` pair, and the
+  alias map has no bare form anywhere. A harness declares the shape a rendered model must have — a
+  model outside it fails the render before anything is written, naming the tier, the value, and the
+  argument or family that supplied it — and the text each of its inherit words renders as, `inherit`
+  among them; an empty rendering leaves the definition without a model line. Every generated
+  definition's tuning line records the family's name, the tier map, the alias map where one was
+  given, and the harness it was rendered for, so what it is tuned for and what it dispatches on are
+  readable from the definition alone.
+  Documents and commands declare no tier and stand outside this resolution; family-wide tuning text
+  still fills their anchors. A family whose member-scoped tuning names a member no tier reaches — in
+  neither its own tier map nor the effective one — is refused before anything is rendered.
+
+An install that requests a tuning other than the default (Deployed Surfaces, above) renders the
+generated definitions under it; Generated-Definition Integrity, below, holds for the tuning the
+install was given exactly as it holds for the default one.
+

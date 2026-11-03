@@ -32,7 +32,7 @@ install target *args:
 
 [doc("install with the kb set as well as the base product: the kb- definitions, the kb-tools package of runner snippets, and the project-root kbase MCP entry (the bare `kbase` command, which the user installs with Homebrew) and runner include line; every argument means what it means to install")]
 install-with-kb target *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install-with-kb.sh "$@"
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "$@" --with-kb
 
 [doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis")]
 install-agents-file dir harness="":
@@ -73,7 +73,9 @@ _render-slot slug *args:
 
 [doc("[dev] re-take the three oracle slots rendered/reference, reference-opencode and reference-gemma from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
 retake-reference:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/retake-reference.sh
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference-opencode --harness=opencode --model-tier-map=all=inherit
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference-gemma --family=gemma-4 --model-pin-tier-alias-map=all=sonnet
 
 [private]
 render-agents-file harness out:
@@ -86,6 +88,19 @@ _harness-value harness key:
 [private]
 _harness-names:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-names.sh
+
+[doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
+dice-doc monolith out map="": _venv
+    @"{{VENV_PYTHON}}" -m docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
+
+[doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees")]
+dice-docs manifest src work: _venv
+    @"{{VENV_PYTHON}}" -m docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
+
+[doc("check every relative link and #anchor in PROJECT_DOCS and the top-level *.md files, then that every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exit 1 on a broken link or an orphan")]
+check-links: _venv
+    @"{{VENV_PYTHON}}" -m docdicer check-links PROJECT_DOCS *.md
+    @"{{VENV_PYTHON}}" -m docdicer check-tree PROJECT_DOCS
 
 # Reports and never gates: a difference between two slots is the expected
 # outcome of doing work, so differences exit zero. Only a comparison that could
@@ -105,19 +120,20 @@ _harness-names:
 render-diff a="reference" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
-[doc("[dev] run tooling python tests: no argument runs both (adjagent + dupe_sweep); a surface argument (adjagent, dupe_sweep) runs only that one; further arguments forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+[doc("[dev] run tooling python tests and the markdown link check: no argument runs all three (adjagent + dupe_sweep pytest, then docs: just check-links with its defaults); a surface argument (adjagent, dupe_sweep, docs) runs only that one; further arguments, never given to docs, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON="{{VENV_PYTHON}}" ./devtools/scripts/test.sh "$@"
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON="{{VENV_PYTHON}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test.sh "$@"
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
 [doc("[dev] black-format, isort, flake8 the generator (adjagent), the tests and devtools, or the given path(s) in place of all of them")]
 format-python *paths: _venv
     @VENV_PYTHON="{{VENV_PYTHON}}" FLAKE8_IGNORE="{{FLAKE8_IGNORE}}" ./devtools/scripts/format-python.sh "$@"
 
-
+# Emits candidates, never verdicts, and exits zero with findings: whether two sites are one idea is
+# a judgment, and a gate here would be claiming it.
 [doc("[dev] list one-idea-two-places candidates across the owned python trees (the corpus devtools/dupe_sweep/python_corpus.py names) — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
 sweep-python *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" ./devtools/scripts/sweep-python.sh "$@"
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep python "$@"
 
 
 # test-changed: run only the test surfaces a change touches.
@@ -125,21 +141,27 @@ sweep-python *args:
 # Changed paths are the uncommitted tree (`git status`: staged, unstaged and
 # untracked, both sides of a rename) plus, when <base> is given, everything
 # committed since it (`git diff base...HEAD`). Each path selects the surface
-# its prefix names in TEST_SURFACE_MAP below; a path matching no row (docs,
-# plans, scratch) selects nothing. There are no cross-surface
+# its prefix names in TEST_SURFACE_MAP below; a path matching no row
+# (ROADMAP_PLANS/, scratch) selects nothing. There are no cross-surface
 # "just in case" rows. The one exception is the runner itself: `justfile`,
-# `python.just` and `devtools/scripts/` — where every recipe body lives — select
+# `python.just` and `devtools/scripts/` — where every recipe body lives, inline or scripted — select
 # every surface, because a change to the `test` recipe, or to the script it
 # runs, cannot be validated by skipping it. With nothing selected, it says so
 # and exits zero without running tests. Git is only read.
 #
 # One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
-# ending in `/` matches everything under it.
+# ending in `/` matches everything under it; one starting `*` is a glob over
+# top-level file names. `docs` is the link check: the documents it reads, and
+# the dicer that runs it.
 TEST_SURFACE_MAP := "
 adjagent/ adjagent
 tests/ adjagent
+kb-tools/ adjagent
 devtools/render_diff.py adjagent
 devtools/ dupe_sweep
+PROJECT_DOCS/ docs
+*.md docs
+devtools/dicer/ docs
 justfile ALL
 python.just ALL
 devtools/scripts/ ALL
@@ -149,6 +171,9 @@ devtools/scripts/ ALL
 test-changed base="":
     @PROJECT_ROOT="{{PROJECT_ROOT}}" TEST_SURFACE_MAP="{{TEST_SURFACE_MAP}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test-changed.sh "$@"
 
+# This repository's own install: base product only, once per harness. The opencode line overrides
+# the tier map because the default family's tier texts name claude models, which opencode refuses.
 [private]
 install-agents-here:
-  @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install-agents-here.sh
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "{{PROJECT_ROOT}}" --harness=claude
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "{{PROJECT_ROOT}}" --harness=opencode --model-tier-map=default

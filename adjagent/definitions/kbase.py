@@ -9,7 +9,7 @@ from adjagent import clauses
 from adjagent.definition import Definition, SkillFile
 from adjagent.vocabulary import Kind
 
-KBASE_MIN_VERSION = "0.9.0"
+KBASE_MIN_VERSION = "0.10.0"
 KBASE_TAP_FORMULA = "benn-herrera/kbase/kbase"
 
 DEFINITIONS = (
@@ -47,8 +47,7 @@ In every path a reference names, `kb-root/` stands for the located **KB root**.
 **A KB is found.** Say in one line where it is, then route by the table below.
 
 **No KB, and this repository holds LaTeX sources.** Not a dead end: it is a build waiting to happen.
-Identify the volume root — the entry whose `usage` is `toplevel` in `00README.json` where the project
-has one, else the `.tex` file carrying `\\documentclass` — put it to the user, and route to
+Identify the volume root — `kbase://help/build` states the rule — put it to the user, and route to
 `references/building.md` once they confirm it. That build has a fast path that spends no inference, and
 the reference carries it.
 
@@ -57,10 +56,9 @@ looking only costs the user time.
 
 ## KB metadata goes through kbase
 
-Under the KB root, the claim markers in the documents are metadata. A document's prose is yours to
-read, and reading it passes over these: take no value from them, and never grep or count them. A
-value metadata carries comes from a query, never off the file, and no metadata byte is typed by
-hand.
+Under the KB root, the statement markers in the documents are metadata. A document's prose is yours
+to read, and reading it passes over these: take no value from them, and never grep or count them. A
+value metadata carries comes from a query, never off the file.
 
 ## kbase's own text governs
 
@@ -135,12 +133,12 @@ When the user asks a question:
 
 ## Claim rigor and strength
 
-Every result in this KB is backed by a **claim-rigor entry** recording how trustworthy it is. When you
-ground an answer on a result — and especially when assisting a derivation or research effort — surface
-its strength; do not cite a leaf as if all results were equally solid.
+Every result in this KB is a node whose record says how trustworthy it is. When you ground an answer
+on a result — and especially when assisting a derivation or research effort — surface its strength;
+do not cite a leaf as if all results were equally solid.
 
-**Where it lives.** Each result's claim-rigor entry carries a `clm-xxxxxx` id; the query tools below
-resolve a result to its id and its entry.
+**Where it lives.** Each result's node carries a `clm-xxxxxx` id, and `show` on that id returns its
+record; the queries below resolve a result to its id.
 
 **Derivation, lifts and caps.** `strength = min(max(derivation, every lift), every cap)`, where
 `derivation = min(rigor, every participating premise)`, and `0` where none participates:
@@ -152,7 +150,7 @@ resolve a result to its id and its entry.
   the derivation.
 - **Cap** — a `clm-`, `ana-` or *run* `exp-` refuting it caps it at `1 − bearing × refuter strength`;
   the smallest cap wins.
-- **Exclusion** — an edge whose bearing or source strength is `*pending*` is left out: no contribution,
+- **Exclusion** — an edge whose bearing or source strength is pending is left out: no contribution,
   no lift, no cap.
 
 The `strength` `show` reports already includes all three, and they are not interchangeable for
@@ -160,25 +158,15 @@ derivation work: a claim solid via its *derivation* can be built on deeper, whil
 a lift (weak derivation, strong lift) supports a conclusion yet does NOT license building a new
 derivation on it.
 
-**Build-status by strength band:**
-
-| strength | status |
-|---|---|
-| 0.85–1.00 | ok to build on |
-| 0.65–0.85 | ok to build on, see caveats |
-| 0.45–0.65 | use as input only, don't build deeper |
-| 0.20–0.45 | do not build on, rework needed |
-| 0.00–0.20 | unsubstantiated |
-
-**`*pending*` means unassessed, not weak.** A claim no scoring pass has reached carries
-`rigor: *pending*`; where a premise participates its `strength` reads `*pending*` unless a lift stands
-over it. Pending does not propagate: strength is computed over the premises that remain — possibly
-higher than it will read once a left-out one is judged, and `0.00` where none remains. A `0.00` has
-several causes, which `show` (`rigor`, `premise_count`) and `deps` tell apart: no premise at all, every
-premise unjudged, a zero in the minimum — a judged `0.0` rigor or bearing, or a premise at `0.00` — or a
-refutation's cap. `strength-below` and `weak-points` omit pending claims but list unjudged `0.00` ones
-— after a build, before any bearing pass, that is every claim. A run `exp-` can float a
-pending-derivation claim to solid; a `*pending*` `ana-` never poisons an otherwise-sound claim.
+**Pending does not propagate.** A claim no scoring pass has reached has a pending rigor, and where a
+premise participates its strength is pending too unless a lift stands over it. Strength is computed
+over the premises that remain — possibly higher than it will read once a left-out one is judged, and
+`0` where none remains. A `0` has several causes, which `show` (`rigor`, `premise_count`) and `trace`
+with `direction: in` tell apart: no premise at all, every premise unjudged, a zero in the minimum — a
+judged `0.0` rigor or bearing, or a premise at `0` — or a refutation's cap. `find` by strength passes
+over pending claims but lists those unjudged zeros: after a build, before any bearing pass, that is
+every claim. A run `exp-` can float a pending-derivation claim to solid; a pending `ana-` never
+poisons an otherwise-sound claim.
 
 **Say which term, and what is unjudged.** When surfacing strength for a derivation or research effort,
 say *which term* carries the strength — derivation, lift or cap — and point at the lifting `exp-`/`ana-`
@@ -187,51 +175,35 @@ reads pending, or reads a value a left-out premise has yet to move, say so plain
 result may well be sound, but its strength is *unassessed*, and flagging that uncertainty is not the
 same as implying solidity.
 
-**Query it through the index — don't grep.** Use the `kbase` server's query tools, which the harness
-offers under the server's prefix — `{clauses.MCP_TOOL_PREFIX}find` — and the bullets below name each tool
-without it.
+**Query it through the index — don't grep.** The queries are operations of the one tool
+`{clauses.MCP_TOOL_PREFIX}query`: `kbase://help/query` says what they share, and
+`kbase://help/<operation>` gives each one's arguments. Route the user's need to an operation:
 
-- `find` with a `query` — **name/number → claim id.** Resolve a result the user names in plain
-  language ("Proposition 4.3", "the Lyapunov result") to its `clm-id` + title + strength. Use this
-  whenever you (or the user) need an id — the user should never have to know or guess a `clm-` id;
-  look it up for them, then chain into `show`/`deps`/`referenced-by`. Offer the id when it is useful
-  to the user (e.g. so they can refer back to it), but lead with the name and strength, not the bare
-  id.
-- `show` on a `clm-id` — strength, build-status, and rationale for one claim, and its strengthen-by
-  items under `strengthen_by`: each one a rework note — what would raise the claim — carrying its
-  text and the ids it mentions, never a graph node.
-- `deps` on a `clm-id` — every scoring edge incident at it, in either direction, and its own outgoing
-  `references` and `demoted` edges, each as `relation`, `direction`, `target`, `bearing` and
-  `context`. Its premises, lifts and caps are the `in` rows; a `references` or `demoted` row names a
-  claim it does not rest on.
-- `deps` with `inverse: true` — the nodes whose strength this one enters: the claims resting on it,
-  and those it lifts or refutes. A claim that only references it, or whose edge to it was cut, is not
-  returned.
-- `gated-on` with an id — the claims whose strengthen-by notes mention that id. No reverse-dependency
-  query reaches a note: `deps` with `inverse: true` never returns one.
-- `referenced-by` on a `clm-id` — leaves that cross-reference this claim's home leaf (live
-  reverse-navigation: "what else points here"). Surface on request; do not auto-traverse.
-- `strength-below` with a `max-strength` — shaky claims
-- `weak-points` — highest-leverage rework targets (shaky *and* load-bearing)
-- `stats` — the summary dashboard
+- **A result named in words** ("Proposition 4.3", "the Lyapunov result") — `find` by `title` resolves
+  it to its id. The user never has to know or guess an id: look it up for them, and offer it when it
+  is useful to them, but lead with the name and the strength, not the bare id.
+- **One node's record** — `show`.
+- **One hop of edges** — `edges` with the node's `id`.
+- **The chain bearing on a claim, or what its strength reaches** — `trace`, `direction` `in` or
+  `out`.
+- **Shaky, high-leverage and unscored claims** — `stats` for the snapshot, `find` for the full lists.
+- **Who cites a node** — `citations-of`. Surface a citation on request; do not follow it.
 
-**A list result is capped, and says so.** A list query is capped and reports `count` and `truncated`;
-where `truncated` is true, re-issue at the next offset before treating the list as complete.
+**Assisting derivations.** When the user builds or checks a derivation, trace the strength of the
+chain it rests on (`trace` on the claim with `direction: in`: the whole chain, each edge's
+contribution) and surface the **weakest link** explicitly — a weak node or a low bearing — e.g. "this
+passes through `clm-yl5n5v` at strength 0.30, *do not build on, rework needed* — that is the
+load-bearing weak point."
 
-**Assisting derivations.** When the user builds or checks a derivation, trace the strength of the chain
-it rests on (`deps` on the claim) and surface the **weakest link** explicitly — a weak node or a low
-bearing — e.g. "this passes through `clm-yl5n5v` at strength 0.30, *do not build on, rework needed* —
-that is the load-bearing weak point."
-
-A `wrk-` id among what `deps` returns is a premise contributing `bearing × rigor`, with no derived
-strength of its own, so the band table does not read against it, and the weakest link in a chain may be a
-work this corpus does not contain. Name the work itself as the weak point when it is one — a chain that
-runs out of the corpus is a different exposure from a weak step inside it, and neither stands in for the
-other. Where either score is `*pending*`, the edge is left out of the claim's derivation, and the
-unsupplied score is what to report: `show` on the work's id gives its title and `rigor`, and `deps` on
-the claim gives the `founds` edge's bearing. `find` does not reach works, so build the id from the citing
-leaf's own citation key rather than searching for the work by name. An `axm-` id is an axiom: a
-`founds` premise contributing `bearing × 1.0`, its rigor `1.0` by rule.
+A `wrk-` id among the claim's edges (`edges` with the claim's `id`) is a premise contributing
+`bearing × rigor`, with no derived strength of its own, so it sits on no strength band, and the
+weakest link in a chain may be a work this corpus does not contain. Name the work itself as the weak
+point when it is one — a chain that runs out of the corpus is a different exposure from a weak step
+inside it, and neither stands in for the other. Where either score is pending, the edge is left out
+of the claim's derivation, and the unsupplied score is what to report: `show` on the work's id gives
+its title and `rigor`, and `edges` with the claim's `id` gives the `founds` edge's bearing. To reach
+the work, `find` it by the citing leaf's own citation key, its `label`, rather than by its name. An
+`axm-` id is an axiom: a `founds` premise contributing `bearing × 1.0`, its rigor `1.0` by rule.
 
 ## Cross-references
 
@@ -252,7 +224,7 @@ These are rules, not a role: nothing here is about what you *are*, and all of it
 - You do not generate new mathematical content. You navigate to and reason about existing content. If
   asked to derive something not in the KB, say so explicitly and distinguish your reasoning from KB
   content.
-- You do not re-score a claim, edit claim-rigor content, or supply a rigor value: `score` grades and
+- You do not re-score a claim, edit a node's record, or supply a rigor value: `score` grades and
   lands values, `references/maintaining.md` writes them, and a number you invent is a defect in the
   record.
 - You do not speculate about content in documents you haven't read. If you don't know whether a topic is
@@ -265,74 +237,43 @@ launch returns, and follow it with `status` on request and `cancel` on the user'
 
 ## What the build takes
 
-The volume roots the user names are the whole input, each passed as an absolute path, one
-`volume-root` per source. The order they come in is not part of it: kbase orders them itself, and the
-result does not depend on the order given. Anything else the user typed is not an input — not a
-further source, and nothing this reference carries into the launch; say so rather than folding it
-into the call.
+The volume roots the user names are the whole input, one `volume-root` per source;
+`kbase://help/build` states how they resolve and in what order the build takes them. Anything else
+the user typed is not an input — not a further source, and nothing this reference carries into the
+launch; say so rather than folding it into the call.
 
 ## The fast path
 
-The same `build` call with `no-inference` true is the shortcut to a KB — the structure, without the
-models, in one argument rather than a separate command or a second tool. Offer it for a
-first look at what a KB over these sources holds, or for a run the user wants before spending
-inference on a long build.
-
-Every step that calls a model is dropped and the rest of the build is walked: the document graph, its
-spine seed, declared claims, equations, the validation gate and readiness all still run. What it
-leaves out is the model's share — no discovered claims, no unmarked references, no co-linear
-culling, no dependencies attributed by the model, no overview passage — and the result carries a
-note naming each step it skipped. State that trade when you offer it: this is the structure, not a
-complete KB. State its cost as well: a fast-path trail is a finished one, so a resume over it changes
-nothing and the dropped steps never run on it. The full build afterwards is a start over (*Resuming
-and starting over*, below) whose fresh `build` leaves `no-inference` off: it begins from scratch and
-keeps no stage of the fast run.
+The same `build` call with `no-inference` true is the fast path; `kbase://help/build` states what it
+drops. Offer it for a first look at what a KB over these sources holds, or for a run the user wants
+before spending inference on a long build. State the trade when you offer it: this is the structure,
+not a complete KB, and the fast run is never upgraded later — the full build afterwards is a start
+over (*Resuming and starting over*, below) and keeps nothing of it.
 
 ## Launch
 
 Call the `build` tool with one `volume-root` per source. Tell the user before you call it that every
 stage boundary of the build is a commit in their repository.
 
-The result is one of three:
+The result holds a `wait` line. Run it as a background shell command in the same turn, as printed
+rather than composed from the flags, and relay the outcome when it returns.
 
-- **`done`** — the launch took. Relay its `state-dir`, its `pid` and its `resume` command; a build
-  that finished inside the call has no `resume` and reports its `stages` instead. Where it carries a
-  `wait` command, run that as a background shell command in the same turn: the result holds the whole
-  line, so run it as printed rather than composing one from the flags. `wait` blocks until the build
-  ends and then prints the store's `status` document, and that is how you learn the build ended —
-  relay the outcome when it returns.
-- **`refused`** — nothing started. The items name what is wrong, each with a remedy where one exists;
-  relay them, and the launch ends there. A `check: inputs` item is a build trail already standing in
-  the repository: *Resuming and starting over* says what follows it. A `check: provider` item is a
-  configuration gap: call the `show-config` tool and relay its document rather than reading the file
-  yourself to explain the refusal, so the user can fix the file the item's `path` names in the layer
-  `show-config` reports.
-  Then offer to set it up: `configure` with `create` writes annotated templates for both files where
-  none stands; once `providers.toml` names an endpoint, `models` lists that provider's ids and
-  `configure` with `model-map` writes the choice.
-- **`failed`** — the item says which of two things happened. The build ran and exited as a failure:
-  the items are its own, naming what failed. Or the call stopped waiting at its bound while the build
-  was still starting: the item names the state directory and says so, and the build keeps running —
-  report it as still starting, and note `status` shows it on the user's next ask.
+A refusal starts nothing: relay its items and their remedies, and the launch ends there. A
+`check: provider` item is a configuration gap: call the `show-config` tool and relay its document
+rather than reading the file yourself to explain the refusal, so the user can fix the file the item's
+`path` names in the layer `show-config` reports. Then offer to set the provider up through
+`configure-providers`, then `configure-models`, following the steps each result's `next` gives.
 
 ## Choosing models
 
-When the refusal leaves `models.decision` or `models.text` unset and the user names no id, read
-`kbase://model-hints` for what each role wants. The choice is the user's.
+When the refusal leaves `models.decision` or `models.text` unset and the user names no id, the
+choice is the user's. Read `kbase://model-hints` for what each role wants.
 
-The decision model answers one ask per candidate link — many asks, each cheap — so the number of
-links, not the model alone, sets that walk's wall clock.
-
-Say what would move either choice that `kbase://model-hints` sets out — the larger text model, the
-non-flash decision id — because the user can judge the material and the wall clock, and the session
-cannot.
-
-Both ids go in the single `model-map` call above, from the ids `models` listed. An id the user names
-fills its role; for the role they leave open, propose one id `models` listed that matches the
-capability `kbase://model-hints` states for it, and say what would move it — the call needs one per
-category it dials. Where `kbase://model-hints` is not offered, say so and leave that role's choice to
-the user rather than writing an id nobody named. Say once if `models` did not list one, then write
-what they chose.
+An id the user names fills its role; for a role they leave open, propose one id `models` listed that
+matches the capability `kbase://model-hints` states for it, and say what would move the choice —
+the user can judge the material and the wall clock, and the session cannot. Say once if `models`
+did not list one, then write what they chose with `configure-models`, each id under its role's
+argument.
 
 ## Following it
 
@@ -341,33 +282,17 @@ where it carries one. `cancel` only on the user's word, and relay what it return
 
 ## Resuming and starting over
 
-- **A resume** is `build` with `resume` true and no `volume-root`: it continues with the inputs the
-  trail records. Given a volume root it is refused, `check: usage`; over a finished trail it returns
-  `unchanged`.
-- **A `check: inputs` refusal** answers volume roots given over a trail that already stands. Relay
-  the remedies it carries — continue with a resume, or start over — and let the user choose between
-  them. Where the trail records no `started-at`, the refusal names no `rewind-build`; relay the way
-  to start over that it does name.
-- **Starting over** is `rewind-build` with `target` `started-at`. It changes nothing: relay its
-  `commands`, the reset for the user to run, and the paths under `dirty` that reset would discard
-  where it lists any. Once the user has run it, call `build` with the volume roots they name — a
-  fresh build.""",
+- **A resume** is `build` with `resume` true.
+- **Starting over** is the command `build-trail` gives for `started-at`, or removing `kb-root/`, and
+  either is the user's to run. Relay the command, and the paths under `dirty` where `build-trail`
+  lists any. Once the user has run it, call `build` with the volume roots they name — a fresh
+  build.""",
             ),
             SkillFile(
                 path="references/scoring.md",
                 body="""Launch a score run in the background, relay what the launch returns, and follow it with
-`status` on request and `cancel` on the user's word.
-
-## What a pass does
-
-A pass walks the KB's scoring set itself: it enumerates every item the pass covers, asks one question
-per item, validates the value it got, lands that one value, and ledgers the run. The enumeration is
-the tool's — do not draw up a list of items, hand it ids, or answer any of its asks yourself.
-
-## One quantity per ask
-
-One quantity per ask; the asks are never merged. Scope a run to one pass — `pass` — for a single
-edited subtree, or for a pass that is failing and is being isolated.
+`status` on request and `cancel` on the user's word. `kbase://help/score` states what a run asks,
+skips, lands and resumes.
 
 ## The model
 
@@ -377,85 +302,47 @@ the plan and the endpoint; you do not.
 - **What would answer.** `show-config` reports the resolved `scoring` role; read it there rather than
   naming an id from memory. Where it resolves to no model, that is the gap to report, not a role
   for you to fill.
-- **What the run costs.** One ask per item, over the run's whole set. Call `score` with `dry-run`
-  true first — or with the `pass` a scoped run would use: it lists the set, asks nothing, writes no KB
-  and needs no model. Give the user its `counts.total`, from the run's own document — the one the
-  call returns, or the one its `wait` line prints.
+- **What the run costs.** Call `score` with `dry-run` true first, scoped as the run would be: it asks
+  nothing. Give the user the count it returns.
 - **The trade, in their terms.** The judgement the KB's numbers get, against the wall clock of the
-  run and what each call costs on their plan. kbase's hint for this role asks for the strongest
-  reasoning model on offer — a default, written without knowledge of whose plan pays for it.
+  run and what each call costs on their plan. `kbase://model-hints` states what the scoring role
+  wants — a default, written without knowledge of whose plan pays for it.
 - **Wait.** Start the run once they pick — `scoring-model` on that call where the pick is not the
   configured role — or once they say to run with what is configured. Never run first and report the
   bill.
 
 ## Launch
 
-Call the `score` tool. It starts the run detached and answers once the run's ledger and pid stand, so
-the walk itself runs on after the call returns.
-
-Where the run is still walking, that answer is its start document. Relay its `run` id and its `ledger`
-directory, and run its `wait` line as a background shell command in the same turn: the result holds
-the whole line, so run it as printed rather than composing one from the flags. `wait` blocks until the
-run ends and then prints the run's own result document — its `counts`, its `scored` items, and its
-`resume` line where items remain, which you relay rather than run. That document is how you learn the
-run ended: report the outcome when it returns.
-
-A run that ended inside the call answers with that document in place of a start document: a
-`check: lock` while another run holds the KB, a `scoring` role that resolves to no model, a walk that
-reached the end of its set. Relay what it reports — nothing is left running — and there is no `wait`
-line.
-
-Where the call stops at its start bound with the run still starting, the item says so and names the
-state directory — that `failed` is the call's bound, not the run's, and the run keeps going. Report it
-as still starting, and note `status` shows it on the user's next ask.
+Call the `score` tool, and run the `wait` line its result holds as a background shell command in the
+same turn, as printed rather than composed from the flags. When it returns, report the run's outcome
+from the document it prints, and relay its `resume` line where items remain rather than running it.
+A refusal starts nothing: relay what it names.
 
 `status` on the user's request: relay its `state`, the run's `counts` and its `resume` line where it
 carries one. `cancel` only on the user's word, and relay what it returns.
 
-## Two things it never scores
-
-- **A work's rigor** — the document sits outside the corpus.
-- **A `founds` edge's bearing** — that pairing leaves the corpus the same way.
-
-No pass reaches either, and a run leaves both values as they stand. Both are the user's, made with
-the document in hand — `set-rigor` writes one, `set-bearing` the other.
-
 ## Filling in `founds` bearings
 
-Where a `founds` edge's bearing is `*pending*`, or the user asks for those values, offer to take
-them: the work or axiom lies outside the corpus, and you have not read it.
+Where a `founds` edge's bearing is pending, or the user asks for those values, offer to take them:
+the work or axiom lies outside the corpus, and you have not read it.
 
-`deps` on the claim lists its edges and their bearings, and `show` gives either end's title. Name the
-edge by both ends, `<work or axiom> → <claim>`, with both titles, and take the number the user
-gives — one edge at a time, or a list. Write each with `set-bearing`. Do not propose a value, do not
-infer one from the claim's rigor or the work's title, and touch no edge the user did not name.
+`edges` on the claim lists its edges and their bearings, and `show` gives either end's title. Name
+the edge by both ends, `<work or axiom> → <claim>`, with both titles, and take the number the user
+gives — one edge at a time, or a list. Write each bearing with `edit-edge`, and a work's rigor the
+user gives with `edit-work`.
 
 An edge the user gives no value for stays as it stands, and your reply names which are still open.
 
-## The ledger and resumption
-
-The run ledgers each item as `done`, `malformed` or `failed`, and every write it lands is idempotent.
-Re-running the run resumes from what the ledger holds rather than starting over: an interrupted run
-is re-run, not repaired by hand. Items it left `malformed` or `failed` are its report of what it
-could not land.
-
-## Values age
-
-A value recorded in the KB is not evidence about the current one: the text it read, or the model
-answering, may have moved since. A rescore re-asks every item rather than trusting the number already
-in the file.
-
 ## What the user sees
 
-Report the run's counts for `done`, `malformed` and `failed`, and the path of the ledger it wrote, as
-the run names them. Where any count is non-zero, say which outcome it is and leave those items to a
-re-run.""",
+Report the run's `counts` and the ledger it wrote, as the run names them. Where items failed, say
+so and leave them to the run's `resume` line.""",
             ),
             SkillFile(
                 path="references/maintaining.md",
                 body=f"""You maintain an existing knowledge base. You take finished work and incremental corrections and land
-them in the canonical tree *correctly* — claim-graph wiring, cross-references, and the
-regeneration/verification loop — leaving `verify` green. The reading route reads, reasons and reports;
+them in the canonical tree *correctly* — claim-graph wiring, cross-references, and the verify loop —
+leaving `verify` green. The reading route reads, reasons and reports;
 you modify.
 
 {
@@ -476,51 +363,26 @@ yourself.
 
 ## What you modify, and how
 
-**You write by hand**: leaf body prose, math and tables, up-links, and cross-references — the
-document's words, and nothing structured.
+**You write by hand**: leaf body prose, math and tables, up-links, and cross-references.
 
-**A built leaf's body is the corpus's words; a leaf you author is your own.** Migrating `session/`
-work means writing whole leaves, and those are yours end to end. A leaf the build produced is a
-mechanical rendering of one extent of the corpus — repair it against that extent, and put anything
-that says more than the source says (a summary, a rationale, an analysis) in its own document,
-cross-referenced from the leaf, rather than over the rendering.
+**A leaf you author is your own.** Migrating `session/` work means writing whole leaves, and those
+are yours end to end.
 
-**You supply values; the call writes the bytes.** A register entry and every field in it, an in-body
-claim marker, a premise bullet, an analysis-to-claim pair — each is written by one write-op tool that
-renders the format itself, proves what it composed by reading it back, and refuses rather than
-writing anything it cannot prove.
+**Metadata goes through the `write` tool.** `kbase://help/write` states the batch and its outcomes,
+and `kbase://help/<operation>` states each op.
 
-- **One entry per call.** A call carries one entry's values and writes that entry.
-- **An insert mints the id and returns it.** There is no separate mint step and no id for you to
-  choose — an id you did not read off an insert's result does not exist.
-- **The outcome decides what you do next.** `done` or `unchanged` (0): the entry stands as you
-  supplied it, and an insert re-issued over an existing entry of the same register and title adopts
-  that entry rather than minting a second one, naming the values it does not already carry.
-  `refused` (1) wrote nothing and names every offending item, each with a `remedy` where it has one:
-  clear that item and call again. A `lock` item is a build running on the KB, and no change to the
-  values clears it: stop and report it. `retry` (2) is another writer holding the KB write lock:
-  re-issue the identical call, unchanged, up to three times, then report the contended KB rather
-  than looping. `failed` (3) is a defect in the tool, its input or the environment, and re-issuing
-  will not fix it.
+**Whether a batch commits `kb-root/` is the user's call.** Passing `commit` is strongly encouraged:
+it makes the batch undoable as one unit.
 
 {clauses.KB_RUNNER_TARGETS}
-
-**You do NOT score rigor.** That value is the scoring run's — or, for a work's rigor and a `founds`
-edge's bearing, a human's — never yours. A claim you create carries `*pending*` for rigor — its
-`strength` pending where a premise participates, `0` where none does, unless a lift stands over it —
-until a run or a person supplies the number through `set-rigor`. Do not guess one. The endcap's two
-scores fall the same way and stay `*pending*` longer: a work's `rigor` — the one you do supply, at
-insert — and a `founds` edge's bearing, which the bullet renders pending on its own, are settled by
-someone who has read the outside work, which you have not. Insert a work at `*pending*` and leave both
-there; for these two values `set-rigor` and `set-bearing` are that reader's to call, not yours.
 
 ## The two jobs
 
 ### Job A — incremental edit / correction
-A leaf, a claim entry, a dependency edge, or a cross-reference needs to change. Read the **primary
-source** first: the leaf's body and any cited source, directly; a claim entry's or an edge's current
-state from `show` and `deps`, never from a status field or a summary. Make the minimal correct change,
-then run the regen→verify loop below.
+A leaf, a node's record, a dependency edge, or a cross-reference needs to change. Read the **primary
+source** first: the leaf's body and any cited source, directly; a node's or an edge's current
+state from `show` and `edges`, never from a status field or a summary. Make the minimal correct
+change, then run the verify loop below.
 
 ### Job B — migrate finished work from `session/` into the canonical tree
 `session/` holds working docs (discussion notes, rescore worksheets, captured-but-unplaced results).
@@ -538,16 +400,16 @@ wire its claim-graph nodes, and leave the source doc behind (or note it for remo
 
 ## Anatomy of a correct leaf (reference, not restated)
 
-A leaf you add by hand carries the same three parts a built one does:
+A leaf you add by hand carries what a built one does:
 - The up-link, on every document you write below the entry point: `[↑ Parent Name](<parent>)` on
   the first line — `↑` is U+2191, the machine-checkable marker; `<parent>` is the parent document,
   spelled relative to the document carrying the link: the `index.md` of its own directory, or for an
   `index.md` itself the one a directory above. Directly under `kb-root/` that parent is
   `entry-point.md`, so a domain index up-links to `../entry-point.md`; there is no
   `kb-root/index.md` to point at.
-- A marker per claim the document hosts, placed by `mark-claim-in-leaf` from a locator in the leaf's
-  own words.
+- A statement marker per node the document hosts, placed by that node's add op.
 - Cross-references use the `> Related:` blockquote form — never paraphrase the target.
+- A node named in prose is a citation; `kbase://help/add-citation` states its forms.
 
 Incremental edits preserve the existing structure; do not reformat beyond the change. **Preserve
 author-adjudication markers verbatim** (e.g. author adjudication notes, walk-back annotations) —
@@ -556,72 +418,31 @@ never strip them in an edit or migration.
 ## Claim-graph wiring
 
 When a migration or edit adds/changes a node:
-- **A node is born from its insert** — `insert-claim-entry`, `insert-analysis-entry`,
-  `insert-experiment-entry` — which mints the id and writes the entry in one act. Read the id off
-  its output and use it from there; there is nothing to draw, check for collision, or carry forward.
-- **A work is the exception to that**: `insert-work-entry` mints nothing. The id is `wrk-` plus the
-  citation key you supply, so there is no id to read off its output and no collision to avoid — a
-  key already entered is adopted with the same values and refused with others, which is what makes a
-  work three volumes cite one node. Take the key from the citing leaf's own citation; never coin one.
-- **`rests-on` membership** is yours to decide: the framework premises (the axioms the KB's own
-  `axioms.md` declares, cited as `axm-<label>`) and the `clm-`/`exp-` ids the derivation actually
-  consumes, supplied at insert or added later with `add-rests-on`. An `ana-` premise is refused: an
-  analysis lifts or refutes, never supports. A target that does not resolve is refused, so a dangling
-  edge is not a state you can leave behind.
-- **A `rests-on` bullet naming a `wrk-` id is a `founds` edge**: the relation follows from the
-  target, not from a second op. Until both endcap scores are supplied the edge is left out of
-  the citing claim's derivation — scoring work the edge creates, not a cost to weigh against
-  leaving a real warrant off the graph — and it can never stand in for an in-corpus dependency.
-  Reach for it where the warrant genuinely leaves the corpus, never as a placeholder for a `clm-`
-  you did not find.
-- **Acyclicity is the only hard constraint, and it is graph-based.** The verifier computes strength
-  bottom-up via **Kahn's topological sort**; a cycle is rejected only when a
-  real path `B→…→A` exists alongside an edge `A→B`. **File/document order is irrelevant** — a
-  `rests-on` that points to an entry positioned *later* in the same `claim-rigor.md` is
-  perfectly valid if no actual cycle results. There is no "deps must be declared above" check; do
-  not reorder entries or downgrade a real edge to dodge a phantom file-order objection.
+- **Which premises a derivation rests on is yours to decide**: the `clm-` and `exp-` nodes it
+  actually consumes, each a `supports` edge into the claim, and the framework premises — the axioms
+  the KB's own `axioms.md` declares — each a `founds` edge.
+- **A `founds` edge from a work** belongs only where the warrant genuinely leaves the corpus, never
+  as a placeholder for a `clm-` you did not find, and it never stands in for an in-corpus
+  dependency. The scores it leaves pending are work it creates, not a cost to weigh against leaving
+  a real warrant off the graph.
 - **Volume order is a heuristic, not a rule.** Dependencies *usually* point to more foundational
   material (earlier or common volumes), and an edge in the unusual direction (e.g. an earlier-volume
   claim genuinely resting on a later volume's theorem) is a smell worth a second look — but it is
   **allowed** if it reflects a real dependency and creates no cycle. Never drop or axiom-downgrade a
-  real `clm-`/`exp-` premise merely because the target is in a "later" volume; the tooling cares only
-  about cycles. If a cross-direction edge feels wrong, surface it (the claim may be mis-placed)
-  rather than silently omitting the dependency.
-- **A `demoted` edge is settled with `resolve-demoted`**; only the build writes one. `remove`
-  deletes the edge; `restore` rewrites it as a `supports` edge, and is refused, naming the
-  cycle's path, where that would close a cycle.
-- **Edges come off a whole class at a time.** `drop-claim-edges` removes a claim's outgoing
-  `rests-on` or `references` bullets — the class you name, or both where you name none — and
-  `drop-inbound-edges` removes every bullet, in any entry, that names the claim, every claim's
-  refutation pair naming it, and the lift and refutation pairs an analysis's or experiment's leaf
-  writes against it. To cut one wrong edge, first read each standing edge's bearing and context with
-  `deps`, drop the class, and re-add every standing edge with `add-rests-on` carrying that same
-  `bearing` and `context` — restoring a recorded value, not scoring one. `demoted` edges are not
-  theirs to touch.
+  real `clm-`/`exp-` premise merely because the target is in a "later" volume. If a cross-direction
+  edge feels wrong, surface it (the claim may be mis-placed) rather than silently omitting the
+  dependency.
 - **A claim that should not exist** — a duplicate of one already in the graph, or one a correction
-  withdraws — comes out in order: `drop-claim-edges`, `drop-inbound-edges`, and `drop-claim-node`,
-  which deletes the entry, its marker and its id in every leaf. That last op refuses, writing
-  nothing, while any edge still names the node and while any line under `kb-root/` still names it —
-  each named as `path:line`, prose for you to edit by hand before calling again. The `rests-on`
-  bullets you drop were dependents' warrants: re-point each one that still holds onto the claim that
-  replaces it, or the dependent is left resting on nothing. A re-pointed bullet enters at a
-  `*pending*` bearing.
+  withdraws — comes out with `remove-node`. Each dependent edge it removes was a warrant: re-point
+  each one that still holds onto the claim that replaces it, or the dependent is left resting on
+  nothing. `kbase://help/remove-node` states how.
 - **An `exp-` node's edges** — `supports`, `lifts` or `refutes` — respect the `exp-`
   design/originate/control gate (re-analyses of outside data are `ana-`/`clm-`, never `exp-`).
 
-## The regen → verify loop (always, before you call it done)
+## The verify loop (always, before you call it done)
 
-1. `refresh` — idempotent, and a write-op call ends with one, so what it is for is the change no tool
-   wrote: run it after you edit a document's body directly.
-2. `verify` — the gate. A fault carrying the remedy `kbase refresh` means a body edit went
-   unrefreshed: call the `refresh` tool. A dangling id is repaired in the prose that names it, by
-   hand. A real cycle is broken with `drop-claim-edges`: the edge that closes it comes off, and the
-   edges that still hold are re-added, per *Edges come off a whole class at a time*. A `demoted` edge is a
-   finding rather than a fault: it arrives under `findings`, with the outcome `done`, listing a cut
-   edge.
-
-Done means `verify` returns `done`. If you cannot get there, stop and report the failing check
-verbatim.
+After you edit a document's body directly, call `verify`, and follow each refusal's remedy. Done
+means `verify` returns `done`. If you cannot get there, stop and report the failing check verbatim.
 
 ## Hazards (learned failure modes — do not relearn them)
 
@@ -629,11 +450,11 @@ verbatim.
   branch being maintained is an edit to a KB you cannot see — the worktree branches off
   `main`/merge-base, NOT the current feature branch, so your edits land on the wrong base and the KB
   you read back is stale. For KB maintenance on a feature branch, work **in-tree** with strict
-  discipline: no branch switch, no `git` mutation, no stage, no commit — committing is not yours.
-- **Mechanical sweeps need a coverage gate:** if the task is "do X to all N entries," state N from a
-  query — the `count` `subtree` reports on the swept index, `find` with an empty `query` for every
-  claim, `stats` for each node kind — do all N, and count one `done` or `unchanged` outcome per entry
-  before declaring done. Byte-green on a partial pass is a false pass.
+  discipline: no branch switch, no stage.
+- **Mechanical sweeps need a coverage gate:** if the task is "do X to all N items," state N from a
+  query — `find`, with `path` for a subtree, or `stats` — do all N, and count one `done` or
+  `unchanged` entry outcome per item before declaring done. Byte-green on a partial pass is a false
+  pass.
 - **Separate complex operations:** do not interleave two distinct complex edits (e.g. a content
   migration *and* a dependency-graph refactor) in one pass — finish and verify-green one, then start
   the next.
@@ -642,24 +463,24 @@ verbatim.
 
 ## One live writer
 
-A KB has at most one writer at a time. Metadata — every write-op call, `refresh`, anything that
-touches a record, a register or the index — comes from that one writer, live and
-serially: a metadata change cascades mechanically through the whole KB on refresh, and the ops are
+A KB has at most one writer at a time. Metadata — every `write` batch, anything that touches a
+record, a register or the index — comes from that one writer, live and serially: kbase's derivation
+after each write cascades a metadata change mechanically through the whole KB, and the batches are
 fast, so a second writer gains nothing and puts the whole KB at risk. The user's task decides which
 role you hold: where it asks you to land changes, you are the writer; where another session is
 already writing this KB, you are the other role below.
 - **Examine and hand back.** Read, decide what needs changing, and hand the change set — each change
   as the op to call and the values it takes — to the user or to the writer, who applies the changes
-  in one coordinated pass. Run no write op and no `refresh`.
+  in one coordinated pass. Run no write batch.
 - **Leaf prose.** Leaf text may be edited in parallel, by more than one session at a time, each on
-  leaves no other is editing, provided none changes metadata: no register, no claim marker, no
+  leaves no other is editing, provided none changes metadata: no register, no statement marker, no
   up-link.""",
             ),
             SkillFile(
                 path="references/scoring-system.md",
-                body="""The descriptions of the internals of the scoring system are maintained in
-[STRENGTH_SCORING_SCHEME.md](https://github.com/benn-herrera/kbase/blob/main/STRENGTH_SCORING_SCHEME.md) and
-[RIGOR_AND_BEARING_SCORING_SCHEME.md](https://github.com/benn-herrera/kbase/blob/main/RIGOR_AND_BEARING_SCORING_SCHEME.md)""",
+                body="""The scoring system — rigor and bearing, and how strength is computed edge by edge — is
+specified in kbase's SPEC; a strength is read against its
+[band ladder](https://github.com/benn-herrera/kbase/blob/main/PROJECT_DOCS/SPEC/10-metadata-format-version/the-band-ladder.md).""",
             ),
             SkillFile(
                 path="references/installing.md",

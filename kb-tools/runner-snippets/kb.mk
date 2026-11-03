@@ -21,14 +21,14 @@
 # references/installing.md walks through it.
 #
 # Target names carry a `kb-` prefix, so they cannot collide with a project's
-# own verify/refresh/stats. Plain POSIX recipe lines — no SHELL override;
+# own verify/stats. Plain POSIX recipe lines — no SHELL override;
 # existing recipes keep their own shell.
 #
 # Targets:
 #   kb-help:            show help on kb make targets
 #   kb-init:            create a new, empty KB. refuses if kb-root exists
 #   kb-verify:          verify KB link integrity and claim-graph metadata
-#   kb-refresh:         refresh mechanically maintained KB metadata
+#   kb-update-format:   convert the KB to the current format and re-derive its pages and sheets; needs a clean kb-root
 #   kb-stats:           print KB claim-graph stats
 #   kb-score:           run an inference scoring pass over the KB
 #   kb-export-latex:    generate a LaTeX file set from the KB
@@ -36,7 +36,7 @@
 # KB
 KBASE := kbase
 
-.PHONY: kb-help kb-init kb-verify kb-refresh kb-stats kb-score kb-export-latex
+.PHONY: kb-help kb-init kb-verify kb-update-format kb-stats kb-score kb-export-latex
 
 kb-help:
 	@grep '^#   kb-' "$(lastword $(MAKEFILE_LIST))" | sed 's:^#: :'
@@ -47,8 +47,8 @@ kb-init:
 kb-verify:
 	@$(KBASE) verify
 
-kb-refresh:
-	$(KBASE) refresh
+kb-update-format:
+	$(KBASE) update-format
 
 kb-stats:
 	$(KBASE) stats

@@ -13,7 +13,6 @@
 __pycache__/
 .pytest_*/
 .venv/
-mad-design/
 
 # where plugin tarballs land
 dist/

@@ -21,7 +21,6 @@ or a family overlay anchor, filled once by `render.filled_body`.
     render.py        definition to file text, the banner, the writer, and the agents file's text
     install.py       the install: renders, the shipped packages' stamped copy, and the prune
     agents_file.py   the agents-file install: the marker span, redirects, and the rolling backup
-    version.py       the version constant the `version` verb prints
     cli.py           the argparse surface
     __main__.py      the `-m` entry
 
@@ -38,3 +37,5 @@ Usage, from the repository root with it on PYTHONPATH:
 The render is deterministic: the text of every file is a function of the
 definition, the harness, the family and the two maps, and of nothing else.
 """
+
+__version__ = "0.12.7"

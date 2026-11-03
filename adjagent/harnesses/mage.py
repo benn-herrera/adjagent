@@ -3,8 +3,8 @@
 import json
 import re
 
+from adjagent import __version__
 from adjagent.harness import AgentFields, Harness, HarnessFile, McpSettings, McpSite, quoted
-from adjagent.version import VERSION
 from adjagent.vocabulary import Tool
 
 _PLUGIN_NAME = "adjagent"
@@ -14,7 +14,9 @@ _PLUGIN_DESCRIPTION = "Adjagent skills, agents, and MCP tools"
 def _plugin_json() -> str:
     """The plugin manifest's whole text: name, version and description, with `json.dumps`'s default
     separators, whose space after each colon the marker is a substring of."""
-    return json.dumps({"name": _PLUGIN_NAME, "version": VERSION, "description": _PLUGIN_DESCRIPTION}, indent=2) + "\n"
+    return (
+        json.dumps({"name": _PLUGIN_NAME, "version": __version__, "description": _PLUGIN_DESCRIPTION}, indent=2) + "\n"
+    )
 
 
 FILES = (HarnessFile(path=".claude-plugin/plugin.json", text=_plugin_json, marker=f'"name": "{_PLUGIN_NAME}"'),)
@@ -36,11 +38,8 @@ _RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the she
 never hands back with a background command running. If a recipe times out, the agent hands back naming it
 instead of rerunning it in the background."""
 
-_KBASE_PROJECT_RULE = """This session's kbase server serves many projects and locates none of its own: every kbase tool call
-passes `project-dir`, the project's absolute path — the git worktree root that holds `kb-root/` or
-will — and a call without it fails. Establish that path before anything else, asking the user where
-nothing in the session names it, and run the probes above with `.` read as that path rather than as
-the directory you are standing in."""
+_KBASE_PROJECT_RULE = """This session's kbase server serves many projects, so run the probes above with `.` read as the
+project path you have established for kbase's tool calls, not as the directory you are standing in."""
 
 
 def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:

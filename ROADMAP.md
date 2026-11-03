@@ -15,7 +15,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    generations: apply strip-first-observe-patch (README.md, "Variants and platform compatibility")
    on a cadence, using behavioral probe sets as the instrument. Byte-level instruments exist today —
    `just render-diff` between two render slots, and the render-property assertions in
-   `tests/test_adjagent.py` (ARCHITECTURE.md, Verification, and Why There Is No Verification Verb);
+   `tests/test_adjagent.py` (ARCHITECTURE.md, Why There Is No Verification Verb);
    behavioral ones do not yet.
 
 2. **One rule arriving several times in one prompt — the duplication class no instrument sees.**
@@ -65,7 +65,37 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    The 74 sites where a clause and a definition's own sentence share a paragraph: each a judgment
    whether the sentence is its own paragraph, to be read site by site, not swept.
 
-4. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+4. **adjagent as an installable package, with two skills that drive tools.** Release 0.12.8:
+   - **The install logic in Python** — `ROADMAP_PLANS/install-in-python.md`, which carries its open
+     questions.
+   - **Packaging.** A `pyproject.toml` reading `adjagent.__version__`, an `adjagent` console script,
+     and the install's `REPO_ROOT` checks (refusing targets inside this repository, skipping the
+     include line for it, the uncommitted-sources check before publishing the agents file) holding
+     or standing down outside a git checkout. Needs every shipped source under `adjagent/`.
+   - **An adjagent skill** for sessions in a consuming project: when it applies (install, update,
+     global setup, a generated file needing change), the install command and its global opt-in
+     flags, `adjagent --help` for the rest, and the rule that a generated file is never edited
+     locally — a local need goes in the project's CONVENTIONS.md, a change to adjagent.
+   - **A docdicer skill**, default set, every harness. The skill: what dicing buys (loading only
+     the leaves a task needs), when (a project's contract documents; a plan or design too large to
+     read whole), offer and run `<harness-dir>/skills/docdicer/tools/docdicer --install` at the
+     user's direction, then `docdicer --help`; no command list. `tools/docdicer` (POSIX sh) checks
+     for `python3` 3.9 or later and names the remedy where it is missing (macOS: `brew install
+     python` or `xcode-select --install`; Linux: the distribution's `python3`), installs into
+     `tools/.venv` with `pip install --upgrade` from `git+https://github.com/benn-herrera/docdicer`
+     on `--install`, says how to install when absent, and otherwise passes its arguments through;
+     `tools/.gitignore` holds `.venv/`. An adjagent install that finds `tools/.venv` before it
+     replaces the package re-runs `--install` after, so docdicer stays matched to the skill; a
+     failure there is reported and does not fail the install. docdicer's own pitfalls (a bare `§N`
+     linked to the wrong volume; no reassembly once the monolith is gone) are docdicer issues, not
+     skill text.
+   - **The diced-project-docs clause** in the harness agents file: a project whose contract
+     documents are trees under `PROJECT_DOCS/` reads the volume entry points and opens the leaves a
+     question needs, and the rules naming THESIS.md, SPEC.md, ARCHITECTURE.md or CONVENTIONS.md
+     apply to those trees. `clauses.PROJECT_DOCS_SETUP` defers to it. A sentence where plans are
+     authored: a plan or design too large to read whole is diced.
+
+5. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
    installs the agent and command definitions under a prefixed namespace so the set coexists with
    an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
    packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a

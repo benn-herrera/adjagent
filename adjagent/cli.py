@@ -8,6 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from adjagent import __version__
 from adjagent.agents_file import install_agents_file, scope_name, uncommitted_sources
 from adjagent.context import (
     ALIAS_MAP_FLAG,
@@ -23,7 +24,6 @@ from adjagent.errors import InputError
 from adjagent.install import install
 from adjagent.loading import load
 from adjagent.render import render_agents_file, render_all, write_renders
-from adjagent.version import VERSION
 from adjagent.vocabulary import HarnessText, key
 
 
@@ -107,7 +107,7 @@ def _run(args: argparse.Namespace) -> None:
     elif args.verb == "harnesses":
         print("\n".join(load("adjagent.harnesses", "HARNESS")))
     elif args.verb == "version":
-        print(VERSION)
+        print(__version__)
     else:
         print(harness_named(args.name).text(HarnessText("_".join(args.key.split("-")))))
 
