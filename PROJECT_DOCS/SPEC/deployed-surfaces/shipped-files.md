@@ -8,9 +8,9 @@ justfile or Makefile, name that destination directly
 and cannot be asked to notice a source-side rearrangement. Its installed copy is stamped like any
 other install emission whose filetype admits a comment: the `!INSTALLED!` banner, not `!GENERATED!`
 — a shipped package is source taken as-is, never a render. `SHIPPED_PACKAGES` is the table of those
-an install delivers by explicit mapping: each row a repository-top-level package and the destination
+an install delivers by explicit mapping: each row a shipped package and the destination
 under the install ROOT it lands at, beside the three definition surfaces, under `adj-tools/`. It
-holds no row today, so no install of this version delivers one. `kb-tools/` is a shipped package
+holds no row today, so no install of this version delivers one. The kb-tools package is a shipped package
 installed at its own stated destination rather than by that table: `skills/kbase/kb-tools/`, inside
 the `kbase` skill's own directory and so inside the `skills/` surface — the one package destination
 outside `adj-tools/`, a skill carrying its tooling in its own directory — holding only the runner
@@ -22,8 +22,8 @@ directory is neither its `SKILL.md` nor a supporting file it lists.
 A harness's shipped files are the fifth class: copied as they stand, never rendered. A harness also
 *renders* files of its own into ROOT — mage's manifest is the one — which are generated, not copied,
 carry no banner, and are replaced whole.
-An install copies the installing harness's set into ROOT — the harness directory itself — save a
-file conditional on a run at install time (below), so a harness file lands at the path it holds
+An install copies the installing harness's set into ROOT — the harness directory itself — except a
+user-level install, which copies no harness file, and save a file conditional on a run at install time (below), so a harness file lands at the path it holds
 below that directory: opencode's sits at `<harness-dir>/plugins/guardrail.ts` today and claude's at
 `<harness-dir>/hooks/guardrail.pl` (mage ships none), beside the surfaces and outside all three.
 Each keeps its bytes and its mode: the install stamps nothing on them. Every such file carries an

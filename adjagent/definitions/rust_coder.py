@@ -91,10 +91,13 @@ cannot panic.
 Rust has no built-in parametrization — write table-driven tests by iterating an array of
 `(input, want)` cases in one test, or factor a helper. Use `assert_eq!`/`assert!` with a message
 where the failure isn't self-evident.
-{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, fiddly arithmetic")}
+
+{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, fiddly arithmetic")} {clauses.COVERAGE_METRIC}
 {clauses.MOCKING_THRESHOLD_GENERAL}
 
-{clauses.integration_tests_coder(subject="in `tests/`, exercising the public crate API")} {clauses.integration_logging_signal(level="maximum logging", sink="output")} Benchmark with `criterion` (stable) rather than the nightly `#[bench]` harness.
+{clauses.integration_tests_coder(subject="in `tests/`, exercising the public crate API")} {clauses.integration_logging_signal(level="maximum logging", sink="output")}
+
+Benchmark with `criterion` (stable) rather than the nightly `#[bench]` harness.
 
 {clauses.INTEGRATION_ARTIFACT}
 
@@ -107,7 +110,11 @@ discipline: commit `Cargo.lock` for binaries, not for libraries. Conditional com
 multi-crate repos. Keep `mod.rs`-free module layout (`foo.rs` + `foo/`) for new code on the 2018+
 edition.
 
-{clauses.build_system_lead(direct="`cargo build` / `cargo test` / `cargo clippy` / `cargo fmt`")} Typical targets/recipes: `build`, `release`, `test`, `check` (often type-checking multiple targets / cfg combinations), `fmt`, `lint`, and a cross-build/`dist` target. Build outputs live under `target/` only (Cargo's default) — never scatter artifacts into the source tree. {clauses.warnings_as_defects(
+{clauses.build_system_lead(direct="`cargo build` / `cargo test` / `cargo clippy` / `cargo fmt`")} Typical targets/recipes: `build`, `release`, `test`, `check` (often type-checking multiple targets / cfg combinations), `fmt`, `lint`, and a cross-build/`dist` target.
+
+Build outputs live under `target/` only (Cargo's default) — never scatter artifacts into the source tree.
+
+{clauses.warnings_as_defects(
     enable="Run `cargo fmt` and `cargo clippy` through their targets before shipping",
     warnings="clippy warnings",
     suppression="an `#[allow(...)]`",

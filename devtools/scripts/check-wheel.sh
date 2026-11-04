@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# `check-wheel`'s body. Proves the wheel `build` left in dist/: its package data is the tree's, and,
+# installed into a throwaway venv made from $1, it runs as the shipped package rather than as the
+# checkout. Every wheel-side command runs with PYTHONPATH unset and GIT_CEILING_DIRECTORIES at the
+# scratch directory, so neither the working tree nor the repository around it can answer for it.
+set -euo pipefail
+: "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
+: "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"
+: "${PYBIN:?PYBIN is empty or unset — run this script through its justfile recipe}"
+: "${EXE?EXE is unset — run this script through its justfile recipe}"
+python="${1:?usage: check-wheel.sh PYTHON}"
+
+function fail() {
+  printf 'check-wheel: %s\n' "$1" >&2
+  exit 1
+}
+
+ver="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" version)"
+wheel="${PROJECT_ROOT}/dist/${GEN}-${ver}-py3-none-any.whl"
+sdist="${PROJECT_ROOT}/dist/${GEN}-${ver}.tar.gz"
+for product in "${wheel}" "${sdist}"; do
+  [[ -f "${product}" ]] || fail "missing build product ${product}"
+done
+
+# A package-data glob sweeps in whatever sits under its tree, so a stray file shows up as extra.
+in_wheel="$(unzip -Z1 "${wheel}" | awk -v top="${GEN}/" 'index($0, top) == 1 && !/\.py$/ && !/\/$/' | sort)"
+in_tree="$(git -C "${PROJECT_ROOT}" ls-files --cached --others --exclude-standard "${GEN}" \
+  | awk '!/\.py$/' | sort)"
+if [[ "${in_wheel}" != "${in_tree}" ]]; then
+  comm -13 <(printf '%s\n' "${in_wheel}") <(printf '%s\n' "${in_tree}") | sed 's/^/missing from the wheel: /' >&2
+  comm -23 <(printf '%s\n' "${in_wheel}") <(printf '%s\n' "${in_tree}") | sed 's/^/extra in the wheel: /' >&2
+  fail "the wheel's package data differs from the tree"
+fi
+
+scratch="${PROJECT_ROOT}/.claude-temp/check-wheel"
+venv="${scratch}/venv"
+command rm -rf "${scratch}"
+mkdir -p "${scratch}"
+"${python}" -m venv "${venv}"
+"${venv}/${PYBIN}/python${EXE}" -m pip install -q --disable-pip-version-check --no-index "${wheel}"
+
+function from_wheel() {
+  env -u PYTHONPATH GIT_CEILING_DIRECTORIES="${scratch}" "$@"
+}
+
+cd "${scratch}"
+imported="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -c 'import adjagent; print(adjagent.__file__)')"
+[[ "${imported}" == "${venv}/"* ]] || fail "adjagent imported from ${imported}, outside ${venv}"
+wheel_ver="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" version)"
+[[ "${wheel_ver}" == "${ver}" ]] || fail "the wheel reports version ${wheel_ver}, the checkout ${ver}"
+script_help="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --help)"
+module_help="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -m adjagent --help)"
+[[ "${script_help}" == "${module_help}" ]] || fail "adjagent --help differs from python -m adjagent --help"
+
+for project in from-wheel from-checkout; do
+  mkdir -p "${project}/.claude"
+  : > "${project}/justfile"
+done
+from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${scratch}/from-wheel" --with-kb > /dev/null
+PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${scratch}/from-checkout" --with-kb > /dev/null
+diff -r from-wheel from-checkout || fail "the wheel's install differs from the checkout's"
+
+mkdir plugins
+from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${scratch}/plugins" --harness=mage > /dev/null
+[[ -f plugins/adjagent/CLAUDE.md ]] || fail "the mage install wrote no plugins/adjagent/CLAUDE.md"
+
+printf 'check-wheel: Python %s, %s\n' "$("${venv}/${PYBIN}/python${EXE}" -c 'import platform; print(platform.python_version())')" "${wheel}"

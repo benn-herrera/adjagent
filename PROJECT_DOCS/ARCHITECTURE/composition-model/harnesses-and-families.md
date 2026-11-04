@@ -14,7 +14,11 @@ coder-dispatch bullet, or `None` where the harness cannot choose a model per dis
 naming the directory that file sits in — the project root, or, under mage, ROOT — `guardrail`
 (`GuardrailHook` or `None`), the hook script and settings entry a claude install registers (Install
 Consumption Model), `rendered_files` (`HarnessFile`), the files it renders of its own beside the
-definitions — mage's manifest — and `omits`, the definition names it renders nothing for.
+definitions — mage's manifest — `omits`, the definition names it renders nothing for, `default_tier_spec`, the
+`--model-tier-map` value used when none is given (`None`: the family's tiers; opencode's is
+`default`, read by `build_render`), and `plugin_parent_dir`, a plugin's trailing path of the
+directory its plugins sit in (`Mage/Skills`; empty otherwise), by which install target detection
+knows a plugin.
 `inherit_synonyms` and `bare_tier_spec_is_all` differ between claude and opencode, as the strings
 above do, and mage holds claude's assumed values (model pattern, aliases, tool spellings,
 frontmatter) as copies it may revise independently: opencode holds `("default",)` and `True`, with

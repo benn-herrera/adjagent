@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from devtools.render_diff import body, text, walk
+from devtools.render_diff import body, line_kinds, text, walk
 
 OLD_BANNER = b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# !BODY-SHA256! abc\n#\nname: a\n---\ntext\n"
 NEW_BANNER = b"---\n# !GENERATED! from x\n# !TUNING! y\nname: a\n---\ntext\n"
@@ -106,6 +106,11 @@ class TextTest(unittest.TestCase):
         self.assertNotEqual(text(b"| a | b |\n| c | d |\n"), text(b"| a | b | | c | d |\n"))
         self.assertNotEqual(text(b"intro\n| a |\n"), text(b"intro | a |\n"))
         self.assertNotEqual(text(b"| a |  b |\n"), text(b"| a | b |\n"))
+
+    def test_a_thematic_break_is_its_own_exact_unit(self):
+        breaks = [b"---", b"***", b"___", b"   - - -", b"*  *  *  ", b"-----"]
+        self.assertEqual(line_kinds(breaks), ["exact"] * len(breaks))
+        self.assertEqual(line_kinds([b"--", b"-*-", b"    ---", b"--- x"]), ["text", "text", "text", "text"])
 
     def test_frontmatter_with_a_changed_space_differs(self):
         self.assertNotEqual(text(b"---\nname: a\n---\ntext\n"), text(b"---\nname:  a\n---\ntext\n"))

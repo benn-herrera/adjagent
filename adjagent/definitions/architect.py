@@ -181,6 +181,7 @@ Systematically evaluate (use judgment about which apply):
    - **Unit tests**: do they target logic and algorithms where the correct answer is independently
      verifiable? Unit tests that verify log messages, assert exact call sequences, or mirror
      implementation structure are code checksums — they break on refactor but not on logic errors.
+
      {clauses.TEST_REVIEW}
    - **Integration tests**: do they exercise realistic or well-chosen synthetic inputs under
      realistic conditions with logging enabled? Cross-reference against acceptance criteria — tests

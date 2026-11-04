@@ -57,9 +57,13 @@ method sets minimal. Return concrete types from constructors; accept interfaces 
 {clauses.boundary_checks_lead()} {clauses.boundary_check_coder_body(expectation="state/goroutine/context")} {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
 
 *Unit tests*: table-driven (`[]struct{{ name, input, want }}`), subtests via `t.Run`, helpers with
-`t.Helper()`. {clauses.unit_test_scope_coder()} {clauses.MOCKING_THRESHOLD_GENERAL}
+`t.Helper()`.
 
-{clauses.integration_tests_coder()} {clauses.integration_logging_signal(level="maximum logging", sink="output")} Use `testing.B` for benchmarks. Race detector (`-race`) on all test runs.
+{clauses.unit_test_scope_coder()} {clauses.COVERAGE_METRIC} {clauses.MOCKING_THRESHOLD_GENERAL}
+
+{clauses.integration_tests_coder()} {clauses.integration_logging_signal(level="maximum logging", sink="output")}
+
+Use `testing.B` for benchmarks. Race detector (`-race`) on all test runs.
 
 {clauses.INTEGRATION_ARTIFACT}
 
@@ -74,9 +78,11 @@ CGo calls, never call CGo in tight loops. CGo types do not escape to Go GC; mana
 explicitly (`C.free`). Use `//export` carefully — it disables dead-code elimination for those
 symbols. Build tag `cgo` is implicit when CGo is in use.
 
-{clauses.build_system_lead(ops="build, test, and integration", direct="the compiler (`go build`, `clang`, CGo compilation, etc.)")} Integration targets may dispatch to shell scripts for complex procedures. `bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
+{clauses.build_system_lead(ops="build, test, and integration", direct="the compiler (`go build`, `clang`, CGo compilation, etc.)")} Integration targets may dispatch to shell scripts for complex procedures.
 
-{clauses.NEW_PROJECT_SETUP}
+`bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
+
+{clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="Go", recipes="`fmt` and `lint` recipes")}
 
 {clauses.PROJECT_DOCS_SETUP}
 
@@ -89,9 +95,11 @@ log.Println, or direct stderr writes. Prefer `log/slog` (stdlib, Go 1.21+) as th
 structured, leveled, and has zero dependencies. Define a thin interface over it so the backend can
 be swapped. {clauses.heavy_logging_framework(baseline="slog")} This {clauses.LOGGING_ABSTRACTION_NOTE}
 
+{clauses.LOGS_NOT_STDOUT}
+
 {clauses.DATA_FORMATS}
 
-{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.manual_over_large_dependency()}
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency()}
 
 {clauses.dependency_vetting(registry="the pkg.go.dev Imported-by count")}
 

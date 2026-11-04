@@ -84,11 +84,14 @@ resources. Mixed-language targets need separate Swift and C/ObjC targets. Missin
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level=clauses.APPLE_VIOLATION_LEVEL, sink="Console.app")}
 
 *Unit tests*: XCTest with `async`/`await` and `runTest`/`TestClock` for concurrency.
+
 {clauses.unit_test_scope(artifact="UI appearance")} {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. Always test under
 memory pressure — use Debug → Simulate Memory Warning in Simulator. Test lifecycle transitions
-(background/foreground, low-memory warnings). {clauses.integration_logging_signal(sink="Console.app")}
+(background/foreground, low-memory warnings).
+
+{clauses.integration_logging_signal(sink="Console.app")}
 
 {clauses.INTEGRATION_ARTIFACT}
 

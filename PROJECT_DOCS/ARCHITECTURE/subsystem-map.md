@@ -45,7 +45,7 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   `clauses.KB_RUNNER_TARGETS` is the maintaining reference's: where the project's runner carries the
   installed `kb-` targets, `update-format`, `verify` and `stats` are `kb-update-format`, `kb-verify` and
   `kb-stats`, run only on the user's direction. The consumer's runner targets are the `kb-`-prefixed
-  recipes of this repository's `kb-tools/runner-snippets/kb.just` and `kb.mk`, prefixed so they cannot
+  recipes of this repository's `adjagent/kb-tools/runner-snippets/kb.just` and `kb.mk`, prefixed so they cannot
   collide with a consuming project's own targets, each running `kbase` from `PATH`.
 - **Specialists** — applied-mathematician, biz-dev-strategist, economic-historian, literature-scout,
   marketing-comms-expert, ml-engineer, prompt-engineer, prose-architect, theoretical-economist:

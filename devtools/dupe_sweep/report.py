@@ -1,5 +1,7 @@
 """dupe_sweep — the report: a pass's header, its candidate lists, and the file-pair tally above each."""
 
+from __future__ import annotations
+
 from collections import Counter
 from collections.abc import Sequence
 from itertools import combinations

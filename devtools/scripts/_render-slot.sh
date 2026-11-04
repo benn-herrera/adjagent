@@ -9,6 +9,7 @@
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${RENDERED_DIR:?RENDERED_DIR is empty or unset — run this script through its justfile recipe}"
+: "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"
 
 slug="${1}"
 shift
@@ -21,7 +22,6 @@ for arg in "${args[@]+"${args[@]}"}"; do
 done
 [[ -z "${harness}" ]] && { harness="claude" && args+=("--harness=${harness}"); } || true
 agents_file="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" agents-file)"
-project_harness_dir="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" project-harness-dir)"
 user_harness_dir="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" user-harness-dir)"
 out="${PROJECT_ROOT}/${RENDERED_DIR}/${slug}"
 rm -rf "${out}"
@@ -38,4 +38,4 @@ else
     : > "${out}/RENDER-FLAGS.txt"
 fi
 "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" "${harness}" "${agents_target}"
-"${PROJECT_ROOT}/devtools/scripts/install.sh" "${out}" --subdir= --with-kb "${args[@]}"
+PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${out}" --subdir= --with-kb "${args[@]}"

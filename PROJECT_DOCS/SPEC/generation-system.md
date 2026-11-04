@@ -1,11 +1,15 @@
 ## Generation System
 
-The mechanism behind every definition in the deployed surfaces guarantees three observable
+The mechanism behind every definition in the deployed surfaces guarantees four observable
 properties, independent of how they are implemented (see ARCHITECTURE.md):
 
 - **Single-sourcing.** Text shared across two or more definitions has exactly one source. Wherever
   rendered output shares text across definitions, that text is identical by construction — not by
   maintenance discipline that could silently drift apart.
+- **Single delivery.** No rendered prompt delivers one shared clause, paragraph or list item twice.
+  A prompt is one rendered output, or a command or skill taken together with each output its
+  `@<path>` lines name directly. The property covers a definition's base text; text added by a
+  family's tuning, and a harness's names for its own paths and tools, are not held to it.
 - **Additive-only model tuning.** A family's tuning may extend a definition's base text at declared
   anchor points; it can never replace, suppress, or fork that text. A definition whose
   anchors the loaded family does not fill is byte-identical, below its banner, to its base render.
@@ -13,7 +17,7 @@ properties, independent of how they are implemented (see ARCHITECTURE.md):
   one of `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability — and the family's tier
   map, the one model source on every harness, resolves it: the tier's family member is both what
   the definition is tuned against and the model it renders with. The tier map comes from the family,
-  or whole from the tier-map argument. Each map argument covers all five tiers, naming each or
+  from a harness's default tier spec where it declares one, or whole from the tier-map argument. Each map argument covers all five tiers, naming each or
   giving one value for all and naming any exceptions; one leaving a tier unnamed is refused, with no
   fallback to the family. An optional alias map, with no
   default, renders an alias in place of each tier's member and changes nothing else, so what a

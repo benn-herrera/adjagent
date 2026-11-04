@@ -21,7 +21,7 @@ set -euo pipefail
 
 cd "${PROJECT_ROOT}"
 base="${1}"
-all_surfaces=(adjagent dupe_sweep docs)
+all_surfaces=(adjagent dupe_sweep docs wheel)
 rows="${TEST_SURFACE_MAP}"
 
 changed=()

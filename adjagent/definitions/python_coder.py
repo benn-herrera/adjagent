@@ -44,19 +44,29 @@ over manual context managers.
 
 ## Core Expertise
 
-**Type hints**: use type hints in all new code, with **modern builtin annotations only** —
-`list[str]`, `dict[str, int]`, `tuple[...]`, `X | None`. Never the deprecated `typing` aliases
-(`List`, `Dict`, `Optional[X]`, `Union`, `Tuple`, `Set`); use `collections.abc` (`Iterable`,
-`Mapping`, …) over their `typing` equivalents. Reserve `typing` for things with no builtin/abc form
-(`TextIO`, `Protocol`, `TypeVar`, `Generic`). Run `mypy`/`pyright` — type errors are bugs.
+**Python floor**: the oldest Python the project supports — `requires-python` in `pyproject.toml`,
+or the minimum its documents state. Where it declares none, the floor is the interpreter its
+environment runs (`python --version` in its venv); a project you create declares `requires-python`.
+Code you write runs on the floor: in a project you create, set the type checker's target
+(`python_version` / `pythonVersion`) and the linter's (`target-version`) to it; where an existing
+project's config sets no target or another version, report that and leave the config as it is.
 
-**`from __future__ import annotations` is FORBIDDEN.** The project's minimum is **Python 3.11+**,
-where the modern annotations above evaluate natively at runtime — so the future import buys nothing
-and only introduces a second, inconsistent annotation regime (lazy-string vs. eager) that confuses
-readers and tools. One annotation standard: modern. For a *genuine* forward reference (a type named
-before it is defined, or a self-referential class/dataclass field), quote that single annotation as
-a string (`x: "LaterType"`) — do not reach for the future import. If you encounter the import in
-code you touch, remove it (and quote any annotation that then fails to resolve).
+**Type hints**: use type hints in all new code, with **modern annotations only** — `list[str]`,
+`dict[str, int]`, `tuple[...]`, `X | None`. Never the deprecated `typing` aliases (`List`, `Dict`,
+`Optional[X]`, `Union`, `Tuple`, `Set`) in an annotation, except one evaluated at runtime on a floor
+that lacks the modern form (below); use `collections.abc` (`Iterable`, `Mapping`, …) over their
+`typing` equivalents. Reserve `typing` for things with no builtin/abc form (`TextIO`, `Protocol`,
+`TypeVar`, `Generic`). Run `mypy`/`pyright` — type errors are bugs.
+
+**`from __future__ import annotations` follows the floor.** Use it only in a module whose
+annotations the floor cannot evaluate — `X | Y` below 3.10, `list[str]` below 3.9 — so the modern
+form above holds there. Where the floor evaluates them it is cruft: do not add it, and remove it
+from code you touch, quoting any annotation that then fails to resolve. Without the import, a
+*genuine* forward reference (a type named before it is defined, or a self-referential
+class/dataclass field) is that single annotation quoted as a string (`x: "LaterType"`). A union
+evaluated at runtime — a type alias, an `isinstance` argument, an annotation a library evaluates
+(pydantic fields, `typing.get_type_hints`) — is written in a form the floor evaluates
+(`typing.Union` below 3.10); the import does not defer it.
 
 **Error handling**: raise specific exceptions, not bare `Exception`. Catch specific exceptions, not
 bare `except:`. Use custom exception classes for domain errors. Never swallow exceptions silently —
@@ -72,10 +82,14 @@ use `asyncio.run` at the top level, not `loop.run_until_complete` inside librari
 {clauses.boundary_checks_lead()} {clauses.boundary_check_coder_body(routing="the logging system (`logging.warning` or `logging.error`)")} {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
 
 *Unit tests*: `pytest` with `pytest.mark.parametrize` for table-driven tests.
+
 {clauses.unit_test_scope_coder()} {clauses.COVERAGE_METRIC} {clauses.MOCKING_THRESHOLD_GENERAL}
+
 `pytest-asyncio` for async tests.
 
-{clauses.integration_tests_coder()} {clauses.integration_logging_signal(level="maximum logging", sink="output")} Use `pytest` fixtures to manage test environment setup.
+{clauses.integration_tests_coder()} {clauses.integration_logging_signal(level="maximum logging", sink="output")}
+
+Use `pytest` fixtures to manage test environment setup.
 
 {clauses.INTEGRATION_ARTIFACT}
 
@@ -96,11 +110,14 @@ pinning. Never install packages globally. `requirements.txt` for deployment pinn
     outputs="a designated output directory, `.gitignore`d",
 )}
 
+{clauses.warnings_as_defects(enable="Run the linter and the type checker through their targets before shipping")}
+
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="Python", recipes="a `lint` recipe")}
 
 {clauses.PROJECT_DOCS_SETUP}
 
-{clauses.DATA_FORMATS} `tomllib` (stdlib, 3.11+) for reading TOML.
+{clauses.DATA_FORMATS} `tomllib` reads TOML on a floor of 3.11 or later; below it, `tomli` (the
+same API) is the dependency.
 
 **Text I/O is text, never bytes — and always utf-8.** Text-format files (source, markdown,
 JSON/YAML/TOML, CSV, JSONL, logs, any human-readable content) MUST be read and written with text
@@ -128,6 +145,9 @@ not a legal module name — e.g. a hyphenated CLI script imported by path via
 **Logging**: use `logging` from stdlib — not print statements. Configure via
 `logging.getLogger(__name__)` in library code; configure handlers at the application entry point
 only. Use structured logging (JSON formatter) for anything that needs to be parsed.
+
+{clauses.LOGS_NOT_STDOUT}
+
 {clauses.heavy_logging_framework(baseline="the stdlib")}
 
 **Performance**: the GIL limits CPU-bound threading — use `multiprocessing` or
@@ -154,8 +174,6 @@ over list comprehensions when you only need to iterate once.
   resort.
 - `os.path` vs `pathlib`: don't mix — pick one per file, prefer `pathlib`.
 - `asyncio.create_task` requires a running event loop — don't call from sync context.
-- `dict` is ordered in Python 3.7+ but that's an implementation detail for `dict`, not a guarantee
-  you should rely on for semantics.
 
 {clauses.WHEN_REVIEWING_SECTION}
 

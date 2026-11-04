@@ -8,6 +8,8 @@ rather than approximated.
 Every stage sorts its output, so the same tree yields the same report, byte for byte.
 """
 
+from __future__ import annotations
+
 from .clustering import clusters
 from .constants import constant_candidates, constants
 from .doc_sentences import doc_units

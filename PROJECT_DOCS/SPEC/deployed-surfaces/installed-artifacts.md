@@ -25,8 +25,8 @@ Every path written inside a definition body — a file the agent is told to `Rea
 invokes — is written against the installing harness's project directory —
 `<harness-dir>/agents/...` for a definition, `<harness-dir>/adj-tools/...` or
 `<harness-dir>/skills/kbase/kb-tools/...` for a shipped package's script, which are
-`.claude/agents/...`, `.claude/adj-tools/...` and `.claude/skills/kbase/kb-tools/...` under the
-default claude harness — not against the repository's own path: that is where the installed file
+`.claude/agents/...`, `.claude/adj-tools/...` and `.claude/skills/kbase/kb-tools/...` under
+claude — not against the repository's own path: that is where the installed file
 actually lives, and the path it must resolve from inside a consuming session. The same holds for
 the project's scratch directory, named as the harness names it. A project's agents file is named
 `AGENTS.md` under claude and opencode, whose user directory is a separate scope; where the

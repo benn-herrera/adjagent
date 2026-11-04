@@ -12,8 +12,9 @@ replaced the same way. Second (`collapsed`), whitespace a model does not read is
 the frontmatter and fenced code, each paragraph is joined into one line with runs of spaces
 collapsed to one, each list item (a line starting `- `, `* `, `+ ` or `1. `/`1) `, plus its
 continuation lines) is likewise its own one-line unit, each ATX heading (a line matching
-` {0,3}#{1,6}` then a space or its end) and each table row (a line whose first non-space character is
-`|`) is its own unit, kept exact, and each run of blank lines is kept as one blank line. The frontmatter (from a first line `---` to the next `---`) and every fenced block stay
+` {0,3}#{1,6}` then a space or its end), each thematic break (` {0,3}` then three or more of one of
+`-`, `*` or `_`, spaces allowed between them) and each table row (a line whose first non-space
+character is `|`) is its own unit, kept exact, and each run of blank lines is kept as one blank line. The frontmatter (from a first line `---` to the next `---`) and every fenced block stay
 byte-exact. Fences follow CommonMark: an opener is three or more backticks with an info string
 holding no backtick, or three or more tildes; the closer is the same character, at least as many,
 and nothing else.
@@ -24,6 +25,8 @@ Output and exit contract: prints `diff -rq`'s two line forms, `Only in <dir>: <n
 `Files <a> and <b> differ`. Exits 0 whether or not differences exist; exits 1 only when a slot does
 not exist.
 """
+
+from __future__ import annotations
 
 import filecmp
 import re
@@ -46,6 +49,7 @@ FENCE_OPEN = re.compile(rb" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 FENCE_CLOSE = re.compile(rb" {0,3}(`{3,}|~{3,})[ \t]*")
 LIST_ITEM = re.compile(rb" {0,3}(?:[-*+]|\d+[.)]) ")
 HEADING = re.compile(rb" {0,3}#{1,6}( |$)")
+THEMATIC_BREAK = re.compile(rb" {0,3}([-*_])(?: *\1){2,} *")
 
 
 def body(data: bytes) -> bytes:
@@ -65,39 +69,53 @@ def body(data: bytes) -> bytes:
     return data
 
 
+def line_kinds(lines: list[bytes]) -> list[str]:
+    """Each line's kind under the collapse rules: `fence` for a fence line or a line inside one,
+    `exact` for a heading, thematic break or table row, `blank`, `item` for a list item's first line,
+    and `text` for any other line, which continues the paragraph or item above it."""
+    kinds: list[str] = []
+    fence: bytes | None = None
+    for line in lines:
+        if fence is not None:
+            kinds.append("fence")
+            closing = FENCE_CLOSE.fullmatch(line)
+            if closing and closing[1][:1] == fence[:1] and len(closing[1]) >= len(fence):
+                fence = None
+        elif opening := FENCE_OPEN.fullmatch(line):
+            kinds.append("fence")
+            fence = opening[1] or opening[2]
+        elif HEADING.match(line) or THEMATIC_BREAK.fullmatch(line) or line.lstrip().startswith(b"|"):
+            kinds.append("exact")
+        elif not line.strip():
+            kinds.append("blank")
+        else:
+            kinds.append("item" if LIST_ITEM.match(line) else "text")
+    return kinds
+
+
 def collapsed(data: bytes) -> bytes:
     lines = data.split(b"\n")
     start = lines.index(b"---", 1) + 1 if lines[0] == b"---" and b"---" in lines[1:] else 0
     out = lines[:start]
     paragraph: list[bytes] = []
-    fence: bytes | None = None
 
     def flush() -> None:
         if paragraph:
             out.append(re.sub(rb" +", b" ", b" ".join(paragraph)))
             paragraph.clear()
 
-    for line in lines[start:]:
-        if fence is not None:
-            out.append(line)
-            closing = FENCE_CLOSE.fullmatch(line)
-            if closing and closing[1][:1] == fence[:1] and len(closing[1]) >= len(fence):
-                fence = None
-        elif opening := FENCE_OPEN.fullmatch(line):
+    for line, kind in zip(lines[start:], line_kinds(lines[start:])):
+        if kind in ("fence", "exact"):
             flush()
             out.append(line)
-            fence = opening[1] or opening[2]
-        elif HEADING.match(line) or line.lstrip().startswith(b"|"):
-            flush()
-            out.append(line)
-        elif line.strip():
-            if LIST_ITEM.match(line):
-                flush()
-            paragraph.append(line)
-        else:
+        elif kind == "blank":
             flush()
             if out[-1:] != [b""]:
                 out.append(b"")
+        else:
+            if kind == "item":
+                flush()
+            paragraph.append(line)
     flush()
     return b"\n".join(out)
 

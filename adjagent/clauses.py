@@ -21,7 +21,9 @@ KBASE_PROJECT_RULE = "@!hrn-kbase-project-rule!@"
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
 
-KEY_GUIDELINE = """**KEY GUIDELINE**: Code is cost, capability is value. Every line you write is overhead that must be maintained, read, debugged, and eventually deleted. This goes double for duplicated code – follow the DRY principle. Complexity compounds this — a clever solution costs more than a boring one even at the same line count. Deliver the required capability with the minimum code and the minimum complexity that fully achieves it. When uncertain whether to add something, default to omission. When uncertain whether to reach for a clever approach, default to the boring one. Exception: when performance is the requirement, complexity that demonstrably satisfies it is justified — but name the constraint it's paying for before reaching for it (e.g., "O(N²) is unacceptable at this scale; this reduces to O(log N)")."""
+KEY_GUIDELINE = """**KEY GUIDELINE**: Code is cost, capability is value. Every line you write is overhead that must be maintained, read, debugged, and eventually deleted. This goes double for duplicated code – follow the DRY principle. Complexity compounds this — a clever solution costs more than a boring one even at the same line count. Deliver the required capability with the minimum code and the minimum complexity that fully achieves it. When uncertain whether to add something, default to omission. Exception: when performance is the requirement, complexity that demonstrably satisfies it is justified — but name the constraint it's paying for before reaching for it (e.g., "O(N²) is unacceptable at this scale; this reduces to O(log N)").
+
+**Least surprise**: in design, implementation and tests, choose the mechanism a maintainer of this codebase, fluent in its language, would expect to find. An unusual mechanism needs a reason the obvious one fails, stated in what you hand back; the bar is highest where the problem itself is not novel."""
 
 
 def incumbent_search(*, act: str = "write", moment: str = "implementing a capability") -> str:
@@ -112,9 +114,13 @@ CHEAP_OVER_THOROUGH = (
 )
 
 
+TESTS_PROTECT_LOGIC = """Tests protect logic by checking its effect. A test that fails when only the code's form changes — wording, formatting, structure — is a checksum of the code: friction, not protection. Where the form is the contract — output another program parses, a file someone else consumes — pinning it is protection."""
+
 # The platform experts' Testing section opens with this, then a paragraph of boundary_checks_lead()
 # followed by platform_boundary_routing(...), then the per-seat unit-test prose.
-PLATFORM_TESTING_LEAD = """## Testing
+PLATFORM_TESTING_LEAD = f"""## Testing
+
+{TESTS_PROTECT_LOGIC}
 
 Three layers with distinct purposes:"""
 
@@ -130,7 +136,9 @@ def boundary_check_coder_body(*, expectation: str = "state/thread/context", rout
 BOUNDARY_CHECK_CONSUMERS_CODER = """One implementation serves three consumers: production forensics, development diagnostics, and integration test signal."""
 
 # The line that opens a language coder's Testing paragraphs, ahead of boundary_checks_lead().
-TESTING_LAYERS_CODER = """**Testing** — three layers, each with a distinct purpose:"""
+TESTING_LAYERS_CODER = f"""**Testing**: {TESTS_PROTECT_LOGIC}
+
+Three layers, each with a distinct purpose:"""
 
 ASSERT_UNDER_NDEBUG = """`assert` disappears under `NDEBUG`, so it is for invariants that hold by construction and never carries a side effect."""
 
@@ -142,16 +150,16 @@ MOCKING_THRESHOLD_PLATFORM = """If mocking more than two dependencies is require
 
 
 def unit_test_scope(*, artifact: str) -> str:
-    return f"""Target logic and algorithms where the correct answer is independently verifiable. Do NOT write tests for exact {artifact}, log messages, or call sequences — these break on refactor with no safety return."""
+    return f"""Target logic and algorithms where the correct answer is independently verifiable. Do NOT write tests for exact {artifact}, log messages, or call sequences."""
 
 
 def unit_test_scope_coder(*, examples: str = "fiddly math, boundary conditions, state transitions") -> str:
-    return f"""Target logic and algorithms where the correct answer is independently verifiable — {examples}. Do NOT write unit tests for log messages, exact call sequences, or code paths — that is a code checksum. A test that breaks on refactor but not on logic error is worse than no test."""
+    return f"""Target logic and algorithms where the correct answer is independently verifiable — {examples}. Do NOT write unit tests for log messages, exact call sequences, or code paths."""
 
 
 COVERAGE_METRIC = """Coverage percentage is the wrong metric."""
 
-TEST_REVIEW = """**Reviewing tests, name what to cut.** *Duplicate coverage*: a test pinning a behaviour another already pins through the same path, a unit re-proving a golden-file or parametrised case included — merge or delete, naming the survivor. *Performative units*: a test no logic error could fail — a constant compared to itself, a mock confirmed called with nothing checked of what it was given, a file confirmed to load with no further claim — delete. Propose a new test only for a stated invariant or acceptance criterion that no test exercises, or for the defect a fix claims to close — the one test that must fail before it."""
+TEST_REVIEW = """**Reviewing tests, name what to cut.** *Duplicate coverage*: a test pinning a behaviour another already pins through the same path, a unit re-proving a golden-file or parametrised case included — merge or delete, naming the survivor. *Performative units*: a test no logic error could fail — a constant compared to itself, a mock confirmed called with nothing checked of what it was given, a file confirmed to load with no further claim — delete. *Form pins*: a test that any rewording, reformatting or restructuring breaks though no consumer depends on that form — loosen it to the effect, or delete it. Propose a new test only for a stated invariant or acceptance criterion that no test exercises, or for the defect a fix claims to close — the one test that must fail before it."""
 
 REVIEW_OWN_INSTRUCTIONS = """**Review against these instructions.** A finding either violates a rule stated here — a principle, a language convention, a gotcha — and names that rule rather than its symptom, or shows the change not doing what it claims. A change merely unlike what you would have written is not a finding."""
 

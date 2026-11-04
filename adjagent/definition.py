@@ -3,6 +3,8 @@ frontmatter values, and its body text; and the `SkillFile` values a skill's
 supporting files are. Harness-neutral: no harness spellings, no model names, no
 I/O, no rendering."""
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -29,7 +31,7 @@ def _check_description(description: str | None, where: str) -> None:
         raise InputError(f"{where}: description must be one non-empty line holding no double quote")
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True)
 class SkillFile:
     """One supporting file of a skill: its path below the skill's directory, and its body text.
 
@@ -52,7 +54,7 @@ class SkillFile:
         _check_body(self.body, where)
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True)
 class Definition:
     """One rendered definition: its kind and place, frontmatter values, and text.
 

@@ -18,7 +18,7 @@ the generated banner is its project's own and signals nothing. No legacy tree is
 A kb install writes three things beyond the renders — two under a harness whose
 `user_harness_dir` is `.`, with no runner include line and no `Makefile`:
 
-- **The kb-tools package**: every file of `kb-tools/` — the `runner-snippets/` fragments — taking the
+- **The kb-tools package**: every file of `adjagent/kb-tools/` — the `runner-snippets/` fragments — taking the
   package copy below. The destination is `KB_TOOLS_PACKAGE` — `skills/kbase/kb-tools/`, its own
   directory inside the `kbase` skill's, within the `skills/` surface — and is removed whole before
   the copy, so an executable and `.asc` an earlier version installed there go, while the skill's
@@ -49,4 +49,7 @@ A kb install writes three things beyond the renders — two under a harness whos
   a plugin is not a repo project, so mage gets no line and no `Makefile`. One line only: a line
   naming another harness is reported and left alone, and one naming this harness under a path an
   earlier version installed is rewritten in place.
+
+On a user-level install none of the three is written: `install` renders the kb set's definitions
+and stops there.
 

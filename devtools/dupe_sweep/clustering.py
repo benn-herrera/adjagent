@@ -10,6 +10,8 @@ real duplicate still reaches its partners through its rarer windows. Sites that 
 are unioned, so a seven-way duplicate is one cluster with seven sites, not twenty-one pairs.
 """
 
+from __future__ import annotations
+
 import difflib
 from collections import Counter
 from collections.abc import Iterable, Sequence

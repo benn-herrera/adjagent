@@ -1,8 +1,11 @@
 """`Render`, the one parameter a render receives, and the two map flags that
 build it. Composes no text and does no I/O."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
 from adjagent.errors import InputError
 from adjagent.family import Family
@@ -110,12 +113,17 @@ class Render:
         return tuple(tier for tier in TIERS if self.tier_map[tier] not in tuned)
 
 
+def harnesses() -> dict[str, Harness]:
+    """Every harness this installation knows, by name, in name order."""
+    return cast(dict[str, Harness], load("adjagent.harnesses", "HARNESS"))
+
+
 def harness_named(name: str) -> Harness:
     """The harness `name` loads as; an unknown name is refused, listing the names there are."""
-    harnesses = load("adjagent.harnesses", "HARNESS")
-    if name not in harnesses:
-        raise InputError(f"unknown harness '{name}' — harnesses are {', '.join(harnesses)}")
-    return harnesses[name]
+    known = harnesses()
+    if name not in known:
+        raise InputError(f"unknown harness '{name}' — harnesses are {', '.join(known)}")
+    return known[name]
 
 
 def _bare_tier_spec_expanded(harness: Harness, spec: str) -> str:
@@ -130,22 +138,26 @@ def build_render(*, harness: str, family: str, tier_spec: str | None, alias_spec
     """The CLI's Render. Unknown harness/family names are refused, listing the names there are (a
     path-shaped --family included). A tier spec that names no tier becomes all=<spec> where the harness
     reads a bare value as the whole map. Then every tier's model text is checked against
-    harness.model_pattern, refusing with tier, value, supplier and model_shape."""
+    harness.model_pattern, refusing with tier, value, supplier and model_shape. With no tier spec given,
+    the harness's `default_tier_spec` stands in for one."""
     loaded_harness = harness_named(harness)
     families = load("adjagent.families", "FAMILY")
     if family not in families:
         raise InputError(f"--family '{family}' names no family — families are {', '.join(families)}")
     loaded = families[family]
-    if tier_spec is None:
+    spec = loaded_harness.default_tier_spec if tier_spec is None else tier_spec
+    if spec is None:
         tier_map = dict(loaded.tiers)
     else:
-        tier_map = parse_tier_map(_bare_tier_spec_expanded(loaded_harness, tier_spec), flag=TIER_MAP_FLAG)
+        tier_map = parse_tier_map(_bare_tier_spec_expanded(loaded_harness, spec), flag=TIER_MAP_FLAG)
     alias_map = None if alias_spec is None else parse_tier_map(alias_spec, flag=ALIAS_MAP_FLAG)
     render = Render(harness=loaded_harness, family=loaded, tier_map=tier_map, alias_map=alias_map)
     if alias_map is not None:
         supplier = ALIAS_MAP_FLAG
     elif tier_spec is not None:
         supplier = TIER_MAP_FLAG
+    elif spec is not None:
+        supplier = f"the harness '{harness}' default tier spec"
     else:
         supplier = f"the family '{family}' tiers (--family)"
     for tier, text in (tier_map if alias_map is None else alias_map).items():

@@ -82,10 +82,12 @@ library flags — not hardcoded paths.
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at WARNING/CRITICAL level", sink="journald")}
 
 *Unit tests*: GTest or GLib Testing Framework (GTK); Qt Test (Qt).
+
 {clauses.unit_test_scope(artifact="widget state")} {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. Test on both X11 and
 Wayland where relevant. Test with AppArmor/SELinux confined execution.
+
 {clauses.integration_logging_signal(sink="the journal")}
 
 {clauses.INTEGRATION_ARTIFACT}
@@ -109,6 +111,7 @@ Wayland where relevant. Test with AppArmor/SELinux confined execution.
 **Logging**: use GLib structured logging (`g_log_structured`) for GTK apps, or `sd_journal_print`
 for systemd-integrated services — not printf, g_print, or raw writes to stderr. Log levels must be
 runtime-configurable (G_MESSAGES_DEBUG, journald verbosity).
+
 {clauses.logging_backend_seam(backend="the logging backend")} This {clauses.LOGGING_ABSTRACTION_NOTE}
 
 {clauses.CODER_OUTPUT_FORMAT}

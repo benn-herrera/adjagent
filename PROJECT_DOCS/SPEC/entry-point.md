@@ -19,6 +19,7 @@ Contents:
   - [Install destination](deployed-surfaces/install-destination.md)
   - [Installed artifacts](deployed-surfaces/installed-artifacts.md)
   - [Shipped files](deployed-surfaces/shipped-files.md)
+- [Package and Command](package-and-command.md)
 - [Mage Plugin Distribution](mage-plugin-distribution.md)
 - [Generation System](generation-system.md)
 - [Generated-Definition Integrity](generated-definition-integrity.md)

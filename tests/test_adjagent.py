@@ -12,14 +12,20 @@ The package is imported from the repository root, which `just test` puts on
 PYTHONPATH.
 """
 
+from __future__ import annotations
+
 import ast
+import importlib.util
 import inspect
 import json
 import re
 import shutil
 import subprocess
-import sys
+import sysconfig
 import types
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -56,13 +62,19 @@ from tests._structure import (
     ASSIGNMENT_RULE,
     BODY_RULE,
     CALL_RULE,
+    DEFINITION_CALL_RULE,
     DEFINITION_TOP_RULE,
     FILES_RULE,
     FUNCTION_RULE,
     IMPORT_RULE,
     TEXT_TOP_RULE,
+    ClauseRoot,
+    body_roots,
+    carried_clauses,
     check_source,
     check_structure,
+    clause_graph,
+    repeated_clause_reaches,
 )
 
 _ALL_INHERIT = dict.fromkeys(("highest", "high", "medium", "low", "lowest"), "inherit")
@@ -139,6 +151,12 @@ def test_opencode_reads_a_bare_tier_spec_as_the_whole_map() -> None:
     assert ctx.model("medium") == ""
 
 
+def test_opencode_with_no_tier_spec_uses_its_default() -> None:
+    ctx = build_render(harness="opencode", family="claude", tier_spec=None, alias_spec=None)
+    assert dict(ctx.tier_map) == dict.fromkeys(TIERS, "default")
+    assert ctx.model("medium") == ""
+
+
 @pytest.mark.parametrize(
     "harness, spec, message",
     [
@@ -155,9 +173,9 @@ def test_a_tier_spec_no_harness_reads_bare_is_refused(harness: str, spec: str, m
 
 def test_build_render_refuses_a_model_outside_the_harness_shape() -> None:
     with pytest.raises(InputError) as caught:
-        build_render(harness="opencode", family="claude", tier_spec=None, alias_spec=None)
+        build_render(harness="claude", family="gemma-4", tier_spec=None, alias_spec=None)
     message = str(caught.value)
-    assert "model 'fable' at tier highest" in message
+    assert "model 'gemma-4-31B-it' at tier highest" in message
     assert "--family" in message
 
 
@@ -742,12 +760,42 @@ def test_every_import_is_at_module_level() -> None:
     assert offenders == []
 
 
+def _is_stdlib(module: str) -> bool:
+    """Whether the top-level module resolves into the running interpreter's
+    standard library: built in, frozen, or a file under its stdlib directory
+    outside any site-packages."""
+    spec = importlib.util.find_spec(module)
+    if spec is None or spec.origin is None:
+        return False
+    if spec.origin in ("built-in", "frozen"):
+        return True
+    stdlib = Path(sysconfig.get_paths()["stdlib"]).resolve()
+    origin = Path(spec.origin).resolve()
+    return stdlib in origin.parents and "site-packages" not in origin.relative_to(stdlib).parts
+
+
+@pytest.mark.parametrize(
+    ("module", "expected"),
+    [
+        ("__future__", True),
+        ("ast", True),
+        ("_thread", True),
+        ("json", True),
+        ("pytest", False),
+        ("adjagent", False),
+        ("no_such_module_anywhere", False),
+    ],
+)
+def test_is_stdlib_tells_the_standard_library_from_everything_else(module: str, expected: bool) -> None:
+    assert _is_stdlib(module) is expected
+
+
 def test_every_import_is_stdlib_or_the_package() -> None:
     offenders = [
         f"{path} imports {name}"
         for path, tree in _modules()
         for name in _imported(tree)
-        if name.split(".")[0] not in sys.stdlib_module_names and name.split(".")[0] != "adjagent"
+        if name.split(".")[0] != "adjagent" and not _is_stdlib(name.split(".")[0])
     ]
     assert offenders == []
 
@@ -799,6 +847,7 @@ def _definitions_of_files(files: str) -> str:
             3,
             CALL_RULE,
         ),
+        (f'{_DEFINITION_HEAD}DEFINITIONS = (Definition("p", "b", kind=Kind.AGENT),)\n', 3, DEFINITION_CALL_RULE),
         (f"{_DEFINITION_HEAD}def helper():\n    pass\n", 3, DEFINITION_TOP_RULE),
         (f"{_DEFINITION_HEAD}DEFINITIONS = (_ONE,)\n", 3, DEFINITION_TOP_RULE),
         ("from adjagent.clauses import X\n", 1, IMPORT_RULE),
@@ -874,7 +923,7 @@ def _credited_text() -> types.SimpleNamespace:
     constant that is a bare placeholder keeps its value, so prose around it is not credited to it."""
     standing: dict[str, object] = {}
     for name, value in vars(adjagent.clauses).items():
-        if isinstance(value, str) and not re.fullmatch(r"@![a-z0-9-]+!@", value):
+        if isinstance(value, str) and not adjagent.render.PLACEHOLDER.fullmatch(value):
             standing[name] = f"<<adjagent.clauses.{name}>>"
         elif isinstance(value, str):
             standing[name] = value
@@ -904,21 +953,15 @@ def _source_definitions(source: str, *, module: str, credited: bool) -> tuple[De
     return namespace["DEFINITIONS"]
 
 
+def _prose_unit_list(body: str) -> list[bytes]:
+    """The paragraphs and list items of a body in order, each as devtools.render_diff collapses it; a
+    heading, a table row and a line of a fenced block are not prose."""
+    lines = render_diff.collapsed(body.encode("utf-8")).split(b"\n")
+    return [line for line, kind in zip(lines, render_diff.line_kinds(lines)) if kind in ("item", "text")]
+
+
 def _prose_units(body: str) -> set[bytes]:
-    """The paragraphs and list items of a body, each as devtools.render_diff collapses it; a heading,
-    a table row and a line of a fenced block are not prose."""
-    units: set[bytes] = set()
-    fence: bytes | None = None
-    for line in render_diff.collapsed(body.encode("utf-8")).split(b"\n"):
-        if fence is not None:
-            closing = render_diff.FENCE_CLOSE.fullmatch(line)
-            if closing and closing[1][:1] == fence[:1] and len(closing[1]) >= len(fence):
-                fence = None
-        elif opening := render_diff.FENCE_OPEN.fullmatch(line):
-            fence = opening[1] or opening[2]
-        elif line.strip() and not render_diff.HEADING.match(line) and not line.lstrip().startswith(b"|"):
-            units.add(line)
-    return units
+    return set(_prose_unit_list(body))
 
 
 def _outputs(defn: Definition, sentinel: Definition) -> list[tuple[str, str, str]]:
@@ -927,9 +970,9 @@ def _outputs(defn: Definition, sentinel: Definition) -> list[tuple[str, str, str
     if defn.kind is Kind.AGENTS_FILE:
         return [(defn.name, defn.body, sentinel.body)]
     pairs = [(str(defn.output_path), defn.body, sentinel.body)]
+    assert len(defn.files) == len(sentinel.files)
     pairs += [
-        (str(defn.file_output_path(file)), file.body, twin.body)
-        for file, twin in zip(defn.files, sentinel.files, strict=True)
+        (str(defn.file_output_path(file)), file.body, twin.body) for file, twin in zip(defn.files, sentinel.files)
     ]
     return pairs
 
@@ -941,7 +984,8 @@ def _uncredited_shared_paragraphs(sources: dict[str, str]) -> list[str]:
     for module, source in sources.items():
         rendered = _source_definitions(source, module=module, credited=False)
         credited = _source_definitions(source, module=module, credited=True)
-        for defn, sentinel in zip(rendered, credited, strict=True):
+        assert len(rendered) == len(credited)
+        for defn, sentinel in zip(rendered, credited):
             for label, literal_body, credited_body in _outputs(defn, sentinel):
                 literal = _prose_units(filled_text(literal_body, defn, _CLAUDE_RENDER, where=label)) & _prose_units(
                     filled_text(credited_body, sentinel, _CLAUDE_RENDER, where=label)
@@ -1018,6 +1062,173 @@ def test_a_paragraph_two_supporting_files_write_out_is_found() -> None:
     assert _uncredited_shared_paragraphs(sources) == [
         "written out in skills/s/references/one.md, skills/s/references/two.md: Written out twice."
     ]
+
+
+# A prompt delivers each shared span once: no clause reached twice, no paragraph written twice.
+
+_CLAUSE_GRAPH = clause_graph((_PACKAGE / "clauses.py").read_text(encoding="utf-8"))
+_HARNESS_STRINGS = {hole(part) for part in HarnessText}
+_SENTENCE_HOLES = frozenset(
+    name for name, value in vars(adjagent.clauses).items() if isinstance(value, str) and value in _HARNESS_STRINGS
+)
+
+
+@dataclass(frozen=True)
+class _PromptOutput:
+    """One rendered file: its label, its text filled under the claude render, and the clause roots its
+    body names. `loads` marks a command's or skill's own body, whose `@` lines can load another
+    output; `path` is None for the agents file, which no `@` line can name."""
+
+    label: str
+    path: PurePosixPath | None
+    text: str
+    roots: tuple[ClauseRoot, ...]
+    loads: bool
+
+
+def _prompts(sources: dict[str, str]) -> list[list[_PromptOutput]]:
+    """Every prompt: an output alone, or a command or skill body with each output an `@` line of it
+    names, one level deep."""
+    outputs = []
+    for module, source in sources.items():
+        roots = body_roots(source, _CLAUSE_GRAPH)
+        for defn in _source_definitions(source, module=module, credited=False):
+            keys = (None, *(file.path for file in defn.files))
+            defn_outputs = _outputs(defn, defn)
+            assert len(keys) == len(defn_outputs)
+            for key, (label, body, _) in zip(keys, defn_outputs):
+                outputs.append(
+                    _PromptOutput(
+                        label=label,
+                        path=None if defn.kind is Kind.AGENTS_FILE else PurePosixPath(label),
+                        text=filled_text(body, defn, _CLAUDE_RENDER, where=label),
+                        roots=roots[defn.name, key],
+                        loads=key is None and defn.kind in (Kind.COMMAND, Kind.SKILL),
+                    )
+                )
+    return [[output, *(_loaded(output, outputs) if output.loads else ())] for output in outputs]
+
+
+def _loaded(output: _PromptOutput, outputs: list[_PromptOutput]) -> list[_PromptOutput]:
+    """The outputs `output`'s `@` lines name: a line names an output when its path ends in the output's."""
+    named = [PurePosixPath(line[1:].strip()).parts for line in output.text.splitlines() if line.startswith("@")]
+    return [
+        target
+        for parts in named
+        for target in outputs
+        if target.path is not None and parts[-len(target.path.parts) :] == target.path.parts
+    ]
+
+
+def _double_clause_deliveries(sources: dict[str, str]) -> list[str]:
+    """Each clause a prompt reaches twice, named with the prompt and both chains that reach it."""
+    found = []
+    for prompt in _prompts(sources):
+        rooted = [(output.label, output.roots) for output in prompt]
+        for node, *reaches in repeated_clause_reaches(_CLAUSE_GRAPH, rooted, uncounted=_SENTENCE_HOLES):
+            paths = " | ".join(f"{label}: {' → '.join(chain)}" for label, chain in reaches)
+            found.append(f"{prompt[0].label}: {node} reached twice — {paths}")
+    return found
+
+
+def _double_paragraphs(sources: dict[str, str]) -> list[str]:
+    """Each prose unit a prompt carries twice, named with the prompt."""
+    found = []
+    for prompt in _prompts(sources):
+        counts = Counter(unit for output in prompt for unit in _prose_unit_list(output.text))
+        found += [
+            f"{prompt[0].label}: written twice: {unit.decode()[:120]}" for unit, count in counts.items() if count > 1
+        ]
+    return found
+
+
+@pytest.mark.parametrize("check", [_double_clause_deliveries, _double_paragraphs])
+def test_no_prompt_delivers_a_span_twice(check: Callable[[dict[str, str]], list[str]]) -> None:
+    sources = {f"adjagent.definitions.{path.stem}": path.read_text(encoding="utf-8") for path in _DEFINITION_PATHS}
+    found = check(sources)
+    assert found == [], "\n".join(found)
+
+
+def test_a_clause_a_composite_already_delivers_is_refused_with_both_paths() -> None:
+    sources = {
+        "fixture.a": _fixture_module(("a", 'f"{clauses.CODE_PRINCIPLES_CODER}\\n\\n{clauses.MACHINE_GUARANTEES}"'))
+    }
+    assert _double_clause_deliveries(sources) == [
+        "commands/a.md: MACHINE_GUARANTEES reached twice — "
+        "commands/a.md: CODE_PRINCIPLES_CODER → MACHINE_GUARANTEES_CODER → MACHINE_GUARANTEES | "
+        "commands/a.md: MACHINE_GUARANTEES"
+    ]
+
+
+def test_a_clause_passed_to_a_parameter_interpolated_twice_is_refused() -> None:
+    sources = {"fixture.a": _fixture_module(("a", 'f"{clauses.kb_orientation_docs(when=clauses.DISSENT)}"'))}
+    assert _double_clause_deliveries(sources) == [
+        "commands/a.md: DISSENT reached twice — commands/a.md: DISSENT | commands/a.md: DISSENT"
+    ]
+
+
+def test_carried_clauses_maps_each_definition_to_the_clauses_its_call_names() -> None:
+    source = (
+        f"{_SKILL_FIXTURE_HEAD}DEFINITIONS = ("
+        'Definition(name="c", kind=Kind.COMMAND, body=f"{clauses.kb_orientation_docs(when=clauses.DISSENT)}"),'
+        'Definition(name="s", kind=Kind.SKILL, description="a skill", body="Own router.", '
+        'files=(SkillFile(path="references/one.md", body=clauses.MACHINE_GUARANTEES),)),'
+        ")\n"
+    )
+    assert carried_clauses(source) == {"c": {"kb_orientation_docs", "DISSENT"}, "s": {"MACHINE_GUARANTEES"}}
+
+
+@pytest.mark.parametrize("walk", [carried_clauses, lambda source: body_roots(source, _CLAUSE_GRAPH)])
+def test_a_definition_name_that_is_not_a_literal_is_refused_alike(walk: Callable[[str], object]) -> None:
+    source = f'{_FIXTURE_HEAD}_NAME = "a"\nDEFINITIONS = (Definition(name=_NAME, kind=Kind.COMMAND, body="Own."),)\n'
+    with pytest.raises(ValueError, match="name= is not a string literal"):
+        walk(source)
+
+
+@pytest.mark.parametrize(
+    "call, expected",
+    [
+        (
+            "clauses.machine_guarantees()",
+            [
+                "commands/a.md: MACHINE_GUARANTEES_FRAME reached twice — "
+                "commands/a.md: machine_guarantees → MACHINE_GUARANTEES_FRAME | "
+                "commands/a.md: MACHINE_GUARANTEES_FRAME"
+            ],
+        ),
+        ("clauses.machine_guarantees(frame=clauses.DISSENT)", []),
+    ],
+)
+def test_a_default_delivers_its_constant_only_where_the_call_passes_none(call: str, expected: list[str]) -> None:
+    sources = {"fixture.a": _fixture_module(("a", f'f"{{{call}}}\\n\\n{{clauses.MACHINE_GUARANTEES_FRAME}}"'))}
+    assert _double_clause_deliveries(sources) == expected
+
+
+def test_a_command_repeating_a_clause_the_output_it_loads_carries_is_refused() -> None:
+    source = (
+        f"{_FIXTURE_HEAD}from adjagent.vocabulary import ALL\n"
+        "DEFINITIONS = (\n"
+        'Definition(name="a", kind=Kind.AGENT, description="an agent", tools=ALL, tier="high", '
+        'body=f"Own agent text.\\n\\n{clauses.DISSENT}"),\n'
+        'Definition(name="c", kind=Kind.COMMAND, '
+        'body=f"@{clauses.PROJECT_HARNESS_DIR}/agents/a.md\\n\\n{clauses.DISSENT}"),\n'
+        ")\n"
+    )
+    sources = {"fixture.loading": source}
+    assert _double_clause_deliveries(sources) == [
+        "commands/c.md: DISSENT reached twice — commands/c.md: DISSENT | agents/a.md: DISSENT"
+    ]
+    assert _double_paragraphs(sources) == [f"commands/c.md: written twice: {adjagent.clauses.DISSENT[:120]}"]
+
+
+def test_a_paragraph_one_output_writes_twice_is_refused() -> None:
+    sources = {"fixture.a": _fixture_module(("a", '"Written twice.\\n\\nOwn.\\n\\nWritten twice."'))}
+    assert _double_paragraphs(sources) == ["commands/a.md: written twice: Written twice."]
+
+
+def test_a_thematic_break_written_twice_is_not_a_paragraph() -> None:
+    sources = {"fixture.a": _fixture_module(("a", '"Own.\\n\\n---\\n\\nMore.\\n\\n---\\n\\nLast."'))}
+    assert _double_paragraphs(sources) == []
 
 
 def test_the_import_graph_is_acyclic() -> None:

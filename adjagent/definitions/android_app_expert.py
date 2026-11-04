@@ -95,12 +95,16 @@ rules.
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at WARN/ERROR level with structured tags", sink="logcat")}
 
 *Unit tests*: JUnit with `@ParameterizedTest` for table-driven cases; `runTest` +
-`TestCoroutineScheduler` for coroutines. {clauses.unit_test_scope(artifact="UI state")}
+`TestCoroutineScheduler` for coroutines.
+
+{clauses.unit_test_scope(artifact="UI state")}
 {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: Espresso for View-based UI, Compose UI testing APIs for Compose. Always test
 with "Don't keep activities" enabled for process death. Test across API levels and representative
-OEM skins. {clauses.integration_logging_signal(sink="logcat")}
+OEM skins.
+
+{clauses.integration_logging_signal(sink="logcat")}
 
 {clauses.INTEGRATION_ARTIFACT}
 

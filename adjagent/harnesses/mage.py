@@ -1,5 +1,7 @@
 """The mage harness: claude's vocabulary copied, its own plugin manifest, and no `imgread`."""
 
+from __future__ import annotations
+
 import json
 import re
 
@@ -61,6 +63,7 @@ HARNESS = Harness(
     project_temp_dir=".mage-temp",
     # the harness's own directory: CLAUDE.md sits beside .mcp.json, at the plugin's root
     user_harness_dir=".",
+    plugin_parent_dir="Mage/Skills",
     mcp_tool_prefix="mcp_kbase_",
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule=_KBASE_PROJECT_RULE,

@@ -4,6 +4,8 @@ A candidate is one name bound twice, or one distinctive value bound under simila
 modules.
 """
 
+from __future__ import annotations
+
 import ast
 import difflib
 from collections.abc import Sequence

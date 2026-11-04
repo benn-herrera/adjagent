@@ -15,6 +15,8 @@ sends both, and opencode's shell receives it as `workdir`. A case's optional `ha
 missing `bun` fails rather than skips, because a skip would hide drift between the two.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -27,9 +29,9 @@ import pytest
 from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
-from adjagent.install import HARNESS_RESOURCES_SOURCE, REPO_ROOT
+from adjagent.install import HARNESS_RESOURCES_SOURCE, PACKAGE_ROOT
 
-_RESOURCES = REPO_ROOT / HARNESS_RESOURCES_SOURCE
+_RESOURCES = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE
 _PERL_HOOK = _RESOURCES / "claude/hooks/guardrail.pl"
 _TS_PLUGIN = _RESOURCES / "opencode/plugins/guardrail.ts"
 _TESTS = Path(__file__).parent
@@ -146,9 +148,7 @@ def _opencode_call(tool: str, tool_input: dict, root: Path, cwd: Path) -> dict:
     directory as `workdir`, sent only where it is not the root, as opencode sends none when the call
     sets none."""
     args = {
-        renamed: value
-        for arg, value in tool_input.items()
-        if (renamed := _OPENCODE_ARGS.get(arg, arg)) is not None
+        renamed: value for arg, value in tool_input.items() if (renamed := _OPENCODE_ARGS.get(arg, arg)) is not None
     }
     name = _opencode_tool(tool)
     if name == "bash" and cwd != root:
@@ -178,10 +178,7 @@ def ts_results(tmp_path_factory: pytest.TempPathFactory) -> dict[int, tuple[Path
     assert done.returncode == 0, done.stderr
     messages = json.loads(done.stdout)
     assert len(messages) == len(runs)
-    return {
-        i: (Path(run["root"]), None if m is None else _reason(m))
-        for i, run, m in zip(_TS_INDEXES, runs, messages)
-    }
+    return {i: (Path(run["root"]), None if m is None else _reason(m)) for i, run, m in zip(_TS_INDEXES, runs, messages)}
 
 
 def _id(index: int) -> str:

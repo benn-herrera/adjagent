@@ -26,7 +26,7 @@ the record of what an install changed.
 
 The package copy skips a vocabulary of names matched at any depth (test directories, caches,
 `.DS_Store`, `.bak` files, the project documents) and carries the executable bit. A copied file of a
-`#`-comment type (`.py`, `.sh`, `.toml`, `.mk`, `.just`) takes the installed banner; any other file
+`#`-comment type (`.py`, `.sh`, `.mk`, `.just`) takes the installed banner; any other file
 is copied byte-verbatim.
 
 The harness resource copy borrows that vocabulary and nothing else from the package path:

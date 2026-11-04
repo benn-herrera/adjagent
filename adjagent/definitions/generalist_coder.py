@@ -49,7 +49,9 @@ implementation or stdlib logger satisfies it.
 {clauses.heavy_logging_framework(baseline="a small abstraction or the standard library")} The interface can
 be backed by a richer implementation later if genuinely needed. This {clauses.LOGGING_ABSTRACTION_NOTE}
 
-**Idiomatic**: match the language's conventions. Go: explicit errors, stdlib-first, no magic.
+{clauses.LOGS_NOT_STDOUT}
+
+**Idiomatic defaults**: Go: explicit errors, stdlib-first, no magic.
 Python: readable over clever. JS/TS: strict types, explicit async.
 
 **Shell**: {clauses.SHELL_HOUSE_STYLE} After non-trivial shell edits, audit with
@@ -58,11 +60,13 @@ Python: readable over clever. JS/TS: strict types, explicit async.
 
 {clauses.DATA_FORMATS}
 
-{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.manual_over_large_dependency()} {clauses.STDLIB_FIRST_ALWAYS}
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency()} {clauses.STDLIB_FIRST_ALWAYS}
 
 {clauses.dependency_vetting()}
 
 {clauses.build_system(direct="the compiler or test runner", outputs="`bin/` at the project root, `.gitignore`d")}
+
+{clauses.warnings_as_defects(enable="Run the language's formatter and linter through their targets before shipping")}
 
 {clauses.NEW_PROJECT_SETUP}
 

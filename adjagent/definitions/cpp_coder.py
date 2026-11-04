@@ -104,7 +104,8 @@ headers is fragile — a project on headers stays on headers unless the migratio
 
 *Unit tests*: the framework the project already uses — GoogleTest and Catch2 are the common ones.
 Parametrise over a table of cases rather than copying a test body.
-{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, lifetime and move behaviour")}
+
+{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, lifetime and move behaviour")} {clauses.COVERAGE_METRIC}
 {clauses.MOCKING_THRESHOLD_GENERAL}
 
 {clauses.integration_tests_coder(subject="exercising the public interface as a consumer sees it")} {clauses.integration_logging_signal(level="maximum logging", sink="output")} {clauses.SANITIZER_SUITE}
@@ -113,7 +114,9 @@ Parametrise over a table of cases rather than copying a test body.
 
 {clauses.verification_evidence()}
 
-{clauses.build_system_lead(direct="`cmake`, `make` or a compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET} Run `clang-format` and `clang-tidy` through their targets before shipping; `clang-tidy` reads the build's `compile_commands.json`, so the build must export one.
+{clauses.build_system_lead(direct="`cmake`, `make` or a compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET}
+
+Run `clang-format` and `clang-tidy` through their targets before shipping; `clang-tidy` reads the build's `compile_commands.json`, so the build must export one.
 
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="C++")}
 
@@ -123,12 +126,16 @@ Parametrise over a table of cases rather than copying a test body.
 lengths and ranges before trusting a field, and never reinterpret a buffer as a struct — alignment,
 padding and endianness are not yours to assume.
 
-{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="library")} A header-only library is still a dependency: it is compile time, a transitive include surface, and a version someone must track. A dependency arrives by the mechanism the project already uses — system package, vcpkg, Conan, `FetchContent`, vendored — never by introducing a second one.
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="library")} A header-only library is still a dependency: it is compile time, a transitive include surface, and a version someone must track.
+
+A dependency arrives by the mechanism the project already uses — system package, vcpkg, Conan, `FetchContent`, vendored — never by introducing a second one.
 
 {clauses.dependency_vetting()}
 
 **Logging**: route through one leveled path the project owns. That {clauses.LOGGING_ABSTRACTION_NOTE}
 {clauses.LOGS_NOT_STDOUT}
+
+{clauses.heavy_logging_framework(baseline="the project's own leveled path")}
 
 ## Critical Gotchas
 

@@ -19,4 +19,5 @@ Contents:
 - [Install parameters ship with their flags](install-parameters-ship-with-their-flags.md)
 - [Harness agent file changes explicitly](harness-agent-file-changes-explicitly.md)
 - [Version has one home](version-has-one-home.md)
+- [Annotations on the floor](annotations-on-the-floor.md)
 - [Obviated code is deleted, not parked](obviated-code-is-deleted-not-parked.md)

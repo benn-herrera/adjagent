@@ -12,9 +12,11 @@
 # the surface's directory is refused. The word after a flag that takes a separate value (`-k expr`)
 # is that value, never a path.
 #
-# The `docs` surface is the markdown link check (`just check-links` with its default roots), not
-# pytest, so it takes no pytest arguments. The full run (no surface) runs it after pytest, and
-# fails when either fails.
+# The `docs` surface is the markdown link check (`just check-links` with its default roots), and
+# the `wheel` surface is `just check-wheel`; neither is pytest, so neither takes pytest arguments.
+# The full run (no surface) runs both after pytest, and fails when any of them fails. It shows
+# check-wheel's last line only, its full output on failure, so the pytest result stays near the end
+# of the log.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${VENV_PYTHON:?VENV_PYTHON is empty or unset — run this script through its justfile recipe}"
@@ -24,9 +26,9 @@ set -euo pipefail
 surface="${1}"
 # A surface is a name, never a flag: `just` binds a leading flag to the surface parameter, so a
 # caller reaching this check with `-k` meant to pass a flag and needs the explicit empty surface.
-check_links=0
+full_run=0
 case "${surface}" in
-    "") dirs=(tests devtools/tests); check_links=1 ;;
+    "") dirs=(tests devtools/tests); full_run=1 ;;
     adjagent) dirs=(tests) ;;
     dupe_sweep) dirs=(devtools/tests) ;;
     docs)
@@ -36,8 +38,15 @@ case "${surface}" in
         fi
         exec "${JUST}" --justfile "${JUSTFILE}" check-links
         ;;
+    wheel)
+        if [[ "$#" -gt 1 ]]; then
+            printf '%s\n' "error: test surface 'wheel' is the wheel check and takes no pytest arguments" >&2
+            exit 1
+        fi
+        exec "${JUST}" --justfile "${JUSTFILE}" check-wheel
+        ;;
     *)
-        printf '%s\n' "error: unknown test surface '${surface}' — valid values: adjagent, dupe_sweep, docs; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" ${surface}" >&2
+        printf '%s\n' "error: unknown test surface '${surface}' — valid values: adjagent, dupe_sweep, docs, wheel; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" ${surface}" >&2
         exit 1
         ;;
 esac
@@ -77,7 +86,14 @@ else
 fi
 status=0
 PYTHONPATH="${root}" "${VENV_PYTHON}" -m pytest ${targets[@]+"${targets[@]}"} "${@:2}" || status=$?
-if [[ "${check_links}" -eq 1 ]]; then
+if [[ "${full_run}" -eq 1 ]]; then
     "${JUST}" --justfile "${JUSTFILE}" check-links || status=1
+    wheel_out=""
+    if wheel_out="$("${JUST}" --justfile "${JUSTFILE}" check-wheel 2>&1)"; then
+        printf '%s\n' "${wheel_out}" | tail -n 1
+    else
+        printf '%s\n' "${wheel_out}" >&2
+        status=1
+    fi
 fi
 exit "${status}"

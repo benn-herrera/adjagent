@@ -26,10 +26,12 @@ user. It's accident protection, not hack-proofing, but can prevent painful misha
 
 Base requirements: 
 
-- **Python 3.11 or later** on the host (`python3` on `PATH`) — the tooling reads TOML with the 
-  standard library's `tomllib`, which first shipped in 3.11.
+- **Python 3.9 or later** on the host (`python3` on `PATH`). The package has no third-party
+  dependency.
 - `perl` with core `JSON::PP` — optional, for the claude guardrail; without it the install
   skips that hook and installs everything else ([Guardrail](#guardrail)).
+- `git` on `PATH` — for installing the package from a git URL. [pipx](https://pipx.pypa.io) is the
+  recommended way to install adjagent; a venv works without it.
 
 For the kb set (`just install-with-kb`):
 
@@ -46,8 +48,36 @@ For the kb set (`just install-with-kb`):
 - a way to reach a model - a build that spends inference needs one; today that is a provider
   configuration; `kbase score` always spends inference; a `--no-inference` build needs none
 
-Clone this repo anywhere, then install the deployed surfaces into the consuming project — from
-**this** repo's root:
+Install the package from a release tag, then install the deployed surfaces into the consuming
+project:
+
+```sh
+pipx install "git+https://github.com/benn-herrera/adjagent@v0.13.0"
+pipx ensurepath   # puts pipx's bin directory on PATH; open a new shell afterwards
+adjagent --help
+adjagent install ~/projects/foo
+```
+
+Without pipx, install into a venv of your own and run `adjagent` from it. A bare
+`pip install` outside a venv is refused on Homebrew and most distro Pythons
+(`externally-managed-environment`), and Apple's `/usr/bin/python3` puts the command in
+`~/Library/Python/3.9/bin`, which is not on `PATH`:
+
+```sh
+python3 -m venv ~/.venvs/adjagent
+~/.venvs/adjagent/bin/pip install "git+https://github.com/benn-herrera/adjagent@v0.13.0"
+~/.venvs/adjagent/bin/adjagent install ~/projects/foo
+```
+
+`adjagent` and `python3 -m adjagent` are the same command. The examples below that name a `just`
+recipe map to `adjagent` verbs: `just install` is `adjagent install`, `just install-with-kb` is
+`adjagent install --with-kb`, and `just install-agents-file` is `adjagent install-agents-file`.
+`just render` is not `adjagent render`: it takes a slug and forwards its `--*` flags to
+`adjagent install`. A wheel built with `just build` installs the
+same way (Development). Installed this way, the checks that protect a clone do not apply: there is no
+repository to refuse as an install root, and no uncommitted state to refuse the agents file for.
+
+Or clone this repo anywhere and install from **this** repo's root:
 
 ```sh
 just install ~/projects/foo
@@ -63,8 +93,19 @@ install-with-kb ~/projects/foo` adds the `kbase` skill under `skills/`, with the
 `skills/kbase/kb-tools/` beneath it ("Knowledge Base Set", below) — except mage, whose plugin always
 installs with it. The definitions are rendered by that invocation and the tool packages are copied.
 Test suites and caches stay behind.
-`--harness=opencode` installs into `.opencode/` instead (each harness's project directory;
-`--subdir=` overrides). `--harness=mage` installs the plugin shape instead:
+The target must be an existing directory. The harness is `--harness=NAME` when given; otherwise the
+one harness directory inside the target (`.claude/` or `.opencode/`); otherwise the one the target
+itself is the directory of (`.claude`, `.opencode`, `.config/opencode`, or `Mage/Skills` for mage).
+A target holding both `.claude/` and `.opencode/`, or neither and not itself a harness directory, is
+refused until you pass `--harness`. `--harness=opencode` installs into `.opencode/` (each harness's
+project directory); `--subdir=DIR` installs into `<target>/DIR` instead, and `--subdir=` into the
+target itself. A target that is itself a harness directory is installed into directly.
+
+A home-directory target is a **user-level** install: `just install ~ --harness=claude` (or
+`opencode`) renders the definitions into `~/.claude` (`~/.config/opencode`) and writes nothing
+else — no guardrail, no kb-tools, no MCP entry, no include line. Add
+`--install-global-agents-file` to install the harness agents file there too ("Harness Agents File",
+below); on a project install the flag is ignored. `--harness=mage` installs the plugin shape instead:
 `just install <plugins-parent> --harness=mage` creates `<plugins-parent>/adjagent`, and the names and
 paths inside the plugin are unchanged — the surfaces at its top level, with the manifest under
 `.claude-plugin/` beside them. Every `--*` flag after the target forwards verbatim to
@@ -184,14 +225,14 @@ and the skill to use it. Add `.mcp.json` to `.gitignore` if you use this recipe.
 ```just
 AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
 AGENTS_DIR := "." + file_stem(AGENTS_REPO)
-AGENTS_VER := "v0.12.7"
+AGENTS_VER := "v0.13.0"
 [doc("updates and installs agent set from adjagents public repo")]
 agents:
   @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
   @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" fetch --tags || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}" "{{AGENTS_DIR}}"
   @git -c "advice.detachedHead=false" -C "{{AGENTS_DIR}}" checkout "{{AGENTS_VER}}"
   just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=claude
-  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode --model-tier-map=default
+  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode
   just --justfile "{{AGENTS_DIR}}/justfile" install-agents-file ~/.claude
 	just --justfile "{{AGENTS_DIR}}/justfile" install-agents-file ~/.config/opencode	
 ```
@@ -201,13 +242,13 @@ agents:
 .PHONY: agents
 AGENTS_REPO := https://github.com/benn-herrera/adjagent.git
 AGENTS_DIR := .$(basename $(notdir $(AGENTS_REPO)))
-AGENTS_VER := v0.12.7
+AGENTS_VER := v0.13.0
 agents:
 	@mkdir -p $(dir $(AGENTS_DIR))
 	@[[ -d "$(AGENTS_DIR)" ]] && git -C "$(AGENTS_DIR)" fetch --tags || git -C "$(dir $(AGENTS_DIR))" clone "$(AGENTS_REPO)" "$(AGENTS_DIR)"
 	@git -c "advice.detachedHead=false" -C "$(AGENTS_DIR)" checkout "$(AGENTS_VER)"
 	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=claude
-	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=opencode --model-tier-map=default
+	just --justfile "$(AGENTS_DIR)/justfile" install "$(CURDIR)" --harness=opencode
 	just --justfile "$(AGENTS_DIR)/justfile" install-agents-file ~/.claude
 	just --justfile "$(AGENTS_DIR)/justfile" install-agents-file ~/.config/opencode	
 ```
@@ -230,15 +271,17 @@ it with `@AGENTS.md` yourself. Under mage the destination is its own directory, 
 `just install-agents-file <dir> mage` takes the plugin directory — `<plugins-parent>/adjagent` — and
 writes `<dir>/CLAUDE.md` directly, never an `AGENTS.md` redirect;
 `just install <plugins-parent> --harness=mage` writes it too, so a normal install needs no second
-step.
+step. For claude and opencode, `just install ~ --harness=NAME --install-global-agents-file` installs
+the agents file into the user-global directory as part of a user-level install, with the same
+refusals.
 
 The install replaces only the block between the `adjagent` marker lines and keeps everything outside
 it; put your own rules outside the markers. Edits inside the block are not preserved. An absent file
 is written whole. If the destination holds nothing but a single `@<path>` import, the install goes
 into that target and leaves the redirect alone; a redirect to another redirect, or to a file outside
 `<dir>`, is refused for you to merge by hand. A file without exactly one begin marker line followed
-by one end marker line is refused with nothing written, as is any run while `adjagent/` has
-uncommitted changes. A write that changes the file keeps one rolling `backup.<name>` of what it
+by one end marker line is refused with nothing written, as is any run from a clone while `adjagent/`
+has uncommitted changes. A write that changes the file keeps one rolling `backup.<name>` of what it
 replaced.
 
 `agents/`, `commands/` and `skills/` are the three deployed surfaces install produces inside
@@ -263,9 +306,8 @@ accepted. Two independent flags carry the tuning further: `--model-tier-map` ove
 member each tier is tuned against, and the optional `--model-pin-tier-alias-map` renders an alias in
 place of each tier's member. Under opencode, `--model-tier-map=inherit` or `=default` — two words
 that render alike there — means "the project's own model for every tier": each agent renders with no
-`model:` line and runs on whatever that project has configured. `--harness=opencode` with the
-default family needs the tier map overridden, its tier texts being Claude model names opencode does
-not accept, and a bare value is the whole map in one word. The alias map takes no bare value, and
+`model:` line and runs on whatever that project has configured; that is opencode's default when
+`--model-tier-map` is not given. A bare value is the whole map in one word. The alias map takes no bare value, and
 under claude a bare one is refused as no `tier=value` pair.
 `just install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]`
 applies the same mechanism to an install (see "Install" above), and `just install-with-kb` takes the
@@ -426,10 +468,13 @@ adjagent/                 the generator and every definition, run as `python3 -m
                           harness directory as they stand (opencode/plugins/guardrail.ts,
                           claude/hooks/guardrail.pl)
   families/               one module per model family, each defining FAMILY
-kb-tools/                 shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
+  kb-tools/               shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
                           a kb install only as skills/kbase/kb-tools/, inside the kbase skill's own
                           directory
+pyproject.toml            the package's build configuration: setuptools, the version read from
+                          `adjagent.__version__`, the console script `adjagent`
 dist/                     gitignored — what `just mage-dist` writes (see "Releasing the mage plugin")
+                          and what `just build` writes: the wheel and sdist
 devtools/render_diff.py   compares two rendered slots by text; reads only rendered output
 devtools/scripts/         the shell scripts behind the justfile recipes
 agent-sandboxing/         setup for running a coding agent as an unprivileged local user
@@ -482,8 +527,15 @@ so the plugin's root is the slot itself, and a plugin writes no include line. A 
 `just render-diff [a] [b]` compares two slots — reference against latest by default — by text, with
 each file's banner replaced by one constant line, and reports differences without failing on them.
 `just test` runs the full tooling
-test suite (the `adjagent`, `dupe_sweep` and `docs` surfaces, the last being `just check-links`,
-auto-provisioning a `.venv`).
+test suite (the `adjagent`, `dupe_sweep`, `docs` and `wheel` surfaces, the `docs` surface being
+`just check-links` and the `wheel` surface `just check-wheel`, auto-provisioning a `.venv`). The
+`.venv` prefers `/usr/bin/python3` on macOS, the Xcode command-line tools' Python 3.9.6, so
+`just test` there checks the Python 3.9 floor; elsewhere it runs on whatever `python3` is installed.
+Using the repository directly does not require Python 3.9.
+`just build` builds the wheel and sdist into `dist/` with the `.venv`'s setuptools, offline and with
+no git check. `just check-wheel [python]` builds, then installs the wheel into a throwaway venv and
+checks that its package data equals the tree and that the installed `adjagent` runs and installs
+the same product as the checkout.
 `just test-changed [base]` runs only the surfaces the uncommitted tree (plus, given `base`, the
 commits since it) touches, and says which paths chose each.
 
@@ -555,6 +607,8 @@ does not loses any local edit to the next install. See
 
 The deployed runtime (`agents/`, `commands/`, `skills/`) is stdlib-only Python and shell with no
 third-party dependencies. `pytest`, `black`, `isort` and `flake8` are dev/test-only tools, installed into a
-local `.venv` by the `just test` and `just format-python` recipes.
+local `.venv` by the `just test` and `just format-python` recipes. The same `.venv` gets `setuptools`
+(Python Packaging Authority, MIT), the build backend `pyproject.toml` names, and `build` (Python
+Packaging Authority, MIT), the frontend `just build` runs; both are build-time only.
 
 pandoc (John MacFarlane and contributors) and Graphviz `dot` (Graphviz authors) are run as external programs and are not bundled.

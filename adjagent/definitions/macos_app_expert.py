@@ -73,12 +73,16 @@ entitlement for JIT. Universal binaries (x86_64 + arm64) required for broad comp
 
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level=clauses.APPLE_VIOLATION_LEVEL, sink="Console.app")}
 
-*Unit tests*: XCTest. {clauses.unit_test_scope(artifact="UI appearance")}
+*Unit tests*: XCTest.
+
+{clauses.unit_test_scope(artifact="UI appearance")}
 {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. Test lifecycle
 transitions (activation, backgrounding, sleep/wake), sandboxing boundaries, and
-macOS-version-specific behaviors. {clauses.integration_logging_signal(sink="Console.app")}
+macOS-version-specific behaviors.
+
+{clauses.integration_logging_signal(sink="Console.app")}
 
 {clauses.INTEGRATION_ARTIFACT}
 

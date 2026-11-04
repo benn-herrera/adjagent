@@ -1,11 +1,14 @@
-"""`python3 -m adjagent install ROOT`: every definition rendered into ROOT's agents/, commands/ and
+"""`python3 -m adjagent install TARGET`, once `adjagent.install_target` has resolved ROOT and the project
+root from TARGET: every definition rendered into ROOT's agents/, commands/ and
 skills/, the shipped packages copied beside them under adj-tools/, each file the installing harness
 ships copied into ROOT as it stands, the harness's guardrail hook registered in the project's settings
 file where one install-time run of it succeeds, and — when the install includes kb — the kb-tools
 package inside the kbase skill's own directory, with the consumer's `kbase` MCP entry and its runner
-include line.
+include line; a plugin installed below its project root also gets its agents file at ROOT.
 Overwrites without ceremony only what carries this repository's banner, refusing over any other file at
 a path it writes: the consumer's git is the record of what an install changed."""
+
+from __future__ import annotations
 
 import json
 import os
@@ -15,16 +18,49 @@ import subprocess
 from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path, PurePosixPath
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
-from adjagent.context import Render
+from adjagent.agents_file import AgentsFileWrite, checked_agents_file, write_agents_file
+from adjagent.context import Render, harnesses
 from adjagent.errors import InputError
 from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite
-from adjagent.loading import load
-from adjagent.render import GENERATED_MARK, GENERATED_NOTICE, render_all, write_renders
+from adjagent.install_target import user_dir_harnesses
+from adjagent.render import (
+    GENERATED_MARK,
+    GENERATED_NOTICE,
+    render_all,
+    write_renders,
+    write_text_verbatim,
+)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-# (source directory in this repository, destination below ROOT) for the packages every install ships.
+
+def checkout_root(package_root: Path) -> Path | None:
+    """`package_root`'s parent when it holds a `.git` entry — a directory in a clone, a file in a
+    worktree — else None. A package installed outside a checkout of this repository, a wheel in
+    site-packages, is not in one even where another project's repository encloses it."""
+    parent = package_root.parent
+    return parent if (parent / ".git").exists() else None
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = checkout_root(PACKAGE_ROOT)
+
+
+def uncommitted_sources() -> tuple[str, ...]:
+    """Every `git status --porcelain` line under this package's directory, untracked included: the
+    agents file is a function of the package, so an uncommitted change is an unpublished one. Outside
+    a checkout there is no commit state, so nothing is uncommitted and git is not run."""
+    if REPO_ROOT is None:
+        return ()
+    command = ["git", "-C", str(REPO_ROOT), "status", "--porcelain", "--", PACKAGE_ROOT.name]
+    try:
+        out = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise InputError(f"cannot read the commit state of {PACKAGE_ROOT}: {exc}") from exc
+    return tuple(line for line in out.splitlines() if line)
+
+
+# (source directory in this package, destination below ROOT) for the packages every install ships.
 # A destination is a consumer contract — definition bodies and the installed runner line name it —
 # so it is stated, never derived.
 #
@@ -36,7 +72,7 @@ SHIPPED_PACKAGES: tuple[tuple[str, str], ...] = ()
 # The harness resources: files a harness ships that land in its project harness directory as they
 # stand, copied and never rendered. The directory below this one in the source is the harness's own
 # name, and the destination is ROOT itself — both stated, neither derived from a directory listing.
-HARNESS_RESOURCES_SOURCE = "adjagent/harnesses/resources"
+HARNESS_RESOURCES_SOURCE = "harnesses/resources"
 # The interpreter the install-time probe runs a guardrail hook script under, found on PATH, and how long
 # that run may take before it counts as failed.
 GUARDRAIL_INTERPRETER = "perl"
@@ -44,7 +80,7 @@ GUARDRAIL_PROBE_SECONDS = 5.0
 KBASE_SKILL_DIR = "skills/kbase"
 # The kbase skill's router: carrying this repository's banner, it is what marks ROOT as a kb install.
 KBASE_ROUTER = f"{KBASE_SKILL_DIR}/SKILL.md"
-# The kb toolchain's package: this repository's `kb-tools/`, delivered inside the kbase skill's own
+# The kb toolchain's package: this package's `kb-tools/`, delivered inside the kbase skill's own
 # directory, shipped there only when the install includes kb.
 KB_TOOLS_PACKAGE = f"{KBASE_SKILL_DIR}/kb-tools"
 KB_TOOLS_SOURCE = "kb-tools"
@@ -92,7 +128,7 @@ EXCLUDED_NAMES = frozenset(
 EXCLUDED_SUFFIX = ".bak"
 # Copied files whose type takes a `#` comment carry the one-line installed banner; every other file
 # is copied byte-verbatim.
-STAMPED_SUFFIXES = frozenset({".py", ".sh", ".toml", ".mk", ".just"})
+STAMPED_SUFFIXES = frozenset({".py", ".sh", ".mk", ".just"})
 SURFACES = ("agents", "commands", "skills")
 # The generated-banner prefixes, built from the mark `render` writes above the payload, and the module
 # paths a payload may name: the current `adjagent/definitions/<module>.py`, and the pre-1.0
@@ -136,16 +172,16 @@ def package_copies(root: Path, *, kb_included: bool) -> list[tuple[Path, Path]]:
     """(source file, target under `root`) for every file the shipped packages deliver, each landing
     under its package's destination."""
     return [
-        (source, root / destination / source.relative_to(REPO_ROOT / package))
+        (source, root / destination / source.relative_to(PACKAGE_ROOT / package))
         for package, destination in _packages(kb_included=kb_included)
-        for source in sorted((REPO_ROOT / package).rglob("*"))
-        if source.is_file() and _shipped(source.relative_to(REPO_ROOT / package))
+        for source in sorted((PACKAGE_ROOT / package).rglob("*"))
+        if source.is_file() and _shipped(source.relative_to(PACKAGE_ROOT / package))
     ]
 
 
 def harness_resource_copies(root: Path, *, harness: str) -> list[tuple[Path, Path]]:
     """(source file, target under `root`) for every file `harness` ships: `resources/<harness>/` in this
-    repository, delivered into ROOT — the harness directory — so `resources/opencode/plugins/x.ts` lands
+    package, delivered into ROOT — the harness directory — so `resources/opencode/plugins/x.ts` lands
     at `<ROOT>/plugins/x.ts`.
 
     These files are the harness's own, not this repository's generated product: each is copied
@@ -157,7 +193,7 @@ def harness_resource_copies(root: Path, *, harness: str) -> list[tuple[Path, Pat
     The copy is one-way and is not a mirror: a resource file this repository drops is not removed from
     a consumer, because `prune` owns the three rendered surfaces and nothing outside them. What lands
     here stays until the consuming project removes it."""
-    source = REPO_ROOT / HARNESS_RESOURCES_SOURCE / harness
+    source = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / harness
     if not source.is_dir():
         return []
     return [
@@ -177,15 +213,15 @@ def stamped(data: bytes, *, origin: str) -> bytes:
 
 
 def _refuse_root(root: Path) -> None:
-    """Refuse a root that is not a directory, that is this repository, or that sits inside a source it
-    copies from — a shipped package's, the kb toolchain's, or a harness's resource tree — installing
-    there writes the product into the tree a later install reads from."""
-    if not root.is_dir():
-        raise InputError(f"install root '{root}' is not an existing directory")
+    """Refuse a root that exists and is not a directory, that is this repository, or that sits inside a
+    source it copies from — a shipped package's, the kb toolchain's, or a harness's resource tree —
+    installing there writes the product into the tree a later install reads from."""
+    if os.path.lexists(root) and not root.is_dir():
+        raise InputError(f"install root '{root}' is not a directory")
     resolved = root.resolve()
     sources = [
-        *(REPO_ROOT / package for package, _ in _packages(kb_included=True)),
-        REPO_ROOT / HARNESS_RESOURCES_SOURCE,
+        *(PACKAGE_ROOT / package for package, _ in _packages(kb_included=True)),
+        PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE,
     ]
     if resolved == REPO_ROOT or any(resolved.is_relative_to(source) for source in sources):
         raise InputError(
@@ -239,7 +275,7 @@ def _blocked_component(target: Path, *, base: Path) -> Path | None:
     """The outermost path strictly between `base` and `target` that exists as a symlink or as anything
     but a directory — a write below it would land elsewhere or fail — or None. `base` and everything
     above it are not examined."""
-    for parent in reversed(target.relative_to(base).parents[:-1]):
+    for parent in reversed(tuple(target.relative_to(base).parents)[:-1]):
         component = base / parent
         if os.path.lexists(component) and (component.is_symlink() or not component.is_dir()):
             return component
@@ -716,7 +752,7 @@ def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
     if spliced is None:
         print(f"{target} could not be edited safely — left untouched; {by_hand}")
         return
-    target.write_text(spliced, encoding="utf-8", newline="")
+    write_text_verbatim(target, spliced)
     print(f"registered the kbase MCP entry in {target}")
 
 
@@ -808,7 +844,7 @@ def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str,
     if spliced == text:
         print(f"{target} already registers the guardrail hook")
         return
-    target.write_text(spliced, encoding="utf-8", newline="")
+    write_text_verbatim(target, spliced)
     print(f"registered the guardrail hook in {target}")
 
 
@@ -868,8 +904,7 @@ def kb_include_line(*, runner: str, harness_relpath: str) -> str:
 
 def _harness_dirs() -> dict[str, str]:
     """harness name → its project-harness-dir, for every harness this installation knows."""
-    harnesses = cast(dict[str, Harness], load("adjagent.harnesses", "HARNESS"))
-    return {name: harness.project_harness_dir for name, harness in harnesses.items()}
+    return {name: harness.project_harness_dir for name, harness in harnesses().items()}
 
 
 class _NamedLine(NamedTuple):
@@ -969,7 +1004,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
             )
             return
         lines[match.index] = rewritten
-        path.write_text("".join(lines), encoding="utf-8", newline="")
+        write_text_verbatim(path, "".join(lines))
         print(f"rewrote the KB include line in {path}")
         return
     line = kb_include_line(runner=runner, harness_relpath=harness_relpath)
@@ -981,7 +1016,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
         appended = f"{text}\n{line}\n"
     else:
         appended = f"{text}\n\n{line}\n"
-    path.write_text(appended, encoding="utf-8", newline="")
+    write_text_verbatim(path, appended)
     print(f"installed: appended the KB include line to {path}")
 
 
@@ -992,6 +1027,8 @@ def install(
     verbose: bool,
     with_kb: bool = False,
     project_root: Path | None = None,
+    uncommitted: Callable[[], tuple[str, ...]],
+    global_agents_file: bool = False,
 ) -> None:
     """Render every included definition and every file the harness renders of its own into ROOT,
     replace each package destination whole with a stamped copy, copy the harness's own resource files
@@ -1009,7 +1046,15 @@ def install(
     a guardrail hook has its script run once on this machine first: when that run succeeds the script
     ships with the other resources and every install registers it in the project's settings file; when
     it fails, neither happens, the install goes on, and the report names why and what an earlier
-    install left in place. A file at a render, harness-file or resource target that does not carry what
+    install left in place. A plugin harness installed below its project root — ROOT is not the project
+    root — also has its agents file installed at ROOT, refused while `uncommitted` names a change; it is
+    called only for such an install. A user-level install — ROOT is the harness's user harness
+    directory, decided here from ROOT and the harness whatever route reached it — renders the
+    definitions, prunes and removes the legacy trees, and writes nothing else: no package, resource
+    file, guardrail probe or registration, MCP entry or runner line; with `global_agents_file` it also
+    installs the agents file at ROOT, under the same `uncommitted` refusal, a flag a project install
+    ignores. ROOT may be absent, and is created only once every
+    check has passed. A file at a render, harness-file or resource target that does not carry what
     that class of file states as its origin — this repository's generated banner or installed header,
     or the marker a harness-rendered file states about itself — or a symlink or non-directory between
     ROOT and such a target, refuses the install; package destinations are replaced whole unchecked. A
@@ -1022,20 +1067,25 @@ def install(
     # The settings file's own base: a harness that keeps its file at ROOT resolves its paths against
     # ROOT, every other against the project root.
     mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
-    harness_relpath = _harness_relpath(root, project)
-    kb_included = with_kb or ctx.harness.user_harness_dir == "." or _is_ours(root / KBASE_ROUTER)
+    user_level = ctx.harness.name in user_dir_harnesses(root)
+    # A user-level ROOT need not sit under its project root — a user directory may be a symlink out of
+    # home — and nothing a user-level install writes spells its path from there.
+    harness_relpath = "" if user_level else _harness_relpath(root, project)
+    kb_included = with_kb or ctx.harness.is_plugin or _is_ours(root / KBASE_ROUTER)
     # Every check runs before the first write: the root refusal and harness relpath above, then the
     # render, the guardrail probe that decides whether its script is a resource target, each render,
     # harness-file and resource target the install would overwrite and the paths below ROOT it would
     # write through, an install including kb's runner file and MCP settings file, and — when the probe
-    # passed — the guardrail entry built for this harness directory and the guardrail settings file.
+    # passed — the guardrail entry built for this harness directory and the guardrail settings file,
+    # and a plugin's agents file. ROOT itself is created only after all of them.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
-    package_files = package_copies(root, kb_included=kb_included)
-    resource_files = harness_resource_copies(root, harness=ctx.harness.name)
-    guardrail = ctx.harness.guardrail
+    package_files = [] if user_level else package_copies(root, kb_included=kb_included)
+    resource_files = [] if user_level else harness_resource_copies(root, harness=ctx.harness.name)
+    guardrail = None if user_level else ctx.harness.guardrail
+    project_kb_files = kb_included and not user_level
     guardrail_skipped: str | None = None
     if guardrail is not None:
-        script = REPO_ROOT / HARNESS_RESOURCES_SOURCE / ctx.harness.name / guardrail.script
+        script = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / ctx.harness.name / guardrail.script
         guardrail_skipped = _guardrail_probe(script, project=project, temp_dir=ctx.harness.project_temp_dir)
         if guardrail_skipped is not None:
             resource_files = [(source, target) for source, target in resource_files if source != script]
@@ -1055,7 +1105,7 @@ def install(
     # Everything this install copies, in one list: `keep` and the report below count a harness's own
     # files with the packages', so neither reads as a stale render.
     copies = [*package_files, *resource_files]
-    if kb_included:
+    if project_kb_files:
         _check_runner(project)
         _, mcp_container = ctx.harness.mcp.entry(command=KBASE_NAME)
         mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
@@ -1064,13 +1114,18 @@ def install(
     if guardrail is not None and guardrail_skipped is None:
         guardrail_entry = guardrail.entry(harness_relpath)
         _check_settings(project / guardrail.settings, base=project, container=guardrail.container, leaf=list)
+    agents_file: AgentsFileWrite | None = None
+    plugin_below_project = ctx.harness.is_plugin and root.resolve() != project
+    if plugin_below_project or (user_level and global_agents_file):
+        agents_file = checked_agents_file(root, ctx.harness, uncommitted=uncommitted())
 
-    for _, destination in _packages(kb_included=kb_included):
+    root.mkdir(parents=True, exist_ok=True)
+    for _, destination in [] if user_level else _packages(kb_included=kb_included):
         shutil.rmtree(root / destination, ignore_errors=True)
     for source, target in package_files:
         data = source.read_bytes()
         if source.suffix in STAMPED_SUFFIXES:
-            data = stamped(data, origin=source.relative_to(REPO_ROOT).as_posix())
+            data = stamped(data, origin=source.relative_to(PACKAGE_ROOT.parent).as_posix())
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         shutil.copymode(source, target)
@@ -1079,6 +1134,8 @@ def install(
         shutil.copyfile(source, target)
         shutil.copymode(source, target)
     written = write_renders(root, renders)
+    if agents_file is not None:
+        write_agents_file(agents_file)
 
     for relative in LEGACY_TREES:
         legacy = root / relative
@@ -1094,11 +1151,11 @@ def install(
     if verbose:
         for path in [*(target for _, target in copies), *written]:
             print(f"wrote {path}")
-    if kb_included:
+    if project_kb_files:
         mcp_merge(mcp_base, harness=ctx.harness, command=KBASE_NAME)
         # A harness whose files sit at its own root is a plugin, not a repo project, so it has no
         # consumer runner file to include the snippets in and none is created.
-        if ctx.harness.user_harness_dir != ".":
+        if not ctx.harness.is_plugin:
             install_kb_include_line(project, harness_relpath=harness_relpath)
     if guardrail is None:
         return

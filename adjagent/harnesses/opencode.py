@@ -1,5 +1,7 @@
 """The opencode harness."""
 
+from __future__ import annotations
+
 import re
 
 from adjagent.harness import AgentFields, Harness, McpSettings, McpSite, quoted
@@ -35,6 +37,7 @@ HARNESS = Harness(
     project_harness_dir=_PROJECT_HARNESS_DIR,
     project_temp_dir=".opencode-temp",
     user_harness_dir="~/.config/opencode",
+    default_tier_spec="default",
     mcp_tool_prefix="kbase_",
     recipe_rule="",
     kbase_project_rule="",

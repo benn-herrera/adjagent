@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adjagent"
+dynamic = ["version"]
+description = "A drift-proof, model-tunable generator of agent, command and skill definitions"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+adjagent = "adjagent.cli:main"
+
+[project.urls]
+Repository = "https://github.com/benn-herrera/adjagent"
+
+[tool.setuptools.packages.find]
+include = ["adjagent", "adjagent.*"]
+
+[tool.setuptools.package-data]
+adjagent = ["kb-tools/**/*", "harnesses/resources/**/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "adjagent.__version__" }

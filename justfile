@@ -26,17 +26,17 @@ default:
     @echo "===="
     @just --list | grep '\[dev\]'
 
-[doc("install into <project>/<subdir>/; <project> is the first non-flag argument, resolved and passed as the project root the harness directory ROOT sits under; [--subdir=<subdir>] defaults to the project-harness-dir of --harness=NAME (default claude: .claude/)")]
+[doc("install into an existing <target>: [--harness=NAME] [--subdir=DIR] [--install-global-agents-file] [tuning flags]; README \"Install\" has the rules")]
 install target *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "$@"
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "$@"
 
-[doc("install with the kb set as well as the base product: the kb- definitions, the kb-tools package of runner snippets, and the project-root kbase MCP entry (the bare `kbase` command, which the user installs with Homebrew) and runner include line; every argument means what it means to install")]
+[doc("as install, plus the kb set (README \"Knowledge Base Set\")")]
 install-with-kb target *args:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "$@" --with-kb
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "$@" --with-kb
 
 [doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis")]
 install-agents-file dir harness="":
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install-agents-file.sh "$@"
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install-agents-file "$@"
 
 ##
 ##
@@ -63,6 +63,14 @@ tag:
 mage-dist:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/mage-dist.sh
 
+[doc("build the wheel and sdist of the working tree into dist/ with the venv's setuptools; makes no git check and fetches nothing")]
+build: _venv
+    @"{{VENV_PYTHON}}" -m build --no-isolation --outdir "{{PROJECT_ROOT}}/dist" "{{PROJECT_ROOT}}"
+
+[doc("[dev] build, then prove the wheel: its package data equals the non-.py files under adjagent/ that git tracks or would track, and installed into a throwaway venv made from <python> (default /usr/bin/python3) it imports from that venv, runs as the adjagent console script, installs byte-identically to the checkout, and writes the mage plugin's agents file outside a checkout")]
+check-wheel python="/usr/bin/python3": build
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" PYBIN="{{PYBIN}}" EXE="{{EXE}}" ./devtools/scripts/check-wheel.sh "$@"
+
 [doc("[dev] render the full install product, kb set included, into rendered/<slug>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug), plus the agents file for --harness=NAME (default claude) into rendered/<slug>/harness/<NAME>/, or at the slot root for a plugin (`mage`) — refuses a slug starting with reference; every --* flag, --harness included, forwards verbatim to `python3 -m adjagent install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
 render *args:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/render.sh "$@"
@@ -85,10 +93,6 @@ render-agents-file harness out:
 _harness-value harness key:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-value.sh "$@"
 
-[private]
-_harness-names:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-names.sh
-
 [doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
 dice-doc monolith out map="": _venv
     @"{{VENV_PYTHON}}" -m docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
@@ -96,6 +100,10 @@ dice-doc monolith out map="": _venv
 [doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees")]
 dice-docs manifest src work: _venv
     @"{{VENV_PYTHON}}" -m docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
+
+[doc("write a diced tree (the directory holding its entry-point.md) back out as one markdown document at monolith, which must not exist, then check it dices back to the same tree")]
+undice tree monolith: _venv
+    @"{{VENV_PYTHON}}" -m docdicer undice "{{tree}}" "{{monolith}}"
 
 [doc("check every relative link and #anchor in PROJECT_DOCS and the top-level *.md files, then that every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exit 1 on a broken link or an orphan")]
 check-links: _venv
@@ -112,7 +120,7 @@ check-links: _venv
 # which has no frontmatter and carries the third shape, the two HTML comments
 # `<!-- !GENERATED! ... -->` and `<!-- !TUNING! ... -->` from its first line. Then,
 # outside fenced code, whitespace inside a paragraph collapses to one space, while
-# headings, table rows, list items, fenced blocks and frontmatter stay exact
+# headings, thematic breaks, table rows, list items, fenced blocks and frontmatter stay exact
 # (devtools/render_diff.py states the rules). A copied file's `!INSTALLED!` banner
 # is replaced the same way. Two files are the same when that text is identical. The
 # output keeps `diff -rq`'s two line forms.
@@ -120,7 +128,7 @@ check-links: _venv
 render-diff a="reference" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
-[doc("[dev] run tooling python tests and the markdown link check: no argument runs all three (adjagent + dupe_sweep pytest, then docs: just check-links with its defaults); a surface argument (adjagent, dupe_sweep, docs) runs only that one; further arguments, never given to docs, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+[doc("[dev] run tooling python tests and the markdown link check: no argument runs all four (adjagent + dupe_sweep pytest, then docs: just check-links with its defaults, then wheel: just check-wheel); a surface argument (adjagent, dupe_sweep, docs, wheel) runs only that one; further arguments, never given to docs or wheel, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
     @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON="{{VENV_PYTHON}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test.sh "$@"
 
@@ -152,16 +160,18 @@ sweep-python *args:
 # One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
 # ending in `/` matches everything under it; one starting `*` is a glob over
 # top-level file names. `docs` is the link check: the documents it reads, and
-# the dicer that runs it.
+# the dicer that runs it. `wheel` is check-wheel: the build configuration it builds from, and the
+# package tree whose data it checks.
 TEST_SURFACE_MAP := "
 adjagent/ adjagent
+adjagent/ wheel
 tests/ adjagent
-kb-tools/ adjagent
 devtools/render_diff.py adjagent
 devtools/ dupe_sweep
 PROJECT_DOCS/ docs
 *.md docs
 devtools/dicer/ docs
+pyproject.toml wheel
 justfile ALL
 python.just ALL
 devtools/scripts/ ALL
@@ -171,9 +181,12 @@ devtools/scripts/ ALL
 test-changed base="":
     @PROJECT_ROOT="{{PROJECT_ROOT}}" TEST_SURFACE_MAP="{{TEST_SURFACE_MAP}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test-changed.sh "$@"
 
-# This repository's own install: base product only, once per harness. The opencode line overrides
-# the tier map because the default family's tier texts name claude models, which opencode refuses.
+# This repository's own install: base product only, once per harness.
 [private]
 install-agents-here:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "{{PROJECT_ROOT}}" --harness=claude
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/install.sh "{{PROJECT_ROOT}}" --harness=opencode --model-tier-map=default
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=claude
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=opencode
+
+[doc("[dev] list each definition-body unit that joins a clauses.* interpolation to the module's own text, one line per unit naming its first clause's line, then the count; given paths, only those definition modules")]
+clause-join-sites *paths:
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.clause_join_sites "$@"

@@ -2,11 +2,13 @@
 the code under test did not compute: the marker span, the bytes kept outside it, the refusals that
 write nothing, the redirects, the kb-tools package and its banner, the kb install path, the MCP
 settings merge, the runner include line, the harness resources a harness ships as they stand, the
-prune, the refusal to overwrite a file without this repository's banner, and the claude guardrail
-hook's probe and settings merge.
+prune, the refusal to overwrite a file without this repository's banner, the claude guardrail hook's
+probe and settings merge, and the checkout premise with the checks that stand down outside one.
 
 The package is imported from the repository root, which `just test` puts on PYTHONPATH.
 """
+
+from __future__ import annotations
 
 import dataclasses
 import json
@@ -32,13 +34,18 @@ from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.install import (
     HARNESS_RESOURCES_SOURCE,
     KBASE_NAME,
+    PACKAGE_ROOT,
     REPO_ROOT,
     _is_our_resource,
     _named_harnesses,
+    _refuse_root,
+    checkout_root,
     excluded,
     harness_resource_copies,
     install,
     install_kb_include_line,
+    kb_include_line,
+    uncommitted_sources,
 )
 from adjagent.loading import load
 from adjagent.render import definitions, filled_body, render_agents_file, render_all, render_definition
@@ -60,6 +67,15 @@ def _files(root: Path) -> dict[str, bytes]:
         for path in sorted(root.rglob("*"))
         if path.is_symlink() or path.is_file()
     }
+
+
+@pytest.fixture(autouse=True)
+def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A home directory under `tmp_path`, created by the tests that use it: an install reads the home
+    directory to tell whether ROOT is user-level, and no test reads the real one."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    return home
 
 
 # The agents-file render.
@@ -178,6 +194,62 @@ def test_uncommitted_sources_refuse_the_install(tmp_path: Path) -> None:
     assert _files(tmp_path) == {}
 
 
+@pytest.mark.parametrize("git_entry", ["directory", "file", None])
+def test_a_checkout_is_a_package_parent_holding_a_git_entry(tmp_path: Path, git_entry: str | None) -> None:
+    package = tmp_path / "adjagent"
+    package.mkdir()
+    if git_entry == "directory":
+        (tmp_path / ".git").mkdir()
+    elif git_entry == "file":
+        (tmp_path / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+    assert checkout_root(package) == (None if git_entry is None else tmp_path)
+
+
+def test_this_checkout_is_one_and_its_commit_state_reads() -> None:
+    assert REPO_ROOT == PACKAGE_ROOT.parent
+    uncommitted_sources()
+
+
+def test_outside_a_checkout_nothing_is_uncommitted_and_git_is_not_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("adjagent.install.REPO_ROOT", None)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert uncommitted_sources() == ()
+
+
+def test_a_checkout_git_cannot_read_still_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".git").write_text("", encoding="utf-8")
+    monkeypatch.setattr("adjagent.install.REPO_ROOT", tmp_path)
+    with pytest.raises(InputError, match="cannot read the commit state"):
+        uncommitted_sources()
+
+
+@pytest.fixture
+def _site_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A site-packages directory holding the package, with no repository around it."""
+    site = (tmp_path / "site").resolve()
+    (site / "adjagent" / "kb-tools").mkdir(parents=True)
+    monkeypatch.setattr("adjagent.install.PACKAGE_ROOT", site / "adjagent")
+    monkeypatch.setattr("adjagent.install.REPO_ROOT", None)
+    return site
+
+
+def test_outside_a_checkout_site_packages_is_an_install_root_and_the_package_sources_are_not(
+    _site_packages: Path,
+) -> None:
+    _refuse_root(_site_packages)
+    with pytest.raises(InputError, match="is this repository or inside a source it copies from"):
+        _refuse_root(_site_packages / "adjagent" / "kb-tools" / "x")
+
+
+def test_outside_a_checkout_a_project_at_site_packages_gets_its_include_line(_site_packages: Path) -> None:
+    (_site_packages / "justfile").write_text("", encoding="utf-8")
+    install_kb_include_line(_site_packages, harness_relpath=".claude")
+    lines = (_site_packages / "justfile").read_text(encoding="utf-8").splitlines()
+    assert kb_include_line(runner="just", harness_relpath=".claude") in lines
+
+
 def test_a_project_directory_under_claude_writes_agents_md_and_the_redirect(tmp_path: Path) -> None:
     _install(tmp_path, CLAUDE)
     assert _files(tmp_path) == {
@@ -273,7 +345,12 @@ def _definition_install(
     with_kb: bool = False,
     project_root: Path | None = None,
 ) -> None:
-    install(root, ctx, verbose=False, with_kb=with_kb, project_root=project_root)
+    install(root, ctx, verbose=False, with_kb=with_kb, project_root=project_root, uncommitted=_committed)
+
+
+def _committed() -> tuple[str, ...]:
+    """No uncommitted sources, so a mage install's agents file does not turn on this tree's git state."""
+    return ()
 
 
 # The harness resources: the files a harness ships for its own harness directory, copied into ROOT as
@@ -299,7 +376,7 @@ def test_an_opencode_install_copies_the_harnesss_plugin_byte_verbatim(tmp_path: 
     root.mkdir()
     _definition_install(root, _OPENCODE_RENDER, project_root=tmp_path)
     copied = root / _PLUGIN
-    assert copied.read_bytes() == (REPO_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
+    assert copied.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
 
 
 def test_a_fresh_claude_install_ships_the_guardrail_and_registers_it_in_a_new_settings_file(tmp_path: Path) -> None:
@@ -309,7 +386,7 @@ def test_a_fresh_claude_install_ships_the_guardrail_and_registers_it_in_a_new_se
     root.mkdir()
     _definition_install(root, project_root=tmp_path)
     copied = root / _GUARDRAIL
-    assert copied.read_bytes() == (REPO_ROOT / HARNESS_RESOURCES_SOURCE / "claude" / _GUARDRAIL).read_bytes()
+    assert copied.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "claude" / _GUARDRAIL).read_bytes()
     assert os.access(copied, os.X_OK)
     assert json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8")) == {
         "hooks": {"PreToolUse": [_hook_entry(".claude")]}
@@ -347,7 +424,7 @@ def test_a_resource_copy_skips_the_unshipped_vocabulary(tmp_path: Path, monkeypa
     (harness / "plugins/keep.ts.bak").write_text("old\n", encoding="utf-8")
     (harness / "__pycache__").mkdir()
     (harness / "__pycache__/probe.pyc").write_bytes(b"\x00")
-    monkeypatch.setattr("adjagent.install.REPO_ROOT", tmp_path / "repo")
+    monkeypatch.setattr("adjagent.install.PACKAGE_ROOT", tmp_path / "repo")
     root = tmp_path / ".probe"
     copies = harness_resource_copies(root, harness="probe")
     assert [target.relative_to(root).as_posix() for _, target in copies] == ["plugins/keep.ts"]
@@ -359,7 +436,7 @@ def test_the_resources_tree_is_not_read_as_a_harness_module() -> None:
     same case pins the tree's presence: a resource tree that went missing fails here too, rather than
     the plugin copy silently landing nothing."""
     assert sorted(load("adjagent.harnesses", "HARNESS")) == ["claude", "mage", "opencode"]
-    assert (REPO_ROOT / HARNESS_RESOURCES_SOURCE / "opencode").is_dir()
+    assert (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode").is_dir()
 
 
 def test_every_harness_omits_a_name_the_package_discovers() -> None:
@@ -433,11 +510,11 @@ def test_a_kb_install_writes_the_kb_definitions_the_package_the_mcp_entry_and_th
     for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES):
         assert (root / relative).is_file()
     kb_just = (root / "skills/kbase/kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
-    source_just = (REPO_ROOT / "kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
+    source_just = (PACKAGE_ROOT / "kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
     kb_mk = (root / "skills/kbase/kb-tools/runner-snippets/kb.mk").read_text(encoding="utf-8").split("\n")
-    assert kb_just[0].startswith("# !INSTALLED! from kb-tools/runner-snippets/kb.just — ")
+    assert kb_just[0].startswith("# !INSTALLED! from adjagent/kb-tools/runner-snippets/kb.just — ")
     assert kb_just[1:] == source_just
-    assert kb_mk[0].startswith("# !INSTALLED! from kb-tools/runner-snippets/kb.mk — ")
+    assert kb_mk[0].startswith("# !INSTALLED! from adjagent/kb-tools/runner-snippets/kb.mk — ")
     assert json.loads((project / ".mcp.json").read_text(encoding="utf-8")) == {
         "mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}
     }
@@ -854,7 +931,7 @@ def test_a_verbose_mage_install_lists_the_manifest_as_written(tmp_path: Path, ca
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
     capsys.readouterr()
-    install(root, _MAGE_RENDER, verbose=True, project_root=project)
+    install(root, _MAGE_RENDER, verbose=True, project_root=project, uncommitted=_committed)
     assert f"wrote {root / _MAGE_MANIFEST}" in capsys.readouterr().out.splitlines()
 
 
@@ -1165,7 +1242,7 @@ def test_the_repositorys_own_project_root_gets_no_include_line() -> None:
 
 @pytest.mark.parametrize(
     "root",
-    [REPO_ROOT, REPO_ROOT / "kb-tools", REPO_ROOT / HARNESS_RESOURCES_SOURCE / "opencode"],
+    [REPO_ROOT, PACKAGE_ROOT / "kb-tools", PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode"],
     ids=["repository", "kb-tools-source", "harness-resources-source"],
 )
 def test_install_refuses_the_repository_and_a_source_it_copies_from(root: Path) -> None:
@@ -1173,7 +1250,7 @@ def test_install_refuses_the_repository_and_a_source_it_copies_from(root: Path) 
     toolchain's package, and a harness's resources — writes there would land inside this run's own
     input."""
     with pytest.raises(InputError, match="is this repository or inside a source it copies from"):
-        install(root, _CLAUDE_RENDER, verbose=False)
+        install(root, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
     assert not (root / "agents" / "python-coder.md").exists() and not (root / "commands").exists()
 
 
@@ -1186,25 +1263,25 @@ def test_a_shipped_package_copies_stamped_executable_and_replaces_its_destinatio
     leaves its tests and project documents behind, replaces the destination whole — a stale file under
     it is gone — and a root inside its own source is refused with nothing written."""
     repo = tmp_path / "repo"
-    package = repo / "probe_pkg"
+    package = repo / "adjagent" / "probe_pkg"
     (package / "tests").mkdir(parents=True)
     tool = package / "tool.py"
     tool.write_text("#!/usr/bin/env python3\nprint('probe')\n", encoding="utf-8")
     tool.chmod(0o755)
     (package / "tests/test_tool.py").write_text("pass\n", encoding="utf-8")
     (package / "SPEC.md").write_text("# probe\n", encoding="utf-8")
-    monkeypatch.setattr("adjagent.install.REPO_ROOT", repo)
+    monkeypatch.setattr("adjagent.install.PACKAGE_ROOT", repo / "adjagent")
     monkeypatch.setattr("adjagent.install.SHIPPED_PACKAGES", (("probe_pkg", "adj-tools/probe_pkg"),))
     project = tmp_path / "project"
     root = project / ".claude"
     stale = root / "adj-tools/probe_pkg/stale.py"
     stale.parent.mkdir(parents=True)
     stale.write_text("x = 1\n", encoding="utf-8")
-    install(root, _CLAUDE_RENDER, verbose=False, project_root=project)
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed)
     copied = root / "adj-tools/probe_pkg/tool.py"
     lines = copied.read_text(encoding="utf-8").split("\n")
     assert lines[0] == "#!/usr/bin/env python3"
-    assert lines[1].startswith("# !INSTALLED! from probe_pkg/tool.py — ")
+    assert lines[1].startswith("# !INSTALLED! from adjagent/probe_pkg/tool.py — ")
     assert lines[2:] == ["print('probe')", ""]
     assert os.access(copied, os.X_OK)
     assert not (root / "adj-tools/probe_pkg/tests").exists()
@@ -1212,8 +1289,16 @@ def test_a_shipped_package_copies_stamped_executable_and_replaces_its_destinatio
     assert not stale.exists()
     before = _files(tmp_path)
     with pytest.raises(InputError, match="is this repository or inside a source it copies from"):
-        install(package, _CLAUDE_RENDER, verbose=False)
+        install(package, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
     assert _files(tmp_path) == before
+
+
+def test_a_direct_install_into_the_user_directory_is_user_level(_home: Path) -> None:
+    root = _home / ".claude"
+    root.mkdir(parents=True)
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed)
+    assert (root / "agents").is_dir()
+    assert not (root / "hooks").exists() and not (root / "settings.json").exists()
 
 
 @pytest.fixture(scope="module")
@@ -1222,20 +1307,22 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     project = tmp_path_factory.mktemp("consumer")
     root = project / ".claude"
     root.mkdir()
-    install(root, _CLAUDE_RENDER, verbose=False, with_kb=True, project_root=project)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("HOME", str(project / "home"))
+        install(root, _CLAUDE_RENDER, verbose=False, with_kb=True, project_root=project, uncommitted=_committed)
     return root
 
 
 def test_install_writes_every_render_and_stamps_the_packages_once(installed: Path) -> None:
     assert all((installed / path).is_file() for path, _ in render_all(_CLAUDE_RENDER))
     kb_mk = (installed / "skills/kbase/kb-tools/runner-snippets/kb.mk").read_text(encoding="utf-8").split("\n")
-    source_mk = (REPO_ROOT / "kb-tools/runner-snippets/kb.mk").read_text(encoding="utf-8").split("\n")
-    assert kb_mk[0].startswith("# !INSTALLED! from kb-tools/runner-snippets/kb.mk — ")
+    source_mk = (PACKAGE_ROOT / "kb-tools/runner-snippets/kb.mk").read_text(encoding="utf-8").split("\n")
+    assert kb_mk[0].startswith("# !INSTALLED! from adjagent/kb-tools/runner-snippets/kb.mk — ")
     assert kb_mk[1:] == source_mk
 
 
 def test_reinstall_prunes_only_our_stale_definitions(tmp_path: Path, capsys) -> None:
-    install(tmp_path, _CLAUDE_RENDER, verbose=False)
+    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
     planted = {
         "agents/kb-maintainer.md": _NEW_BANNER,
         "agents/gone/old.md": _NEW_BANNER,
@@ -1247,7 +1334,7 @@ def test_reinstall_prunes_only_our_stale_definitions(tmp_path: Path, capsys) -> 
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / relative).write_text(text, encoding="utf-8")
     capsys.readouterr()
-    install(tmp_path, _CLAUDE_RENDER, verbose=False)
+    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
     left = {relative for relative in planted if (tmp_path / relative).exists()}
     assert left == {"agents/mine.md", "agents/x.md.00.bak"}
     assert not (tmp_path / "agents/gone").exists() and not (tmp_path / "agents/gone-too").exists()
@@ -1352,7 +1439,7 @@ def test_a_resource_target_passes_only_with_the_header_in_its_first_ten_lines(
     plugin = root / _PLUGIN
     plugin.parent.mkdir(parents=True)
     plugin.write_text(f"{head}export const mine = 1\n", encoding="utf-8")
-    source = (REPO_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
+    source = (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
     before = _files(tmp_path)
     if refused:
         with pytest.raises(InputError, match=re.escape(f"'{plugin}'")):
@@ -1371,7 +1458,7 @@ def test_a_prior_installs_resource_is_overwritten(tmp_path: Path) -> None:
     with plugin.open("a", encoding="utf-8") as handle:
         handle.write("// a local edit\n")
     _definition_install(root, _OPENCODE_RENDER, project_root=tmp_path)
-    assert plugin.read_bytes() == (REPO_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
+    assert plugin.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
 
 
 def test_every_shipped_resource_carries_the_header_its_reinstall_needs(tmp_path: Path) -> None:

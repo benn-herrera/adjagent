@@ -121,7 +121,8 @@ returns `false`. `fetch` bodies and Deno's and Bun's APIs use web streams; `Read
 vitest, or `deno test` on Deno. An assertion on a promise is awaited. Time-dependent code
 runs under fake timers (`vi.useFakeTimers()`, `mock.timers` in `node:test`), never real sleeps. A
 library whose public types carry logic tests them with `expectTypeOf`.
-{clauses.unit_test_scope_coder(examples="parsing and validation, type guards, state transitions, boundary conditions, date and number arithmetic")}
+
+{clauses.unit_test_scope_coder(examples="parsing and validation, type guards, state transitions, boundary conditions, date and number arithmetic")} {clauses.COVERAGE_METRIC}
 {clauses.MOCKING_THRESHOLD_GENERAL}
 
 {clauses.integration_tests_coder(subject="run against what ships — the emitted build where there is one — through its entry points: the CLI spawned as a child process, the service on a real port, the library imported by package name through its `exports` map —")} {clauses.integration_logging_signal(level="maximum logging", sink="stderr and the service log")}
@@ -145,12 +146,16 @@ reads `paths` at runtime). `files` decides what ships; `npm pack --dry-run` list
 
 {clauses.build_system_lead(direct="the package manager, `tsc`, `vitest`, `eslint` or `prettier`")} Where the project has no Makefile or justfile, its `package.json` `scripts` are the targets: run them
 through the lockfile's package manager (`pnpm run test`), never the tool behind them. Typical
-targets/recipes: `build`, `typecheck`, `test`, `lint`, `fmt`, and `check` running the lot. `tsc`
+targets/recipes: `build`, `typecheck`, `test`, `lint`, `fmt`, and `check` running the lot.
+
+`tsc`
 emits one `.js` per source file (and a `.d.ts` under `declaration`) and leaves import specifiers as
 written; a bundler (esbuild, Rollup, tsdown) resolves aliases and emits fewer files but checks no
 types; type stripping emits nothing. Outside Deno the type check is `tsc --noEmit`, whatever emits;
 a JavaScript project is type-checked only where it already runs `tsc` over JSDoc (`checkJs`).
-Output goes to the `outDir` (`dist/`) — `tsc` with no `outDir` writes each `.js` beside its `.ts`. {clauses.warnings_as_defects(
+Output goes to the `outDir` (`dist/`) — `tsc` with no `outDir` writes each `.js` beside its `.ts`.
+
+{clauses.warnings_as_defects(
     enable="Run the type check, the linter (eslint with typescript-eslint's type-checked rules) and the formatter's check (prettier), or biome for both where the project uses it, through their targets before shipping",
     warnings="type errors and lint warnings",
     suppression="an `// eslint-disable-next-line <rule>` or `// @ts-expect-error`",
@@ -172,12 +177,16 @@ whose logs feed an aggregator writes JSON lines through `pino`. Otherwise a thin
 {clauses.LOGS_NOT_STDOUT} In Node `console.log`, `console.info` and `console.debug` all write to stdout, and so does `pino`
 by default — give it `pino.destination(2)` when stdout carries data.
 
+{clauses.heavy_logging_framework(baseline="`pino` or a thin leveled module")}
+
 {clauses.DATA_FORMATS} JSON is built in, and `JSON.parse` returns `any` — its output goes through the boundary parse
 (*Runtime boundary checks*). TOML and YAML need a package —
 `smol-toml`, `yaml` — vetted like any other, except on Deno (`@std/toml`, `@std/yaml`) and Bun,
 which imports TOML natively.
 
-{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="package")} The lockfile names the package manager — `package-lock.json` npm, `pnpm-lock.yaml` pnpm,
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="package")}
+
+The lockfile names the package manager — `package-lock.json` npm, `pnpm-lock.yaml` pnpm,
 `yarn.lock` Yarn, `bun.lock` or `bun.lockb` Bun, `deno.lock` Deno — and changes with `package.json`
 in the same change; never create a second lockfile. Tools a build or test runs are
 `devDependencies`, and so are `@types/*` packages except in a library whose published types

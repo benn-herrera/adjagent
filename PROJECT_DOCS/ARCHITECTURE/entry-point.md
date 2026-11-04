@@ -23,6 +23,7 @@ Contents:
   - [Harnesses and families](composition-model/harnesses-and-families.md)
   - [Structural rules](composition-model/structural-rules.md)
   - [History](composition-model/history.md)
+- [Packaging](packaging.md)
 - [Banner](banner.md)
 - [Why There Is No Verification Verb](why-there-is-no-verification-verb.md)
 - [Sanctioned Invocation](sanctioned-invocation.md)

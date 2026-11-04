@@ -21,7 +21,10 @@ release artifact an install builds and a consumer unpacks. Install has two types
 other:
 
 ```sh
-just install <path-to-consuming-project> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME] [--verbose]
+just install <path-to-consuming-project> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME] [--subdir=DIR] [--install-global-agents-file] [--verbose]
 just install-with-kb <path-to-consuming-project> [the same arguments]
 ```
+
+The installed package takes the same arguments as `adjagent install <path-to-consuming-project> […]`,
+with `--with-kb` for the second type (Package and Command).
 

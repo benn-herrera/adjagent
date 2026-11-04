@@ -35,6 +35,8 @@
   A JSONC file, or one the splice cannot place with certainty, is reported with the entry printed
   and left as it stands. Other `PreToolUse` entries are never touched.
 
+A user-level install runs neither the probe nor the merge: `install` takes no guardrail for it.
+
 The merge runs on every claude install whose probe passes, kb or not, and on
 `install-agents-here`'s: the settings file is the project's own, so it passes through no banner
 check and has no `REPO_ROOT` exemption, unlike the include line below, which is not written when

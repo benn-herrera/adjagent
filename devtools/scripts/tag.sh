@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `tag`'s body: a tag names a commit whose own files carry the number it is tagged with, so this
 # refuses while `adjagent/` is uncommitted — the same reasoning
-# `agents_file.uncommitted_sources` applies to publishing the agents file, and the lines it prints
+# `install.uncommitted_sources` applies to publishing the agents file, and the lines it prints
 # are that check's own. The number is read from the `version` verb rather than restated here,
 # `__version__` in `adjagent/__init__.py` holding the one copy. The tag is signed and annotated
 # (`git tag -s`), so it needs a gpg secret key and a TTY, and nothing is pushed: the operator pushes.

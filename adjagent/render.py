@@ -3,6 +3,8 @@ files a harness renders beside them, and the writer. Holds no prose, knows no
 individual definition, fills a body's placeholders in one pass and never rescans
 what it filled, and writes the rendered definitions and harness files."""
 
+from __future__ import annotations
+
 import dataclasses
 import re
 from collections.abc import Callable, Iterable
@@ -21,7 +23,7 @@ GENERATED_MARK = "!GENERATED! from "
 GENERATED_NOTICE = (
     "do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md."
 )
-_PLACEHOLDER = re.compile(r"@![a-z0-9.-]+!@")
+PLACEHOLDER = re.compile(r"@![a-z0-9.-]+!@")
 _DISPATCH_TIER: Tier = "medium"  # the tier the agents file's coder-dispatch rule cites
 
 
@@ -137,7 +139,7 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
         return values[match[0]]
 
     paragraphs = body.split("\n\n")
-    filled = [_PLACEHOLDER.sub(value, paragraph) for paragraph in paragraphs]
+    filled = [PLACEHOLDER.sub(value, paragraph) for paragraph in paragraphs]
     return "\n\n".join(text for text, source in zip(filled, paragraphs) if text or not source)
 
 
@@ -197,6 +199,12 @@ def render_agents_file(harness: Harness, *, scope: str) -> str:
     return filled_body(defn, ctx) + "\n"
 
 
+def write_text_verbatim(path: Path, text: str) -> None:
+    """Write `text` to `path` as utf-8 with no newline translation."""
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        stream.write(text)
+
+
 def write_renders(out: Path, renders: Iterable[tuple[PurePosixPath, str]]) -> list[Path]:
     """Write each text under `out` (an existing directory, else InputError) as utf-8 with no newline
     translation, creating parents and overwriting; return the paths written."""
@@ -206,6 +214,6 @@ def write_renders(out: Path, renders: Iterable[tuple[PurePosixPath, str]]) -> li
     for relative, text in renders:
         target = out.joinpath(*relative.parts)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8", newline="")
+        write_text_verbatim(target, text)
         written.append(target)
     return written

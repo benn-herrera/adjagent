@@ -55,6 +55,8 @@ it exists. Without that record a later maintainer cannot tell "still
 load-bearing" from "residue from a model we no longer use".
 """
 
+from __future__ import annotations
+
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field

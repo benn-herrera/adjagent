@@ -142,12 +142,15 @@ and scripts, never into a command line the reply asks someone to paste.
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at `KERN_WARNING` or above", sink="the kernel log")}
 
 *Unit tests*: KUnit for logic that can be exercised without hardware.
-{clauses.unit_test_scope(artifact="parsing, state machines and register-level computation")}
+
+{clauses.unit_test_scope(artifact="private struct layouts")}
 {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: boot the module in a virtual machine against the debugging configuration, and
 exercise it through the interface a consumer actually uses. `kselftest` is where a test that belongs
-to the kernel goes. {clauses.integration_logging_signal(sink="the kernel log")}
+to the kernel goes.
+
+{clauses.integration_logging_signal(sink="the kernel log")}
 
 {clauses.INTEGRATION_ARTIFACT}
 
@@ -170,7 +173,9 @@ to the kernel goes. {clauses.integration_logging_signal(sink="the kernel log")}
 **Logging**: use the kernel's own facilities — `dev_err`, `dev_warn`, `dev_dbg` and their
 `_ratelimited` forms, which carry the device identity a bare `pr_*` loses. Dynamic debug is what
 makes `dev_dbg` runtime-selectable; a driver that needs a rebuild to say more is one that cannot be
-diagnosed in the field. {clauses.logging_backend_seam(backend="the kernel log")} This
+diagnosed in the field.
+
+{clauses.logging_backend_seam(backend="the kernel log")} This
 {clauses.LOGGING_ABSTRACTION_NOTE}
 
 {clauses.CODER_OUTPUT_FORMAT}

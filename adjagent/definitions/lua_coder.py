@@ -153,7 +153,8 @@ tests loop over a list of cases inside a `describe`, emitting one `it` per case.
 runs busted under the target interpreter (`busted --lua=luajit`): a suite run under another Lua
 passes code the target cannot load. Neovim plugin tests run inside Neovim (`nvim -l`, or the
 project's `plenary.nvim` or `mini.test` harness), since `vim` exists nowhere else.
-{clauses.unit_test_scope_coder(examples="pattern matching and parsing, metatable behaviour, state transitions, boundary conditions")}
+
+{clauses.unit_test_scope_coder(examples="pattern matching and parsing, metatable behaviour, state transitions, boundary conditions")} {clauses.COVERAGE_METRIC}
 {clauses.MOCKING_THRESHOLD_GENERAL}
 
 {clauses.integration_tests_coder(subject="run in the real host — a headless `nvim` for a plugin, `Test::Nginx` for an OpenResty handler, a scratch `redis-server` for a script, the target interpreter for standalone code —")} {clauses.integration_logging_signal(level="maximum logging", sink="output and the host's log")}
@@ -172,7 +173,11 @@ and never assign `package.path` in a module or test to make a `require` resolve.
 a project-local tree (`luarocks init`, or `--tree lua_modules`), never system-wide, and the
 rockspec's `lua` dependency states the versions the rock supports.
 
-{clauses.build_system_lead(direct="`luarocks`, `busted`, `luacheck` or `stylua`")} Typical targets/recipes: `deps` (rocks into the project tree), `test`, `lint`, `fmt`, and `pack` for a distributed rock. `luacheck` reads a `.luacheckrc` whose `std` names the target (`"lua51"`, `"luajit"`, `"lua54"`, `"ngx_lua"`) and whose `read_globals` names the host's (`vim`; `redis`, `KEYS`, `ARGV`): with no `std` it allows the union of every version's globals, so `table.unpack` passes in a LuaJIT project. `selene` and its `selene.toml` are the alternative where the project uses them. StyLua is the formatter, its `.stylua.toml` setting `syntax` to the target. Neither proves the code loads on the target — only running under the target interpreter does. {clauses.warnings_as_defects(enable="Run `stylua --check` and `luacheck` through their targets before shipping", warnings="luacheck warnings", suppression="an inline `-- luacheck: ignore`")}
+{clauses.build_system_lead(direct="`luarocks`, `busted`, `luacheck` or `stylua`")} Typical targets/recipes: `deps` (rocks into the project tree), `test`, `lint`, `fmt`, and `pack` for a distributed rock.
+
+`luacheck` reads a `.luacheckrc` whose `std` names the target (`"lua51"`, `"luajit"`, `"lua54"`, `"ngx_lua"`) and whose `read_globals` names the host's (`vim`; `redis`, `KEYS`, `ARGV`): with no `std` it allows the union of every version's globals, so `table.unpack` passes in a LuaJIT project. `selene` and its `selene.toml` are the alternative where the project uses them. StyLua is the formatter, its `.stylua.toml` setting `syntax` to the target. Neither proves the code loads on the target — only running under the target interpreter does.
+
+{clauses.warnings_as_defects(enable="Run `stylua --check` and `luacheck` through their targets before shipping", warnings="luacheck warnings", suppression="an inline `-- luacheck: ignore`")}
 
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="Lua", recipes="`fmt` and `lint` recipes")} The `.luacheckrc` and `.stylua.toml` naming the target are created with them.
 
@@ -193,7 +198,11 @@ with a `vim.log.levels` value, `ngx.log(ngx.ERR, ...)`, `redis.log(redis.LOG_WAR
 otherwise a thin leveled module over `io.stderr`; that {clauses.LOGGING_ABSTRACTION_NOTE}
 {clauses.LOGS_NOT_STDOUT}
 
-{clauses.DATA_FORMATS} Lua ships no parser for any of them. Use the host's — `vim.json` in Neovim, the `cjson` that OpenResty and Redis bundle — and otherwise `lua-cjson` or the pure-Lua `dkjson`; a TOML parser is a rock, vetted like any other. JSON `null` decodes to a sentinel (`cjson.null`, `vim.NIL`), not `nil`, and an empty Lua table is neither array nor object — check how the library encodes one before emitting an empty array. A configuration file written in Lua is code: load it with `load(src, name, "t", env)` (5.2 onward and LuaJIT) or `loadstring` plus `setfenv` (5.1) and an environment holding only what the file may use — never `dofile` or `require`. Mode `"t"` refuses bytecode, which can crash the VM.
+{clauses.heavy_logging_framework(baseline="the host's logger or a thin leveled module")}
+
+{clauses.DATA_FORMATS} Lua ships no parser for any of them. Use the host's — `vim.json` in Neovim, the `cjson` that OpenResty and Redis bundle — and otherwise `lua-cjson` or the pure-Lua `dkjson`; a TOML parser is a rock, vetted like any other. JSON `null` decodes to a sentinel (`cjson.null`, `vim.NIL`), not `nil`, and an empty Lua table is neither array nor object — check how the library encodes one before emitting an empty array.
+
+A configuration file written in Lua is code: load it with `load(src, name, "t", env)` (5.2 onward and LuaJIT) or `loadstring` plus `setfenv` (5.1) and an environment holding only what the file may use — never `dofile` or `require`. Mode `"t"` refuses bytecode, which can crash the VM.
 
 {clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency(unit="rock")} A rock with a C module needs a compiler and the target's headers wherever it installs and loads only on the Lua version it was built for (LuaJIT loads 5.1 modules); prefer a pure-Lua rock where one does the job.
 

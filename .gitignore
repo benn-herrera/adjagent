@@ -14,8 +14,10 @@ __pycache__/
 .pytest_*/
 .venv/
 
-# where plugin tarballs land
+# where plugin tarballs, the wheel and the sdist land
 dist/
+# the setuptools build's metadata directory
+*.egg-info/
 
 # this repo's own render tree (justfile RENDERED): a build product, produced
 # on demand by the same install path a consuming project gets. Never committed.

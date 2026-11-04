@@ -8,7 +8,7 @@ detect — staleness of a build product — a free re-render fixes.
 
 The comparison is `just render-diff`, which reads rendered output only. It replaces each banner
 block with one constant line and collapses whitespace inside a paragraph outside fenced code;
-headings, list items, table rows, fenced blocks and frontmatter stay exact
+headings, thematic breaks, list items, table rows, fenced blocks and frontmatter stay exact
 (`devtools/render_diff.py` states the rules). `just render <slug>` renders into `rendered/<slug>/`
 and refuses a slug starting with `reference`. A slot is a kb install with itself as project root, so
 beside the definitions it holds the kb-tools package, the harness's MCP entry, the runner include

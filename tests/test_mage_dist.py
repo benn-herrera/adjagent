@@ -2,6 +2,8 @@
 `tests/stubs/` on PATH: no key, no real keyring. Each build gets its own work directory.
 """
 
+from __future__ import annotations
+
 import functools
 import json
 import os
@@ -21,7 +23,11 @@ SCRIPT = REPO / "devtools/scripts/mage-dist.sh"
 def _version() -> str:
     return subprocess.run(
         ["python3", "-m", "adjagent", "version"],
-        cwd=REPO, env={**os.environ, "PYTHONPATH": str(REPO)}, capture_output=True, encoding="utf-8", check=True,
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
     ).stdout.strip()
 
 
@@ -73,7 +79,7 @@ def test_build_layout(tmp_path_factory: pytest.TempPathFactory):
         entries = [m.name for m in members]
         assert all(n == "adjagent" or n.startswith("adjagent/") for n in entries), entries
         assert not [m.name for m in members if any("xattr" in k for k in m.pax_headers)]
-        tar.extractall(extracted, filter="data")
+        tar.extractall(extracted)
     tools = extracted / "adjagent/skills/kbase/kb-tools"
     assert [p.name for p in tools.iterdir()] == ["runner-snippets"]
     mcp = json.loads((extracted / "adjagent/.mcp.json").read_text(encoding="utf-8"))

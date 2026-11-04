@@ -3,6 +3,8 @@
 ``tests/`` is unswept because a fixture is data and a test function is called by pytest.
 """
 
+from __future__ import annotations
+
 import ast
 import logging
 

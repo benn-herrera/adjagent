@@ -2,9 +2,10 @@
 
 The repository publishes a recommended operator agents file as one definition, rendered per
 supported harness. It is installed only by explicit act, into a directory the operator names — the
-harness's user-global directory or a project's own. `install` installs it only for a plugin harness
-(mage), whose agents file belongs in the plugin directory it installs; for any other harness it never
-does.
+harness's user-global directory or a project's own. `install` installs it in two cases, through
+the same mechanism and refusals: for a plugin harness (mage) installed below its project root,
+whose agents file belongs in the plugin directory at ROOT, and for a user-level ROOT given
+`--install-global-agents-file`; for any other harness it never does.
 
 Agent directives live in `AGENTS.md`. Installed into the harness's user-global directory, the file
 takes the name that harness reads there — `CLAUDE.md` for Claude Code and mage, `AGENTS.md` for
@@ -25,7 +26,8 @@ or a target outside that directory, is refused with nothing written.
 
 Edits made inside the block are not preserved. A write that changes the file keeps one rolling
 backup of the prior content beside it; identical output writes nothing, so installing twice changes
-nothing. Installation is refused while the generator's sources carry uncommitted changes.
+nothing. Installation from a clone is refused while the generator's sources carry uncommitted
+changes; an installed package has no uncommitted state and is not refused (Package and Command).
 Publishing an improvement is a manual edit to the agents-file definition.
 
 Neither direction is a symlink, so a write to this repository can never silently rewrite live

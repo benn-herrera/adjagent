@@ -18,84 +18,34 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    `tests/test_adjagent.py` (ARCHITECTURE.md, Why There Is No Verification Verb);
    behavioral ones do not yet.
 
-2. **One rule arriving several times in one prompt — the duplication class no instrument sees.**
-   Distinct from the cross-output duplication the suite's identical-paragraph test refuses: a seat
-   is told the same thing twice inside its own definition, through a clause and an inline
-   restatement, or through two clauses that both land in it. Single-sourcing does not prevent it —
-   a clause guarantees one *definition*, not one *delivery*. **Roughly 60 instances across 24
-   files, found by reading; about 22 resolved.** The residue splits by cost: where one statement
-   is a clean superset of the other the fix is a deletion, and where neither is, it needs a
-   composition ruling per pair — which clause a definition stops carrying.
-
-   **The instrument's limits are measured rather than assumed.** The retired prose sweep found
-   exact runs of eight or more shared words across texts (guaranteed at fifteen), whatever the
-   sentence boundaries, so a paragraph duplicated verbatim was reported even when its sentences
-   were short; the identical-paragraph test that replaced it compares whole paragraphs across
-   outputs. Neither sees a rule restated in different words, inside one file or across two: a
-   lexical intra-file detector over all 46 templates at a 7-token floor recovered **zero** of the
-   findings above, because they are semantic paraphrases — a rule stated once where it is *defined*
-   and again where it is *applied*, drifting apart in wording as it goes. Reading finds them; a
-   lexical instrument does not. It also refuses the fourth comparative question, one word with two
-   meanings, and names what it would need: a glossary binding each project term to the one thing it
-   may refer to.
-
-   **A command's prompt can be a union, and no file-unit instrument sees it.** A command body that
-   opens with an `@`-load of another definition renders as one prompt: the body plus the loaded
-   definition in full. A rule stated in the body and again in the loaded text reaches the model
-   twice, and neither a per-file tool nor a reading of either file alone sees the pair. Many of the
-   intra-prompt findings above lived only in such a union, in command definitions since retired;
-   one of those was an outright **conflict** rather than duplication — the command telling a referee
-   the charter `MUST` be passed verbatim to every seat where the clause beside it forbade pasting
-   the charter inline. The class retires with nothing: any command that opens with an `@`-load
-   recreates it, so the instrument this item asks for has to see the rendered prompt, not the
-   source files.
-
-   **Sections meant to stay in sync are held in sync by nobody.** A section that is the same
-   across a family is a run of clauses each definition lists in its own body, so the run drifts:
-   go and rust carry no coverage rule by design, and nothing distinguishes a deliberate omission
-   from a forgotten one. The 1.0 shape makes the run visible in each body and `render-diff` shows
-   a repair exactly; what it does not do is name which omissions are deliberate. First: enumerate
-   every deviation across the coders and platform experts and classify it.
-
-3. **The content pass the 1.0 port deferred.** The port changed no prose; these change what a
-   seat reads and each is a `render-diff` the owner reads before `retake-reference`. Unify the two
-   debate referees' vocabulary on one set of words (gate, seat, outcome, the run and file names),
-   after which their slot constants lose their holes and the two bodies converge. Drop the
-   referees' "in Steps … above" cross-reference, which the sentence already names.
-   The 74 sites where a clause and a definition's own sentence share a paragraph: each a judgment
-   whether the sentence is its own paragraph, to be read site by site, not swept.
-
-4. **adjagent as an installable package, with two skills that drive tools.** Release 0.12.8:
-   - **The install logic in Python** — `ROADMAP_PLANS/install-in-python.md`, which carries its open
-     questions.
-   - **Packaging.** A `pyproject.toml` reading `adjagent.__version__`, an `adjagent` console script,
-     and the install's `REPO_ROOT` checks (refusing targets inside this repository, skipping the
-     include line for it, the uncommitted-sources check before publishing the agents file) holding
-     or standing down outside a git checkout. Needs every shipped source under `adjagent/`.
+2. **Two skills that drive tools, and the diced-project-docs clause.** Release 0.13.1:
    - **An adjagent skill** for sessions in a consuming project: when it applies (install, update,
      global setup, a generated file needing change), the install command and its global opt-in
      flags, `adjagent --help` for the rest, and the rule that a generated file is never edited
      locally — a local need goes in the project's CONVENTIONS.md, a change to adjagent.
    - **A docdicer skill**, default set, every harness. The skill: what dicing buys (loading only
      the leaves a task needs), when (a project's contract documents; a plan or design too large to
-     read whole), offer and run `<harness-dir>/skills/docdicer/tools/docdicer --install` at the
+     read whole), when to undice (a diced plan or design that has shrunk back to readable size, or
+     one that needs reading or reviewing whole: `docdicer undice` writes the tree back out as one
+     document), offer and run `<harness-dir>/skills/docdicer/tools/docdicer --install` at the
      user's direction, then `docdicer --help`; no command list. `tools/docdicer` (POSIX sh) checks
      for `python3` 3.9 or later and names the remedy where it is missing (macOS: `brew install
      python` or `xcode-select --install`; Linux: the distribution's `python3`), installs into
-     `tools/.venv` with `pip install --upgrade` from `git+https://github.com/benn-herrera/docdicer`
-     on `--install`, says how to install when absent, and otherwise passes its arguments through;
+     `tools/.venv` with `pip install --upgrade` from `git+https://github.com/benn-herrera/docdicer@v0.7.1`
+     (the version the skill is written against) on `--install`, says how to install when absent, and otherwise passes its arguments through;
      `tools/.gitignore` holds `.venv/`. An adjagent install that finds `tools/.venv` before it
      replaces the package re-runs `--install` after, so docdicer stays matched to the skill; a
      failure there is reported and does not fail the install. docdicer's own pitfalls (a bare `§N`
-     linked to the wrong volume; no reassembly once the monolith is gone) are docdicer issues, not
-     skill text.
+     linked to the wrong volume) are docdicer issues, not skill text.
    - **The diced-project-docs clause** in the harness agents file: a project whose contract
      documents are trees under `PROJECT_DOCS/` reads the volume entry points and opens the leaves a
      question needs, and the rules naming THESIS.md, SPEC.md, ARCHITECTURE.md or CONVENTIONS.md
      apply to those trees. `clauses.PROJECT_DOCS_SETUP` defers to it. A sentence where plans are
      authored: a plan or design too large to read whole is diced.
 
-5. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+3. **Follow-ups from the 0.12.7 review**, unscheduled — `ROADMAP_PLANS/review-0.12.7-followups.md`.
+
+4. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
    installs the agent and command definitions under a prefixed namespace so the set coexists with
    an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
    packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a

@@ -95,11 +95,15 @@ calls, use Transferable/SharedArrayBuffer. MIME type must be `application/wasm`.
 
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at `warn`/`error` level with structured context objects", sink="browser DevTools, log aggregators")}
 
-*Unit tests*: Vitest or Jest. {clauses.unit_test_scope(artifact="DOM snapshots")}
+*Unit tests*: Vitest or Jest.
+
+{clauses.unit_test_scope(artifact="DOM snapshots")}
 {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: Playwright for browser-level flows; test across Chrome, Firefox, and Safari.
-Test on mobile viewport sizes. {clauses.integration_logging_signal(sink="the test output")}
+Test on mobile viewport sizes.
+
+{clauses.integration_logging_signal(sink="the test output")}
 
 {clauses.INTEGRATION_ARTIFACT}
 
@@ -115,7 +119,7 @@ Test on mobile viewport sizes. {clauses.integration_logging_signal(sink="the tes
 
 {clauses.build_system(direct="`npm`, `vite`, `vitest`, or `playwright`")}
 
-{clauses.PROJECT_SETUP_PLATFORM} {clauses.manual_over_large_dependency()}
+{clauses.PROJECT_SETUP_PLATFORM} {clauses.manual_over_large_dependency()} {clauses.STDLIB_FIRST_ALWAYS}
 
 {clauses.dependency_vetting(registry="npm weekly downloads")}
 

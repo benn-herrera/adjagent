@@ -11,7 +11,11 @@ functions: at most three keyword-only parameters, one returned string over the p
 constants, and no call.
 """
 
+from __future__ import annotations
+
 import ast
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 TEXT_MODULE = "clauses.py"
@@ -24,6 +28,7 @@ CALL_RULE = (
 )
 ARGUMENT_RULE = "an argument to a text function or a .format is a string literal or a module-level constant"
 BODY_RULE = "a body= expression is a module constant, a clauses.<name>, or a permitted call"
+DEFINITION_CALL_RULE = "a Definition(...) in DEFINITIONS takes keyword arguments only"
 FILES_RULE = "files= is a tuple of SkillFile(path=<string literal>, body=<body>) calls"
 FUNCTION_RULE = (
     "a text function takes at most three keyword-only parameters and returns one string over its "
@@ -32,6 +37,135 @@ FUNCTION_RULE = (
 DEFINITION_TOP_RULE = "a definition module's top level holds only imports, string constants and DEFINITIONS"
 TEXT_TOP_RULE = "the text module's top level holds only string constants and text functions"
 IMPORT_RULE = "the clauses module is imported only as `from adjagent import clauses`"
+
+
+def carried_clauses(source: str) -> dict[str, set[str]]:
+    """For each `Definition(...)` call in a definition module's source, its `name=` literal mapped to
+    the `clauses.<name>` attributes the call names, whether read or called."""
+    return {
+        name: {node.attr for node in ast.walk(call) if _is_clause(node)} for name, call in _definition_calls(source)
+    }
+
+
+def _definition_calls(source: str) -> Iterator[tuple[str, ast.Call]]:
+    """Each `Definition(...)` call in a definition module's source, with its `name=` literal; a
+    `name=` that is not a string literal raises ValueError."""
+    for call in ast.walk(ast.parse(source)):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "Definition"):
+            continue
+        name = next((keyword.value for keyword in call.keywords if keyword.arg == "name"), None)
+        if not (name is not None and _is_literal(name)):
+            raise ValueError(f"line {call.lineno}: a Definition(...) call's name= is not a string literal")
+        yield name.value, call
+
+
+@dataclass(frozen=True)
+class ClauseNode:
+    """A clauses-module constant or text function: the names its string interpolates, in order, and
+    for a text function each keyword parameter mapped to its constant default, or None where the
+    default is a literal or absent."""
+
+    edges: tuple[str, ...]
+    defaults: dict[str, str | None]
+
+
+@dataclass(frozen=True)
+class ClauseRoot:
+    """A `clauses.<name>` a body names, with the keyword parameters a call to it passes."""
+
+    name: str
+    passed: frozenset[str]
+
+
+Reach = tuple[str, tuple[str, ...]]
+"""Where a node was reached: the label of the roots that reached it, and the chain from the root."""
+
+
+def clause_graph(source: str) -> dict[str, ClauseNode]:
+    """Every constant and text function of the clauses module's source, by name."""
+    graph = {}
+    for node in ast.parse(source).body:
+        if name := _target(node):
+            graph[name] = ClauseNode(edges=_interpolated(node.value), defaults={})
+        elif isinstance(node, ast.FunctionDef):
+            returned = next(statement.value for statement in node.body if isinstance(statement, ast.Return))
+            defaults = {
+                argument.arg: default.id if isinstance(default, ast.Name) else None
+                for argument, default in zip(node.args.kwonlyargs, node.args.kw_defaults)
+            }
+            graph[node.name] = ClauseNode(edges=_interpolated(returned), defaults=defaults)
+    return graph
+
+
+def body_roots(source: str, graph: dict[str, ClauseNode]) -> dict[tuple[str, str | None], tuple[ClauseRoot, ...]]:
+    """For each body in a definition module's source, keyed by its definition's `name=` and its
+    `SkillFile` `path=` (None for the definition's own body), the `clauses.<name>` it names in source
+    order. A text-function call's argument is listed once for each time the function, per `graph`,
+    interpolates that parameter."""
+    roots = {}
+    for name, call in _definition_calls(source):
+        keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+        roots[name, None] = tuple(_clause_roots(keywords["body"], graph))
+        for file in keywords["files"].elts if "files" in keywords else ():
+            file_keywords = {keyword.arg: keyword.value for keyword in file.keywords}
+            roots[name, file_keywords["path"].value] = tuple(_clause_roots(file_keywords["body"], graph))
+    return roots
+
+
+def repeated_clause_reaches(
+    graph: dict[str, ClauseNode], rooted: list[tuple[str, tuple[ClauseRoot, ...]]], *, uncounted: frozenset[str]
+) -> list[tuple[str, Reach, Reach]]:
+    """Each node a depth-first walk from the labelled roots reaches a second time, with the reach that
+    came first and the repeat. A node in `uncounted` is not walked; nothing below a repeat is walked,
+    so a node is never reported under a parent already reported. A parameter's constant default is
+    an edge only where the root's call does not pass that parameter."""
+    first: dict[str, Reach] = {}
+    repeats = []
+
+    def visit(name: str, *, label: str, chain: tuple[str, ...], passed: frozenset[str]) -> None:
+        if name in uncounted:
+            return
+        path = (*chain, name)
+        if name in first:
+            repeats.append((name, first[name], (label, path)))
+            return
+        first[name] = (label, path)
+        node = graph[name]
+        for edge in node.edges:
+            if edge in node.defaults:
+                default = node.defaults[edge]
+                if default is None or edge in passed:
+                    continue
+                edge = default
+            visit(edge, label=label, chain=path, passed=frozenset())
+
+    for label, roots in rooted:
+        for root in roots:
+            visit(root.name, label=label, chain=(), passed=root.passed)
+    return repeats
+
+
+def _interpolated(value: ast.expr) -> tuple[str, ...]:
+    """The bare names an f-string interpolates, in order; none for a string literal."""
+    if not isinstance(value, ast.JoinedStr):
+        return ()
+    return tuple(part.value.id for part in value.values if isinstance(part, ast.FormattedValue))
+
+
+def _clause_roots(node: ast.AST, graph: dict[str, ClauseNode]) -> list[ClauseRoot]:
+    if isinstance(node, ast.Call) and _is_clause(node.func):
+        edges = graph[node.func.attr].edges
+        roots = [ClauseRoot(node.func.attr, frozenset(keyword.arg for keyword in node.keywords))]
+        for keyword in node.keywords:
+            roots += _clause_roots(keyword.value, graph) * edges.count(keyword.arg)
+        return roots
+    if _is_clause(node):
+        return [ClauseRoot(node.attr, frozenset())]
+    return [root for child in ast.iter_child_nodes(node) for root in _clause_roots(child, graph)]
+
+
+def _is_clause(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == CLAUSES
 
 
 def check_structure(paths: list[Path]) -> list[str]:
@@ -142,13 +276,16 @@ def _definitions_violations(node: ast.stmt, constants: dict[str, ast.expr]) -> l
         ):
             found.append((element.lineno, DEFINITION_TOP_RULE))
             continue
-        for argument in [*element.args, *element.keywords]:
-            if isinstance(argument, ast.keyword) and argument.arg == "body":
-                found += _body_violations(argument.value, constants)
-            elif isinstance(argument, ast.keyword) and argument.arg == "files":
-                found += _files_violations(argument.value, constants)
+        if element.args:
+            found.append((element.lineno, DEFINITION_CALL_RULE))
+            continue
+        for keyword in element.keywords:
+            if keyword.arg == "body":
+                found += _body_violations(keyword.value, constants)
+            elif keyword.arg == "files":
+                found += _files_violations(keyword.value, constants)
             else:
-                found += [(call.lineno, CALL_RULE) for call in ast.walk(argument) if isinstance(call, ast.Call)]
+                found += [(call.lineno, CALL_RULE) for call in ast.walk(keyword) if isinstance(call, ast.Call)]
     return found
 
 
@@ -197,7 +334,7 @@ def _is_reference(node: ast.expr, constants: dict[str, ast.expr]) -> bool:
     """A name among the module's constants, or `clauses.<name>`."""
     if isinstance(node, ast.Name):
         return node.id in constants
-    return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == CLAUSES
+    return _is_clause(node)
 
 
 def _call_violations(call: ast.Call, constants: dict[str, ast.expr]) -> list[tuple[int, str]]:

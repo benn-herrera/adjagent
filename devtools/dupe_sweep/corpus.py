@@ -5,6 +5,8 @@ the installed surfaces under ``.claude/`` and ``.opencode/``), and a walk would 
 a duplicate.
 """
 
+from __future__ import annotations
+
 import logging
 import subprocess
 from collections.abc import Sequence

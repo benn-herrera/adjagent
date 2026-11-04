@@ -3,8 +3,8 @@
 # is ever mistaken for a baseline. The working sequence is to do the work, `just render`, then
 # `just render-diff` against the reference slots.
 #
-# This scan mirrors install.sh's own leading-flag scan: the first argument that is not a `--` flag,
-# wherever it sits, is the slug (default `latest`) rather than a fixed positional parameter, so
+# This scan reads the slug as the install verb reads its target: the first argument that is not a
+# `--` flag, wherever it sits, is the slug (default `latest`) rather than a fixed positional, so
 # `just render --family=gemma-4` tunes the `latest` slot instead of mistaking the flag for a slug.
 # `--subdir=` is fixed ahead of the forwarded flags in `_render-slot`, so the render always lands
 # directly under the slot with no .claude nest.

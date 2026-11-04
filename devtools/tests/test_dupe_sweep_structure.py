@@ -7,6 +7,8 @@ remove it. Everything is read from the source's AST alone; nothing here imports
 the package, so no module (`__main__` included) runs.
 """
 
+from __future__ import annotations
+
 import ast
 import graphlib
 from pathlib import Path

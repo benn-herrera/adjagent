@@ -69,11 +69,14 @@ analysis. Application Verifier to catch handle leaks and heap corruption during 
 
 {clauses.boundary_checks_lead()} {clauses.platform_boundary_routing(level="at Warning/Error level with structured context", sink="Event Log, ETW")}
 
-*Unit tests*: xUnit or MSTest. {clauses.unit_test_scope(artifact="UI state")}
+*Unit tests*: xUnit or MSTest.
+
+{clauses.unit_test_scope(artifact="UI state")}
 {clauses.MOCKING_THRESHOLD_PLATFORM}
 
 *Integration tests*: exercise with realistic or well-chosen synthetic inputs. For UI: WinAppDriver
 or UI Automation. Test across privilege levels (standard user, UAC prompt, admin).
+
 {clauses.integration_logging_signal(sink="ETW or the Event Log")}
 
 {clauses.INTEGRATION_ARTIFACT}
@@ -95,7 +98,9 @@ or UI Automation. Test across privilege levels (standard user, UAC prompt, admin
 {clauses.dependency_vetting()}
 
 **Logging**: use `ILogger<T>` (.NET Generic Host) or ETW for structured leveled logging — not
-Debug.WriteLine or Console.Write. Log levels must be runtime-configurable. Define a thin interface;
+Debug.WriteLine or Console.Write. Log levels must be runtime-configurable.
+
+Define a thin interface;
 the backend (Serilog, NLog, Application Insights) is swappable. This {clauses.LOGGING_ABSTRACTION_NOTE}
 
 {clauses.CODER_OUTPUT_FORMAT}

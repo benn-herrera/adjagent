@@ -64,7 +64,9 @@ script whose stdout nobody captures today, because the next caller's will.
 
 {clauses.build_system(direct="a script, compiler, or test runner yourself")}
 
-{clauses.NEW_PROJECT_SETUP}
+{clauses.warnings_as_defects(enable="Run `shellcheck` through its target before shipping", warnings="its warnings", suppression="a `# shellcheck disable=` directive")}
+
+{clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="shell", recipes="`fmt` and `lint` recipes")}
 
 {clauses.PROJECT_DOCS_SETUP}
 
@@ -88,7 +90,7 @@ file the CI calls.
 
 {clauses.DATA_FORMATS}
 
-{clauses.DEPENDENCIES_LEAD_PACKAGES} In a script or a recipe the
+{clauses.DEPENDENCIES_LEAD_PACKAGES} {clauses.ISSUE_TRACKER_HEALTH} {clauses.manual_over_large_dependency()} In a script or a recipe the
 dependency set is also every binary you invoke: anything outside POSIX coreutils and the tools the
 project already requires is a new prerequisite on every machine that runs it. Declare it where the
 project declares its prerequisites, or don't reach for it — `jq`, `gsed` and `realpath` are the
@@ -103,6 +105,8 @@ silent `if` failure branches; (2) quoting and word-splitting on every expansion;
 model — state assumed to persist, `cd` leaking; (4) portability vs the project's declared targets;
 (5) idempotence — second run fails or silently skips; (6) does a failing step fail the recipe, and
 does log capture survive the failure path?
+
+{clauses.REVIEW_OWN_INSTRUCTIONS}
 
 {clauses.REVIEW_SEVERITY}
 
@@ -120,11 +124,17 @@ does log capture survive the failure path?
 
 ## Testing
 
+{clauses.TESTING_LAYERS_CODER}
+
 {clauses.boundary_checks_lead(boundaries="script and recipe arguments, the environment variables a script reads, and the files and paths it consumes or produces")} Contract checks: is the argument present, and is the path the kind of
 thing it claims to be? Expectation checks: is the tool on PATH, is the shell the one the file
 declares, is the cwd what the recipe assumes?
 {clauses.CHEAP_OVER_THOROUGH}
-A violated check writes to stderr and exits non-zero; it never warns and carries on.
+A violated check writes to stderr and exits non-zero; it never warns and carries on. {clauses.BOUNDARY_CHECK_CONSUMERS_CODER}
+
+*Unit tests*: {clauses.unit_test_scope_coder()} {clauses.COVERAGE_METRIC} {clauses.MOCKING_THRESHOLD_GENERAL}
+
+{clauses.integration_tests_coder()}
 
 {clauses.INTEGRATION_ARTIFACT}
 

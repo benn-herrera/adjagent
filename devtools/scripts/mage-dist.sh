@@ -28,11 +28,11 @@ function clean_outputs() {
   command rm -f "${DIST_DIR}/${tgz}" "${DIST_DIR}/${tgz_asc}"
 }
 
-# `install.sh` refuses a target that does not exist. The agents file comes from the renderer, as the
+# The install refuses a target that does not exist. The agents file comes from the renderer, as the
 # slot render's does: the install-agents-file path refuses while generator sources are uncommitted.
 function stage_plugin() {
   mkdir -p "${stage}/${plugin_dir}"
-  "${PROJECT_ROOT}/devtools/scripts/install.sh" "${stage}/${plugin_dir}" \
+  PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${stage}/${plugin_dir}" \
     --subdir= --harness=mage >&2
   "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" mage "${stage}/${plugin_dir}/${agents_file}" >&2
 }

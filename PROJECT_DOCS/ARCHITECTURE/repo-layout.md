@@ -3,14 +3,16 @@
 ```
 PROJECT_DOCS/           the contract trees — THESIS, SPEC, ARCHITECTURE, CONVENTIONS — as small leaf files, one `entry-point.md` per volume; the root `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md` and `CONVENTIONS.md` are pointers to them, not sources; checked by `just check-links`
 agent-sandboxing/       setup for running a coding agent as an unprivileged local user — project space, never installed
-kb-tools/               shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, which run `kbase` from `PATH`; nothing importable; installed under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
-dist/                   gitignored build product — what `just mage-dist` writes: the mage plugin tarball and its detached signature, plus `stage/` while a build runs, removed when it ends (`DIST_DIR`, devtools/scripts/mage-dist.sh); created on demand
+pyproject.toml          the package's build configuration — setuptools, the version read from `adjagent.__version__`, the package-data globs, the `adjagent` console script (Packaging)
+dist/                   gitignored build product — what `just mage-dist` writes: the mage plugin tarball and its detached signature, plus `stage/` while a build runs, removed when it ends (`DIST_DIR`, devtools/scripts/mage-dist.sh); and what `just build` writes: the wheel and sdist; created on demand
 rendered/               gitignored build product — this repo's own render tree, one slot per render, and the three `reference*` slots `render-diff` compares against (justfile RENDERED); created on demand
 adjagent/               the generator package, run as python3 -m adjagent — definitions as Python values rendered into a named output root; the package docstring lists its modules
+  kb-tools/             shipped package, delivered only by a kb install — the runner-snippets/ fragments (kb.just, kb.mk) an install writes the consumer's include line for, which run `kbase` from `PATH`; nothing importable; installed under <harness-dir>/skills/kbase/kb-tools/, inside the kbase skill's own directory (KB_TOOLS_PACKAGE, adjagent/install.py)
   harnesses/resources/  one directory per harness, named for it — the files that harness ships into its project harness directory, copied into ROOT as they stand and never rendered (HARNESS_RESOURCES_SOURCE, adjagent/install.py); `opencode/plugins/guardrail.ts` and `claude/hooks/guardrail.pl` today, and no `__init__.py`, so `load` still reads one harness per module; mage ships none
 devtools/               repository-maintenance tooling — project space, never installed; imported from the repository root as `devtools.*`
   scripts/              the shell scripts behind the justfile recipes (justfile)
   render_diff.py        the text comparison of two rendered slots (justfile `render-diff`); reads rendered output only and never imports the generator
+  clause_join_sites.py  the list of definition-body units that join a `clauses.*` interpolation to the module's own text (justfile `clause-join-sites`); splits units with `render_diff.py`'s line classification, `line_kinds`
   dupe_sweep/           the duplication sweep, run as `python3 -m devtools.dupe_sweep` — enumerates one-idea-two-places candidates over the owned python trees (justfile `sweep-python`)
     __init__.py         package docstring (what the sweep is for, its passes, candidates not verdicts)
     __main__.py         the `-m` entry

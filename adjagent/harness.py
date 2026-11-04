@@ -13,6 +13,8 @@ no knowledge of any one definition. Its emitter only lays out lines; the
 renderer maps tools to spellings and computes the governed keys.
 """
 
+from __future__ import annotations
+
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -126,6 +128,8 @@ class Harness:
     guardrail: GuardrailHook | None  # the guardrail hook it registers; None where its own file registers itself
     rendered_files: tuple[HarnessFile, ...] = ()  # files it renders beside the definitions
     omits: frozenset[str] = frozenset()  # definition names it renders nothing for
+    default_tier_spec: str | None = None  # the --model-tier-map value used when none is given; None: the family's tiers
+    plugin_parent_dir: str = ""  # a plugin's: the trailing path of the directory its plugins sit in; "" otherwise
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
@@ -169,6 +173,12 @@ class Harness:
                 f"harness '{self.name}': guardrail hook needs a script path, a settings path, a container "
                 "path, a builder, and a recogniser"
             )
+
+    @property
+    def is_plugin(self) -> bool:
+        """Whether this harness is a plugin: its files sit at its own root, so its user harness directory
+        is `.`."""
+        return self.user_harness_dir == "."
 
     def text(self, part: HarnessText | OptionalHarnessText) -> str:
         """The value of the string field `part` names; "" where an optional one is supplied nowhere."""

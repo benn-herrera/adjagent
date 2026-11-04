@@ -12,6 +12,8 @@ the `kbase` skill with every supporting file it lists — together with the
 plugin's at ROOT — and one runner include line in the
 project's own justfile or Makefile, never into this repository's own — except a plugin harness,
 which is not a repo project and writes no runner include line and creates no `Makefile`.
+A user-level kb install (Install destination, above) writes the kb-set definitions and nothing else
+of the kb install: no `kb-tools/` package, no MCP entry, no include line and no runner file.
 The choice is sticky per harness directory: an install whose ROOT already
 holds a kb install is a kb install. The signal is a file, never the `kb-tools/` directory
 (ARCHITECTURE.md, Install Consumption Model, names it). Exclusion is decided once per definition, on its name,
@@ -39,7 +41,7 @@ walk ends. A run enumerates the KB's scoring set itself, so an interrupted run i
 than repeated. It never supplies two scores — a work's rigor and a `founds` edge's bearing, both
 because the work lies outside the corpus; the user authors those.
 
-The generator and install need Python 3.11 or later on the host; the kb set's toolchain is the
+The generator and install need Python 3.9 or later on the host; the kb set's toolchain is the
 `kbase` executable the user installs, which needs no Python. `README.md` states what it asks of the
 host.
 

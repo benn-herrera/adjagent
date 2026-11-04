@@ -13,3 +13,8 @@ stripped ends of the marker lines, replaces it with the rendered span, and write
 back as read. Every check, including the git-status refusal over `adjagent/`, runs before the first
 write.
 
+`install` uses it twice: for a plugin installed below its project root, and for a user-level install
+given `--install-global-agents-file`. It runs the checks (`checked_agents_file`) among its own
+pre-write checks and writes the file (`write_agents_file`) after its renders, so a refusal
+leaves the install unwritten.
+

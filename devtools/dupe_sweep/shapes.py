@@ -6,6 +6,8 @@ algorithm collide. Classes are swept through their methods, never whole — a cl
 contains its methods', so each would match its own class.
 """
 
+from __future__ import annotations
+
 import ast
 from collections.abc import Iterator
 

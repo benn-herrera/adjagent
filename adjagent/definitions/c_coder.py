@@ -102,7 +102,8 @@ C11, so use none of it where the project's standard does not admit it.
 
 *Unit tests*: a test runner the project already uses, or a plain harness of assertions over a table
 of `(input, want)` cases — C has no parametrization, so the table is the pattern.
-{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, integer edge cases")}
+
+{clauses.unit_test_scope_coder(examples="parsing, state transitions, boundary conditions, integer edge cases")} {clauses.COVERAGE_METRIC}
 {clauses.MOCKING_THRESHOLD_GENERAL}
 
 {clauses.integration_tests_coder(subject="exercising the public header's interface as a consumer sees it")} {clauses.integration_logging_signal(level="maximum logging", sink="output")} {clauses.SANITIZER_SUITE}
@@ -111,7 +112,9 @@ of `(input, want)` cases — C has no parametrization, so the table is the patte
 
 {clauses.verification_evidence()}
 
-{clauses.build_system_lead(direct="the compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET} Run `clang-format` and a static analyser through their targets before shipping — `clang-tidy`, `cppcheck`, or GCC's `-fanalyzer`.
+{clauses.build_system_lead(direct="the compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET}
+
+Run `clang-format` and a static analyser through their targets before shipping — `clang-tidy`, `cppcheck`, or GCC's `-fanalyzer`.
 
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="C")}
 
@@ -129,6 +132,8 @@ fixed-width type and convert its byte order explicitly.
 
 **Logging**: route through one leveled path the project owns rather than scattering `printf`. That
 {clauses.LOGGING_ABSTRACTION_NOTE} {clauses.LOGS_NOT_STDOUT}
+
+{clauses.heavy_logging_framework(baseline="the project's own leveled path")}
 
 ## Critical Gotchas
 
