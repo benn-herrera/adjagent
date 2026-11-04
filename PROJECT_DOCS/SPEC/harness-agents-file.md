@@ -26,7 +26,10 @@ or a target outside that directory, is refused with nothing written.
 
 Edits made inside the block are not preserved. A write that changes the file keeps one rolling
 backup of the prior content beside it; identical output writes nothing, so installing twice changes
-nothing. Installation from a clone is refused while the generator's sources carry uncommitted
+nothing. `install-agents-file` says so: where the run would change nothing it reports the agents file
+up to date and touches no file, a backup and a redirect included. With `--dry-run` it prints whether
+the agents file, and any redirect file it would create, would be created or changed, writes nothing
+and exits 0; its paths are relative to the directory named. Installation from a clone is refused while the generator's sources carry uncommitted
 changes; an installed package has no uncommitted state and is not refused (Package and Command).
 Publishing an improvement is a manual edit to the agents-file definition.
 

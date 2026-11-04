@@ -15,7 +15,7 @@ function fail() {
   exit 1
 }
 
-ver="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" version)"
+ver="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" --version)"
 wheel="${PROJECT_ROOT}/dist/${GEN}-${ver}-py3-none-any.whl"
 sdist="${PROJECT_ROOT}/dist/${GEN}-${ver}.tar.gz"
 for product in "${wheel}" "${sdist}"; do
@@ -46,7 +46,7 @@ function from_wheel() {
 cd "${scratch}"
 imported="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -c 'import adjagent; print(adjagent.__file__)')"
 [[ "${imported}" == "${venv}/"* ]] || fail "adjagent imported from ${imported}, outside ${venv}"
-wheel_ver="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" version)"
+wheel_ver="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --version)"
 [[ "${wheel_ver}" == "${ver}" ]] || fail "the wheel reports version ${wheel_ver}, the checkout ${ver}"
 script_help="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --help)"
 module_help="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -m adjagent --help)"

@@ -2,9 +2,9 @@
 
 A **base install** — `just install` — delivers every definition this repository produces except the
 kb set: the `kbase` skill — except a mage install, which always includes the kb set. It also
-delivers each package `SHIPPED_PACKAGES` names (Deployed Surfaces, below) to its destination there,
-beside the definition surfaces; the table holds no row today, so no install of this version
-delivers one.
+delivers each package `SHIPPED_PACKAGES` names (Deployed Surfaces, below) to its destination there:
+the docdicer tools package, inside the `docdicer` skill's own directory. A user-level install
+delivers none.
 A **kb install** — `just install-with-kb`, or any install carrying `--with-kb` — adds the kb set —
 the `kbase` skill with every supporting file it lists — together with the
 `kb-tools/` package (the runner snippets, inside the `kbase` skill's own directory), the harness's
@@ -29,7 +29,7 @@ kb install replaces `skills/kbase/kb-tools/` whole, so a `kbase` executable and 
 version installed there are removed.
 
 No install writes, copies, verifies or locates a `kbase` executable. The user installs kbase
-themselves (README.md, Usage, Install), and every harness's `kbase` MCP entry
+themselves (docs/knowledge-base.md, Requirements), and every harness's `kbase` MCP entry
 names the bare command `kbase`, resolved from `PATH`; under mage the entry keeps its
 `--project-dir-required` argument. Version 0.10.0 is the minimum kbase this product is written for,
 and nothing checks it. The kb set is supported on macOS and Linux, where kbase installs through
@@ -42,6 +42,6 @@ than repeated. It never supplies two scores — a work's rigor and a `founds` ed
 because the work lies outside the corpus; the user authors those.
 
 The generator and install need Python 3.9 or later on the host; the kb set's toolchain is the
-`kbase` executable the user installs, which needs no Python. `README.md` states what it asks of the
-host.
+`kbase` executable the user installs, which needs no Python. `README.md` states what the generator
+asks of the host, and `docs/knowledge-base.md` what the kb set asks.
 

@@ -17,9 +17,11 @@ which says where the file was generated from and that it is not for local edit, 
 (Generation System). A skill's
 supporting file has no frontmatter, so it carries the same two lines as HTML comments — its first two lines, above a
 blank line and the body — and nothing about how the file is read depends on them. A copied package
-file whose type takes a `#` comment carries an installed banner at its top, below its shebang where
-it has one. No banner sits where it changes how the file is read. Every other copied file — and
-every file a harness ships, whatever its type — is installed byte-verbatim and unstamped.
+file of a script or build-file type (`.py`, `.sh`, `.mk`, `.just`), and the extensionless launcher
+`tools/docdicer`, carries an installed banner at its top, below its shebang where it has one. No
+banner sits where it changes how the file is read. Every other copied file — `tools/.gitignore`
+among them — and every file a harness ships, whatever its type, is installed byte-verbatim and
+unstamped.
 
 Every path written inside a definition body — a file the agent is told to `Read`, a script it
 invokes — is written against the installing harness's project directory —
@@ -27,7 +29,10 @@ invokes — is written against the installing harness's project directory —
 `<harness-dir>/skills/kbase/kb-tools/...` for a shipped package's script, which are
 `.claude/agents/...`, `.claude/adj-tools/...` and `.claude/skills/kbase/kb-tools/...` under
 claude — not against the repository's own path: that is where the installed file
-actually lives, and the path it must resolve from inside a consuming session. The same holds for
+actually lives, and the path it must resolve from inside a consuming session. The exception is a
+script inside a skill's own directory, which that skill's body may name relative to that directory
+(`tools/docdicer`), because the skill's directory differs by harness (under mage,
+`~/Mage/Skills/adjagent/skills/docdicer/`). The same holds for
 the project's scratch directory, named as the harness names it. A project's agents file is named
 `AGENTS.md` under claude and opencode, whose user directory is a separate scope; where the
 destination is the harness's own directory — mage — the harness's name is used, so the file is

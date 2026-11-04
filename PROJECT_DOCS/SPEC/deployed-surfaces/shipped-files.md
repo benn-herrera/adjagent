@@ -5,15 +5,37 @@ carrying a `!GENERATED!` banner in this repository, its tests beside it where it
 by explicit mapping to a frozen destination under the install ROOT — frozen because an installed
 consumer's own artifacts, such as the runner include line an install writes into the consumer's
 justfile or Makefile, name that destination directly
-and cannot be asked to notice a source-side rearrangement. Its installed copy is stamped like any
-other install emission whose filetype admits a comment: the `!INSTALLED!` banner, not `!GENERATED!`
+and cannot be asked to notice a source-side rearrangement. Its installed copy is stamped where
+Installed artifacts says: the `!INSTALLED!` banner, not `!GENERATED!`
 — a shipped package is source taken as-is, never a render. `SHIPPED_PACKAGES` is the table of those
 an install delivers by explicit mapping: each row a shipped package and the destination
-under the install ROOT it lands at, beside the three definition surfaces, under `adj-tools/`. It
-holds no row today, so no install of this version delivers one. The kb-tools package is a shipped package
-installed at its own stated destination rather than by that table: `skills/kbase/kb-tools/`, inside
-the `kbase` skill's own directory and so inside the `skills/` surface — the one package destination
-outside `adj-tools/`, a skill carrying its tooling in its own directory — holding only the runner
+under the install ROOT it lands at, stated per row — beside the three definition surfaces, under
+`adj-tools/`, or inside a skill's own directory and so inside the `skills/` surface. It holds one
+row, the **docdicer tools package**, which every project install delivers to `skills/docdicer/tools/`,
+inside the `docdicer` skill's own directory. A user-level install delivers none (Install destination,
+above). The package holds four files:
+- `docdicer`, a POSIX `sh` script, executable, carrying the `!INSTALLED!` banner below its shebang
+- `.gitignore`, holding `.venv/` and carrying no banner
+- `runner-snippets/docdicer.just` and `runner-snippets/docdicer.mk`, runner fragments for a consumer
+  to include, each carrying the `!INSTALLED!` banner at its top. No install writes an include line
+  for them; a project opts in by adding one itself.
+
+The script's behavior, run as `tools/docdicer` from the skill's directory:
+- `--install` builds `tools/.venv` afresh and installs into it the docdicer version the script
+  names; where `python3` 3.9 or later is not on the host, it names the remedy and exits non-zero
+- with no `tools/.venv` and any other arguments, it says how to install and exits non-zero
+- otherwise its arguments pass to docdicer unchanged
+
+An install that changes anything replaces the package whole, `tools/.venv` included. Where
+`tools/.venv` existed before that install, the install afterwards runs `tools/docdicer --install`, so
+the installed docdicer stays matched to the script. A failure of that run is reported in one line
+naming the command; the install's exit status and the rest of its writes are unaffected. An install
+that changes nothing (Write Safety) runs nothing. A `.venv` directly under a package destination is
+not install output.
+
+The kb-tools package is a shipped package installed at its own stated destination rather than by
+that table: `skills/kbase/kb-tools/`, inside the `kbase` skill's own directory — a skill carrying its
+tooling in its own directory, as the docdicer package does — holding only the runner
 snippets, and not an importable package either, read by the consumer through the runner include
 line. The snippets run `kbase` from `PATH`. No package is a
 definition: `adj-tools/` is outside the dispatch namespace entirely, and a package under a skill's

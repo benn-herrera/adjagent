@@ -22,7 +22,7 @@ Repository = "https://github.com/benn-herrera/adjagent"
 include = ["adjagent", "adjagent.*"]
 
 [tool.setuptools.package-data]
-adjagent = ["kb-tools/**/*", "harnesses/resources/**/*"]
+adjagent = ["kb-tools/**/*", "harnesses/resources/**/*", "docdicer-tools/**/*", "docdicer-tools/**/.*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "adjagent.__version__" }

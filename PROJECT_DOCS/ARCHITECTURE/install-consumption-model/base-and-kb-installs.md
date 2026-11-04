@@ -24,8 +24,10 @@ A kb install writes three things beyond the renders — two under a harness whos
   the copy, so an executable and `.asc` an earlier version installed there go, while the skill's
   `SKILL.md` and references beside it are not touched. Package destinations come from one list,
   `_packages`, which `package_copies`, the clearing before the copy and `_refuse_root` all read:
-  the `SHIPPED_PACKAGES` table, and `kb-tools/` at `KB_TOOLS_PACKAGE` when kb is included. kbase itself reaches the host by the
-  user's own install (README.md); the skill's `references/installing.md` walks a session through it.
+  the `SHIPPED_PACKAGES` table, whose one row is the docdicer tools package at
+  `DOCDICER_TOOLS_PACKAGE` (`skills/docdicer/tools/`) and so in the list whether or not kb is included (a user-level install copies none); and `kb-tools/` at
+  `KB_TOOLS_PACKAGE` when kb is included. kbase itself reaches the host by the
+  user's own install (`docs/knowledge-base.md`); the skill's `references/installing.md` walks a session through it.
 - **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): claude's
   `.mcp.json`, at the plugin root under mage — `McpSettings.site` names the directory, `HARNESS`
   there and `PROJECT` for the other two — or for opencode the first discovered of

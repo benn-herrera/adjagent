@@ -4,17 +4,18 @@ A recipe body longer than three command lines is a script in `devtools/scripts/`
 recipe, and the recipe is the line that runs it, handing it the variables it reads as an env
 prefix; a shorter body stays in the justfile. `just install`,
 `just install-with-kb`, `just install-agents-here`, `just render`, `just retake-reference`,
-`just install-agents-file <dir> [harness]`, `just mage-dist`, `just tag` and `just check-wheel` reach
+`just install-agents-file <dir> [--harness NAME] [--dry-run]`, `just mage-dist`, `just tag` and `just check-wheel` reach
 `python3 -m adjagent`:
 `install`, `install-with-kb`, `install-agents-here` and `install-agents-file` each run the verb
-directly in one line; `render` and `retake-reference` go through the private
+directly in one line; `install-agents-file` takes `dir *args` and forwards all of it as `"$@"`, so
+`--harness NAME` and `--dry-run` both reach the verb; `render` and `retake-reference` go through the private
 `_render-slot.sh`, which calls `python3 -m adjagent install` with `--subdir= --with-kb`, and through the
 stable private `render-agents-file HARNESS OUT` script, which a later revision calls inside a
 worktree of an earlier one, so its name and two arguments do not change incompatibly; and `tag`
-through `version`, which prints the version bare and nothing else, so the `v` of `v<version>` is the
-recipe's; `check-wheel` through `version` and through `install` (see the paragraph on `build` below). Scripts read a harness's five `HarnessText` values through
+through `--version`, which prints the version bare and nothing else, so the `v` of `v<version>` is the
+recipe's; `check-wheel` through `--version` and through `install` (see the paragraph on `build` below). Scripts read a harness's five `HarnessText` values through
 `python3 -m adjagent harness NAME KEY`, never from a copy of them — `_harness-value.sh` is the one
-shell reader, for `_render-slot.sh` and `mage-dist.sh` — and the version through `python3 -m adjagent version`, never restated in a recipe or a
+shell reader, for `_render-slot.sh` and `mage-dist.sh` — and the version through `python3 -m adjagent --version`, never restated in a recipe or a
 script. `just tag` reads it there to create the signed annotated tag `v<version>`: it refuses while
 `adjagent/` has uncommitted changes and again while that tag already exists, and it pushes nothing.
 CONVENTIONS.md states where the version is written down, and the order a bump takes against its tag.

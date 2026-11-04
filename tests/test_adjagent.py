@@ -15,6 +15,7 @@ PYTHONPATH.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import importlib.util
 import inspect
 import json
@@ -55,7 +56,17 @@ from adjagent.render import (
     render_skill_file,
     write_renders,
 )
-from adjagent.vocabulary import ALL, TIERS, Anchor, HarnessText, Kind, OptionalHarnessText, Tool, hole
+from adjagent.vocabulary import (
+    ALL,
+    TIERS,
+    AgentsFileText,
+    Anchor,
+    HarnessText,
+    Kind,
+    OptionalHarnessText,
+    Tool,
+    hole,
+)
 from devtools import render_diff
 from tests._structure import (
     ARGUMENT_RULE,
@@ -610,6 +621,78 @@ def test_family_text_renders_the_seats_overlay_or_leaves_no_empty_paragraph(
     assert _with_family_text(family=family, tier=tier, body=body) == rendered
 
 
+# Filled text is literal: what a fill puts into a body is never filled again. Each value below carries a
+# hole the fill expands — to the harness's agents file name — so any second pass over filled text
+# changes the output.
+_BAIT = hole(HarnessText.AGENTS_FILE)
+_BAITED_FAMILY = Family(
+    "baited",
+    {"highest": "big", "high": "big", "medium": f"mid{_BAIT}", "low": "small", "lowest": "small"},
+    overlays={Anchor.GAP_AVERSION: Overlay(text=f"overlay {_BAIT}")},
+)
+
+
+def _clause_with_a_baited_harness_value() -> tuple[Definition, Render, str]:
+    """A clause constant's own holes are filled once; the value one fills to stays as it is."""
+    harness = dataclasses.replace(CLAUDE, project_temp_dir=f"temp{_BAIT}")
+    clause = adjagent.clauses.NEW_PROJECT_SETUP
+    expected = clause.replace(hole(HarnessText.PROJECT_TEMP_DIR), f"temp{_BAIT}").replace(
+        hole(HarnessText.PROJECT_HARNESS_DIR), CLAUDE.project_harness_dir
+    )
+    defn = Definition(name="probe", kind=Kind.COMMAND, body=clause)
+    return defn, Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT), expected
+
+
+def _baited_harness_text() -> tuple[Definition, Render, str]:
+    harness = dataclasses.replace(CLAUDE, user_harness_dir=f"~/home{_BAIT}")
+    defn = Definition(name="probe", kind=Kind.COMMAND, body=f"see {hole(HarnessText.USER_HARNESS_DIR)}")
+    return defn, Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT), f"see ~/home{_BAIT}"
+
+
+def _baited_optional_harness_text() -> tuple[Definition, Render, str]:
+    harness = dataclasses.replace(CLAUDE, recipe_rule=f"rule {_BAIT}")
+    defn = Definition(name="probe", kind=Kind.COMMAND, body=hole(OptionalHarnessText.RECIPE_RULE))
+    return defn, Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT), f"rule {_BAIT}"
+
+
+def _baited_family_overlay() -> tuple[Definition, Render, str]:
+    defn = Definition(name="probe", kind=Kind.AGENT, description="a probe", tools=ALL, tier="high", body=_GAP)
+    ctx = Render(harness=CLAUDE, family=_BAITED_FAMILY, tier_map=dict(_BAITED_FAMILY.tiers))
+    return defn, ctx, f"overlay {_BAIT}"
+
+
+def _baited_scope_name() -> tuple[Definition, Render, str]:
+    defn = Definition(name="probe", kind=Kind.AGENTS_FILE, body=f"# {hole(AgentsFileText.SCOPE_NAME)}")
+    return defn, Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT, scope=f"s{_BAIT}"), f"# s{_BAIT}"
+
+
+def _baited_model_in_the_coder_dispatch() -> tuple[Definition, Render, str]:
+    """The family member the dispatch bullet names carries the hole."""
+    assert CLAUDE.coder_dispatch is not None
+    defn = Definition(name="probe", kind=Kind.AGENTS_FILE, body=hole(AgentsFileText.CODER_DISPATCH))
+    ctx = Render(harness=CLAUDE, family=_BAITED_FAMILY, tier_map=dict(_BAITED_FAMILY.tiers))
+    return defn, ctx, CLAUDE.coder_dispatch(f"mid{_BAIT}")
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        _clause_with_a_baited_harness_value,
+        _baited_harness_text,
+        _baited_optional_harness_text,
+        _baited_family_overlay,
+        _baited_scope_name,
+        _baited_model_in_the_coder_dispatch,
+    ],
+    ids=["clause", "harness-text", "optional-harness-text", "family-overlay", "scope-name", "model"],
+)
+def test_a_filled_value_carrying_a_hole_reaches_the_body_literally(case) -> None:
+    defn, ctx, expected = case()
+    filled = filled_body(defn, ctx)
+    assert filled == expected
+    assert _BAIT in filled
+
+
 def test_stock_excludes_the_overridden_tier() -> None:
     ctx = Render(harness=CLAUDE, family=_TUNED, tier_map=dict(_TUNED.tiers))
     assert ctx.stock == ("highest", "high", "low", "lowest")
@@ -711,30 +794,6 @@ def _imported(tree: ast.Module) -> list[str]:
             module = f"adjagent.{node.module}" if node.level else node.module
             names += [module, *(f"{module}.{alias.name}" for alias in node.names)]
     return names
-
-
-def test_no_composed_text_is_rescanned() -> None:
-    """No text is re-formatted or re-substituted, and the one pattern substitution is the body fill.
-    A definition module's `.format` is outside this walk: check_structure admits it only on one of
-    that module's string literals, which holds no composed text."""
-    offenders = []
-    substitutions = []
-    for path, tree in _modules():
-        if path.startswith("adjagent/definitions/"):
-            continue
-        for top in tree.body:
-            scope = getattr(top, "name", "<module>")
-            for node in ast.walk(top):
-                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-                    continue
-                owner = node.func.value.id if isinstance(node.func.value, ast.Name) else None
-                attr = node.func.attr
-                if (attr == "replace" and owner != "dataclasses") or attr in ("format", "format_map"):
-                    offenders.append(f"{path}:{node.lineno} .{attr}(")
-                elif attr in ("sub", "subn"):
-                    substitutions.append(f"{path}:{scope} .{attr}(")
-    assert offenders == []
-    assert substitutions == ["adjagent/render.py:filled_text .sub("]
 
 
 def test_definitions_and_text_reach_nothing_outside_their_arguments() -> None:

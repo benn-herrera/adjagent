@@ -89,5 +89,5 @@ HARNESS = Harness(
     mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.HARNESS, entry=_mcp_entry),
     guardrail=None,
     rendered_files=FILES,
-    omits=frozenset({"imgread"}),
+    omits=frozenset({"imgread", "adjagent"}),
 )

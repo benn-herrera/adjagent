@@ -1,6 +1,7 @@
 """The agents-file render and installer, and the definition install, each case checked against values
 the code under test did not compute: the marker span, the bytes kept outside it, the refusals that
-write nothing, the redirects, the kb-tools package and its banner, the kb install path, the MCP
+write nothing, the redirects, the kb-tools package and its banner, the docdicer tools package and its
+venv rebuild, the kb install path, the MCP
 settings merge, the runner include line, the harness resources a harness ships as they stand, the
 prune, the refusal to overwrite a file without this repository's banner, the claude guardrail hook's
 probe and settings merge, and the checkout premise with the checks that stand down outside one.
@@ -45,6 +46,7 @@ from adjagent.install import (
     install,
     install_kb_include_line,
     kb_include_line,
+    preflighted_install,
     uncommitted_sources,
 )
 from adjagent.loading import load
@@ -345,12 +347,33 @@ def _definition_install(
     with_kb: bool = False,
     project_root: Path | None = None,
 ) -> None:
-    install(root, ctx, verbose=False, with_kb=with_kb, project_root=project_root, uncommitted=_committed)
+    install(
+        root,
+        ctx,
+        verbose=False,
+        with_kb=with_kb,
+        project_root=project_root,
+        uncommitted=_committed,
+        tool_install=_ToolInstalls(),
+    )
 
 
 def _committed() -> tuple[str, ...]:
     """No uncommitted sources, so a mage install's agents file does not turn on this tree's git state."""
     return ()
+
+
+class _ToolInstalls:
+    """A stand-in for `run_tool_install`, so no test reaches the network: it records each script it is
+    asked to run with `--install` and answers `failure`."""
+
+    def __init__(self, failure: str | None = None) -> None:
+        self.scripts: list[Path] = []
+        self.failure = failure
+
+    def __call__(self, script: Path) -> str | None:
+        self.scripts.append(script)
+        return self.failure
 
 
 # The harness resources: the files a harness ships for its own harness directory, copied into ROOT as
@@ -493,7 +516,7 @@ def test_a_default_install_writes_no_kb_definition_and_no_kb_side_config(tmp_pat
         "skills/kbase/kb-tools/runner-snippets/kb.just",
     ):
         assert relative not in files
-    assert not (root / "skills").exists()
+    assert not (root / "skills/kbase").exists()
     assert not (project / ".mcp.json").exists()
     assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
     assert not (project / "Makefile").exists()
@@ -604,12 +627,21 @@ def test_a_kb_tools_tree_without_the_router_is_not_sticky(tmp_path: Path) -> Non
     assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
 
 
-def test_the_version_verb_prints_the_constant_and_nothing_else(capsys) -> None:
+def test_the_version_flag_prints_the_constant_and_nothing_else(capsys) -> None:
     """A recipe parses this line to cut the tag, so it is the constant alone: no `v`, no suffix, no
     prose, one line — and the constant carries that shape, which a manifest would inherit too."""
-    main(["version"])
+    with pytest.raises(SystemExit) as exited:
+        main(["--version"])
+    assert exited.value.code == 0
     assert capsys.readouterr().out == f"{__version__}\n"
     assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)
+
+
+def test_version_is_refused_as_a_verb(capsys) -> None:
+    with pytest.raises(SystemExit) as exited:
+        main(["version"])
+    assert exited.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_the_cli_with_kb_flag_installs_the_kb_skill_files_and_the_skill_kb_tools_destination(
@@ -931,7 +963,9 @@ def test_a_verbose_mage_install_lists_the_manifest_as_written(tmp_path: Path, ca
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
     capsys.readouterr()
-    install(root, _MAGE_RENDER, verbose=True, project_root=project, uncommitted=_committed)
+    install(
+        root, _MAGE_RENDER, verbose=True, project_root=project, uncommitted=_committed, tool_install=_ToolInstalls()
+    )
     assert f"wrote {root / _MAGE_MANIFEST}" in capsys.readouterr().out.splitlines()
 
 
@@ -944,7 +978,7 @@ def test_an_mcp_file_carrying_jsonc_comments_is_reported_and_left_untouched(tmp_
     capsys.readouterr()
     _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=tmp_path)
     assert discovered.read_text(encoding="utf-8") == prior
-    assert f"{discovered} carries JSONC comments — left untouched; merge this entry by hand:" in capsys.readouterr().out
+    assert f"{discovered} carries JSONC comments — left untouched; merge this entry by hand:" in capsys.readouterr().err
 
 
 def _built_entry(harness: Harness) -> dict:
@@ -1051,10 +1085,10 @@ def test_a_duplicate_container_key_is_reported_and_left_byte_identical(tmp_path:
     capsys.readouterr()
     _definition_install(root, with_kb=True, project_root=project)
     assert (project / ".mcp.json").read_text(encoding="utf-8") == seed
-    out = capsys.readouterr().out
+    err = capsys.readouterr().err
     entry = _built_entry(CLAUDE)
-    assert f"{project / '.mcp.json'} could not be edited safely — left untouched; merge this entry by hand:" in out
-    assert json.dumps(entry) in out
+    assert f"{project / '.mcp.json'} could not be edited safely — left untouched; merge this entry by hand:" in err
+    assert json.dumps(entry) in err
 
 
 def test_the_opencode_container_is_spliced_into_a_plain_json_file(tmp_path: Path) -> None:
@@ -1106,8 +1140,8 @@ def test_a_second_harness_writes_no_include_line_and_reports_the_first(tmp_path:
     capsys.readouterr()
     _definition_install(second, _OPENCODE_RENDER, with_kb=True, project_root=project)
     assert (project / "justfile").read_bytes() == before
-    out = capsys.readouterr().out
-    assert "no include line written" in out and "'claude'" in out
+    err = capsys.readouterr().err
+    assert "no include line written" in err and "'claude'" in err
 
 
 @pytest.mark.parametrize(
@@ -1153,8 +1187,8 @@ def test_an_include_line_for_another_harness_is_reported_and_left(tmp_path: Path
     capsys.readouterr()
     _definition_install(root, _OPENCODE_RENDER, with_kb=True, project_root=project)
     assert (project / "justfile").read_text(encoding="utf-8") == f"{line}\n"
-    out = capsys.readouterr().out
-    assert "no include line written" in out and "'claude'" in out
+    err = capsys.readouterr().err
+    assert "no include line written" in err and "'claude'" in err
 
 
 @pytest.mark.parametrize(
@@ -1203,7 +1237,7 @@ def test_two_include_lines_are_reported_and_left(tmp_path: Path, capsys) -> None
     (tmp_path / "justfile").write_text(prior, encoding="utf-8")
     install_kb_include_line(tmp_path, harness_relpath=".claude")
     assert (tmp_path / "justfile").read_text(encoding="utf-8") == prior
-    assert "names the kb snippets on lines 1, 2" in capsys.readouterr().out
+    assert "names the kb snippets on lines 1, 2" in capsys.readouterr().err
 
 
 def test_an_include_line_naming_no_harness_reports_its_raw_prefix() -> None:
@@ -1250,55 +1284,200 @@ def test_install_refuses_the_repository_and_a_source_it_copies_from(root: Path) 
     toolchain's package, and a harness's resources — writes there would land inside this run's own
     input."""
     with pytest.raises(InputError, match="is this repository or inside a source it copies from"):
-        install(root, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
+        install(root, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
     assert not (root / "agents" / "python-coder.md").exists() and not (root / "commands").exists()
 
 
-def test_a_shipped_package_copies_stamped_executable_and_replaces_its_destination(
+def test_a_shipped_package_leaves_its_tests_and_documents_behind_and_refuses_a_root_inside_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`SHIPPED_PACKAGES` is empty while no package ships, and the machinery stays because one is
-    expected to return. A restored row over a temporary source is the only thing that exercises it:
-    the package copies with the `!INSTALLED!` banner below the shebang, keeps the executable bit,
-    leaves its tests and project documents behind, replaces the destination whole — a stale file under
-    it is gone — and a root inside its own source is refused with nothing written."""
+    """What the docdicer tools row cannot exercise, its source holding neither: a package's tests and
+    project documents do not ship, and a root inside a package's source is refused with nothing
+    written. A row over a temporary source stands in for the table."""
     repo = tmp_path / "repo"
     package = repo / "adjagent" / "probe_pkg"
     (package / "tests").mkdir(parents=True)
-    tool = package / "tool.py"
-    tool.write_text("#!/usr/bin/env python3\nprint('probe')\n", encoding="utf-8")
-    tool.chmod(0o755)
+    (package / "tool.py").write_text("print('probe')\n", encoding="utf-8")
     (package / "tests/test_tool.py").write_text("pass\n", encoding="utf-8")
     (package / "SPEC.md").write_text("# probe\n", encoding="utf-8")
     monkeypatch.setattr("adjagent.install.PACKAGE_ROOT", repo / "adjagent")
     monkeypatch.setattr("adjagent.install.SHIPPED_PACKAGES", (("probe_pkg", "adj-tools/probe_pkg"),))
     project = tmp_path / "project"
     root = project / ".claude"
-    stale = root / "adj-tools/probe_pkg/stale.py"
-    stale.parent.mkdir(parents=True)
-    stale.write_text("x = 1\n", encoding="utf-8")
-    install(root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed)
-    copied = root / "adj-tools/probe_pkg/tool.py"
-    lines = copied.read_text(encoding="utf-8").split("\n")
-    assert lines[0] == "#!/usr/bin/env python3"
-    assert lines[1].startswith("# !INSTALLED! from adjagent/probe_pkg/tool.py — ")
-    assert lines[2:] == ["print('probe')", ""]
-    assert os.access(copied, os.X_OK)
+    install(
+        root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed, tool_install=_ToolInstalls()
+    )
+    assert (root / "adj-tools/probe_pkg/tool.py").is_file()
     assert not (root / "adj-tools/probe_pkg/tests").exists()
     assert not (root / "adj-tools/probe_pkg/SPEC.md").exists()
-    assert not stale.exists()
     before = _files(tmp_path)
     with pytest.raises(InputError, match="is this repository or inside a source it copies from"):
-        install(package, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
+        install(package, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
     assert _files(tmp_path) == before
 
 
 def test_a_direct_install_into_the_user_directory_is_user_level(_home: Path) -> None:
     root = _home / ".claude"
     root.mkdir(parents=True)
-    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed)
+    install(
+        root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=_ToolInstalls()
+    )
     assert (root / "agents").is_dir()
     assert not (root / "hooks").exists() and not (root / "settings.json").exists()
+
+
+# The docdicer tools package: copied into the docdicer skill's own directory, its launcher stamped by
+# name, and its venv rebuilt after an install that replaced it.
+
+_DOCDICER_TOOLS = "skills/docdicer/tools"
+_DOCDICER_SOURCE = PACKAGE_ROOT / "docdicer-tools"
+
+
+def _preflighted(root: Path, *, project: Path, tool_install: _ToolInstalls, dry_run: bool = False) -> None:
+    preflighted_install(
+        root,
+        _CLAUDE_RENDER,
+        verbose=False,
+        project_root=project,
+        uncommitted=_committed,
+        tool_install=tool_install,
+        dry_run=dry_run,
+    )
+
+
+def _claude_project(tmp_path: Path) -> tuple[Path, Path]:
+    """A project and its `.claude/` ROOT, both created."""
+    project = tmp_path / "project"
+    root = project / ".claude"
+    root.mkdir(parents=True)
+    return project, root
+
+
+def _plant(path: Path, text: str = "planted\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_reinstall_replaces_the_docdicer_tools_whole_and_rebuilds_the_venv_that_stood(tmp_path: Path) -> None:
+    """The stale file is a difference, so the install proceeds past the preflight; the copy it runs into
+    holds no `.venv`, so only the real install calls the runner."""
+    project, root = _claude_project(tmp_path)
+    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    tools = root / _DOCDICER_TOOLS
+    stale = _plant(tools / "stale.txt")
+    marker = _plant(tools / ".venv/marker")
+    runner = _ToolInstalls()
+    _preflighted(root, project=project, tool_install=runner)
+    script = tools / "docdicer"
+    lines = script.read_text(encoding="utf-8").split("\n")
+    source_lines = (_DOCDICER_SOURCE / "docdicer").read_text(encoding="utf-8").split("\n")
+    assert lines[0] == source_lines[0] and lines[0].startswith("#!")
+    assert lines[1].startswith("# !INSTALLED! from adjagent/docdicer-tools/docdicer")
+    assert lines[2:] == source_lines[1:]
+    assert os.access(script, os.X_OK)
+    gitignore = (tools / ".gitignore").read_bytes()
+    assert gitignore == (_DOCDICER_SOURCE / ".gitignore").read_bytes()
+    assert ".venv/" in gitignore.decode("utf-8").splitlines()
+    assert not stale.exists() and not marker.exists()
+    assert runner.scripts == [script]
+
+
+def test_an_install_with_no_docdicer_venv_runs_no_tool_install(tmp_path: Path) -> None:
+    project, root = _claude_project(tmp_path)
+    _plant(root / _DOCDICER_TOOLS / "stale.txt")
+    runner = _ToolInstalls()
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed, tool_install=runner)
+    assert (root / _DOCDICER_TOOLS / "docdicer").is_file()
+    assert runner.scripts == []
+
+
+def test_an_up_to_date_target_with_a_docdicer_venv_runs_nothing(tmp_path: Path, capsys) -> None:
+    project, root = _claude_project(tmp_path)
+    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    _plant(root / _DOCDICER_TOOLS / ".venv/marker")
+    state = _state(project)
+    runner = _ToolInstalls()
+    capsys.readouterr()
+    _preflighted(root, project=project, tool_install=runner)
+    assert _UP_TO_DATE in capsys.readouterr().out
+    assert _state(project) == state
+    assert runner.scripts == []
+
+
+def test_a_dry_run_says_the_install_would_rebuild_the_docdicer_venv_and_runs_nothing(tmp_path: Path, capsys) -> None:
+    """The venv is outside the comparison, so the one stale render is what makes the install proceed;
+    the dry run names the venv rebuild that install would also make."""
+    project, root = _claude_project(tmp_path)
+    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    marker = _plant(root / _DOCDICER_TOOLS / ".venv/marker")
+    _plant(root / "agents/gone.md", _NEW_BANNER)
+    runner = _ToolInstalls()
+    capsys.readouterr()
+    _preflighted(root, project=project, tool_install=runner, dry_run=True)
+    out = capsys.readouterr().out
+    assert marker.is_file() and runner.scripts == []
+    assert f".claude/{_DOCDICER_TOOLS}/.venv" in out and f".claude/{_DOCDICER_TOOLS}/docdicer --install" in out
+
+
+def test_a_mode_change_alone_is_a_difference(tmp_path: Path, capsys) -> None:
+    project, root = _claude_project(tmp_path)
+    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    script = root / _DOCDICER_TOOLS / "docdicer"
+    script.chmod(0o644)
+    capsys.readouterr()
+    _preflighted(root, project=project, tool_install=_ToolInstalls(), dry_run=True)
+    assert _dry_run_groups(capsys.readouterr().out) == {"changed": {f".claude/{_DOCDICER_TOOLS}/docdicer"}}
+    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    assert _UP_TO_DATE not in capsys.readouterr().out
+    assert os.access(script, os.X_OK)
+
+
+def test_a_failed_tool_install_is_reported_and_the_install_completes(tmp_path: Path, capsys) -> None:
+    project, root = _claude_project(tmp_path)
+    _definition_install(root, project_root=project)
+    _plant(root / _DOCDICER_TOOLS / ".venv/marker")
+    capsys.readouterr()
+    install(
+        root,
+        _CLAUDE_RENDER,
+        verbose=False,
+        project_root=project,
+        uncommitted=_committed,
+        tool_install=_ToolInstalls(failure="exited 1"),
+    )
+    assert all(
+        (root / path).is_file() for path, _ in render_all(_CLAUDE_RENDER, include=lambda d: not excluded(d.name))
+    )
+    assert (root / _DOCDICER_TOOLS / "docdicer").is_file() and (root / _DOCDICER_TOOLS / ".gitignore").is_file()
+    script = str(root / _DOCDICER_TOOLS / "docdicer")
+    assert len([line for line in capsys.readouterr().out.splitlines() if script in line]) == 1
+
+
+def test_a_user_level_install_ships_no_docdicer_tools_and_runs_no_tool_install(_home: Path) -> None:
+    root = _home / ".claude"
+    marker = _plant(root / _DOCDICER_TOOLS / ".venv/marker")
+    runner = _ToolInstalls()
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=runner)
+    assert not (root / _DOCDICER_TOOLS / "docdicer").exists()
+    assert marker.is_file()
+    assert runner.scripts == []
+
+
+def test_the_install_verb_hands_the_tool_install_runner_to_the_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = _ToolInstalls()
+    monkeypatch.setattr("adjagent.cli.run_tool_install", runner)
+    argv = ["install", str(project), "--harness=claude"]
+    main(argv)
+    tools = project / ".claude" / _DOCDICER_TOOLS
+    _plant(tools / ".venv/marker")
+    _plant(tools / "stale.txt")
+    main(argv)
+    assert runner.scripts == [tools / "docdicer"]
 
 
 @pytest.fixture(scope="module")
@@ -1309,7 +1488,15 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root.mkdir()
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("HOME", str(project / "home"))
-        install(root, _CLAUDE_RENDER, verbose=False, with_kb=True, project_root=project, uncommitted=_committed)
+        install(
+            root,
+            _CLAUDE_RENDER,
+            verbose=False,
+            with_kb=True,
+            project_root=project,
+            uncommitted=_committed,
+            tool_install=_ToolInstalls(),
+        )
     return root
 
 
@@ -1322,7 +1509,7 @@ def test_install_writes_every_render_and_stamps_the_packages_once(installed: Pat
 
 
 def test_reinstall_prunes_only_our_stale_definitions(tmp_path: Path, capsys) -> None:
-    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
+    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
     planted = {
         "agents/kb-maintainer.md": _NEW_BANNER,
         "agents/gone/old.md": _NEW_BANNER,
@@ -1334,7 +1521,7 @@ def test_reinstall_prunes_only_our_stale_definitions(tmp_path: Path, capsys) -> 
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / relative).write_text(text, encoding="utf-8")
     capsys.readouterr()
-    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
+    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
     left = {relative for relative in planted if (tmp_path / relative).exists()}
     assert left == {"agents/mine.md", "agents/x.md.00.bak"}
     assert not (tmp_path / "agents/gone").exists() and not (tmp_path / "agents/gone-too").exists()
@@ -1553,7 +1740,7 @@ def test_an_earlier_bash_only_entry_is_replaced_in_place(tmp_path: Path, capsys)
     _definition_install(root, project_root=tmp_path)
     settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
     assert settings["hooks"]["PreToolUse"] == [_hook_entry(".claude"), json.loads(_SED_HOOK)]
-    assert _BY_HAND not in capsys.readouterr().out
+    assert _BY_HAND not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -1574,8 +1761,8 @@ def test_settings_naming_our_command_ambiguously_are_reported_and_left_untouched
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
-    out = capsys.readouterr().out
-    assert _BY_HAND in out and json.dumps(_hook_entry(".claude")) in out
+    err = capsys.readouterr().err
+    assert _BY_HAND in err and json.dumps(_hook_entry(".claude")) in err
 
 
 def test_jsonc_settings_are_reported_and_left_untouched(tmp_path: Path, capsys) -> None:
@@ -1584,7 +1771,7 @@ def test_jsonc_settings_are_reported_and_left_untouched(tmp_path: Path, capsys) 
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
-    assert f"{tmp_path / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in capsys.readouterr().out
+    assert f"{tmp_path / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -1621,7 +1808,7 @@ def test_a_failed_probe_installs_everything_else_and_neither_ships_nor_registers
     assert (root / "agents/python-coder.md").is_file()
     assert not (root / _GUARDRAIL).exists()
     assert not (tmp_path / _SETTINGS).exists()
-    [skipped] = [line for line in capsys.readouterr().out.splitlines() if line.startswith("guardrail hook skipped")]
+    [skipped] = [line for line in capsys.readouterr().err.splitlines() if line.startswith("guardrail hook skipped")]
     assert reason in skipped and "left in place" not in skipped
 
 
@@ -1638,7 +1825,7 @@ def test_a_failed_probe_after_an_install_leaves_its_script_and_entry_and_names_t
     for relative in (f".claude/{_GUARDRAIL}", _SETTINGS):
         assert after[relative] == before[relative]
     assert (
-        f"left in place from an earlier install: {root / _GUARDRAIL}, {tmp_path / _SETTINGS}" in capsys.readouterr().out
+        f"left in place from an earlier install: {root / _GUARDRAIL}, {tmp_path / _SETTINGS}" in capsys.readouterr().err
     )
 
 
@@ -1716,7 +1903,7 @@ def test_a_failed_probe_names_neither_a_script_nor_an_entry_an_install_did_not_w
     monkeypatch.setattr("adjagent.install.GUARDRAIL_INTERPRETER", "adjagent-no-such-perl")
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
-    [skipped] = [line for line in capsys.readouterr().out.splitlines() if line.startswith("guardrail hook skipped")]
+    [skipped] = [line for line in capsys.readouterr().err.splitlines() if line.startswith("guardrail hook skipped")]
     assert "left in place" not in skipped
 
 
@@ -1732,7 +1919,7 @@ def test_a_probe_that_hangs_fails_within_its_timeout(tmp_path: Path, capsys, mon
     capsys.readouterr()
     _definition_install(root, project_root=project)
     assert not (project / _SETTINGS).exists()
-    [skipped] = [line for line in capsys.readouterr().out.splitlines() if line.startswith("guardrail hook skipped")]
+    [skipped] = [line for line in capsys.readouterr().err.splitlines() if line.startswith("guardrail hook skipped")]
     assert "did not exit within 0.5 seconds" in skipped
 
 
@@ -1834,5 +2021,310 @@ def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_stan
     capsys.readouterr()
     _definition_install(root, ctx, with_kb=kb if kb else None, project_root=project)
     assert (_standing(project / planted), _files(outside)) == before
+    err = capsys.readouterr().err
+    assert any(f"{project / planted} {reason}" in line and _BY_HAND in line for line in err.splitlines())
+
+
+# The preflight: `install` and `install-agents-file` first run into a scratch copy of the paths they
+# manage and compare it with the target, so an up-to-date target is left untouched and `--dry-run`
+# prints the difference without writing.
+
+_UP_TO_DATE = "up to date: "
+
+
+def _state(base: Path) -> dict[str, tuple[bytes, int, int]]:
+    """Every directory, file and symlink below `base`, symlinks not followed: its bytes (a symlink's
+    target text, a directory's none), modification time and mode — what "touched nothing" compares."""
+    state = {}
+    for directory, subdirs, names in os.walk(base):
+        for name in [*subdirs, *names]:
+            path = Path(directory, name)
+            info = path.lstat()
+            if path.is_symlink():
+                data = str(path.readlink()).encode()
+            elif path.is_file():
+                data = path.read_bytes()
+            else:
+                data = b""
+            state[path.relative_to(base).as_posix()] = (data, info.st_mtime_ns, info.st_mode)
+    return state
+
+
+def _dry_run_groups(out: str) -> dict[str, set[str]]:
+    """The paths a dry run printed under each of its `created`, `changed` and `removed` headings."""
+    groups: dict[str, set[str]] = {}
+    current: set[str] | None = None
+    for line in out.splitlines():
+        if line in ("created:", "changed:", "removed:"):
+            current = groups.setdefault(line[:-1], set())
+        elif line.startswith("  ") and current is not None:
+            current.add(line.strip())
+        else:
+            current = None
+    return groups
+
+
+@pytest.fixture
+def _no_uncommitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI's commit-state check standing down, so an agents-file write does not turn on this tree."""
+    monkeypatch.setattr("adjagent.cli.uncommitted_sources", _committed)
+
+
+def _assert_dry_run_predicts(argv: list[str], *, project: Path, capsys) -> dict[str, set[str]]:
+    """Run `argv` with `--dry-run`, then for real: the dry run touches nothing under `project`, and the
+    paths it prints are exactly those the real run then creates, changes and removes. Its groups."""
+    files, state = _files(project), _state(project)
+    capsys.readouterr()
+    main([*argv, "--dry-run"])
+    groups = _dry_run_groups(capsys.readouterr().out)
+    assert _state(project) == state
+    main(argv)
+    after = _files(project)
+    actual = {
+        "created": set(after) - set(files),
+        "changed": {path for path in set(after) & set(files) if after[path] != files[path]},
+        "removed": set(files) - set(after),
+    }
+    assert groups == {group: paths for group, paths in actual.items() if paths}
+    return groups
+
+
+def _kb_install_with_a_runner_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
+    """The settings file and the runner include line are in play: each is already what the second run
+    writes."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "justfile").write_text("# mine\n", encoding="utf-8")
+    return ["install", str(project), "--harness=claude", "--with-kb"], project
+
+
+def _user_level_with_global_agents_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    return ["install", str(home), "--harness=claude", "--install-global-agents-file"], home
+
+
+def _agents_file_in_a_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
+    """An agents file holding an earlier block, so the first run also writes the backup."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text(f"mine\n{_BEGIN}\nold\n{_END}\n", encoding="utf-8")
+    return ["install-agents-file", str(project), "--harness=claude"], project
+
+
+def _the_repository_as_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
+    """The project is this repository, whose runner file no install writes: the copy must read that from
+    the real project, not from its scratch one."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "justfile").write_text("# generator\n", encoding="utf-8")
+    monkeypatch.setattr("adjagent.install.REPO_ROOT", project.resolve())
+    return ["install", str(project), "--harness=claude", "--with-kb"], project
+
+
+def _mage_below_its_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
+    """The plugin's own `.mcp.json` and agents file at ROOT."""
+    project = tmp_path / "project"
+    project.mkdir()
+    return ["install", str(project), "--harness=mage", "--subdir=plugins/adjagent"], project
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize(
+    "setup",
+    [
+        _kb_install_with_a_runner_file,
+        _user_level_with_global_agents_file,
+        _agents_file_in_a_project,
+        _the_repository_as_project,
+        _mage_below_its_project,
+    ],
+    ids=["kb-runner-file", "user-level-global-agents-file", "agents-file", "repository-project", "mage-subdir"],
+)
+def test_a_second_identical_run_whose_decisions_read_the_real_location_is_up_to_date(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, setup
+) -> None:
+    """Nothing under the target changes, a modification time included."""
+    argv, base = setup(tmp_path, monkeypatch)
+    main(argv)
+    state = _state(base)
+    capsys.readouterr()
+    main(argv)
     out = capsys.readouterr().out
-    assert any(f"{project / planted} {reason}" in line and _BY_HAND in line for line in out.splitlines())
+    assert _UP_TO_DATE in out and "installed:" not in out
+    assert _state(base) == state
+
+
+def test_a_changed_kb_set_installs(tmp_path: Path, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    argv = ["install", str(project), "--harness=opencode", "--family=gemma-4"]
+    main(argv)
+    files = _files(project)
+    capsys.readouterr()
+    main([*argv, "--with-kb"])
+    assert _UP_TO_DATE not in capsys.readouterr().out
+    assert _files(project) != files
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize(
+    "harness_args",
+    [
+        ["--harness=claude", "--with-kb"],
+        ["--harness=opencode", "--with-kb"],
+        ["--harness=mage", "--subdir=plugins/adjagent"],
+    ],
+    ids=["claude-kb", "opencode-kb", "mage-subdir"],
+)
+def test_a_dry_run_on_a_fresh_target_lists_as_created_what_the_install_creates(
+    tmp_path: Path, capsys, harness_args: list[str]
+) -> None:
+    """The project's runner file is in play too: under a kb install it gains the include line, so it is
+    listed as changed."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "justfile").write_text("# mine\n", encoding="utf-8")
+    groups = _assert_dry_run_predicts(["install", str(project), *harness_args], project=project, capsys=capsys)
+    assert groups["created"]
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_a_dry_run_on_a_user_directory_predicts_the_install(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agents file holds an earlier block: only a copy that holds it too predicts that the file
+    changes and its backup is created."""
+    argv, home = _user_level_with_global_agents_file(tmp_path, monkeypatch)
+    (home / ".claude/CLAUDE.md").write_text(f"mine\n{_BEGIN}\nold\n{_END}\n", encoding="utf-8")
+    groups = _assert_dry_run_predicts(argv, project=home, capsys=capsys)
+    assert ".claude/CLAUDE.md" in groups["changed"] and ".claude/backup.CLAUDE.md" in groups["created"]
+
+
+def test_a_dry_run_after_a_family_change_lists_the_renders_as_changed(tmp_path: Path, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    argv = ["install", str(project), "--harness=opencode"]
+    main([*argv, "--family=gemma-4"])
+    groups = _assert_dry_run_predicts([*argv, "--family=qwen3"], project=project, capsys=capsys)
+    assert groups["changed"] and set(groups) == {"changed"}
+
+
+def test_a_dry_run_lists_a_legacy_tree_and_a_stale_render_as_removed(tmp_path: Path, capsys) -> None:
+    project = tmp_path / "project"
+    root = project / ".claude"
+    root.mkdir(parents=True)
+    argv = ["install", str(project), "--harness=claude"]
+    main(argv)
+    (root / "agents/kb_tools").mkdir()
+    (root / "agents/kb_tools/helper.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "agents/gone.md").write_text(_NEW_BANNER, encoding="utf-8")
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert groups == {"removed": {".claude/agents/kb_tools/helper.py", ".claude/agents/gone.md"}}
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize(
+    "argv",
+    [["install", "{project}", "--harness=claude"], ["install-agents-file", "{project}", "--harness=claude"]],
+    ids=["install", "install-agents-file"],
+)
+def test_a_dry_run_on_an_up_to_date_target_says_so(tmp_path: Path, capsys, argv: list[str]) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    argv = [part.format(project=project) for part in argv]
+    main(argv)
+    state = _state(project)
+    capsys.readouterr()
+    main([*argv, "--dry-run"])
+    out = capsys.readouterr().out
+    assert _UP_TO_DATE in out and _dry_run_groups(out) == {}
+    assert _state(project) == state
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_an_agents_file_dry_run_names_the_files_and_writes_nothing(tmp_path: Path, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    groups = _assert_dry_run_predicts(
+        ["install-agents-file", str(project), "--harness=claude"], project=project, capsys=capsys
+    )
+    assert groups == {"created": {"AGENTS.md", "CLAUDE.md"}}
+
+
+def test_no_printed_path_or_refusal_names_the_scratch_copy(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal the copy run raises names the real file; the scratch copy is gone afterwards."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr("tempfile.tempdir", str(scratch))
+    project = tmp_path / "project"
+    root = project / ".claude"
+    root.mkdir(parents=True)
+    argv = ["install", str(project), "--harness=claude", "--dry-run"]
+    main(argv)
+    printed = capsys.readouterr().out
+    (root / "agents").mkdir()
+    (root / "agents/python-coder.md").write_text("mine\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        main(argv)
+    assert exit_info.value.code == 2
+    refusal = capsys.readouterr().err
+    assert f"'{root / 'agents/python-coder.md'}'" in refusal
+    assert str(scratch) not in printed + refusal
+    assert list(scratch.iterdir()) == []
+
+
+def test_a_dry_run_through_a_symlinked_skill_directory_writes_nowhere(tmp_path: Path, capsys) -> None:
+    """The copy dereferences the link, so the kbase skill the run into it writes there cannot land in
+    the link's destination."""
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    outside.mkdir()
+    (outside / "notes.txt").write_text("mine\n", encoding="utf-8")
+    (project / ".claude/skills").mkdir(parents=True)
+    (project / ".claude/skills/kbase").symlink_to(outside.resolve(), target_is_directory=True)
+    before = (_state(project), _state(outside))
+    capsys.readouterr()
+    main(["install", str(project), "--harness=claude", "--with-kb", "--dry-run"])
+    assert ".claude/skills/kbase/SKILL.md" in _dry_run_groups(capsys.readouterr().out)["created"]
+    assert (_state(project), _state(outside)) == before
+
+
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["install", "dry-run"])
+def test_a_settings_file_left_alone_is_reported_on_an_up_to_date_target(
+    tmp_path: Path, capsys, dry_run: list[str]
+) -> None:
+    """The entry to merge by hand is printed on every run that leaves the file alone, not only the one
+    that first wrote the rest."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _claude_root(project, '{\n  // mine\n  "hooks": {}\n}\n')
+    argv = ["install", str(project), "--harness=claude"]
+    main(argv)
+    capsys.readouterr()
+    main([*argv, *dry_run])
+    printed = capsys.readouterr()
+    assert _UP_TO_DATE in printed.out
+    assert f"{project / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in printed.err
+
+
+@pytest.mark.parametrize("linked", ["{}\n", None], ids=["link-outside-the-project", "dangling-link"])
+def test_a_symlinked_settings_file_the_install_leaves_alone_is_up_to_date(
+    tmp_path: Path, capsys, linked: str | None
+) -> None:
+    """The copy keeps the link a link, so the run into it leaves the file alone as the real install does."""
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    outside.mkdir()
+    project.mkdir()
+    if linked is not None:
+        (outside / "settings.json").write_text(linked, encoding="utf-8")
+    _claude_root(project)
+    (project / _SETTINGS).symlink_to(outside / "settings.json")
+    argv = ["install", str(project), "--harness=claude"]
+    main(argv)
+    capsys.readouterr()
+    main(argv)
+    assert _UP_TO_DATE in capsys.readouterr().out
+    main([*argv, "--dry-run"])
+    assert _dry_run_groups(capsys.readouterr().out) == {}

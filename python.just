@@ -5,8 +5,11 @@
 VENV := PROJECT_ROOT / ".venv"
 PYBIN := if os() == "windows" { "Scripts" } else { "bin" }
 EXE := if os() == "windows" { ".exe" } else { "" }
-VENV_PYTHON := VENV / PYBIN / "python" + EXE
+VENV_PYTHON := "\"" + VENV / PYBIN / "python" + EXE + "\""
+DOCDICER := "\"" + VENV / PYBIN / "docdicer" + EXE + "\""
 TOOLS_RECORD := VENV / "tools.txt"
+
+DOCDICER_VER := "0.7.1"
 
 # Lazy: the venv is created when its python is absent. The tool list below is recorded in
 # .venv/tools.txt after it installs; when the record is absent or differs from the list, the list
@@ -20,16 +23,16 @@ TOOLS_RECORD := VENV / "tools.txt"
 _venv:
     #!/usr/bin/env bash
     set -euo pipefail
-    tools=("pytest~=8.4.2" "isort~=6.1.0" "black~=25.11.0" "flake8~=7.3.0" "setuptools~=82.0.1" "build~=1.4.4" "git+https://github.com/benn-herrera/docdicer@v0.7.1")
-    if [[ ! -x "{{VENV_PYTHON}}" ]]; then
+    tools=("pytest~=8.4.2" "isort~=6.1.0" "black~=25.11.0" "flake8~=7.3.0" "setuptools~=82.0.1" "build~=1.4.4" "git+https://github.com/benn-herrera/docdicer@v{{DOCDICER_VER}}")
+    if [[ ! -x {{VENV_PYTHON}} ]]; then
         # if /usr/bin/python3 is installed it is the crappy 3.9.6 from xcode command line tools
         # that is actually our minspec, so use it to ensure we're not using any features
         # beyond its ken
         [[ "$(uname)" == Darwin ]] && export PATH=/usr/bin/:${PATH} || true
         python3 -m venv "{{VENV}}"
-        "{{VENV_PYTHON}}" -m pip install pip --upgrade
+        {{VENV_PYTHON}} -m pip install pip --upgrade
     fi
     if [[ "$(cat "{{TOOLS_RECORD}}" 2>/dev/null || true)" != "$(printf '%s\n' "${tools[@]}")" ]]; then
-        "{{VENV_PYTHON}}" -m pip install "${tools[@]}"
+        {{VENV_PYTHON}} -m pip install "${tools[@]}"
         printf '%s\n' "${tools[@]}" > "{{TOOLS_RECORD}}"
     fi

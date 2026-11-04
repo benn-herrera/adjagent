@@ -1,9 +1,11 @@
 ### Composed text is never rescanned
 
-Outside `adjagent/definitions/`, no module of the package
-calls `str.replace`, `format` or `format_map` (`dataclasses.replace` is not one), and the only
-pattern substitution is the body fill in `render.filled_text`. A definition module's `.format` on
-one of its own string literals is the permitted call, and that literal holds no composed text.
-What a constant or a harness string fills in is literal: a placeholder-shaped span it introduces
-is never filled again. Only `tests/test_adjagent.py::test_no_composed_text_is_rescanned` stated
-the rule, which is why it is written here.
+Filled text is literal. A definition body gets one substitution: the body fill, `render.filled_text`,
+which fills each hole once. Whatever a fill puts in is never filled again, whether it comes from a
+clause constant, a harness string, a family overlay, a model name or an agents-file value. A
+placeholder-shaped span inside it reaches the rendered output as written. A definition module may
+call `.format` on one of its own string literals, because that literal holds no composed text. The
+reason is ownership: if filled text could introduce a hole, any harness or family value could edit
+any definition, and no reader of the body could tell what renders. The check is
+`tests/test_adjagent.py::test_a_filled_value_carrying_a_hole_reaches_the_body_literally`. Each of its
+cases fills in a value that carries a hole, and asserts that the hole survives unfilled.

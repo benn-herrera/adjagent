@@ -1,5 +1,5 @@
-"""`python3 -m adjagent install-agents-file DIR [HARNESS]`: the harness agents file installed by
-replacing its block and keeping every other byte of the live file.
+"""`python3 -m adjagent install-agents-file DIR [--harness NAME] [--dry-run]`: the harness agents file
+installed by replacing its block and keeping every other byte of the live file.
 
 The block runs from the begin marker line through the end marker line. A marker line is recognised
 by its whitespace-stripped ends alone, so a block any earlier revision wrote is still found. A live
@@ -20,6 +20,7 @@ from pathlib import Path
 
 from adjagent.errors import InputError
 from adjagent.harness import Harness
+from adjagent.preflight import run_preflighted
 from adjagent.render import render_agents_file, write_text_verbatim
 
 BEGIN = ("<!-- vvv-adjagent", "adjagent-vvv -->")
@@ -119,17 +120,49 @@ class AgentsFileWrite:
     native: Path | None
 
 
-def install_agents_file(directory: Path, harness: Harness, *, uncommitted: tuple[str, ...]) -> None:
-    """Install `harness`'s agents file into `directory`, refusing while `uncommitted`
-    (uncommitted_sources) names any change; nothing is written until every check has passed."""
+def _refuse_unless_directory(directory: Path) -> None:
     if not directory.is_dir():
         raise InputError(f"'{directory}' is not an existing directory")
-    write_agents_file(checked_agents_file(directory, harness, uncommitted=uncommitted))
 
 
-def checked_agents_file(directory: Path, harness: Harness, *, uncommitted: tuple[str, ...]) -> AgentsFileWrite:
+def install_agents_file(
+    directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], real_directory: Path | None = None
+) -> None:
+    """Install `harness`'s agents file into `directory`, refusing while `uncommitted`
+    (uncommitted_sources) names any change; nothing is written until every check has passed.
+    `real_directory` is as `checked_agents_file` takes it."""
+    _refuse_unless_directory(directory)
+    write_agents_file(checked_agents_file(directory, harness, uncommitted=uncommitted, real_directory=real_directory))
+
+
+def preflighted_agents_file_install(
+    directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], dry_run: bool
+) -> None:
+    """`install_agents_file` behind the preflight: run first into a scratch copy of the files it would
+    read or write — the agents file, the destination it is reached through, the backup and the native
+    redirect — then, where that changed nothing, `directory` is reported up to date and nothing is
+    written; with `dry_run`, what would be created or changed is printed relative to `directory` and
+    nothing is written; otherwise the install runs. Every refusal names `directory`, never the copy."""
+    _refuse_unless_directory(directory)
+    write = checked_agents_file(directory, harness, uncommitted=uncommitted)
+    paths = [write.path, write.destination, write.backup, *([] if write.native is None else [write.native])]
+    run_preflighted(
+        [(directory, [str(path.relative_to(directory)) for path in paths])],
+        install=lambda bases: install_agents_file(bases[0], harness, uncommitted=uncommitted, real_directory=directory),
+        dry_run=dry_run,
+        target=directory,
+        report_root=directory,
+    )
+
+
+def checked_agents_file(
+    directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], real_directory: Path | None = None
+) -> AgentsFileWrite:
     """Every check of installing `harness`'s agents file into `directory`, writing nothing. An absent
-    `directory` reads as an empty one."""
+    `directory` reads as an empty one. `real_directory` is the directory the file is for, where
+    `directory` is a scratch copy of it: whether it is the harness's user directory, and the scope the
+    file is titled with, are read from it. It defaults to `directory`."""
+    identity = directory if real_directory is None else real_directory
     if uncommitted:
         raise InputError(
             f"{__package__}/ has uncommitted changes ({', '.join(uncommitted)}) — commit them before "
@@ -137,7 +170,7 @@ def checked_agents_file(directory: Path, harness: Harness, *, uncommitted: tuple
         )
     native = None
     destination = directory / harness.agents_file
-    if not _in_user_dir(harness, directory) and harness.agents_file != STANDARD_AGENTS_FILE:
+    if not _in_user_dir(harness, identity) and harness.agents_file != STANDARD_AGENTS_FILE:
         native, destination = destination, directory / STANDARD_AGENTS_FILE
         native_text = _read(native)
         if native_text is not None and _redirect(native_text) != STANDARD_AGENTS_FILE:
@@ -151,7 +184,7 @@ def checked_agents_file(directory: Path, harness: Harness, *, uncommitted: tuple
         raise InputError(f"{destination} redirects to {native}, which may hold only the redirect — nothing written")
     backup = path.with_name(BACKUP_PREFIX + path.name)
     _refuse_unless_regular_or_absent(backup)
-    rendered = render_agents_file(harness, scope=scope_name(harness, directory))
+    rendered = render_agents_file(harness, scope=scope_name(harness, identity))
     if existing is None:
         text = rendered
     else:

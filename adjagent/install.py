@@ -1,6 +1,7 @@
 """`python3 -m adjagent install TARGET`, once `adjagent.install_target` has resolved ROOT and the project
 root from TARGET: every definition rendered into ROOT's agents/, commands/ and
-skills/, the shipped packages copied beside them under adj-tools/, each file the installing harness
+skills/, the shipped packages copied to their stated destinations — the docdicer tools inside the
+docdicer skill's directory, rebuilding their venv afterwards where one stood — each file the installing harness
 ships copied into ROOT as it stands, the harness's guardrail hook registered in the project's settings
 file where one install-time run of it succeeds, and — when the install includes kb — the kb-tools
 package inside the kbase skill's own directory, with the consumer's `kbase` MCP entry and its runner
@@ -15,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path, PurePosixPath
@@ -25,6 +27,7 @@ from adjagent.context import Render, harnesses
 from adjagent.errors import InputError
 from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite
 from adjagent.install_target import user_dir_harnesses
+from adjagent.preflight import VENV_DIR, run_preflighted
 from adjagent.render import (
     GENERATED_MARK,
     GENERATED_NOTICE,
@@ -60,15 +63,28 @@ def uncommitted_sources() -> tuple[str, ...]:
     return tuple(line for line in out.splitlines() if line)
 
 
-# (source directory in this package, destination below ROOT) for the packages every install ships.
-# A destination is a consumer contract — definition bodies and the installed runner line name it —
-# so it is stated, never derived.
-#
-# Empty for now: no package ships, the one row this held having retired. The machinery around it
-# stays, because a package is expected to return — `package_copies`, the `!INSTALLED!` stamping, the
-# destination replacement and `_refuse_root`'s source list all read this tuple, so one row
-# here restores the whole path, and nothing else needs an edit.
-SHIPPED_PACKAGES: tuple[tuple[str, str], ...] = ()
+def run_tool_install(script: Path) -> str | None:
+    """Run a shipped tool's `script --install`, its output passing through: None when it exits 0, else
+    one line saying how it failed — its exit status, or why it could not be started."""
+    try:
+        result = subprocess.run([str(script), "--install"], check=False)
+    except OSError as exc:
+        return f"could not be run: {exc}"
+    return None if result.returncode == 0 else f"exited {result.returncode}"
+
+
+# The docdicer tools package, inside the docdicer skill's own directory: its launcher script, and the
+# virtual environment that script builds beside itself — not install output, so the install replaces it
+# with the package and afterwards has the script rebuild it where it existed.
+DOCDICER_TOOLS_PACKAGE = "skills/docdicer/tools"
+DOCDICER_TOOLS_SCRIPT = f"{DOCDICER_TOOLS_PACKAGE}/docdicer"
+DOCDICER_TOOLS_VENV = f"{DOCDICER_TOOLS_PACKAGE}/{VENV_DIR}"
+# (source directory in this package, destination below ROOT) for the packages every project install
+# ships; a user-level install ships none. A destination is a consumer contract — a skill names its own
+# tools relative to its directory, and an installed runner line names its destination — so it is
+# stated, never derived. `package_copies`, the `!INSTALLED!` stamping, the destination replacement
+# and `_refuse_root`'s source list all read this table.
+SHIPPED_PACKAGES: tuple[tuple[str, str], ...] = (("docdicer-tools", DOCDICER_TOOLS_PACKAGE),)
 # The harness resources: files a harness ships that land in its project harness directory as they
 # stand, copied and never rendered. The directory below this one in the source is the harness's own
 # name, and the destination is ROOT itself — both stated, neither derived from a directory listing.
@@ -119,16 +135,19 @@ NOT_BY_DEFAULT = re.compile(r"^(kb-|kbase$)")
 # else any make variant selects `make`.
 _JUSTFILE_NAMES = ("justfile", "Justfile", ".justfile")
 _MAKEFILE_NAMES = ("Makefile", "makefile", "GNUmakefile")
-# Never shipped, matched at any depth: test suites and caches, safety copies, and this repository's
-# own project documents. README.md is absent on purpose: a package that grows one ships it.
-EXCLUDED_DIRS = frozenset({"tests", "__pycache__", ".pytest_cache"})
+# Never shipped, matched at any depth: test suites, caches and virtual environments, safety copies,
+# and this repository's own project documents. README.md is absent on purpose: a package that grows
+# one ships it.
+EXCLUDED_DIRS = frozenset({"tests", "__pycache__", ".pytest_cache", VENV_DIR})
 EXCLUDED_NAMES = frozenset(
     {".DS_Store", "SPEC.md", "ARCHITECTURE.md", "CONVENTIONS.md", "THESIS.md", "ROADMAP.md", "AGENTS.md", "CLAUDE.md"}
 )
 EXCLUDED_SUFFIX = ".bak"
-# Copied files whose type takes a `#` comment carry the one-line installed banner; every other file
-# is copied byte-verbatim.
+# Copied package files of a script or build-file type carry the one-line installed banner: by suffix,
+# or by name for an extensionless script. Every other file — a `.gitignore` among them — is copied
+# byte-verbatim.
 STAMPED_SUFFIXES = frozenset({".py", ".sh", ".mk", ".just"})
+STAMPED_NAMES = frozenset({"docdicer"})
 SURFACES = ("agents", "commands", "skills")
 # The generated-banner prefixes, built from the mark `render` writes above the payload, and the module
 # paths a payload may name: the current `adjagent/definitions/<module>.py`, and the pre-1.0
@@ -325,12 +344,14 @@ def prune(root: Path, *, keep: set[Path]) -> list[Path]:
     """Remove every regular file under ROOT's surfaces that is not in `keep`, would ship, and is ours;
     then each directory that leaves empty, up to its surface.
 
-    The kb-tools package is the one destination inside a surface — `skills/kbase/kb-tools/` — and no
-    destination is carved out by name. It needs none: a copied package file opens with the
-    `!INSTALLED!` banner rather than the generated one `_is_ours` reads, so it is untouched here rather
-    than pruned. Every file under a surface is thus either ours or untouched. The would-ship
-    vocabulary is name-based and covers `kb-` names and `kbase`, so a kb definition this run did not write — an
-    install without kb — is stale and removed, while one the run wrote is in `keep`.
+    Package destinations sit inside the skills surface — `skills/kbase/kb-tools/` and
+    `skills/docdicer/tools/` — and no destination is carved out by name. None needs to be: a copied
+    package file carries the `!INSTALLED!` banner or none, never the generated one `_is_ours` reads, so
+    it is untouched here rather than pruned, and a `.venv` below a destination is outside the would-ship
+    vocabulary, so its files never enter the stale list. Every file under a surface is thus either ours
+    or untouched. The would-ship vocabulary is name-based and covers `kb-` names and `kbase`, so a kb
+    definition this run did not write — an install without kb — is stale and removed, while one the run
+    wrote is in `keep`.
 
     A file at ROOT's top level is outside every surface, and so outside this walk: a harness-rendered
     file such as the plugin manifest, and the harness's own settings file where it lives at ROOT, are
@@ -718,6 +739,12 @@ def _plain_json_object(target: Path) -> tuple[str, dict] | None:
     return (text, data) if isinstance(data, dict) else None
 
 
+def _report_left_alone(message: str) -> None:
+    """Print `message`, naming something the install left alone or skipped, on stderr: the write log
+    is stdout, which the preflight discards, and this report is owed on every run."""
+    print(message, file=sys.stderr)
+
+
 def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
     """Register the `kbase` server in `harness`'s MCP settings file under `base`: the first discovered
     alternative, else the canonical path — created when no file the contract names exists. `base` is
@@ -736,7 +763,7 @@ def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
     by_hand = f"merge this entry by hand: {json.dumps(entry)}"
     obstacle = _settings_obstacle(target, base=base)
     if obstacle is not None:
-        print(f"{target} not written: {obstacle} — left untouched; {by_hand}")
+        _report_left_alone(f"{target} not written: {obstacle} — left untouched; {by_hand}")
         return
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -745,12 +772,12 @@ def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
         return
     plain = _plain_json_object(target)
     if plain is None:
-        print(f"{target} carries JSONC comments — left untouched; {by_hand}")
+        _report_left_alone(f"{target} carries JSONC comments — left untouched; {by_hand}")
         return
     text, _ = plain
     spliced = _splice(text, container=container, entry=entry)
     if spliced is None:
-        print(f"{target} could not be edited safely — left untouched; {by_hand}")
+        _report_left_alone(f"{target} could not be edited safely — left untouched; {by_hand}")
         return
     write_text_verbatim(target, spliced)
     print(f"registered the kbase MCP entry in {target}")
@@ -816,7 +843,7 @@ def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str,
     by_hand = f"merge this entry by hand: {json.dumps(entry)}"
     obstacle = _settings_obstacle(target, base=project)
     if obstacle is not None:
-        print(f"{target} not written: {obstacle} — left untouched; {by_hand}")
+        _report_left_alone(f"{target} not written: {obstacle} — left untouched; {by_hand}")
         return
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -825,13 +852,13 @@ def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str,
         return
     plain = _plain_json_object(target)
     if plain is None:
-        print(f"{target} is not a plain JSON object — left untouched; {by_hand}")
+        _report_left_alone(f"{target} is not a plain JSON object — left untouched; {by_hand}")
         return
     text, data = plain
     found = _guardrail_claims(data, guardrail=guardrail)
     if len(found) > 1 or (found and found[0][1] is HookClaim.SHARED):
         indexes = ", ".join(str(index) for index, _ in found)
-        print(
+        _report_left_alone(
             f"{target} names the guardrail hook in {'.'.join(guardrail.container)} entries {indexes}, not one "
             f"entry holding it alone — left untouched; {by_hand}"
         )
@@ -839,7 +866,7 @@ def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str,
     replace = found[0][0] if found else None
     spliced = _splice_element(text, container=guardrail.container, entry=entry, replace=replace)
     if spliced is None:
-        print(f"{target} could not be edited safely — left untouched; {by_hand}")
+        _report_left_alone(f"{target} could not be edited safely — left untouched; {by_hand}")
         return
     if spliced == text:
         print(f"{target} already registers the guardrail hook")
@@ -950,7 +977,7 @@ def _harness_relpath(root: Path, project: Path) -> str:
     return resolved.relative_to(project).as_posix()
 
 
-def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
+def install_kb_include_line(project: Path, *, harness_relpath: str, real_project: Path | None = None) -> None:
     """Write the canonical KB include line into `project`'s runner file: the justfile or Makefile
     probed there, else a `Makefile` created carrying it.
 
@@ -960,8 +987,10 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
     appended. A line naming another harness is reported and left alone, and so is a file holding more
     than one such line, which the operator merges by hand. Only the runner file this run selected is
     examined: a second runner file's stale line is left to the operator and is non-fatal. Nothing is
-    written when `project` is this repository — its own runner is the generator's, not a consumer's."""
-    if project == REPO_ROOT:
+    written when `project` is this repository — its own runner is the generator's, not a consumer's.
+    `real_project`, defaulting to `project`, is the project that is, where `project` is a scratch copy
+    of it: the repository test reads it."""
+    if (project if real_project is None else real_project) == REPO_ROOT:
         return
     found = _runner_file(project)
     if found is None:
@@ -980,12 +1009,14 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
     named = _named_harnesses(text, runner=runner)
     if len(named) > 1:
         indexes = ", ".join(str(match.index + 1) for match in named)
-        print(f"no include line written: {path} names the kb snippets on lines {indexes}; merge them into one")
+        _report_left_alone(
+            f"no include line written: {path} names the kb snippets on lines {indexes}; merge them into one"
+        )
         return
     if named:
         match = named[0]
         if _harness_dirs().get(match.name, match.name) != harness_relpath:
-            print(
+            _report_left_alone(
                 f"no include line written: {path} line {match.index + 1} already includes the kb "
                 f"snippets for harness '{match.name}'"
             )
@@ -998,7 +1029,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
         canonical = f"{segment}/{KB_TOOLS_SNIPPETS}/{KB_SNIPPET_NAMES[runner]}"
         rewritten = f"{prior[: match.start]}{canonical}{prior[match.end :]}"
         if rewritten == prior:
-            print(
+            _report_left_alone(
                 f"no include line written: {path} line {match.index + 1} already names the installed "
                 f"kb snippets for harness '{match.name}'"
             )
@@ -1020,6 +1051,21 @@ def install_kb_include_line(project: Path, *, harness_relpath: str) -> None:
     print(f"installed: appended the KB include line to {path}")
 
 
+def _installs_agents_file(
+    root: Path, harness: Harness, *, project: Path, user_level: bool, global_agents_file: bool
+) -> bool:
+    """Whether an install into `root` writes an agents file there: a plugin installed below its project
+    root, or a user-level ROOT given `global_agents_file`."""
+    plugin_below_project = harness.is_plugin and root.resolve() != project
+    return plugin_below_project or (user_level and global_agents_file)
+
+
+def _docdicer_venv_to_rebuild(root: Path, *, user_level: bool) -> bool:
+    """Whether an install into `root` replaces the docdicer tools' `.venv` and then rebuilds it: a
+    project install that finds one standing."""
+    return not user_level and (root / DOCDICER_TOOLS_VENV).is_dir()
+
+
 def install(
     root: Path,
     ctx: Render,
@@ -1028,10 +1074,13 @@ def install(
     with_kb: bool = False,
     project_root: Path | None = None,
     uncommitted: Callable[[], tuple[str, ...]],
+    tool_install: Callable[[Path], str | None],
     global_agents_file: bool = False,
+    real_root: Path | None = None,
+    real_project: Path | None = None,
 ) -> None:
     """Render every included definition and every file the harness renders of its own into ROOT,
-    replace each package destination whole with a stamped copy, copy the harness's own resource files
+    replace each package destination whole — a `.venv` under it included — with a stamped copy, copy the harness's own resource files
     into ROOT as they stand, write the renders over what is there, then prune. An install that includes
     kb — `with_kb` names it, the harness is one whose files sit at its own root, which is a plugin and
     always takes the kb set, or ROOT holds the evidence of an earlier kb install (the sticky rule, per
@@ -1061,13 +1110,24 @@ def install(
     refusal of the root, of the render, of a target it would overwrite, of the runner file, of the MCP
     settings file, of the harness directory the guardrail entry cannot name or of the guardrail
     settings file writes nothing; a settings path that is a symlink or not a regular file is reported
-    and left alone."""
+    and left alone.
+
+    Where a project install finds the docdicer tools' `.venv` under ROOT before its first write, it
+    afterwards calls `tool_install` with the installed docdicer script, so the venv the replacement
+    removed is rebuilt to match the script. `tool_install` returns None on success or one line saying
+    how the run failed; a failure is printed naming the command, and the install's outcome is
+    otherwise unaffected.
+
+    `real_root` and `real_project` name the ROOT and project root the install is for, where `root` and
+    `project_root` are a scratch copy of them; each defaults to the path written. The decisions that
+    compare a path with a fixed location read them: whether ROOT is user-level, whether the project is
+    this repository, and the agents file's user-directory test and title."""
     _refuse_root(root)
     project = root.resolve() if project_root is None else Path(project_root).resolve()
     # The settings file's own base: a harness that keeps its file at ROOT resolves its paths against
     # ROOT, every other against the project root.
     mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
-    user_level = ctx.harness.name in user_dir_harnesses(root)
+    user_level = ctx.harness.name in user_dir_harnesses(root if real_root is None else real_root)
     # A user-level ROOT need not sit under its project root — a user directory may be a symlink out of
     # home — and nothing a user-level install writes spells its path from there.
     harness_relpath = "" if user_level else _harness_relpath(root, project)
@@ -1115,16 +1175,19 @@ def install(
         guardrail_entry = guardrail.entry(harness_relpath)
         _check_settings(project / guardrail.settings, base=project, container=guardrail.container, leaf=list)
     agents_file: AgentsFileWrite | None = None
-    plugin_below_project = ctx.harness.is_plugin and root.resolve() != project
-    if plugin_below_project or (user_level and global_agents_file):
-        agents_file = checked_agents_file(root, ctx.harness, uncommitted=uncommitted())
+    if _installs_agents_file(
+        root, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
+    ):
+        agents_file = checked_agents_file(root, ctx.harness, uncommitted=uncommitted(), real_directory=real_root)
+    # Read before the destination is replaced, which removes the venv with the rest of the package.
+    rebuild_docdicer_venv = _docdicer_venv_to_rebuild(root, user_level=user_level)
 
     root.mkdir(parents=True, exist_ok=True)
     for _, destination in [] if user_level else _packages(kb_included=kb_included):
         shutil.rmtree(root / destination, ignore_errors=True)
     for source, target in package_files:
         data = source.read_bytes()
-        if source.suffix in STAMPED_SUFFIXES:
+        if source.suffix in STAMPED_SUFFIXES or source.name in STAMPED_NAMES:
             data = stamped(data, origin=source.relative_to(PACKAGE_ROOT.parent).as_posix())
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -1156,13 +1219,118 @@ def install(
         # A harness whose files sit at its own root is a plugin, not a repo project, so it has no
         # consumer runner file to include the snippets in and none is created.
         if not ctx.harness.is_plugin:
-            install_kb_include_line(project, harness_relpath=harness_relpath)
-    if guardrail is None:
-        return
-    if guardrail_entry is not None:
+            install_kb_include_line(project, harness_relpath=harness_relpath, real_project=real_project)
+    if guardrail is not None and guardrail_entry is not None:
         guardrail_merge(project, guardrail=guardrail, entry=guardrail_entry)
-        return
-    # Neither prune nor the one-way copy removes what an earlier install delivered, so it is named.
-    earlier = _earlier_guardrail(root / guardrail.script, project=project, guardrail=guardrail)
-    left = f"; left in place from an earlier install: {', '.join(str(path) for path in earlier)}" if earlier else ""
-    print(f"guardrail hook skipped, neither installed nor registered: {guardrail_skipped}{left}")
+    elif guardrail is not None:
+        # Neither prune nor the one-way copy removes what an earlier install delivered, so it is named.
+        earlier = _earlier_guardrail(root / guardrail.script, project=project, guardrail=guardrail)
+        left = f"; left in place from an earlier install: {', '.join(str(path) for path in earlier)}" if earlier else ""
+        _report_left_alone(f"guardrail hook skipped, neither installed nor registered: {guardrail_skipped}{left}")
+    if rebuild_docdicer_venv:
+        script = root / DOCDICER_TOOLS_SCRIPT
+        failure = tool_install(script)
+        if failure is not None:
+            print(f"'{script} --install' failed, the install otherwise complete: {failure}")
+
+
+def _install_managed_paths(
+    root: Path,
+    harness: Harness,
+    *,
+    project: Path,
+    user_level: bool,
+    global_agents_file: bool,
+    uncommitted: Callable[[], tuple[str, ...]],
+) -> list[tuple[Path, list[str]]]:
+    """(base, paths relative to it) for everything an install into `root` may read or write, the
+    project root first: what it writes by, never a listing of ROOT, which in a user harness directory
+    holds the operator's own trees. Under ROOT, the surfaces, every package destination, each legacy
+    tree, the harness's resource targets and rendered files, and the agents file's paths where the run
+    writes one; under the project root, on a project install, the guardrail settings file and the
+    runner files; the MCP settings candidates under whichever of the two the harness keeps them."""
+    under_root = [
+        *SURFACES,
+        *(destination for _, destination in _packages(kb_included=True)),
+        *LEGACY_TREES,
+        *(target.relative_to(root).as_posix() for _, target in harness_resource_copies(root, harness=harness.name)),
+        *(file.path for file in harness.rendered_files),
+    ]
+    under_project: list[str] = []
+    if not user_level:
+        mcp_paths = [harness.mcp.canonical, *harness.mcp.alternatives]
+        if harness.mcp.site is McpSite.PROJECT:
+            under_project += mcp_paths
+        else:
+            under_root += mcp_paths
+        under_project += [*_JUSTFILE_NAMES, *_MAKEFILE_NAMES]
+        if harness.guardrail is not None:
+            under_project.append(harness.guardrail.settings)
+    if _installs_agents_file(
+        root, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
+    ):
+        write = checked_agents_file(root, harness, uncommitted=uncommitted())
+        agents_paths = (write.path, write.destination, write.backup, write.native)
+        under_root += [path.relative_to(root).as_posix() for path in agents_paths if path is not None]
+    return [(project, under_project), (root, under_root)]
+
+
+def preflighted_install(
+    root: Path,
+    ctx: Render,
+    *,
+    verbose: bool,
+    with_kb: bool = False,
+    project_root: Path | None = None,
+    uncommitted: Callable[[], tuple[str, ...]],
+    tool_install: Callable[[Path], str | None],
+    global_agents_file: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """`install` behind the preflight: run first into a scratch copy of the paths it manages, with the
+    real ROOT and project root as its identity. Where that changed nothing, ROOT is reported up to date
+    and nothing in the target is touched — no file, no package destination, no `.venv`, no
+    `tool_install` run. With `dry_run`, what would be created, changed and removed is printed relative
+    to the project root, followed by the docdicer `.venv` rebuild the install would also make, and
+    nothing is written. Otherwise the install runs exactly as `install` does.
+    The copy holds no `.venv`, so only that real install can reach `tool_install`. Every printed path and refusal names
+    the real target; a refusal the real install raises for a symlink below ROOT that is not itself a
+    managed path is not foreseen by the copy, which dereferences such symlinks, and the install itself
+    still raises it."""
+    _refuse_root(root)
+    project = root.resolve() if project_root is None else Path(project_root).resolve()
+    user_level = ctx.harness.name in user_dir_harnesses(root)
+    managed = _install_managed_paths(
+        root,
+        ctx.harness,
+        project=project,
+        user_level=user_level,
+        global_agents_file=global_agents_file,
+        uncommitted=uncommitted,
+    )
+    dry_run_notes: list[str] = []
+    if _docdicer_venv_to_rebuild(root, user_level=user_level):
+        relpath = PurePosixPath(_harness_relpath(root, project))
+        dry_run_notes.append(
+            f"the install would also replace {relpath / DOCDICER_TOOLS_VENV} and run "
+            f"'{relpath / DOCDICER_TOOLS_SCRIPT} --install', which needs the network"
+        )
+    run_preflighted(
+        managed,
+        install=lambda bases: install(
+            bases[1],
+            ctx,
+            verbose=verbose,
+            with_kb=with_kb,
+            project_root=bases[0],
+            uncommitted=uncommitted,
+            tool_install=tool_install,
+            global_agents_file=global_agents_file,
+            real_root=root,
+            real_project=project,
+        ),
+        dry_run=dry_run,
+        target=root,
+        report_root=project,
+        dry_run_notes=dry_run_notes,
+    )

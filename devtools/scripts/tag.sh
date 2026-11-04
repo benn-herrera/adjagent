@@ -2,7 +2,7 @@
 # `tag`'s body: a tag names a commit whose own files carry the number it is tagged with, so this
 # refuses while `adjagent/` is uncommitted — the same reasoning
 # `install.uncommitted_sources` applies to publishing the agents file, and the lines it prints
-# are that check's own. The number is read from the `version` verb rather than restated here,
+# are that check's own. The number is read from the `--version` flag rather than restated here,
 # `__version__` in `adjagent/__init__.py` holding the one copy. The tag is signed and annotated
 # (`git tag -s`), so it needs a gpg secret key and a TTY, and nothing is pushed: the operator pushes.
 set -euo pipefail
@@ -18,11 +18,11 @@ if [[ -n "${dirty}" ]]; then
     printf '%s\n' "${dirty}" >&2
     exit 1
 fi
-version="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" version)"
+version="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" --version)"
 # An empty reading would tag the commit `v` instead of failing, and a wrong
 # tag is the one thing this recipe can produce that nothing else corrects.
 if [[ -z "${version}" ]]; then
-    printf '%s\n' "error: 'python3 -m ${GEN} version' printed nothing — nothing tagged" >&2
+    printf '%s\n' "error: 'python3 -m ${GEN} --version' printed nothing — nothing tagged" >&2
     exit 1
 fi
 tag="v${version}"

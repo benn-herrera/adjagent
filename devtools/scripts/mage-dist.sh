@@ -10,7 +10,7 @@ set -euo pipefail
 DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist}"
 
 function resolve_names() {
-  ver="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" version)"
+  ver="$(PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" --version)"
   if [[ ! "${ver}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf 'mage-dist: version %q is not <major>.<minor>.<patch>; nothing was removed or written.\n' "${ver}" >&2
     exit 1

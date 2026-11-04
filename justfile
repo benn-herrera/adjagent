@@ -26,16 +26,16 @@ default:
     @echo "===="
     @just --list | grep '\[dev\]'
 
-[doc("install into an existing <target>: [--harness=NAME] [--subdir=DIR] [--install-global-agents-file] [tuning flags]; README \"Install\" has the rules")]
+[doc("install into an existing <target>: [--harness=NAME] [--subdir=DIR] [--install-global-agents-file] [--dry-run] [tuning flags]; an up-to-date target is left untouched; --dry-run prints what would be created, changed and removed and writes nothing; docs/install-reference.md has the rules")]
 install target *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "$@"
 
-[doc("as install, plus the kb set (README \"Knowledge Base Set\")")]
+[doc("as install, plus the kb set (docs/knowledge-base.md); takes --dry-run as install does")]
 install-with-kb target *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "$@" --with-kb
 
-[doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [harness] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis")]
-install-agents-file dir harness="":
+[doc("install the harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [--harness NAME] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis; an up-to-date file is left untouched; [--dry-run] prints whether the agents file and any redirect would be created or changed and writes nothing")]
+install-agents-file dir *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install-agents-file "$@"
 
 ##
@@ -55,7 +55,7 @@ install-agents-file dir harness="":
 # not a privileged tree.
 RENDERED_DIR := "rendered"
 
-[doc("tag the current commit v<version>, <version> read from `python3 -m adjagent version`; refuses while adjagent/ has uncommitted changes or the tag already exists, and never pushes")]
+[doc("tag the current commit v<version>, <version> read from `python3 -m adjagent --version`; refuses while adjagent/ has uncommitted changes or the tag already exists, and never pushes")]
 tag:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/tag.sh
 
@@ -65,7 +65,7 @@ mage-dist:
 
 [doc("build the wheel and sdist of the working tree into dist/ with the venv's setuptools; makes no git check and fetches nothing")]
 build: _venv
-    @"{{VENV_PYTHON}}" -m build --no-isolation --outdir "{{PROJECT_ROOT}}/dist" "{{PROJECT_ROOT}}"
+    @{{VENV_PYTHON}} -m build --no-isolation --outdir "{{PROJECT_ROOT}}/dist" "{{PROJECT_ROOT}}"
 
 [doc("[dev] build, then prove the wheel: its package data equals the non-.py files under adjagent/ that git tracks or would track, and installed into a throwaway venv made from <python> (default /usr/bin/python3) it imports from that venv, runs as the adjagent console script, installs byte-identically to the checkout, and writes the mage plugin's agents file outside a checkout")]
 check-wheel python="/usr/bin/python3": build
@@ -95,20 +95,20 @@ _harness-value harness key:
 
 [doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
 dice-doc monolith out map="": _venv
-    @"{{VENV_PYTHON}}" -m docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
+    @{{DOCDICER}} dice-doc "{{monolith}}" "{{out}}" "{{map}}"
 
 [doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees")]
 dice-docs manifest src work: _venv
-    @"{{VENV_PYTHON}}" -m docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
+    @{{DOCDICER}} dice-docs "{{manifest}}" "{{src}}" "{{work}}"
 
 [doc("write a diced tree (the directory holding its entry-point.md) back out as one markdown document at monolith, which must not exist, then check it dices back to the same tree")]
 undice tree monolith: _venv
-    @"{{VENV_PYTHON}}" -m docdicer undice "{{tree}}" "{{monolith}}"
+    @{{DOCDICER}} undice "{{tree}}" "{{monolith}}"
 
-[doc("check every relative link and #anchor in PROJECT_DOCS and the top-level *.md files, then that every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exit 1 on a broken link or an orphan")]
+[doc("check every relative link and #anchor in PROJECT_DOCS, docs and the top-level *.md files, then that every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exit 1 on a broken link or an orphan")]
 check-links: _venv
-    @"{{VENV_PYTHON}}" -m docdicer check-links PROJECT_DOCS *.md
-    @"{{VENV_PYTHON}}" -m docdicer check-tree PROJECT_DOCS
+    @{{DOCDICER}} check-links PROJECT_DOCS docs *.md
+    @{{DOCDICER}} check-tree PROJECT_DOCS
 
 # Reports and never gates: a difference between two slots is the expected
 # outcome of doing work, so differences exit zero. Only a comparison that could
@@ -130,12 +130,12 @@ render-diff a="reference" b="latest":
 
 [doc("[dev] run tooling python tests and the markdown link check: no argument runs all four (adjagent + dupe_sweep pytest, then docs: just check-links with its defaults, then wheel: just check-wheel); a surface argument (adjagent, dupe_sweep, docs, wheel) runs only that one; further arguments, never given to docs or wheel, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON="{{VENV_PYTHON}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test.sh "$@"
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON={{VENV_PYTHON}} JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test.sh "$@"
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
 [doc("[dev] black-format, isort, flake8 the generator (adjagent), the tests and devtools, or the given path(s) in place of all of them")]
 format-python *paths: _venv
-    @VENV_PYTHON="{{VENV_PYTHON}}" FLAKE8_IGNORE="{{FLAKE8_IGNORE}}" ./devtools/scripts/format-python.sh "$@"
+    @VENV_PYTHON={{VENV_PYTHON}} FLAKE8_IGNORE="{{FLAKE8_IGNORE}}" ./devtools/scripts/format-python.sh "$@"
 
 # Emits candidates, never verdicts, and exits zero with findings: whether two sites are one idea is
 # a judgment, and a gate here would be claiming it.
@@ -159,9 +159,10 @@ sweep-python *args:
 #
 # One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
 # ending in `/` matches everything under it; one starting `*` is a glob over
-# top-level file names. `docs` is the link check: the documents it reads, and
-# the dicer that runs it. `wheel` is check-wheel: the build configuration it builds from, and the
-# package tree whose data it checks.
+# top-level file names. `docs` is the link check: the documents it reads
+# (PROJECT_DOCS/, docs/, top-level *.md), and the dicer that runs it. `wheel` is
+# check-wheel: the build configuration it builds from, and the package tree
+# whose data it checks.
 TEST_SURFACE_MAP := "
 adjagent/ adjagent
 adjagent/ wheel
@@ -170,6 +171,7 @@ devtools/render_diff.py adjagent
 devtools/ dupe_sweep
 PROJECT_DOCS/ docs
 *.md docs
+docs/ docs
 devtools/dicer/ docs
 pyproject.toml wheel
 justfile ALL

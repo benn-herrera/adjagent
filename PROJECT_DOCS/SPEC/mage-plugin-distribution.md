@@ -9,7 +9,7 @@ stands — it makes no git check — two files into `dist/`, which is gitignored
 - `adjagent-mage-v<V>.tgz.asc`, its detached armored signature, made with the signer's default `gpg`
   secret key.
 
-`<V>` is what `python3 -m adjagent version` prints. The build refuses, before anything is removed or
+`<V>` is what `python3 -m adjagent --version` prints. The build refuses, before anything is removed or
 written, a version not of the form `major.minor.patch`. Past that refusal, a re-run at the same
 version replaces the two files, and a build that fails, signing included, leaves neither output of
 that version and no `stage/` directory. The build signs with `gpg` and its default secret key, so the

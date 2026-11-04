@@ -29,16 +29,16 @@ directory".
 An install is **user-level** when its ROOT is the installing harness's `user-harness-dir`, however
 the target reached it. A user-level install renders the definitions its type carries, prunes and
 removes the legacy trees as any install does, and writes nothing else: no shipped harness file, no
-guardrail probe or registration, no `kb-tools/` package, no MCP entry, no runner include line and
-no runner file. `--install-global-agents-file` is its one opt-in: it also installs the harness
-agents file at ROOT (Harness Agents File, below). On a project install the flag is ignored, with
-no error and no write.
+guardrail probe or registration, no shipped package (neither `kb-tools/` nor the docdicer tools
+package) and so no `--install` re-run, no MCP entry, no runner include line and no runner file.
+`--install-global-agents-file` is its one opt-in: it also installs the harness agents file at ROOT
+(Harness Agents File, below). On a project install the flag is ignored, with no error and no write.
 
 An install writes into ROOT: every definition its type carries, rendered by that same invocation, together with the packages
 those definitions read (below), delivered to their own frozen destinations by explicit mapping
 rather than as part of any surface, and the files the installing harness itself ships, copied into
 that same directory as they stand (below). What is not part of the product does not travel: test
-suites and their fixtures, caches, `.DS_Store`, backup (`.bak`) copies, and this repository's own
+suites and their fixtures, caches, `.DS_Store`, backup (`.bak`) copies, a `.venv` directory, and this repository's own
 project documentation. That last class is a filename vocabulary — the contract
 documents (`SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `THESIS.md`) and the development
 apparatus (`ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`) — matched at any depth in a shipped package's

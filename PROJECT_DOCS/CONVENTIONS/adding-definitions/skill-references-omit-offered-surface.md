@@ -8,5 +8,7 @@ drift the moment either moves. kbase's surface also includes the
 maintained block kbase stamps into `kb-root/AGENTS.md` and `kb-root/CONVENTIONS.md`, for a
 reference that has the session read those documents. The offered surface is the one the minimum kbase version provides
 (`KBASE_MIN_VERSION` in `adjagent/definitions/kbase.py`), so a change of that minimum is the
-moment to re-read the references. Nothing checks a reference for sync with that surface. Prose
+moment to re-read the references. The docdicer skill's offered surface is `docdicer --help` of the
+version `tools/docdicer` pins (its `VERSION`), and changing that pin is the moment to re-read the
+skill. Nothing checks a reference or a skill for sync with that surface. Prose
 only the tool's README carries is not offered to a session, and stays in the reference.

@@ -1,0 +1,44 @@
+#!/bin/sh
+# Launcher for docdicer, kept in a venv beside this script. `--install` builds that venv afresh and
+# installs the pinned version into it; every other invocation runs the venv's docdicer.
+
+VERSION=0.7.1
+PACKAGE="git+https://github.com/benn-herrera/docdicer@v${VERSION}"
+
+case "${0}" in
+  */*) dir="${0%/*}" ;;
+  *) dir="." ;;
+esac
+
+venv=${dir}/.venv
+venv_bin=${venv}/bin
+venv_python=${venv_bin}/python
+venv_docdicer=${venv_bin}/docdicer
+
+if [ "${1:-}" = "--install" ]; then
+  function remedy() {
+    {
+      printf '%s\n' "docdicer needs python3 3.9 or later with its venv module."
+      printf '%s\n' "  macOS: brew install python  (or: xcode-select --install)"
+      printf '%s\n' "  Linux: install the distribution's python3 package and, where it is split out, its venv module (Debian and Ubuntu: python3-venv)."
+    } >&2
+  }
+  if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
+    remedy
+    exit 1
+  fi
+  command rm -rf "${venv}"
+  if ! python3 -m venv "${venv}"; then
+    remedy
+    exit 1
+  fi
+  "${venv_python}" -m pip install --upgrade "${PACKAGE}"
+  exit "${?}"
+fi
+
+if [ ! -x "${venv_docdicer}" ]; then
+  printf '%s\n' "docdicer is not installed here. Run: \"${0}\" --install" >&2
+  exit 1
+fi
+
+exec "${venv_docdicer}" "${@}"

@@ -151,4 +151,4 @@ def agents_file_harness(directory: Path, harness: str | None) -> str:
         cause = f"it is the user directory of {' and '.join(matches)}"
     else:
         cause = "it is no harness's user directory"
-    raise InputError(f"cannot infer the harness for '{directory}': {cause} — pass HARNESS, one of {inferable}")
+    raise InputError(f"cannot infer the harness for '{directory}': {cause} — pass --harness, one of {inferable}")

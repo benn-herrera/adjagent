@@ -11,7 +11,8 @@ there; what stands at or above ROOT is the operator's own and is not examined. I
 report — every file under a deployed surface that it did not write and that carries a generated
 banner, and with them any directory that leaves empty; a file with neither banner is never touched.
 A shipped package's destination is replaced whole, `skills/kbase/kb-tools/` included: a `kbase`
-executable and signature an earlier version installed there do not survive a kb install. A
+executable and signature an earlier version installed there do not survive a kb install. The
+docdicer tools destination is replaced the same way, a `.venv` under it included. A
 file a harness ships is replaced whole on each install when the file already at its path carries
 `!INSTALLED! … adjagent` in its first ten lines; any other file there refuses the install the same
 way. It is never removed: the copy is one-way and no mirror, so a file this repository stops
@@ -38,4 +39,23 @@ skipped for a failed install-time run leaves the settings file and any script or
 install wrote where they stand, and the report names those that are the install's own. An install's report names each
 path it pruned; where the consuming project tracks the installed set, its git is the record of what an
 install changed.
+
+An install that would change nothing reports the target up to date, exits 0 and touches nothing: no
+file written, no mode or modification time changed, no package destination replaced, no
+`tools/.venv` rebuilt and no `--install` re-run. "Nothing" is judged on the result: every file the
+install would write is already byte-identical and mode-identical, and none would be created or
+removed. Changing `--harness`, `--family`, the model map or `--with-kb` changes bytes, so that install
+proceeds. A `.venv` directory is not install output and is outside the comparison, so its presence
+alone never makes an install proceed. No version marker or stamp file decides this.
+
+`--dry-run` runs the same judgment and writes nothing, in the target or elsewhere that outlives the
+run. It prints what the install would change, grouped as created, changed and removed, each path
+relative to the project root, and exits 0; where nothing would change it says the target is up to
+date. Where the install would replace a docdicer `tools/.venv`, the dry run also says so and that
+the install would rebuild it with `--install`, which needs the network. Every path it prints and
+every refusal it reports names the real target. What the install would leave alone or skip, with the
+reason, is reported on stderr on an up-to-date run and a dry run as on a changing one. It reports the
+refusals it can foresee, a symlinked surface or package destination among them; a symlink or
+non-directory on the path to a target, such as the directory above a settings file, is judged by the
+install itself and a dry run may not foresee it.
 

@@ -1,7 +1,7 @@
 ## Subsystem Map
 
-Every entry below is rendered from the definition module under `adjagent/definitions/` named for its
-output path, or for its set (Composition Model). A shared-text name given here is a constant or
+Every entry below but the last is rendered from the definition module under `adjagent/definitions/`
+named for its output path, or for its set (Composition Model). A shared-text name given here is a constant or
 function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
 
 - **Coder family** — generalist-coder, language coders (c, cpp, go, lua, python, rust, typescript),
@@ -52,3 +52,20 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   single-purpose, invoked directly rather than as part of a coding pipeline.
   applied-mathematician carries the `fam-ask-vs-stipulate` overlay anchor; `fam-gap-aversion` was
   authored in the retired `kb-claim-scorer` module and now renders nowhere.
+- **Tool-driving skills** — `adjagent` and `docdicer`, each one `SKILL.md` with no supporting
+  files, in the default set under every harness, except that mage omits `adjagent` through
+  `Harness.omits`, as it omits `imgread`; no install type excludes either. `docdicer.py` names its
+  script `tools/docdicer`, relative to the skill's directory, and reads three states from running
+  it: the script absent (a user-level install delivers no tools), the venv absent (offer
+  `--install`, run only at the user's direction) and installed (the script's `--help` is the command
+  list, which the skill does not restate). `adjagent.py` states the rule for changing the installed
+  set — never edit it, put project behavior in CONVENTIONS.md or AGENTS.md, change the definitions
+  only through a vendored copy or a fork — and how to update and inspect it, naming
+  `adjagent install`, `--dry-run` and `adjagent --version` and the runner's `AGENTS_VER`. It also
+  states how to run adjagent: the project's runner recipe where there is one, else the release tag
+  installed into a venv and that venv's `adjagent`. The docdicer version the script installs is written once, as `VERSION` in
+  `adjagent/docdicer-tools/docdicer`.
+- **Install machinery** — the one entry not rendered from a definition: `install.py` renders, copies
+  and prunes; `preflight.py` runs that install into a scratch copy and compares (Install
+  Consumption Model, Renders and copies); `agents_file.py` does the same for the agents file
+  (Agents File).

@@ -107,6 +107,10 @@ changes cannot be seen at its source or corrected there.
   - CONVENTIONS.md — project-specific additions to house rules and practices
 - Each states what the others do not; where one needs another's content it cites rather than
   restates.
+- Where a project keeps these documents as trees under `PROJECT_DOCS/`, a rule naming THESIS.md,
+  SPEC.md, ARCHITECTURE.md or CONVENTIONS.md — in this file, an agent definition or a dispatch —
+  means that document's tree: reading it is reading the tree's `entry-point.md` and opening a leaf
+  only when a question needs it; writing to it is writing the leaf that holds the text.
 - **A problem you record for later states the fact, not its surroundings.** Line counts, today's
   file layout, how you found it and the fix you had in mind all rot, and a later reader cannot tell
   which parts have. Name it and where it lives; evidence belongs where it is dated — the commit, the
@@ -126,7 +130,8 @@ before presenting it. **Reading is not establishing: where one command settles a
 acts on — an import graph, what a call executes, where a symbol is defined — the step carries that
 command and the answer it gave, for the executing agent to re-run.** Where a document settles it,
 the step quotes the line and names the file. An approved plan runs to completion: surface any
-blocker needing user intervention during planning, never as a mid-run discovery.
+blocker needing user intervention during planning, never as a mid-run discovery. A plan or design
+you write that grows too large to read whole, you dice.
 
 ## Coding
 **INVARIANT**: NEVER JUST CODE FROM BASE BEHAVIOR.

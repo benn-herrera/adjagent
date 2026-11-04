@@ -22,7 +22,7 @@ SCRIPT = REPO / "devtools/scripts/mage-dist.sh"
 @functools.cache
 def _version() -> str:
     return subprocess.run(
-        ["python3", "-m", "adjagent", "version"],
+        ["python3", "-m", "adjagent", "--version"],
         cwd=REPO,
         env={**os.environ, "PYTHONPATH": str(REPO)},
         capture_output=True,

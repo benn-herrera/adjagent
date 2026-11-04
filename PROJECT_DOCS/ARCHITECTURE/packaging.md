@@ -9,9 +9,11 @@ repository root is the whole build configuration.
 - **Version.** `dynamic = ["version"]` with `[tool.setuptools.dynamic]` reading
   `adjagent.__version__`. `pyproject.toml` holds no version literal (CONVENTIONS.md, Version has one
   home).
-- **Package data.** `[tool.setuptools.package-data]` lists two directory globs,
-  `kb-tools/**/*` and `harnesses/resources/**/*`: the trees `install.py` reads through
-  `PACKAGE_ROOT` (`KB_TOOLS_SOURCE`, `HARNESS_RESOURCES_SOURCE`). A glob sweeps in whatever sits
+- **Package data.** `[tool.setuptools.package-data]` lists four patterns, `kb-tools/**/*`,
+  `harnesses/resources/**/*`, `docdicer-tools/**/*` and `docdicer-tools/**/.*`: the trees `install.py`
+  reads through `PACKAGE_ROOT` (`KB_TOOLS_SOURCE`, `HARNESS_RESOURCES_SOURCE` and the
+  `SHIPPED_PACKAGES` source). The last exists because setuptools' `**/*` skips dotfiles, and the
+  docdicer package ships a `.gitignore`. A glob sweeps in whatever sits
   under its tree, so `just check-wheel` holds the list equal to the tree: the wheel's non-`.py`
   files under `adjagent/` must be exactly the non-`.py` files git tracks or would track there
   (`git ls-files --cached --others --exclude-standard`). A shipped tree missing from the list fails

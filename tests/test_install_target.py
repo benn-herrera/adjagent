@@ -159,7 +159,7 @@ def test_a_mage_install_into_the_target_itself_writes_no_agents_file(tmp_path: P
     assert not (tmp_path / "CLAUDE.md").exists()
 
 
-@pytest.mark.parametrize("harness", [[], [""]], ids=["absent", "empty"])
+@pytest.mark.parametrize("harness", [[], ["--harness="]], ids=["absent", "empty"])
 def test_the_agents_file_harness_is_inferred_from_a_user_directory(
     tmp_path: Path, monkeypatch, harness: list[str]
 ) -> None:
@@ -169,6 +169,14 @@ def test_the_agents_file_harness_is_inferred_from_a_user_directory(
     user_dir.mkdir()
     cli.main(["install-agents-file", str(user_dir), *harness])
     assert (user_dir / "CLAUDE.md").read_text(encoding="utf-8") == render_agents_file(CLAUDE, scope="Global")
+
+
+def test_an_agents_file_harness_given_as_a_positional_is_refused(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "uncommitted_sources", _committed)
+    project = tmp_path / "project"
+    project.mkdir()
+    assert "unrecognized arguments: claude" in _refused(["install-agents-file", str(project), "claude"], capsys)
+    assert _paths(project) == []
 
 
 def test_a_project_directory_without_a_harness_is_refused(tmp_path: Path, monkeypatch, capsys) -> None:
