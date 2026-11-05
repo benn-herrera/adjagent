@@ -14,7 +14,7 @@ family, so the installed set agrees with itself.
 - The kb set runs on macOS or Linux only; native Windows is unsupported for it. It needs kbase, which
   you install, among its other requirements ([Knowledge base](docs/knowledge-base.md#requirements)).
 
-Adjagent installs for three harnesses: claude (`.claude/`), opencode (`.opencode/`) and mage (a plugin).
+Adjagent installs for three harnesses: claude (one plugin, `.claude/skills/adjagent/`, whose agents run as `adjagent:<name>`), opencode (`.opencode/`) and mage (a plugin).
 
 ## Quick Start Guide
 
@@ -74,8 +74,7 @@ with it.
 To update, change `AGENTS_VER` to the new release tag and run the recipe again. Everything it
 installs is documented in the [install reference](docs/install-reference.md).
 
-To add the knowledge-base set, add `--with-kb` to the two `install .` lines, add `.mcp.json` to
-`.gitignore`, and install kbase first ([Knowledge base](docs/knowledge-base.md)).
+To add the knowledge-base set, add `--with-kb` to the two `install .` lines and install kbase first ([Knowledge base](docs/knowledge-base.md)).
 
 ## Previewing and re-installing
 

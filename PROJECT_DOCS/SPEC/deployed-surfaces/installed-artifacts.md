@@ -23,17 +23,13 @@ banner sits where it changes how the file is read. Every other copied file — `
 among them — and every file a harness ships, whatever its type, is installed byte-verbatim and
 unstamped.
 
-Every path written inside a definition body — a file the agent is told to `Read`, a script it
-invokes — is written against the installing harness's project directory —
-`<harness-dir>/agents/...` for a definition, `<harness-dir>/adj-tools/...` or
-`<harness-dir>/skills/kbase/kb-tools/...` for a shipped package's script, which are
-`.claude/agents/...`, `.claude/adj-tools/...` and `.claude/skills/kbase/kb-tools/...` under
-claude — not against the repository's own path: that is where the installed file
-actually lives, and the path it must resolve from inside a consuming session. The exception is a
-script inside a skill's own directory, which that skill's body may name relative to that directory
-(`tools/docdicer`), because the skill's directory differs by harness (under mage,
-`~/Mage/Skills/adjagent/skills/docdicer/`). The same holds for
-the project's scratch directory, named as the harness names it. A project's agents file is named
+A definition body names no installed path below the harness directory, because where the set sits
+differs by harness (under claude, inside the plugin `<harness-dir>/skills/adjagent/`). A script
+inside a skill's own directory is named relative to that directory (`tools/docdicer`). The project's
+scratch directory is named as the harness names it. Where a definition names another definition,
+claude and mage render it with the plugin's namespace — `adjagent:<name>` for an agent or a command
+— and opencode renders the bare name; claude's `kbase` MCP tools are offered as
+`mcp__plugin_adjagent_kbase__<tool>`. A project's agents file is named
 `AGENTS.md` under claude and opencode, whose user directory is a separate scope; where the
 destination is the harness's own directory — mage — the harness's name is used, so the file is
 `CLAUDE.md` (Harness Agents File, below).

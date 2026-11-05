@@ -1,4 +1,4 @@
-"""The claude harness."""
+"""The claude harness: the set written as one skills-directory plugin below the harness directory."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import re
 
 from adjagent.errors import InputError
 from adjagent.harness import (
+    PLUGIN_MANIFEST,
+    PLUGIN_NAME,
     AgentFields,
     GuardrailHook,
     Harness,
@@ -15,6 +17,13 @@ from adjagent.harness import (
     quoted,
 )
 from adjagent.vocabulary import Tool
+
+# Claude Code registers a freshly written plugin's components only after a restart or `/reload-plugins`.
+# The sentence names the symptom and the remedy alone: the cause is Claude Code's and may change.
+_RELOAD_RULE = (
+    "If the new agents are not available after using `adjagent install`, use `/reload-plugins` to rescan the "
+    "agent list."
+)
 
 
 def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
@@ -96,7 +105,11 @@ HARNESS = Harness(
     project_harness_dir=".claude",
     project_temp_dir=".claude-temp",
     user_harness_dir="~/.claude",
-    mcp_tool_prefix="mcp__kbase__",
+    plugin_dir=f"skills/{PLUGIN_NAME}",
+    # a plugin's components register only under the plugin's namespace, its MCP tools included
+    reference_prefix=f"{PLUGIN_NAME}:",
+    mcp_tool_prefix=f"mcp__plugin_{PLUGIN_NAME}_kbase__",
+    reload_rule=_RELOAD_RULE,
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule="",
     tools={
@@ -117,7 +130,8 @@ HARNESS = Harness(
     bare_tier_spec_is_all=False,
     frontmatter=_frontmatter,
     document_frontmatter=(),
-    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.PROJECT, entry=_mcp_entry),
+    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.HARNESS, entry=_mcp_entry),
+    rendered_files=(PLUGIN_MANIFEST,),
     # Claude Code reads project hooks from this one path, whatever directory the harness is installed in.
     guardrail=GuardrailHook(
         script=_GUARDRAIL_SCRIPT,

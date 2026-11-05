@@ -8,8 +8,13 @@ itself, and any other file at that path refuses like any foreign target. Any oth
 naming each such path. So does a symlink, or anything but
 a directory, on the path from ROOT to such a target, since a write would pass through it or fail
 there; what stands at or above ROOT is the operator's own and is not examined. It removes — naming each in its
-report — every file under a deployed surface that it did not write and that carries a generated
-banner, and with them any directory that leaves empty; a file with neither banner is never touched.
+report — every file under a deployed surface of the harness directory that it did not write and that
+carries a generated banner, and with them any directory that leaves empty; a file with neither banner
+is never touched. Under claude the surfaces walked are the harness directory's, not the plugin's
+alone, so the generated files an earlier version wrote straight into the harness directory go.
+A claude project install also removes whole, naming each, the package folders that earlier layout
+left outside the plugin, `skills/docdicer/tools/` and `skills/kbase/kb-tools/`, unless a symlink
+stands on the way, which is named and left; a user-level install removes none.
 A shipped package's destination is replaced whole, `skills/kbase/kb-tools/` included: a `kbase`
 executable and signature an earlier version installed there do not survive a kb install. The
 docdicer tools destination is replaced the same way, a `.venv` under it included. A
@@ -32,8 +37,8 @@ non-directory, or that is not a regular file; the report names which. A settings
 UTF-8, or holds a `hooks` that is not an object (`null` included) or a `PreToolUse` that is not an
 array, refuses the install with nothing written, as does a harness directory whose path holds a
 `"`, `$`, backtick or `\` where the hook is to be registered, the entry being unable to name it. A
-kb install's `kbase` settings file is held to the same, wherever it lives — under mage it sits at
-the plugin root, inside ROOT: left alone where a symlink or non-regular file stands in the way,
+kb install's `kbase` settings file is held to the same, wherever it lives — under claude and mage it
+sits at the plugin root, inside ROOT: left alone where a symlink or non-regular file stands in the way,
 refused where it is not UTF-8 or nests a non-object, `null` included, where the entry goes. A hook
 skipped for a failed install-time run leaves the settings file and any script or entry an earlier
 install wrote where they stand, and the report names those that are the install's own. An install's report names each

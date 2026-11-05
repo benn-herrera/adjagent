@@ -82,6 +82,7 @@ class OptionalHarnessText(Enum):
 
     RECIPE_RULE = "recipe_rule"
     KBASE_PROJECT_RULE = "kbase_project_rule"
+    RELOAD_RULE = "reload_rule"
 
 
 class AgentsFileText(Enum):

@@ -3,7 +3,9 @@
 Every definition below is **generated**: there are no hand-maintained definitions and nothing to edit
 in an installed tree. Each is rendered from a module under `adjagent/definitions/`
 ([Development](development.md#generated-definitions)). Entries are named by where they land in
-`<project>/.claude/`: every entry lives under `agents/` unless noted as a command or a skill.
+the install's plugin directory (`<project>/.claude/skills/adjagent/` under claude): every entry lives
+under `agents/` unless noted as a command or a skill. Under claude and mage an agent or command is
+invoked as `adjagent:<name>`.
 
 A base install carries everything here except the `kbase` skill ([Knowledge base](knowledge-base.md)).
 
@@ -58,7 +60,8 @@ Three skills ship in the default set of every harness, except that mage omits `a
   ([README, Customizing](../README.md#customizing-the-set)). It also covers running adjagent (the
   project's runner recipe where there is one, else the release tag installed into a venv and that
   venv's `adjagent`), updating (raise the pinned version, preview with `adjagent install --dry-run`,
-  then install) and inspecting (`adjagent --version`, `--dry-run`).
+  then install) and inspecting (`adjagent --version`, `--dry-run`). Under claude it also says what to
+  do when the new agents are not offered after an install: run `/reload-plugins`.
 - **`docdicer`** (`skills/docdicer/SKILL.md`): dicing markdown into a tree of small linked files under
   one `entry-point.md`, and undicing a tree back into one document, so a session loads only the
   leaves a task needs. It runs through `tools/docdicer` in its own directory, and offers
@@ -67,15 +70,15 @@ Three skills ship in the default set of every harness, except that mage omits `a
 
   **Runner recipes.** The tools package also carries `runner-snippets/docdicer.just` and
   `docdicer.mk`. No install adds an include line for them; a project opts in by adding one to its
-  runner file, naming its harness directory (`.claude` or `.opencode`), and the docdicer skill offers
-  that line at your direction:
+  runner file, naming where the install put them (below `.claude/skills/adjagent/` under claude,
+  `.opencode/` under opencode), and the docdicer skill offers that line at your direction:
 
   ```just
-  import? '.claude/skills/docdicer/tools/runner-snippets/docdicer.just'
+  import? '.claude/skills/adjagent/skills/docdicer/tools/runner-snippets/docdicer.just'
   ```
 
   ```make
-  -include .claude/skills/docdicer/tools/runner-snippets/docdicer.mk
+  -include .claude/skills/adjagent/skills/docdicer/tools/runner-snippets/docdicer.mk
   ```
 
   Each gives two recipes. `docdicer` passes its arguments to `tools/docdicer`. `docdicer-check` runs

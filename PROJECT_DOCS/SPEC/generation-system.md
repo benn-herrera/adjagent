@@ -41,6 +41,11 @@ properties, independent of how they are implemented (see ARCHITECTURE.md):
   still fills their anchors. A family whose member-scoped tuning names a member no tier reaches — in
   neither its own tier map nor the effective one — is refused before anything is rendered.
 
+A definition's reference to another definition renders with the installing harness's name for it:
+under claude and mage the plugin's namespace, `adjagent:<name>` for an agent or a command, and the
+bare name under opencode. A render under a harness differs from the same render without that prefix
+at reference sites alone.
+
 An install that requests a tuning other than the default (Deployed Surfaces, above) renders the
 generated definitions under it; Generated-Definition Integrity, below, holds for the tuning the
 install was given exactly as it holds for the default one.

@@ -10,10 +10,10 @@ directory of, matched on the target's trailing path elements (`.claude`, `.openc
 `--harness`. More than one harness directory inside the target is refused the same way. No other
 part of a path selects a harness.
 
-The install's **ROOT** is where it writes, and the **project root** is the directory the MCP entry
-and the runner include line belong to:
+The install's **harness directory** is the directory of its harness's own that it writes under, and
+the **project root** is the directory the MCP entry and the runner include line belong to:
 
-| target | ROOT | project root |
+| target | harness directory | project root |
 |---|---|---|
 | any, with `--subdir=<dir>` | `<target>/<dir>`; an empty `--subdir=` is the target itself | the target |
 | a harness's own directory (mage: `Mage/Skills`) | the target (mage: `<target>/adjagent`) | the target's parent (mage: the target) |
@@ -22,17 +22,33 @@ and the runner include line belong to:
 
 The project-harness-dir is `.claude/` by default, `.opencode/` for `opencode`, and `adjagent/` for
 mage. A home-directory target with `--harness=mage` takes the last row, mage having no absolute
-user directory. The project root is resolved through symlinks. ROOT may be absent and is created
-once every check has passed; one that exists and is not a directory is refused, "is not a
-directory".
+user directory. The project root is resolved through symlinks.
 
-An install is **user-level** when its ROOT is the installing harness's `user-harness-dir`, however
-the target reached it. A user-level install renders the definitions its type carries, prunes and
-removes the legacy trees as any install does, and writes nothing else: no shipped harness file, no
-guardrail probe or registration, no shipped package (neither `kb-tools/` nor the docdicer tools
-package) and so no `--install` re-run, no MCP entry, no runner include line and no runner file.
-`--install-global-agents-file` is its one opt-in: it also installs the harness agents file at ROOT
-(Harness Agents File, below). On a project install the flag is ignored, with no error and no write.
+The install's **ROOT** is where it writes the set. Under opencode and mage it is the harness
+directory. Under claude it is the plugin inside it, `<harness-dir>/skills/adjagent/`: the set is one
+Claude Code plugin named `adjagent`, so its agents and commands are invoked as `adjagent:<name>`, in
+a project and at user level alike. ROOT may be absent and is created once every check has passed;
+one that exists and is not a directory is refused, "is not a directory".
+
+An install is **user-level** when its harness directory is the installing harness's
+`user-harness-dir`, however the target reached it. A user-level install renders the definitions its
+type carries and the files its harness renders of its own (the plugin manifest), prunes and removes
+the legacy trees as any install does, and writes nothing else but the kb set's MCP entry (below): no
+shipped harness file, no guardrail probe or registration, no shipped package (neither `kb-tools/` nor
+the docdicer tools package) and so no `--install` re-run, no runner include line and no runner file.
+`--install-global-agents-file` is its one opt-in: it also installs the harness agents file in the
+harness directory (Harness Agents File, below). On a project install the flag is ignored, with no
+error and no write.
+
+A user-level claude plugin and a project's one share a name, and Claude Code loads the user-level one
+alone. A claude install reports this on stderr and never refuses over it: a user-level install says
+it takes precedence over every project's plugin; a project install says its plugin does not load
+where the user-level plugin is already installed. The report is made on a dry run and on an
+up-to-date run as on a changing one.
+
+A claude install that writes the plugin prints one sentence after it: "If the new agents are not
+available after using `adjagent install`, use `/reload-plugins` to rescan the agent list." The
+installed `adjagent` skill says the same.
 
 An install writes into ROOT: every definition its type carries, rendered by that same invocation, together with the packages
 those definitions read (below), delivered to their own frozen destinations by explicit mapping
@@ -56,13 +72,13 @@ described at the top of this page.
 
 An install's ROOT may be any directory prepared to receive the product. The sanctioned deployment
 has two shapes. One has a consuming project gitignore a subdirectory for this repository's own clone
-and run install from inside it, so ROOT resolves to the project's `.claude/` with the repository
+and run install from inside it, so the harness directory resolves to the project's `.claude/` with the repository
 sitting underneath it as one of the sources the install reads — that containment is what that shape
 *is*, not a hazard it happens to create. The other runs the installed package (Package and Command),
-which has no repository around it. Run from a clone, the install refuses a ROOT that is this
-repository's own root, since the render would then land beside the sources that produce it, as `agents/`, `commands/` and
+which has no repository around it. Run from a clone, the install refuses a harness directory or ROOT
+that is this repository's own root, since the render would then land beside the sources that produce it, as `agents/`, `commands/` and
 `skills/` materializing untracked at the repository's own top level, in a place no `.gitignore`
-entry here covers. Nor may ROOT sit inside any source an install copies from — a shipped package's or
+entry here covers. Nor may either sit inside any source an install copies from — a shipped package's or
 a harness's resource tree (Deployed Surfaces names both): installing there once writes the product
 into the tree a later install reads from, and that later install then deletes or overwrites,
 out from under itself, files its own copy still needs to read. Both refusals are decided on the tree

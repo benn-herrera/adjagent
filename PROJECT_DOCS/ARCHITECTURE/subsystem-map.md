@@ -63,7 +63,10 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   only through a vendored copy or a fork — and how to update and inspect it, naming
   `adjagent install`, `--dry-run` and `adjagent --version` and the runner's `AGENTS_VER`. It also
   states how to run adjagent: the project's runner recipe where there is one, else the release tag
-  installed into a venv and that venv's `adjagent`. The docdicer version the script installs is written once, as `VERSION` in
+  installed into a venv and that venv's `adjagent`. Under claude a paragraph of its own, the
+`reload_rule` hole (Composition Model, Holes), says to run `/reload-plugins` when the agents an
+install wrote are not offered; the paragraph drops where the harness supplies none. Because mage omits
+the skill and opencode supplies no rule, only claude renders it. The docdicer version the script installs is written once, as `VERSION` in
   `adjagent/docdicer-tools/docdicer`.
 - **Process skill** — `dev-process` (`definitions/dev_process.py`): one `SKILL.md` and four
   references (`references/new-project.md`, `project-setup.md`, `adopting.md`, `release.md`), carried

@@ -1,13 +1,17 @@
-"""`python3 -m adjagent install TARGET`, once `adjagent.install_target` has resolved ROOT and the project
-root from TARGET: every definition rendered into ROOT's agents/, commands/ and
-skills/, the shipped packages copied to their stated destinations — the docdicer tools inside the
-docdicer skill's directory, rebuilding their venv afterwards where one stood — each file the installing harness
-ships copied into ROOT as it stands, the harness's guardrail hook registered in the project's settings
-file where one install-time run of it succeeds, and — when the install includes kb — the kb-tools
-package inside the kbase skill's own directory, with the consumer's `kbase` MCP entry and its runner
-include line; a plugin installed below its project root also gets its agents file at ROOT.
-Overwrites without ceremony only what carries this repository's banner, refusing over any other file at
-a path it writes: the consumer's git is the record of what an install changed."""
+"""`python3 -m adjagent install TARGET`, once `adjagent.install_target` has resolved the harness
+directory and the project root from TARGET. The set is written into ROOT, the harness's `plugin_dir`
+below the harness directory — the harness directory itself where that is empty: every definition
+rendered into ROOT's agents/, commands/ and skills/, the shipped packages copied to their stated
+destinations — the docdicer tools inside the docdicer skill's directory, rebuilding their venv
+afterwards where one stood — each file the installing harness ships copied into ROOT as it stands, the
+harness's guardrail hook registered in the project's settings file where one install-time run of it
+succeeds, and — when the install includes kb — the kb-tools package inside the kbase skill's own
+directory, with the `kbase` MCP entry and the consumer's runner include line; a standalone plugin
+installed below its project root also gets its agents file in its harness directory. What an earlier
+layout left under the harness directory outside ROOT is removed as the prune and the retired package
+destinations reach it. Overwrites without ceremony only what carries this repository's banner, refusing
+over any other file at a path it writes: the consumer's git is the record of what an install
+changed."""
 
 from __future__ import annotations
 
@@ -86,8 +90,8 @@ DOCDICER_TOOLS_VENV = f"{DOCDICER_TOOLS_PACKAGE}/{VENV_DIR}"
 # stated, never derived. `package_copies`, the `!INSTALLED!` stamping, the destination replacement
 # and `_refuse_root`'s source list all read this table.
 SHIPPED_PACKAGES: tuple[tuple[str, str], ...] = (("docdicer-tools", DOCDICER_TOOLS_PACKAGE),)
-# The harness resources: files a harness ships that land in its project harness directory as they
-# stand, copied and never rendered. The directory below this one in the source is the harness's own
+# The harness resources: files a harness ships that land in ROOT as they stand, copied and never
+# rendered. The directory below this one in the source is the harness's own
 # name, and the destination is ROOT itself — both stated, neither derived from a directory listing.
 HARNESS_RESOURCES_SOURCE = "harnesses/resources"
 # The interpreter the install-time probe runs a guardrail hook script under, found on PATH, and how long
@@ -201,8 +205,7 @@ def package_copies(root: Path, *, kb_included: bool) -> list[tuple[Path, Path]]:
 
 def harness_resource_copies(root: Path, *, harness: str) -> list[tuple[Path, Path]]:
     """(source file, target under `root`) for every file `harness` ships: `resources/<harness>/` in this
-    package, delivered into ROOT — the harness directory — so `resources/opencode/plugins/x.ts` lands
-    at `<ROOT>/plugins/x.ts`.
+    package, delivered into ROOT, so `resources/opencode/plugins/x.ts` lands at `<ROOT>/plugins/x.ts`.
 
     These files are the harness's own, not this repository's generated product: each is copied
     byte-verbatim with its mode preserved and nothing else — no `!INSTALLED!` banner, no stamping. Each
@@ -341,9 +344,12 @@ def _refuse_foreign_targets(
         )
 
 
-def prune(root: Path, *, keep: set[Path]) -> list[Path]:
-    """Remove every regular file under ROOT's surfaces that is not in `keep`, would ship, and is ours;
-    then each directory that leaves empty, up to its surface.
+def prune(harness_dir: Path, *, keep: set[Path]) -> list[Path]:
+    """Remove every regular file under the harness directory's surfaces that is not in `keep`, would
+    ship, and is ours; then each directory that leaves empty, up to its surface.
+
+    A ROOT below the harness directory lies inside its skills surface, so this one walk reaches both
+    ROOT's stale renders and what a layout writing straight into the harness directory left there.
 
     Package destinations sit inside the skills surface — `skills/kbase/kb-tools/` and
     `skills/docdicer/tools/` — and no destination is carved out by name. None needs to be: a copied
@@ -354,25 +360,25 @@ def prune(root: Path, *, keep: set[Path]) -> list[Path]:
     definition this run did not write — an install without kb — is stale and removed, while one the run
     wrote is in `keep`.
 
-    A file at ROOT's top level is outside every surface, and so outside this walk: a harness-rendered
-    file such as the plugin manifest, and the harness's own settings file where it lives at ROOT, are
-    neither pruned nor read as a stale render. The manifest is rendered on every install that emits it,
-    and the settings file is only ever spliced, so neither has a stale form to remove."""
+    A harness-rendered file such as the plugin manifest, and the harness's own settings file where it
+    lives at ROOT, carry no generated banner, so wherever they sit they are neither pruned nor read as a
+    stale render. The manifest is rendered on every install that emits it, and the settings file is
+    only ever spliced, so neither has a stale form to remove."""
     stale = [
         path
         for surface in SURFACES
-        for path in sorted((root / surface).rglob("*"))
+        for path in sorted((harness_dir / surface).rglob("*"))
         if path not in keep
         and path.is_file()
         and not path.is_symlink()
-        and _shipped(path.relative_to(root))
+        and _shipped(path.relative_to(harness_dir))
         and _is_ours(path)
     ]
     for path in stale:
         path.unlink()
     for path in stale:
         parent = path.parent
-        while parent.parent != root and parent.is_dir() and not any(parent.iterdir()):
+        while parent.parent != harness_dir and parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
             parent = parent.parent
     return stale
@@ -924,8 +930,8 @@ def _check_runner(project: Path) -> None:
 
 def kb_include_line(*, runner: str, harness_relpath: str) -> str:
     """The canonical KB include line for `runner`: the non-fatal `import?` form for a justfile (just
-    >= 1.33), or the `-include` form for a Makefile, each naming the installed snippets under the
-    harness directory `harness_relpath` names relative to the project root."""
+    >= 1.33), or the `-include` form for a Makefile, each naming the installed snippets under the ROOT
+    `harness_relpath` names relative to the project root."""
     snippets = f"{harness_relpath}/{KB_TOOLS_SNIPPETS}/{KB_SNIPPET_NAMES[runner]}"
     return {"just": f"import? '{snippets}'", "make": f"-include {snippets}"}[runner]
 
@@ -982,10 +988,12 @@ def install_kb_include_line(project: Path, *, harness_relpath: str, real_project
     """Write the canonical KB include line into `project`'s runner file: the justfile or Makefile
     probed there, else a `Makefile` created carrying it.
 
-    One line only. A line naming this run's harness is recognized by the shape of the snippets path it
-    names, whatever tree sits in front of `runner-snippets/`, and rewritten in place — only that path
-    token, so an assignment's left-hand side and a trailing comment survive — with no second line
-    appended. A line naming another harness is reported and left alone, and so is a file holding more
+    One line only. A line naming this run's harness directory is recognized by the shape of the snippets
+    path it names, whatever tree sits between its first segment — the harness directory, matched against
+    the first segment of `harness_relpath` — and `runner-snippets/`, and its whole path token is
+    rewritten in place to the canonical one — so an assignment's left-hand side and a trailing comment
+    survive — with no second line appended. A line naming another harness directory is reported and
+    left alone, and so is a file holding more
     than one such line, which the operator merges by hand. Only the runner file this run selected is
     examined: a second runner file's stale line is left to the operator and is non-fatal. Nothing is
     written when `project` is this repository — its own runner is the generator's, not a consumer's.
@@ -1016,18 +1024,18 @@ def install_kb_include_line(project: Path, *, harness_relpath: str, real_project
         return
     if named:
         match = named[0]
-        if _harness_dirs().get(match.name, match.name) != harness_relpath:
+        lines = text.splitlines(keepends=True)
+        prior = lines[match.index]
+        # The line is this install's when it spells the same first segment — the harness directory — as
+        # ROOT's path does; the whole path token, ROOT's own path below that segment included, is then
+        # this install's to replace.
+        if prior[match.start : match.end].split("/", 1)[0] != harness_relpath.split("/", 1)[0]:
             _report_left_alone(
                 f"no include line written: {path} line {match.index + 1} already includes the kb "
                 f"snippets for harness '{match.name}'"
             )
             return
-        lines = text.splitlines(keepends=True)
-        prior = lines[match.index]
-        # The harness directory the line spells is kept as it is written; the tree below it belongs to
-        # this install, so it is replaced whole.
-        segment = prior[match.start : match.end].split("/", 1)[0]
-        canonical = f"{segment}/{KB_TOOLS_SNIPPETS}/{KB_SNIPPET_NAMES[runner]}"
+        canonical = f"{harness_relpath}/{KB_TOOLS_SNIPPETS}/{KB_SNIPPET_NAMES[runner]}"
         rewritten = f"{prior[: match.start]}{canonical}{prior[match.end :]}"
         if rewritten == prior:
             _report_left_alone(
@@ -1045,22 +1053,47 @@ def install_kb_include_line(project: Path, *, harness_relpath: str, real_project
 
 
 def _installs_agents_file(
-    root: Path, harness: Harness, *, project: Path, user_level: bool, global_agents_file: bool
+    harness_dir: Path, harness: Harness, *, project: Path, user_level: bool, global_agents_file: bool
 ) -> bool:
-    """Whether an install into `root` writes an agents file there: a plugin installed below its project
-    root, or a user-level ROOT given `global_agents_file`."""
-    plugin_below_project = harness.is_plugin and root.resolve() != project
+    """Whether an install into `harness_dir` writes an agents file there: a standalone plugin installed
+    below its project root, or a user-level install given `global_agents_file`."""
+    plugin_below_project = harness.is_standalone_plugin and harness_dir.resolve() != project
     return plugin_below_project or (user_level and global_agents_file)
 
 
-def _docdicer_venv_to_rebuild(root: Path, *, user_level: bool) -> bool:
-    """Whether an install into `root` replaces the docdicer tools' `.venv` and then rebuilds it: a
-    project install that finds one standing."""
-    return not user_level and (root / DOCDICER_TOOLS_VENV).is_dir()
+def _standing_docdicer_venvs(root: Path, *, harness_dir: Path, user_level: bool) -> list[Path]:
+    """The docdicer tools' `.venv` directories a project install finds standing, removes with their
+    package destination, and then has rebuilt at ROOT's: one at ROOT's destination, and one at the
+    harness directory's where ROOT lies below it. None for a user-level install, which ships no
+    package."""
+    if user_level:
+        return []
+    venvs = dict.fromkeys((root / DOCDICER_TOOLS_VENV, harness_dir / DOCDICER_TOOLS_VENV))
+    return [venv for venv in venvs if venv.is_dir()]
+
+
+def _report_shadowing(root: Path, *, harness: Harness, user_level: bool) -> None:
+    """Report a plugin the harness loads in place of another of the same name, for a harness that writes
+    its set below its harness directory: a user-level install always shadows every project's; a project
+    install is shadowed where the user-level ROOT holds every file the harness renders of its own, each
+    carrying the marker that makes it ours."""
+    if not harness.plugin_dir:
+        return
+    if user_level:
+        _report_left_alone(
+            f"{root} is user-level: the harness loads it in place of every project's plugin of the same name"
+        )
+        return
+    user_root = Path(harness.user_harness_dir).expanduser() / harness.plugin_dir
+    if all(_is_our_harness_file(user_root / file.path, marker=file.marker) for file in harness.rendered_files):
+        _report_left_alone(
+            f"{root} is shadowed by {user_root}, a user-level plugin of the same name: the harness loads that "
+            "one, and this project's plugin — its tuning, version and MCP server — does not load"
+        )
 
 
 def install(
-    root: Path,
+    harness_dir: Path,
     ctx: Render,
     *,
     verbose: bool,
@@ -1069,72 +1102,93 @@ def install(
     uncommitted: Callable[[], tuple[str, ...]],
     tool_install: Callable[[Path], str | None],
     global_agents_file: bool = False,
-    real_root: Path | None = None,
+    real_harness_dir: Path | None = None,
     real_project: Path | None = None,
 ) -> None:
-    """Render every included definition and every file the harness renders of its own into ROOT,
-    replace each package destination whole — a `.venv` under it included — with a stamped copy, copy the harness's own resource files
-    into ROOT as they stand, write the renders over what is there, then prune. An install that includes
-    kb — `with_kb` names it, the harness is one whose files sit at its own root, which is a plugin and
-    always takes the kb set, or ROOT holds the evidence of an earlier kb install (the sticky rule, per
-    ROOT and not per project: the kbase skill's router carrying this repository's banner) — also
-    replaces the kb-tools destination whole with the package, so nothing an earlier version placed
-    there survives, and writes the harness's `kbase` MCP entry
-    and, for a harness whose files sit in a project subdirectory, the consumer's runner include line,
-    none being written or created for a harness installed at its own root, which is a plugin rather
-    than a repo project. The entry's command is the bare `kbase`, resolved from PATH, and goes in the
-    harness's own MCP settings file, which sits at the project root or, under a harness whose file is
-    the plugin's, at ROOT. Every install removes each tree an earlier version installed. A harness with
-    a guardrail hook has its script run once on this machine first: when that run succeeds the script
-    ships with the other resources and every install registers it in the project's settings file; when
-    it fails, neither happens, the install goes on, and the report names why and what an earlier
-    install left in place. A plugin harness installed below its project root — ROOT is not the project
-    root — also has its agents file installed at ROOT, whatever the sources' commit state. A
-    user-level install — ROOT is the harness's user harness directory, decided here from ROOT and the
-    harness whatever route reached it — renders the definitions, prunes and removes the legacy trees,
-    and writes nothing else: no package, resource file, guardrail probe or registration, MCP entry or
-    runner line; with `global_agents_file` it also installs the agents file at ROOT, refused while
-    `uncommitted` names a change, a flag a project install ignores; `uncommitted` is called only for
-    such an install. ROOT may be absent, and is created only once every check has passed. A file at a
-    render, harness-file or resource target that does not carry what that class of file states as its
-    origin — this repository's generated banner or installed header, or the marker a harness-rendered
-    file states about itself — or a symlink or non-directory between ROOT and such a target, refuses the install; package destinations are replaced whole unchecked. A
-    refusal of the root, of the render, of a target it would overwrite, of the runner file, of the MCP
-    settings file, of the harness directory the guardrail entry cannot name or of the guardrail
-    settings file writes nothing; a settings path that is a symlink or not a regular file is reported
-    and left alone.
+    """Install into ROOT, `harness_dir / ctx.harness.plugin_dir`: render every included definition and
+    every file the harness renders of its own into ROOT, replace each package destination whole — a
+    `.venv` under it included — with a stamped copy, copy the harness's own resource files into ROOT as
+    they stand, write the renders over what is there, then prune the harness directory's surfaces,
+    which hold ROOT's. An install that includes kb — `with_kb` names it, the harness is a standalone
+    plugin, which always takes the kb set, or ROOT or the harness directory holds the evidence of an
+    earlier kb install (the sticky rule, per install and not per project: the kbase skill's router
+    carrying this repository's banner) — also replaces the kb-tools destination whole with the package,
+    so nothing an earlier version placed there survives, and writes the harness's `kbase` MCP entry and,
+    for a harness that is not a standalone plugin, the consumer's runner include line, naming ROOT's
+    snippets. The entry's command is the bare `kbase`, resolved from PATH, and goes in the harness's own
+    MCP settings file, which sits at the project root or, under a harness whose file is the plugin's, at
+    ROOT. Every install removes each tree an earlier version installed under the harness directory. A
+    project install of a harness whose ROOT lies below its harness directory also removes the package
+    destinations an install straight into the harness directory wrote there, naming each. A harness
+    with a guardrail hook has its script run once on this machine first: when that run succeeds the
+    script ships with the other resources and every install registers it in the project's settings
+    file; when it fails, neither happens, the install goes on, and the report names why and what an
+    earlier install left in place. A standalone plugin installed below its project root also has its
+    agents file installed in its harness directory, whatever the sources' commit state. A user-level
+    install — the harness directory is the harness's user harness directory, decided here from it and
+    the harness whatever route reached it — renders the definitions, prunes, removes the legacy trees
+    and, on a kb install under a harness whose MCP settings file is the plugin's, writes that entry; it
+    writes nothing else: no package, resource file, guardrail probe or registration, project MCP entry
+    or runner line. With `global_agents_file` it also installs the agents file in the harness directory,
+    refused while `uncommitted` names a change, a flag a project install ignores; `uncommitted` is called
+    only for such an install. ROOT may be absent, and is created only once every check has passed. A
+    file at a render, harness-file or resource target that does not carry what that class of file
+    states as its origin — this repository's generated banner or installed header, or the marker a
+    harness-rendered file states about itself — or a symlink or non-directory between the harness
+    directory and such a target, refuses the install; package destinations are replaced whole
+    unchecked. A refusal of the harness directory or ROOT, of the render, of a target it would
+    overwrite, of the runner file, of the MCP settings file, of the ROOT the guardrail entry cannot name
+    or of the guardrail settings file writes nothing; a settings path that is a symlink or not a regular
+    file is reported and left alone.
 
-    Where a project install finds the docdicer tools' `.venv` under ROOT before its first write, it
-    afterwards calls `tool_install` with the installed docdicer script, so the venv the replacement
-    removed is rebuilt to match the script. `tool_install` returns None on success or one line saying
-    how the run failed; a failure is printed naming the command, and the install's outcome is
-    otherwise unaffected.
+    Where a project install finds the docdicer tools' `.venv` before its first write, under ROOT or
+    under the harness directory, it afterwards calls `tool_install` with the installed docdicer script,
+    so the venv the replacement removed is rebuilt at ROOT to match the script. `tool_install` returns
+    None on success or one line saying how the run failed; a failure is printed naming the command, and
+    the install's outcome is otherwise unaffected.
 
-    `real_root` and `real_project` name the ROOT and project root the install is for, where `root` and
-    `project_root` are a scratch copy of them; each defaults to the path written. The decisions that
-    compare a path with a fixed location read them: whether ROOT is user-level, whether the project is
-    this repository, and the agents file's user-directory test and title."""
+    A plugin a user-level one of the same name shadows is reported, and so is a user-level plugin,
+    which shadows every project's. After the install, the harness's reload rule is printed where it has
+    one.
+
+    `real_harness_dir` and `real_project` name the harness directory and project root the install is
+    for, where `harness_dir` and `project_root` are a scratch copy of them; each defaults to the path
+    written. The decisions that compare a path with a fixed location read them: whether the install is
+    user-level, whether the project is this repository, and the agents file's user-directory test and
+    title."""
+    root = harness_dir / ctx.harness.plugin_dir
+    _refuse_root(harness_dir)
     _refuse_root(root)
-    project = root.resolve() if project_root is None else Path(project_root).resolve()
+    project = harness_dir.resolve() if project_root is None else Path(project_root).resolve()
     # The settings file's own base: a harness that keeps its file at ROOT resolves its paths against
     # ROOT, every other against the project root.
     mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
-    user_level = ctx.harness.name in user_dir_harnesses(root if real_root is None else real_root)
-    # A user-level ROOT need not sit under its project root — a user directory may be a symlink out of
-    # home — and nothing a user-level install writes spells its path from there.
+    user_level = ctx.harness.name in user_dir_harnesses(harness_dir if real_harness_dir is None else real_harness_dir)
+    # A user-level harness directory need not sit under its project root — a user directory may be a
+    # symlink out of home — and nothing a user-level install writes spells its path from there.
     harness_relpath = "" if user_level else _harness_relpath(root, project)
-    kb_included = with_kb or ctx.harness.is_plugin or _is_ours(root / KBASE_ROUTER)
-    # Every check runs before the first write: the root refusal and harness relpath above, then the
+    kb_included = (
+        with_kb
+        or ctx.harness.is_standalone_plugin
+        or any(_is_ours(base / KBASE_ROUTER) for base in (root, harness_dir))
+    )
+    # Every check runs before the first write: the root refusals and harness relpath above, then the
     # render, the guardrail probe that decides whether its script is a resource target, each render,
-    # harness-file and resource target the install would overwrite and the paths below ROOT it would
-    # write through, an install including kb's runner file and MCP settings file, and — when the probe
-    # passed — the guardrail entry built for this harness directory and the guardrail settings file,
-    # and a plugin's agents file. ROOT itself is created only after all of them.
+    # harness-file and resource target the install would overwrite and the paths below the harness
+    # directory it would write through, an install including kb's runner file and MCP settings file,
+    # and — when the probe passed — the guardrail entry built for this ROOT and the guardrail settings
+    # file, and a standalone plugin's agents file. ROOT itself is created only after all of them.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
     package_files = [] if user_level else package_copies(root, kb_included=kb_included)
     resource_files = [] if user_level else harness_resource_copies(root, harness=ctx.harness.name)
     guardrail = None if user_level else ctx.harness.guardrail
-    project_kb_files = kb_included and not user_level
+    writes_mcp = kb_included and (not user_level or ctx.harness.mcp.site is McpSite.HARNESS)
+    writes_include_line = kb_included and not user_level and not ctx.harness.is_standalone_plugin
+    retired_destinations = (
+        []
+        if user_level or not ctx.harness.plugin_dir
+        else [harness_dir / dest for _, dest in _packages(kb_included=True)]
+    )
     guardrail_skipped: str | None = None
     if guardrail is not None:
         script = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / ctx.harness.name / guardrail.script
@@ -1145,7 +1199,7 @@ def install(
     # marker each states, not a banner a JSON manifest has no way to carry.
     harness_markers = {PurePosixPath(file.path): file.marker for file in ctx.harness.rendered_files}
     _refuse_foreign_targets(
-        root,
+        harness_dir,
         render_targets=[root.joinpath(*relative.parts) for relative, _ in renders if relative not in harness_markers],
         resource_targets=[target for _, target in resource_files],
         harness_targets=[
@@ -1157,8 +1211,9 @@ def install(
     # Everything this install copies, in one list: `keep` and the report below count a harness's own
     # files with the packages', so neither reads as a stale render.
     copies = [*package_files, *resource_files]
-    if project_kb_files:
+    if writes_include_line:
         _check_runner(project)
+    if writes_mcp:
         _, mcp_container = ctx.harness.mcp.entry(command=KBASE_NAME)
         mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
         _check_settings(mcp_target, base=mcp_base, container=mcp_container, leaf=object)
@@ -1168,13 +1223,13 @@ def install(
         _check_settings(project / guardrail.settings, base=project, container=guardrail.container, leaf=list)
     agents_file: AgentsFileWrite | None = None
     if _installs_agents_file(
-        root, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
+        harness_dir, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
     ):
         if user_level:
             refuse_uncommitted(uncommitted())
-        agents_file = checked_agents_file(root, ctx.harness, real_directory=real_root)
+        agents_file = checked_agents_file(harness_dir, ctx.harness, real_directory=real_harness_dir)
     # Read before the destination is replaced, which removes the venv with the rest of the package.
-    rebuild_docdicer_venv = _docdicer_venv_to_rebuild(root, user_level=user_level)
+    rebuild_docdicer_venv = bool(_standing_docdicer_venvs(root, harness_dir=harness_dir, user_level=user_level))
 
     root.mkdir(parents=True, exist_ok=True)
     for _, destination in [] if user_level else _packages(kb_included=kb_included):
@@ -1194,26 +1249,37 @@ def install(
     if agents_file is not None:
         write_agents_file(agents_file)
 
+    # Removed before the prune, so a skill directory the prune then empties goes with its last file. One
+    # reached through a symlink is not this project's alone, so it is named and left.
+    for retired in retired_destinations:
+        if not retired.is_dir():
+            continue
+        blocked = _blocked_component(retired, base=harness_dir) or (retired if retired.is_symlink() else None)
+        if blocked is not None:
+            _report_left_alone(f"retired package destination {retired} left in place: {blocked} is a symlink")
+            continue
+        shutil.rmtree(retired)
+        print(f"removed retired package destination {retired}")
     for relative in LEGACY_TREES:
-        legacy = root / relative
+        legacy = harness_dir / relative
         if legacy.is_dir():
             shutil.rmtree(legacy)
             print(f"removed legacy tree {legacy}")
             if relative == LEGACY_KB_TOOLS and not kb_included:
                 print(LEGACY_KB_TOOLS_MESSAGE)
-    pruned = prune(root, keep={*written, *(target for _, target in copies)})
+    pruned = prune(harness_dir, keep={*written, *(target for _, target in copies)})
     print(f"installed: {len(written)} rendered files, {len(copies)} copied files → {root}")
     for path in pruned:
         print(f"pruned {path}")
     if verbose:
         for path in [*(target for _, target in copies), *written]:
             print(f"wrote {path}")
-    if project_kb_files:
+    if writes_mcp:
         mcp_merge(mcp_base, harness=ctx.harness, command=KBASE_NAME)
-        # A harness whose files sit at its own root is a plugin, not a repo project, so it has no
-        # consumer runner file to include the snippets in and none is created.
-        if not ctx.harness.is_plugin:
-            install_kb_include_line(project, harness_relpath=harness_relpath, real_project=real_project)
+    # A standalone plugin is not a repo project, so it has no consumer runner file to include the
+    # snippets in and none is created.
+    if writes_include_line:
+        install_kb_include_line(project, harness_relpath=harness_relpath, real_project=real_project)
     if guardrail is not None and guardrail_entry is not None:
         guardrail_merge(project, guardrail=guardrail, entry=guardrail_entry)
     elif guardrail is not None:
@@ -1226,50 +1292,59 @@ def install(
         failure = tool_install(script)
         if failure is not None:
             print(f"'{script} --install' failed, the install otherwise complete: {failure}")
+    _report_shadowing(root, harness=ctx.harness, user_level=user_level)
+    if ctx.harness.reload_rule:
+        print(ctx.harness.reload_rule)
 
 
 def _install_managed_paths(
-    root: Path,
+    harness_dir: Path,
     harness: Harness,
     *,
     project: Path,
     user_level: bool,
     global_agents_file: bool,
 ) -> list[tuple[Path, list[str]]]:
-    """(base, paths relative to it) for everything an install into `root` may read or write, the
-    project root first: what it writes by, never a listing of ROOT, which in a user harness directory
-    holds the operator's own trees. Under ROOT, the surfaces, every package destination, each legacy
-    tree, the harness's resource targets and rendered files, and the agents file's paths where the run
-    writes one; under the project root, on a project install, the guardrail settings file and the
-    runner files; the MCP settings candidates under whichever of the two the harness keeps them."""
+    """(base, paths relative to it) for everything an install into `harness_dir` may read or write: the
+    project root, the harness directory and ROOT, in that order, ROOT keeping its position below the
+    harness directory. What it writes by, never a listing of either directory, which in a user harness
+    directory holds the operator's own trees. Under the harness directory, the surfaces the prune walks,
+    each legacy tree, every package destination an install straight into it wrote, and the agents
+    file's paths where the run writes one; under ROOT, the surfaces, every package destination, the
+    harness's resource targets and rendered files, and the MCP settings candidates where the harness
+    keeps them there and the run may write them; under the project root, on a project install, the
+    guardrail settings file, the runner files and the MCP settings candidates where the harness keeps
+    them there."""
+    root = harness_dir / harness.plugin_dir
+    destinations = [destination for _, destination in _packages(kb_included=True)]
+    under_harness_dir = [*SURFACES, *LEGACY_TREES, *destinations]
     under_root = [
         *SURFACES,
-        *(destination for _, destination in _packages(kb_included=True)),
-        *LEGACY_TREES,
+        *destinations,
         *(target.relative_to(root).as_posix() for _, target in harness_resource_copies(root, harness=harness.name)),
         *(file.path for file in harness.rendered_files),
     ]
     under_project: list[str] = []
+    mcp_paths = [harness.mcp.canonical, *harness.mcp.alternatives]
+    if harness.mcp.site is McpSite.HARNESS:
+        under_root += mcp_paths
+    elif not user_level:
+        under_project += mcp_paths
     if not user_level:
-        mcp_paths = [harness.mcp.canonical, *harness.mcp.alternatives]
-        if harness.mcp.site is McpSite.PROJECT:
-            under_project += mcp_paths
-        else:
-            under_root += mcp_paths
         under_project += [*_JUSTFILE_NAMES, *_MAKEFILE_NAMES]
         if harness.guardrail is not None:
             under_project.append(harness.guardrail.settings)
     if _installs_agents_file(
-        root, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
+        harness_dir, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
     ):
-        write = checked_agents_file(root, harness)
+        write = checked_agents_file(harness_dir, harness)
         agents_paths = (write.path, write.destination, write.backup, write.native)
-        under_root += [path.relative_to(root).as_posix() for path in agents_paths if path is not None]
-    return [(project, under_project), (root, under_root)]
+        under_harness_dir += [path.relative_to(harness_dir).as_posix() for path in agents_paths if path is not None]
+    return [(project, under_project), (harness_dir, under_harness_dir), (root, under_root)]
 
 
 def preflighted_install(
-    root: Path,
+    harness_dir: Path,
     ctx: Render,
     *,
     verbose: bool,
@@ -1281,30 +1356,34 @@ def preflighted_install(
     dry_run: bool = False,
 ) -> None:
     """`install` behind the preflight: run first into a scratch copy of the paths it manages, with the
-    real ROOT and project root as its identity. Where that changed nothing, ROOT is reported up to date
-    and nothing in the target is touched — no file, no package destination, no `.venv`, no
-    `tool_install` run. With `dry_run`, what would be created, changed and removed is printed relative
-    to the project root, followed by the docdicer `.venv` rebuild the install would also make, and
-    nothing is written. Otherwise the install runs exactly as `install` does.
-    The copy holds no `.venv`, so only that real install can reach `tool_install`. Every printed path and refusal names
-    the real target; a refusal the real install raises for a symlink below ROOT that is not itself a
-    managed path is not foreseen by the copy, which dereferences such symlinks, and the install itself
-    still raises it."""
+    real harness directory and project root as its identity. Where that changed nothing, the harness
+    directory is reported up to date and nothing in the target is touched — no file, no package
+    destination, no `.venv`, no `tool_install` run. With `dry_run`, what would be created, changed and
+    removed is printed relative to the project root, followed by the docdicer `.venv` rebuild the
+    install would also make, and nothing is written. Otherwise the install runs exactly as `install`
+    does. The copy holds no `.venv`, so only that real install can reach `tool_install`. Every printed
+    path and refusal names the real target; a refusal the real install raises for a symlink below the
+    harness directory that is not itself a managed path is not foreseen by the copy, which dereferences
+    such symlinks, and the install itself still raises it."""
+    root = harness_dir / ctx.harness.plugin_dir
+    _refuse_root(harness_dir)
     _refuse_root(root)
-    project = root.resolve() if project_root is None else Path(project_root).resolve()
-    user_level = ctx.harness.name in user_dir_harnesses(root)
+    project = harness_dir.resolve() if project_root is None else Path(project_root).resolve()
+    user_level = ctx.harness.name in user_dir_harnesses(harness_dir)
     managed = _install_managed_paths(
-        root,
+        harness_dir,
         ctx.harness,
         project=project,
         user_level=user_level,
         global_agents_file=global_agents_file,
     )
     dry_run_notes: list[str] = []
-    if _docdicer_venv_to_rebuild(root, user_level=user_level):
+    venvs = _standing_docdicer_venvs(root, harness_dir=harness_dir, user_level=user_level)
+    if venvs:
         relpath = PurePosixPath(_harness_relpath(root, project))
+        replaced = " and ".join(_harness_relpath(venv, project) for venv in venvs)
         dry_run_notes.append(
-            f"the install would also replace {relpath / DOCDICER_TOOLS_VENV} and run "
+            f"the install would also replace {replaced} and run "
             f"'{relpath / DOCDICER_TOOLS_SCRIPT} --install', which needs the network"
         )
     run_preflighted(
@@ -1318,11 +1397,11 @@ def preflighted_install(
             uncommitted=uncommitted,
             tool_install=tool_install,
             global_agents_file=global_agents_file,
-            real_root=root,
+            real_harness_dir=harness_dir,
             real_project=project,
         ),
         dry_run=dry_run,
-        target=root,
+        target=harness_dir,
         report_root=project,
         dry_run_notes=dry_run_notes,
     )

@@ -14,8 +14,9 @@ write. `checked_agents_file` makes the checks of the destination and carries no 
 The git-status refusal over `adjagent/` is `agents_file.refuse_uncommitted`, applied by the callers
 only where the destination is live operator configuration, so a project directory is never refused.
 
-`install` uses it twice: for a plugin installed below its project root, and for a user-level install
-given `--install-global-agents-file`. It runs the checks (`checked_agents_file`) among its own
+`install` uses it twice: for a standalone plugin (mage) installed below its project root, and for a
+user-level install given `--install-global-agents-file`; both write into the harness directory, never
+into claude's plugin inside it (`_installs_agents_file`). It runs the checks (`checked_agents_file`) among its own
 pre-write checks and writes the file (`write_agents_file`) after its renders, so a refusal
 leaves the install unwritten. It calls `refuse_uncommitted` only when the install is user-level, so
 the plugin below a project is not refused. Where the file's text is identical to what the destination holds,

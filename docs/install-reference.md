@@ -21,12 +21,16 @@ A target holding both `.claude/` and `.opencode/`, or neither and not itself a h
 refused until you pass `--harness`.
 
 `--harness=opencode` installs into `.opencode/`, each harness's project directory. `--subdir=DIR`
-installs into `<target>/DIR` instead, and `--subdir=` into the target itself. A target that is itself
-a harness directory is installed into directly.
+makes `<target>/DIR` the harness directory instead, and `--subdir=` the target itself. A target that
+is itself a harness directory is installed into directly.
 
 ## What an install writes
 
-A project install writes, inside the harness directory (`~/projects/foo/.claude/`):
+Under claude the set is one Claude Code plugin named `adjagent`, written to `skills/adjagent/` inside
+the harness directory (`~/projects/foo/.claude/skills/adjagent/`), with its manifest at
+`.claude-plugin/plugin.json`. Its agents and commands are invoked as `adjagent:<name>`. Mage and
+opencode write straight into their harness directory, and mage's agents and commands carry the same
+`adjagent:` prefix. A project install writes, inside that directory (the plugin, under claude):
 
 - `agents/` and `commands/`: every agent and slash command of the base set
   ([Definition sets](definition-sets.md)).
@@ -42,8 +46,13 @@ A project install writes, inside the harness directory (`~/projects/foo/.claude/
 - With the kb set, the `kbase` skill and the rest of what [Knowledge base](knowledge-base.md)
   lists.
 
-Claude Code reads agent definitions from `.claude/agents/`, slash commands from `.claude/commands/`
-and skills from `.claude/skills/`. Test suites and caches stay behind.
+Claude Code reads the plugin's `agents/`, `commands/` and `skills/` from
+`.claude/skills/adjagent/`. Test suites and caches stay behind.
+
+A project plugin loads only when the session starts at the project root, after Claude Code's trust
+dialog ([Claude Code plugin loading](https://code.claude.com/docs/en/plugins/loading), "Check why a
+repository plugin didn't load"). A claude install that writes the plugin prints: "If the new agents
+are not available after using `adjagent install`, use `/reload-plugins` to rescan the agent list."
 
 `tools/docdicer --install` builds `tools/.venv` and installs docdicer into it; it needs `python3`
 3.9 or later with its venv module, `git`, and the network. An install does not run it unprompted, with one
@@ -55,11 +64,28 @@ are unaffected.
 ## User-level installs
 
 A home-directory target is a user-level install: `adjagent install ~ --harness=claude` (or
-`opencode`) renders the definitions into `~/.claude` (`~/.config/opencode`) and writes nothing else:
-no guardrail, no tools package, no kb-tools, no MCP entry, no include line. The docdicer skill is
+`opencode`) renders the definitions into `~/.claude/skills/adjagent/` (`~/.config/opencode`), with
+the plugin manifest under claude, and writes nothing else but the kb set's MCP entry: under claude,
+with `--with-kb`, the user-level plugin's own `.mcp.json`, and no user settings file. No guardrail, no tools package, no
+kb-tools, no include line. The docdicer skill is
 installed without its script, and says so when asked to run it. Add `--install-global-agents-file`
-to install the harness agents file there too ([Agents file](agents-file.md)); on a project install
-the flag is ignored.
+to install the harness agents file in `~/.claude` too, beside the plugin
+([Agents file](agents-file.md)); on a project install the flag is ignored.
+
+### A user-level plugin shadows the project's
+
+Claude Code loads one plugin per name, and the user-level `adjagent` wins. Symptom: a project
+install prints that its plugin "is shadowed by" `~/.claude/skills/adjagent`, and the project's tuning,
+version and `kbase` server do not load. Remedy: remove the user-level plugin, or work from it
+alone. A user-level install prints the converse, that it takes precedence over every project's.
+Neither install is refused.
+
+## Upgrading from the flat layout
+
+Releases before the plugin form wrote the set directly under `.claude/` (`.claude/agents/`,
+`.claude/skills/docdicer/tools/`). A project install over it removes the generated files there and the
+old package folders, printing `removed retired package destination <path>` for each, and rebuilds a
+docdicer `tools/.venv` it found at either place. A user-level install removes no package folder.
 
 ## Mage
 
@@ -102,12 +128,12 @@ grouped as created, changed and removed, each path relative to the project root,
 ```text
 dry run, nothing written — the install would change these files under /home/me/foo:
 created:
-  .claude/agents/architect.md
-  .claude/skills/docdicer/tools/docdicer
+  .claude/skills/adjagent/agents/architect.md
+  .claude/skills/adjagent/skills/docdicer/tools/docdicer
 changed:
-  .claude/agents/python-coder.md
+  .claude/skills/adjagent/agents/python-coder.md
 removed:
-  .claude/agents/retired-agent.md
+  .claude/skills/adjagent/agents/retired-agent.md
 ```
 
 Where the install would replace `tools/.venv`, the dry run adds a line saying so, and that the

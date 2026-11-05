@@ -6,8 +6,9 @@
 # This scan reads the slug as the install verb reads its target: the first argument that is not a
 # `--` flag, wherever it sits, is the slug (default `latest`) rather than a fixed positional, so
 # `just render --family=gemma-4` tunes the `latest` slot instead of mistaking the flag for a slug.
-# `--subdir=` is fixed ahead of the forwarded flags in `_render-slot`, so the render always lands
-# directly under the slot with no .claude nest.
+# `--subdir=` is fixed ahead of the forwarded flags in `_render-slot`, so the slot is the harness
+# directory, with no .claude nest: the render lands directly under it, and a claude slot holds the
+# plugin at <slot>/skills/adjagent/.
 #
 # The flags that produced a slot are recorded in it as RENDER-FLAGS.txt, so a `render-diff` between
 # two slots rendered under different tunings shows why they differ instead of reading as unexplained
@@ -26,7 +27,8 @@
 # nothing touched: those slots are the pre-1.0 oracle until stage 6 re-renders them.
 #
 # A slot is rendered with the kb set as well as the base product — the kb definitions, the kb-tools
-# package, and the slot's own MCP entry (the slot is its own project root) — so a `render-diff`
+# package, and the slot's own MCP entry (the slot is its own project root; a claude slot's entry is the
+# plugin's, in <slot>/skills/adjagent/) — so a `render-diff`
 # compares the kb half too. A plugin's slot (`mage`) carries no runner include line and no
 # `Makefile`, its harness writing neither.
 set -euo pipefail

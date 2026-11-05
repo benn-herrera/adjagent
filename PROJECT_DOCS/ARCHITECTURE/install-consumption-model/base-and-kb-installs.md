@@ -7,8 +7,10 @@ dropped definition is written, and the skill's directory is never created by a r
 it. A harness whose `user_harness_dir` is `.` is always a kb install, so the filter never applies
 to it. A kb install is named by `--with-kb`, the flag `install-with-kb` passes, or is sticky, per
 ROOT rather than per project, so a later base-typed invocation refreshes the kb set instead of
-dropping it. The predicate, at `kb_included` in `install`, is `with_kb`, or `user_harness_dir == "."`, or
-`_is_ours` (the generated-banner test) of the router, `KBASE_ROUTER` — `skills/kbase/SKILL.md`. The
+dropping it. The predicate, at `kb_included` in `install`, is `with_kb`, or `Harness.is_standalone_plugin`
+(`user_harness_dir == "."`), or `_is_ours` (the generated-banner test) of the router, `KBASE_ROUTER` —
+`skills/kbase/SKILL.md` — at ROOT or at the harness directory. The two differ only under claude, where the
+harness directory holds an earlier flat install's router, so the first install after upgrade stays kb. The
 router is the whole of the sticky signal, because no release installed a `kbase` executable without
 also installing the generated router beside it. The test reads the router's banner and nothing
 else: the mode is never read, and the runner snippets are never inspected, so a destination holding
@@ -28,9 +30,9 @@ A kb install writes three things beyond the renders — two under a harness whos
   `DOCDICER_TOOLS_PACKAGE` (`skills/docdicer/tools/`) and so in the list whether or not kb is included (a user-level install copies none); and `kb-tools/` at
   `KB_TOOLS_PACKAGE` when kb is included. kbase itself reaches the host by the
   user's own install (`docs/knowledge-base.md`); the skill's `references/installing.md` walks a session through it.
-- **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): claude's
-  `.mcp.json`, at the plugin root under mage — `McpSettings.site` names the directory, `HARNESS`
-  there and `PROJECT` for the other two — or for opencode the first discovered of
+- **The `kbase` server entry**, merged into the harness's own settings file (`Harness.mcp`): `.mcp.json`
+  at the plugin root under claude and mage — `McpSettings.site` names the directory, `HARNESS`
+  there and `PROJECT` for opencode — or for opencode the first discovered of
   `.opencode/opencode.json`, `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc`
   created. Under every harness the entry's command is `KBASE_NAME`, the bare `kbase`, which the
   host resolves from `PATH`, so the settings file names no machine-specific path and a project can
@@ -47,11 +49,16 @@ A kb install writes three things beyond the renders — two under a harness whos
   printed, and left as it stands.
 - **The runner include line**, appended to the project's justfile or Makefile — or to a `Makefile`
   created carrying it, where the project has neither: the non-fatal `import?` or `-include` form
-  naming the installed snippets. Written only for a harness whose user directory is not `.`:
+  naming the installed snippets at `<harness-relpath>/skills/kbase/kb-tools/runner-snippets/<snippet>`,
+  `harness_relpath` being ROOT relative to the project root, so under claude
+  `.claude/skills/adjagent/skills/kbase/kb-tools/…`. Written only for a harness whose user directory is not `.`:
   a plugin is not a repo project, so mage gets no line and no `Makefile`. One line only: a line
-  naming another harness is reported and left alone, and one naming this harness under a path an
-  earlier version installed is rewritten in place.
+  naming another harness directory — its first path segment differing from `harness_relpath`'s — is reported and left alone, and one
+  naming this harness's directory is this install's, its whole path token rewritten in place to
+  the canonical one, so a line an earlier version wrote at the flat path is moved into the plugin.
 
-On a user-level install none of the three is written: `install` renders the kb set's definitions
-and stops there.
+On a user-level install only the server entry is written, and only where the settings file's
+`McpSettings.site` is `HARNESS` (claude's `.mcp.json` inside the user-level plugin, with no user
+settings file touched): the kb-tools package and the include line are project-only, and `install`
+otherwise renders the kb set's definitions and stops there.
 

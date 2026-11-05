@@ -51,6 +51,7 @@ from adjagent.render import (
     filled_body,
     filled_text,
     keyed_by_path,
+    render_agents_file,
     render_all,
     render_definition,
     render_skill_file,
@@ -263,10 +264,11 @@ def test_opencode_frontmatter_matches_the_pre_1_0_render() -> None:
     )
 
 
-_PYTHON_CODER_DESCRIPTION = (
-    'description: "Python implementation specialist. Prefer over generalist-coder for any Python file modification '
-    'or Python project task."'
-)
+def _python_coder_description(harness: Harness) -> str:
+    return (
+        f'description: "Python implementation specialist. Prefer over {harness.reference_prefix}generalist-coder for '
+        'any Python file modification or Python project task."'
+    )
 
 
 @pytest.mark.parametrize(
@@ -274,11 +276,11 @@ _PYTHON_CODER_DESCRIPTION = (
     [
         (
             Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers)),
-            ("name: python-coder", _PYTHON_CODER_DESCRIPTION, "model: opus", 'color: "#3776AB"'),
+            ("name: python-coder", _python_coder_description(CLAUDE), "model: opus", 'color: "#3776AB"'),
         ),
         (
             Render(harness=OPENCODE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT),
-            (_PYTHON_CODER_DESCRIPTION, 'color: "#3776AB"', "mode: subagent"),
+            (_python_coder_description(OPENCODE), 'color: "#3776AB"', "mode: subagent"),
         ),
     ],
     ids=["claude", "opencode"],
@@ -467,7 +469,7 @@ def test_the_manifest_is_the_only_render_of_a_mage_plugin_carrying_the_version()
 
 @pytest.mark.parametrize(
     "harness, tool_name",
-    [(CLAUDE, "mcp__kbase__query"), (MAGE, "mcp_kbase_query"), (OPENCODE, "kbase_query")],
+    [(CLAUDE, "mcp__plugin_adjagent_kbase__query"), (MAGE, "mcp_kbase_query"), (OPENCODE, "kbase_query")],
 )
 def test_the_kb_reading_reference_names_the_harness_mcp_tool(harness: Harness, tool_name: str) -> None:
     """The rendered instruction must name the callable the selected host actually exposes."""
@@ -537,7 +539,7 @@ def test_a_skill_file_body_follows_the_definition_body_rule() -> None:
         (HarnessText.PROJECT_TEMP_DIR, OPENCODE, ".opencode-temp"),
         (HarnessText.USER_HARNESS_DIR, CLAUDE, "~/.claude"),
         (HarnessText.USER_HARNESS_DIR, OPENCODE, "~/.config/opencode"),
-        (HarnessText.MCP_TOOL_PREFIX, CLAUDE, "mcp__kbase__"),
+        (HarnessText.MCP_TOOL_PREFIX, CLAUDE, "mcp__plugin_adjagent_kbase__"),
         (HarnessText.MCP_TOOL_PREFIX, OPENCODE, "kbase_"),
     ],
 )
@@ -600,6 +602,28 @@ def test_a_reference_to_an_undiscovered_name_is_refused_naming_the_definition(ha
     with pytest.raises(InputError, match=re.escape("definition 'probe'")) as refused:
         render_definition(defn, ctx, module="m")
     assert f"unknown placeholder {hole_text}" in str(refused.value)
+
+
+_NAMESPACED = [harness for harness in (CLAUDE, MAGE, OPENCODE) if harness.reference_prefix]
+
+
+@pytest.mark.parametrize("harness", _NAMESPACED, ids=lambda harness: harness.name)
+def test_a_reference_prefix_changes_nothing_but_the_reference_sites(harness: Harness) -> None:
+    """Every rendered file, the agents file included, read with each prefix occurrence removed is the
+    render of the same harness with the prefix empty, and that bare render spells the prefix nowhere: a
+    prefix reaches no text but the references it is put before."""
+    bare = dataclasses.replace(harness, reference_prefix="")
+    prefix = harness.reference_prefix
+
+    def rendered(each: Harness) -> dict[PurePosixPath, str]:
+        ctx = Render(harness=each, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+        return {**dict(render_all(ctx)), PurePosixPath("<agents file>"): render_agents_file(each, scope="x")}
+
+    prefixed, plain = rendered(harness), rendered(bare)
+    assert prefixed.keys() == plain.keys()
+    assert {path: text.replace(prefix, "") for path, text in prefixed.items()} == plain
+    assert [path for path, text in plain.items() if prefix in text] == []
+    assert any(prefix in text for text in prefixed.values())
 
 
 _STEP_DOWN_BODY = f"before\n\nDefault: `{adjagent.clauses.STEP_DOWN_MODEL}`, unless bound.\n\nafter"

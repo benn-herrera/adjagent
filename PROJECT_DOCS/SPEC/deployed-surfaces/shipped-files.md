@@ -42,12 +42,14 @@ definition: `adj-tools/` is outside the dispatch namespace entirely, and a packa
 directory is neither its `SKILL.md` nor a supporting file it lists.
 
 A harness's shipped files are the fifth class: copied as they stand, never rendered. A harness also
-*renders* files of its own into ROOT — mage's manifest is the one — which are generated, not copied,
+*renders* files of its own into ROOT — the plugin manifest `.claude-plugin/plugin.json`, one value
+shared by claude and mage, version included — which are generated, not copied,
 carry no banner, and are replaced whole.
-An install copies the installing harness's set into ROOT — the harness directory itself — except a
-user-level install, which copies no harness file, and save a file conditional on a run at install time (below), so a harness file lands at the path it holds
-below that directory: opencode's sits at `<harness-dir>/plugins/guardrail.ts` today and claude's at
-`<harness-dir>/hooks/guardrail.pl` (mage ships none), beside the surfaces and outside all three.
+An install copies the installing harness's set into ROOT — the harness directory under opencode and
+mage, the plugin under claude — except a user-level install, which copies no harness file, and save a
+file conditional on a run at install time (below), so a harness file lands at the path it holds
+below ROOT: opencode's sits at `<harness-dir>/plugins/guardrail.ts` today and claude's at
+`<harness-dir>/skills/adjagent/hooks/guardrail.pl` (mage ships none), beside the surfaces and outside all three.
 Each keeps its bytes and its mode: the install stamps nothing on them. Every such file carries an
 `!INSTALLED! … adjagent` header in its first ten lines — the guardrail files' name this repository
 and forbid edits — as the file's own text, which travels with it. A harness shipping none copies nothing, which
@@ -62,7 +64,7 @@ behind the edit tools, such as in-place `sed`, `perl` or `ruby` edits, redirects
 `mv` onto an existing file, and inline scripts that write, and allows writes into scratch. A
 relative target is judged lexically against the working directory of the call, scratch against the
 project directory, and a heredoc's body is not read as shell. Their `.index/` check is active only
-where the harness directory holds the kbase skill's `SKILL.md`, which they look for on every call,
+where the install's ROOT holds the kbase skill's `SKILL.md`, which they look for on every call,
 so a base install is never refused by it. It refuses a call that reaches into
 `<project>/kb-root/.index/`, whose records kbase's own tools read and change:
 - a shell command with a word naming a path there, existence checks (`stat`, and `test` or `[` with `-e`, `-d` or `-f`) excepted

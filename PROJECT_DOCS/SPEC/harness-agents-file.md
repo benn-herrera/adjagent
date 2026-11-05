@@ -4,8 +4,9 @@ The repository publishes a recommended operator agents file as one definition, r
 supported harness. It is installed only by explicit act, into a directory the operator names — the
 harness's user-global directory or a project's own. `install` installs it in two cases, through
 the same mechanism: for a plugin harness (mage) installed below its project root,
-whose agents file belongs in the plugin directory at ROOT, and for a user-level ROOT given
-`--install-global-agents-file`; for any other harness it never does.
+whose agents file belongs in the plugin directory, which is its harness directory, and for a
+user-level harness directory given `--install-global-agents-file`, where the file goes into the
+harness directory and never inside claude's plugin below it; for any other install it never does.
 
 Agent directives live in `AGENTS.md`. Installed into the harness's user-global directory, the file
 takes the name that harness reads there — `CLAUDE.md` for Claude Code and mage, `AGENTS.md` for

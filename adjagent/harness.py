@@ -7,22 +7,32 @@ value names the whole map, the frontmatter lines it reads, the rule a dispatched
 agent follows when running recipes in its shell, the files it
 renders beside the definitions, the definitions it renders nothing for, the
 prefix a definition's name takes where other definition text names it, the
+path below its harness directory the set is written into, the
 settings file it registers an MCP server in, and the guardrail hook it
 registers, where it has one. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
 renderer maps tools to spellings and computes the governed keys.
+
+The plugin name and the plugin manifest every plugin-form harness renders are here, so each value
+derived from the name has one source.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
+from adjagent import __version__
 from adjagent.errors import InputError
 from adjagent.vocabulary import IDENTIFIER, HarnessText, OptionalHarnessText, Tool
+
+PLUGIN_NAME = "adjagent"
+"""The one spelling of the plugin's name: its manifest name, and the source of every reference prefix,
+plugin directory and plugin MCP prefix a harness derives from it."""
 
 
 @dataclass(frozen=True)
@@ -46,6 +56,17 @@ class HarnessFile:
     path: str  # harness-relative, e.g. ".claude-plugin/plugin.json"
     text: Callable[[], str]  # the whole file, final newline included
     marker: str  # the value inside the file that makes it ours
+
+
+def _plugin_json() -> str:
+    """The plugin manifest's whole text: name, version and description, with `json.dumps`'s default
+    separators, whose space after each colon the marker is a substring of."""
+    manifest = {"name": PLUGIN_NAME, "version": __version__, "description": "Adjagent skills, agents, and MCP tools"}
+    return json.dumps(manifest, indent=2) + "\n"
+
+
+PLUGIN_MANIFEST = HarnessFile(path=".claude-plugin/plugin.json", text=_plugin_json, marker=f'"name": "{PLUGIN_NAME}"')
+"""The plugin manifest every harness that writes its set as a plugin renders beside it."""
 
 
 class McpEntryBuilder(Protocol):
@@ -128,6 +149,8 @@ class Harness:
     default_tier_spec: str | None = None  # the --model-tier-map value used when none is given; None: the family's tiers
     plugin_parent_dir: str = ""  # a plugin's: the trailing path of the directory its plugins sit in; "" otherwise
     reference_prefix: str = ""  # put before a definition's name wherever definition text names it; "" names it bare
+    plugin_dir: str = ""  # below the harness directory, where the set is written (ROOT); "" for the directory
+    reload_rule: str = ""  # what to do when an install's agents are not offered; printed after one, "" for none
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
@@ -171,9 +194,9 @@ class Harness:
             )
 
     @property
-    def is_plugin(self) -> bool:
-        """Whether this harness is a plugin: its files sit at its own root, so its user harness directory
-        is `.`."""
+    def is_standalone_plugin(self) -> bool:
+        """Whether this harness's harness directory is itself a plugin: its files sit at its own root, so
+        its user harness directory is `.`."""
         return self.user_harness_dir == "."
 
     def text(self, part: HarnessText | OptionalHarnessText) -> str:

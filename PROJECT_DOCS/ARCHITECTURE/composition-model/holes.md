@@ -1,12 +1,13 @@
 ### Holes
 
 The renderer fills one closed set of holes, spelled by `vocabulary.hole`: `@!hrn-<key>!@` for the
-seven harness strings, in two classes — the five `HarnessText` members, which every harness supplies
+eight harness strings, in two classes — the five `HarnessText` members, which every harness supplies
 (agents file name, project harness directory, project scratch directory, user harness directory,
-MCP tool prefix), and `OptionalHarnessText`'s two members, `recipe_rule` (the rule a dispatched
-agent follows running recipes) and `kbase_project_rule` (how a kbase session locates its project where
-the server serves many), which a harness supplies as text or as the empty string, an empty one
-dropping the paragraph it stands in — and
+MCP tool prefix), and `OptionalHarnessText`'s three members, `recipe_rule` (the rule a dispatched
+agent follows running recipes), `kbase_project_rule` (how a kbase session locates its project where
+the server serves many) and `reload_rule` (what to do when an install's agents are not offered, in
+its own paragraph of the `adjagent` skill), which a harness supplies as text or as the empty string,
+an empty one dropping the paragraph it stands in — and
 `@!fam-<anchor>!@` for the family overlay anchors a definition exposes (`gap-aversion`,
 `ask-vs-stipulate`). The agents file alone also carries `@!agf-<key>!@` for its scope name. A body of
 any kind may carry `@!tun-<key>!@` for a tuning value, one computed from the render's tier map and
@@ -15,8 +16,8 @@ harness rather than supplied by either: `TuningText`'s one member, `step_down_mo
 `@!ref-<name>!@`, spelled by `vocabulary.reference` and written in definitions as
 `clauses.ref(name=…)`, for a reference to another definition. Its closed set is the name of every
 discovered definition, the agents file's text included, each filled with `Harness.reference_prefix`
-followed by the name; the prefix is `""` for every harness today, so a reference renders as the bare
-name. No prose in the repository contains `@!`.
+followed by the name; the prefix is `adjagent:` under claude and mage and `""` under opencode, so a
+reference renders as `adjagent:<name>` or as the bare name. No prose in the repository contains `@!`.
 
 `render.filled_text` fills a body in one pass over its paragraphs and does not rescan what it
 filled, so a family's overlay text or a harness string cannot introduce a further hole;

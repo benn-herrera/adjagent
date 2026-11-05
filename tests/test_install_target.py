@@ -37,6 +37,11 @@ def _paths(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
 
 
+def _claude_plugin(harness_dir: Path) -> Path:
+    """Where a claude install into `harness_dir` writes the set."""
+    return harness_dir / CLAUDE.plugin_dir
+
+
 def test_the_suite_runs_under_a_scratch_home(_home: Path) -> None:
     """The resolver reads the home directory on every install, so the suite must never see the real one."""
     pwd = pytest.importorskip("pwd")
@@ -47,7 +52,7 @@ def test_the_suite_runs_under_a_scratch_home(_home: Path) -> None:
 def test_the_harness_flag_beats_a_harness_directory_in_the_target(tmp_path: Path) -> None:
     (tmp_path / ".opencode").mkdir()
     cli.main(["install", str(tmp_path), "--harness=claude"])
-    assert (tmp_path / ".claude/agents").is_dir()
+    assert (_claude_plugin(tmp_path / ".claude") / "agents").is_dir()
     assert _paths(tmp_path / ".opencode") == []
 
 
@@ -66,15 +71,18 @@ def test_two_harness_directories_in_the_target_are_refused(tmp_path: Path, capsy
     assert _paths(tmp_path) == [".claude", ".opencode"]
 
 
-def test_a_harness_directory_target_is_root_under_its_parent_as_project_root(tmp_path: Path) -> None:
-    """The kb install's project-root writes — the MCP entry and the runner file — land beside the
-    harness directory, not inside it."""
-    root = tmp_path / ".claude"
-    root.mkdir()
-    cli.main(["install", str(root), "--with-kb"])
-    assert (root / "agents").is_dir()
-    assert not (root / ".claude").exists()
-    assert (tmp_path / ".mcp.json").is_file() and (tmp_path / "Makefile").is_file()
+def test_a_harness_directory_target_is_the_harness_directory_under_its_parent_as_project_root(
+    tmp_path: Path,
+) -> None:
+    """The kb install's project-root write — the runner file — lands beside the harness directory, not
+    inside it, and the set and its MCP entry land in the plugin below it."""
+    harness_dir = tmp_path / ".claude"
+    harness_dir.mkdir()
+    cli.main(["install", str(harness_dir), "--with-kb"])
+    plugin = _claude_plugin(harness_dir)
+    assert (plugin / "agents").is_dir() and (plugin / ".mcp.json").is_file()
+    assert not (harness_dir / ".claude").exists()
+    assert (tmp_path / "Makefile").is_file()
 
 
 def test_a_mage_skills_target_installs_the_plugin_with_its_agents_file(tmp_path: Path, monkeypatch) -> None:
@@ -92,12 +100,12 @@ def test_a_mage_skills_target_installs_the_plugin_with_its_agents_file(tmp_path:
 def test_a_relative_target_is_matched_as_the_directory_it_names(
     tmp_path: Path, monkeypatch, cwd: str, target: str, harness_args: list[str]
 ) -> None:
-    root = tmp_path / "proj/.claude"
-    (root / "agents").mkdir(parents=True)
+    harness_dir = tmp_path / "proj/.claude"
+    (harness_dir / "agents").mkdir(parents=True)
     monkeypatch.chdir(tmp_path / cwd)
     cli.main(["install", target, *harness_args])
-    assert (root / "agents/python-coder.md").is_file()
-    assert not (root / ".claude").exists()
+    assert (_claude_plugin(harness_dir) / "agents/python-coder.md").is_file()
+    assert not (harness_dir / ".claude").exists()
 
 
 @pytest.mark.parametrize("subdir", ["../escape", "{tmp}/elsewhere"], ids=["escaping", "absolute"])
@@ -191,21 +199,21 @@ def test_a_project_directory_without_a_harness_is_refused(tmp_path: Path, monkey
 
 
 @pytest.mark.parametrize(
-    ("present", "harness_args", "root"),
+    ("present", "harness_args", "root", "set_dir"),
     [
-        ([".claude"], [], ".claude"),
-        ([".config/opencode"], [], ".config/opencode"),
-        ([".claude", ".config/opencode"], ["--harness=opencode"], ".config/opencode"),
+        ([".claude"], [], ".claude", f".claude/{CLAUDE.plugin_dir}"),
+        ([".config/opencode"], [], ".config/opencode", ".config/opencode"),
+        ([".claude", ".config/opencode"], ["--harness=opencode"], ".config/opencode", ".config/opencode"),
     ],
     ids=["claude", "opencode", "both-with-harness"],
 )
 def test_a_home_directory_target_installs_user_level_into_the_user_directory(
-    _home: Path, present: list[str], harness_args: list[str], root: str
+    _home: Path, present: list[str], harness_args: list[str], root: str, set_dir: str
 ) -> None:
     for directory in present:
         (_home / directory).mkdir(parents=True)
     cli.main(["install", str(_home), *harness_args])
-    assert (_home / root / "agents").is_dir()
+    assert (_home / set_dir / "agents").is_dir()
     assert not (_home / root / ".claude").exists() and not (_home / root / ".opencode").exists()
     assert not (_home / root / "hooks").exists() and not (_home / root / "plugins").exists()
     assert all(_paths(_home / other) == [] for other in present if other != root)
@@ -220,8 +228,8 @@ def test_a_user_directory_symlinked_out_of_home_installs_through_the_link(
     _home.mkdir()
     (_home / ".claude").symlink_to(dotfiles)
     cli.main(["install", str(_home / in_home)])
-    assert (dotfiles / "agents").is_dir()
-    assert not (dotfiles / "hooks").exists()
+    assert (_claude_plugin(dotfiles) / "agents").is_dir()
+    assert not (_claude_plugin(dotfiles) / "hooks").exists()
 
 
 def test_another_harness_s_user_directory_name_is_a_project_install(_home: Path) -> None:
@@ -237,12 +245,21 @@ def test_a_home_directory_holding_both_user_directories_is_refused(_home: Path, 
     assert _paths(_home) == [".claude", ".config", ".config/opencode"]
 
 
-def test_a_claude_user_level_kb_install_writes_only_the_definitions(_home: Path) -> None:
+def test_a_claude_user_level_kb_install_writes_the_definitions_and_the_plugins_mcp_entry(_home: Path) -> None:
+    """The plugin's own `.mcp.json` is inside the plugin, so a user-level kb install writes it; nothing
+    else beside the definitions, and no user settings file."""
     root = _home / ".claude"
     root.mkdir(parents=True)
     cli.main(["install", str(root), "--with-kb"])
-    assert (root / "agents").is_dir() and (root / "skills/kbase/SKILL.md").is_file()
-    absent = ["hooks/guardrail.pl", "skills/kbase/kb-tools", "CLAUDE.md", "settings.json"]
+    plugin = _claude_plugin(root)
+    assert (plugin / "agents").is_dir() and (plugin / "skills/kbase/SKILL.md").is_file()
+    assert (plugin / ".mcp.json").is_file()
+    absent = [
+        f"{CLAUDE.plugin_dir}/hooks/guardrail.pl",
+        f"{CLAUDE.plugin_dir}/skills/kbase/kb-tools",
+        "CLAUDE.md",
+        "settings.json",
+    ]
     assert not any((root / path).exists() for path in absent)
     assert not any((_home / path).exists() for path in ["Makefile", ".mcp.json", ".claude.json"])
 

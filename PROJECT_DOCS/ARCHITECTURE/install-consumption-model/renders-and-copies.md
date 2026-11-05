@@ -1,13 +1,19 @@
 ### Renders and copies
 
 An install renders every included definition — its own output, then each supporting file a skill
-lists — and every file the harness itself renders (mage's manifest), bar a definition the harness
+lists — and every file the harness itself renders (the plugin manifest, under claude and mage), bar a definition the harness
 declares it renders nothing for (`Harness.omits`), replaces each destination `_packages` names
 whole with a copy — a `.venv` below it included — copies each file the installing harness ships into ROOT as it stands
 — bar a guardrail script whose probe fails (below) — writes the renders over what is there, and
-removes each file under `agents/`, `commands/` or `skills/` that this run did not write, that would
-ship, and that is ours by its own carrier: a frontmatter block holding a `!GENERATED!` line, or a
-comment line opening with it, which is how a skill's supporting file holds its banner. It then
+removes each file under the harness directory's `agents/`, `commands/` or `skills/` that this run did
+not write, that would ship, and that is ours by its own carrier: a frontmatter block holding a
+`!GENERATED!` line, or a comment line opening with it, which is how a skill's supporting file holds its
+banner. ROOT sits below the harness directory inside its `skills/` surface, so this one walk reaches
+ROOT's stale renders and the generated files a flat layout left directly under the harness directory.
+Before it, a project install under a harness with a `plugin_dir` removes whole each package
+destination `_packages(kb_included=True)` names directly under the harness directory, the flat
+layout's, printing each and leaving one reached through a symlink named and in place; a user-level
+install removes none. The walk then
 removes each directory that leaves empty, up to its surface. That walk needs no carve-out for a
 package destination: the table's one row, the docdicer tools package, and the kb toolchain's
 destination both sit inside a surface — `skills/docdicer/tools/` and `skills/kbase/kb-tools/`, each
@@ -17,7 +23,7 @@ docdicer script builds under its destination is outside the would-ship vocabular
 never enter the stale list. A kb-set name is
 inside that would-ship vocabulary, so under a base install one this run did not write is stale and
 goes — every one of its files, a skill's included. Every install also removes each tree in
-`LEGACY_TREES`, naming each it removed: `agents/kb_tools/` (the pre-1.0 kb helper tree),
+`LEGACY_TREES` under the harness directory, naming each it removed: `agents/kb_tools/` (the pre-1.0 kb helper tree),
 `adj-tools/kb-tools/` (where v0.11.x installed the kb toolchain), `agents/kb-tools/` (written only
 by an unreleased build) and `agents/liaison_tools/`. A run that excludes kb reports the removal of
 `agents/kb_tools/` with the advice to install with kb. A render that fails writes nothing. There is no hash or backup of a modified
@@ -66,13 +72,16 @@ prediction tests (`_assert_dry_run_predicts`, which has a user-level case) hold 
 the install. No version marker or stamp file takes part.
 
 - **The managed set** (`_install_managed_paths`) is named from what the install writes by, never from
-  a listing of ROOT, which in a user harness directory holds the operator's own trees. Under ROOT: the
-  three surfaces, the destination of every package `_packages(kb_included=True)` names, each
-  `LEGACY_TREES` entry, the harness's resource targets and rendered files, and, where the run writes
-  an agents file, the `path`, `destination`, `backup` and `native` of a non-writing
-  `checked_agents_file` call. Under the project root, on a project install: the justfile and Makefile
-  names, the guardrail settings file, and the MCP settings candidates (`Harness.mcp.canonical` and
-  `.alternatives`), which sit under ROOT instead for a harness whose `McpSettings.site` is `HARNESS`.
+  a listing of a directory, which in a user harness directory holds the operator's own trees. The bases
+  are the project root, the harness directory and ROOT, ROOT keeping its position below the harness
+  directory. Under the harness directory: the three surfaces the prune walks, each `LEGACY_TREES`
+  entry, the retired package destinations, and, where the run writes an agents file, the `path`,
+  `destination`, `backup` and `native` of a non-writing `checked_agents_file` call. Under ROOT: the
+  three surfaces, the destination of every package `_packages(kb_included=True)` names, the
+  harness's resource targets and rendered files, and the MCP settings candidates where
+  `McpSettings.site` is `HARNESS` and the run may write them. Under the project root, on a project
+  install: the justfile and Makefile names, the guardrail settings file, and the MCP settings
+  candidates (`Harness.mcp.canonical` and `.alternatives`) where `McpSettings.site` is `PROJECT`.
 - **The copy** (`preflight.preflight`) lives in a `tempfile.TemporaryDirectory`, each managed path at
   its position below its base. A managed path that is a symlink, dangling included, is reproduced as a
   symlink, so the install's own checks see what they see on the target: to its counterpart in the copy
@@ -81,9 +90,9 @@ the install. No version marker or stamp file takes part.
   dereferenced (`copy2`, `copytree(symlinks=False)`), so nothing in the copy points back into the
   target. Every `.venv` (`VENV_DIR`) is omitted. A base nested in another keeps its position below
   the outer one.
-- **The run** calls `install` on the copy with `real_root` and `real_project` naming the real paths,
-  because three decisions compare a written path with a fixed location and a copy would decide them
-  differently: whether ROOT is user-level, whether the project is `REPO_ROOT` (the include line is
+- **The run** calls `install` on the copy with `real_harness_dir` and `real_project` naming the real
+  paths, because three decisions compare a written path with a fixed location and a copy would decide
+  them differently: whether the harness directory is user-level, whether the project is `REPO_ROOT` (the include line is
   skipped there), and the agents file's user-directory test and title, which
   `checked_agents_file` and `install_agents_file` read from their `real_directory` parameter. Its
   stdout, the write log, is discarded. What the install leaves alone or skips goes to stderr, which
@@ -112,12 +121,24 @@ the install. No version marker or stamp file takes part.
 
 **The tool re-run.** `install` takes `tool_install`, a keyword-only callable from a script path to
 `None` on success or a one-line failure description, shaped like `uncommitted`. On a project install,
-before its first write, it records whether `<ROOT>/skills/docdicer/tools/.venv` is a directory; the
-package replacement then removes it with the rest of the destination. After every other write it calls
-`tool_install` with `<ROOT>/skills/docdicer/tools/docdicer` if the venv was there, and prints one line
+before its first write, it records whether `skills/docdicer/tools/.venv` is a directory under ROOT or
+under the harness directory (`_standing_docdicer_venvs`; the second is where a flat layout kept it,
+and the retired-destination removal takes it); the package replacement then removes it with the rest
+of the destination. After every other write it calls
+`tool_install` with `<ROOT>/skills/docdicer/tools/docdicer` if a venv was there, and prints one line
 naming the command and the description when one comes back. The install's exit status and its
 other writes are unaffected. `cli.py` passes `install.run_tool_install`, a `subprocess.run` of
 `[script, "--install"]` whose non-zero exit or `OSError` becomes the description; `install.py`
 reimplements neither venv creation nor pip. A test passes a recording runner, so none reaches the
 network.
+
+**Shadow report and reload sentence.** The last two steps of `install`, for a harness with a
+non-empty `plugin_dir` (`_report_shadowing`) and `reload_rule`. A user-level install reports through
+`_report_left_alone` that it takes precedence over every project's plugin; a project install reports
+that a plugin of the same name at `<user_harness_dir>/<plugin_dir>` shadows its own, when every file
+the harness renders of its own (`rendered_files`) is there carrying its marker. Neither refuses. The
+check reads the operator's real home, so it runs inside the preflight copy as it does for real, and its
+stderr line reaches the up-to-date and dry-run outcomes. `Harness.reload_rule`, where non-empty, is
+printed to stdout after the writes; an up-to-date run returns at the preflight before the real
+install and prints none.
 

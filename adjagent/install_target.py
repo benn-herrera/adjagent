@@ -1,6 +1,7 @@
-"""Where an install lands: the harness, ROOT and the project root, resolved from the target an
-operator names, without writing anything. Whether ROOT is user-level is not decided here: `install`
-derives it from ROOT and the harness.
+"""Where an install lands: the harness, the harness directory and the project root, resolved from the
+target an operator names, without writing anything. ROOT, where the set is written, is not decided
+here, nor whether the install is user-level: `install` derives both from the harness directory and the
+harness.
 
 The harness is, in order: the one `--harness` names; the one whose harness directory sits inside the
 target — its project harness directory, or, in the home directory, its user harness directory; the
@@ -25,11 +26,11 @@ _HOME_PREFIX = "~/"
 
 @dataclass(frozen=True)
 class InstallTarget:
-    """A resolved install: the harness's name; ROOT, built from the target normalised without following
-    symlinks; and the project root, symlinks followed."""
+    """A resolved install: the harness's name; the harness directory, built from the target normalised
+    without following symlinks; and the project root, symlinks followed."""
 
     harness: str
-    root: Path
+    harness_dir: Path
     project_root: Path
 
 
@@ -44,14 +45,14 @@ def _dir_inside(harness: Harness, *, at_home: bool) -> str | None:
     the home directory, its project harness directory anywhere else, and never a plugin's."""
     if at_home:
         return _user_dir_in_home(harness)
-    return None if harness.is_plugin else harness.project_harness_dir
+    return None if harness.is_standalone_plugin else harness.project_harness_dir
 
 
 def _own_dir_names(harness: Harness) -> tuple[str, ...]:
     """The trailing paths a directory that is itself `harness`'s harness directory ends in. A plugin's
     project harness directory is the plugin's own name, which a clone of this repository also bears, so
     a plugin is known only by the directory its plugins sit in."""
-    if harness.is_plugin:
+    if harness.is_standalone_plugin:
         return (harness.plugin_parent_dir,) if harness.plugin_parent_dir else ()
     in_home = _user_dir_in_home(harness)
     return (harness.project_harness_dir, *(() if in_home is None else (in_home,)))
@@ -92,11 +93,12 @@ def _detected_harness(target: Path, *, at_home: bool) -> str:
 
 
 def resolve_install_target(target: Path, *, harness: str | None, subdir: str | None) -> InstallTarget:
-    """The harness, ROOT and project root for installing into `target`. With `subdir` given, ROOT is
-    `<target>/<subdir>` (`""`: the target itself). Otherwise, in the home directory, ROOT is the
-    harness's user harness directory there; a target that is itself the non-plugin harness's directory
-    is ROOT, under its parent as the project root; any other target holds ROOT at
-    `<target>/<project harness directory>`. A target that is not an existing directory is refused."""
+    """The harness, harness directory and project root for installing into `target`. With `subdir`
+    given, the harness directory is `<target>/<subdir>` (`""`: the target itself). Otherwise, in the
+    home directory, it is the harness's user harness directory there; a target that is itself the
+    non-plugin harness's directory is the harness directory, under its parent as the project root; any
+    other target holds it at `<target>/<project harness directory>`. A target that is not an existing
+    directory is refused."""
     if not target.is_dir():
         cause = (
             "'~' was not expanded; pass an absolute path" if target.parts[:1] == ("~",) else "create the project first"
@@ -109,15 +111,15 @@ def resolve_install_target(target: Path, *, harness: str | None, subdir: str | N
     in_home = _user_dir_in_home(selected) if at_home else None
     project_root = target.resolve()
     if subdir is not None:
-        root = target / subdir
+        harness_dir = target / subdir
     elif in_home is not None:
-        root = target / in_home
-    elif not selected.is_plugin and _is_own_dir(target, selected):
-        root = target
+        harness_dir = target / in_home
+    elif not selected.is_standalone_plugin and _is_own_dir(target, selected):
+        harness_dir = target
         project_root = target.parent.resolve()
     else:
-        root = target / selected.project_harness_dir
-    return InstallTarget(harness=name, root=root, project_root=project_root)
+        harness_dir = target / selected.project_harness_dir
+    return InstallTarget(harness=name, harness_dir=harness_dir, project_root=project_root)
 
 
 def _absolute_user_dir(harness: Harness) -> Path | None:
