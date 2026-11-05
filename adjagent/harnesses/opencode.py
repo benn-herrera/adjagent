@@ -41,7 +41,6 @@ HARNESS = Harness(
     mcp_tool_prefix="kbase_",
     recipe_rule="",
     kbase_project_rule="",
-    coder_dispatch=None,
     tools={
         Tool.READ: ("read",),
         Tool.GREP: ("grep",),

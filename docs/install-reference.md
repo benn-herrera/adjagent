@@ -30,11 +30,13 @@ A project install writes, inside the harness directory (`~/projects/foo/.claude/
 
 - `agents/` and `commands/`: every agent and slash command of the base set
   ([Definition sets](definition-sets.md)).
-- `skills/adjagent/SKILL.md` and `skills/docdicer/SKILL.md`, and the docdicer tools package beside
-  the second, `skills/docdicer/tools/`: the `docdicer` script, a `.gitignore` holding `.venv/`, and
-  `runner-snippets/docdicer.just` and `docdicer.mk`, which no install includes for you
+- `skills/adjagent/SKILL.md`, `skills/docdicer/SKILL.md` and `skills/dev-process/SKILL.md` with its
+  four files under `skills/dev-process/references/`, and the docdicer tools package beside the
+  docdicer skill, `skills/docdicer/tools/`: the `docdicer` script, a `.gitignore` holding `.venv/`,
+  and `runner-snippets/docdicer.just` and `docdicer.mk`, which no install includes for you
   ([Definition sets](definition-sets.md)).
-  Under mage the `adjagent` skill is omitted; the docdicer skill and its tools are written.
+  Under mage the `adjagent` skill is omitted; the docdicer and dev-process skills and the docdicer
+  tools are written.
 - The harness's own files, copied unchanged and unstamped: a guardrail for claude and opencode, none
   for mage ([Guardrail](guardrail.md)).
 - With the kb set, the `kbase` skill and the rest of what [Knowledge base](knowledge-base.md)

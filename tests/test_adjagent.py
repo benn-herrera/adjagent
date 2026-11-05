@@ -35,7 +35,7 @@ import adjagent
 import adjagent.clauses
 from adjagent.context import TIER_MAP_FLAG, Render, build_render, parse_tier_map
 from adjagent.definition import Definition, SkillFile
-from adjagent.definitions import definitions_of
+from adjagent.definitions import definitions_of, discover
 from adjagent.errors import InputError
 from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
 from adjagent.families.qwen3 import FAMILY as QWEN3_FAMILY
@@ -65,6 +65,7 @@ from adjagent.vocabulary import (
     Kind,
     OptionalHarnessText,
     Tool,
+    TuningText,
     hole,
 )
 from devtools import render_diff
@@ -487,11 +488,14 @@ def _routed_references(router: str) -> set[str]:
     return routed
 
 
-def test_the_router_routes_to_every_reference_that_ships_and_no_other(discovered: Discovered) -> None:
+_SKILLS_WITH_FILES = [defn for _, defn in definitions() if defn.kind is Kind.SKILL and defn.files]
+
+
+@pytest.mark.parametrize("skill", _SKILLS_WITH_FILES, ids=lambda skill: skill.name)
+def test_the_router_routes_to_every_reference_that_ships_and_no_other(skill: Definition) -> None:
     """A reference is read only when its route is reached and every route is a reference, so the two
     sets are one: a route naming a file the skill does not carry opens on nothing, and a file no route
     names is text no session ever reads."""
-    _, skill = _found(discovered, "skills/kbase/SKILL.md")
     routed = _routed_references(skill.body)
     assert routed == {file.path for file in skill.files}
     assert routed, "no route parsed from the table, so the comparison above would pass vacuously"
@@ -552,11 +556,64 @@ def test_an_unknown_placeholder_is_refused_at_render(placeholder: str) -> None:
         filled_body(defn, ctx)
 
 
-@pytest.mark.parametrize("part", [*HarnessText, *OptionalHarnessText], ids=lambda part: part.name)
-def test_the_text_module_spells_each_harness_placeholder_as_the_renderer_fills_it(
-    part: HarnessText | OptionalHarnessText,
+@pytest.mark.parametrize("part", [*HarnessText, *OptionalHarnessText, *TuningText], ids=lambda part: part.name)
+def test_the_text_module_spells_each_render_placeholder_as_the_renderer_fills_it(
+    part: HarnessText | OptionalHarnessText | TuningText,
 ) -> None:
     assert getattr(adjagent.clauses, part.name) == hole(part)
+
+
+_STEP_DOWN_BODY = f"before\n\nDefault: `{adjagent.clauses.STEP_DOWN_MODEL}`, unless bound.\n\nafter"
+
+
+@pytest.mark.parametrize(
+    "harness, tier_spec, rendered",
+    [
+        ("claude", None, "before\n\nDefault: `sonnet`, unless bound.\n\nafter"),
+        ("opencode", None, "before\n\nafter"),
+        (
+            "opencode",
+            "all=omlx/Qwen3.8-Flash-Next",
+            "before\n\nDefault: `omlx/Qwen3.8-Flash-Next`, unless bound.\n\nafter",
+        ),
+        ("mage", None, "before\n\nDefault: `sonnet`, unless bound.\n\nafter"),
+        ("claude", "all=inherit", "before\n\nafter"),
+    ],
+)
+def test_the_step_down_paragraph_names_the_pinned_medium_model_or_drops_whole(
+    harness: str, tier_spec: str | None, rendered: str
+) -> None:
+    """The paragraph renders exactly where the render pins a model for the step-down tier; where that
+    tier renders as inherit there is nothing to step down to, and the paragraph goes with its other text."""
+    ctx = build_render(harness=harness, family="claude", tier_spec=tier_spec, alias_spec=None)
+    assert filled_text(_STEP_DOWN_BODY, _skill(), ctx, where="skills/probe/SKILL.md") == rendered
+
+
+def test_the_step_down_model_fills_a_skill_supporting_file_as_it_fills_skill_md() -> None:
+    line = f"Step down to {adjagent.clauses.STEP_DOWN_MODEL}."
+    defn = _skill(body=line, files=(SkillFile(path="references/reading.md", body=line),))
+    ctx = build_render(harness="claude", family="claude", tier_spec=None, alias_spec=None)
+    rendered = render_skill_file(defn, defn.files[0], ctx, module="adjagent.definitions.probe")
+    assert rendered.endswith("\n\nStep down to sonnet.\n")
+
+
+# A paragraph a tuning hole stands in is dropped whole where the value fills to nothing; a list or table
+# in that paragraph would go with it.
+_TUNING_HOLES = re.compile("|".join(re.escape(hole(part)) for part in TuningText))
+_LIST_OR_TABLE_LINE = re.compile(r"^\s*(?:[-*] |\d+\. |\|)", re.MULTILINE)
+
+
+def test_no_tuning_hole_shares_a_paragraph_with_a_list_or_table() -> None:
+    every = [defn for _, entries in discover() for defn in entries]
+    bodies = [(defn.name, defn.body) for defn in every]
+    bodies += [(f"{defn.name}/{file.path}", file.body) for defn in every for file in defn.files]
+    found = [
+        f"{label}: {paragraph[:120]}"
+        for label, body in bodies
+        for paragraph in body.split("\n\n")
+        if _TUNING_HOLES.search(paragraph) and _LIST_OR_TABLE_LINE.search(paragraph)
+    ]
+    assert found == [], "\n".join(found)
 
 
 @pytest.mark.parametrize("path", ["agents/python-coder.md", "agents/web-app-expert.md"])
@@ -666,12 +723,11 @@ def _baited_scope_name() -> tuple[Definition, Render, str]:
     return defn, Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT, scope=f"s{_BAIT}"), f"# s{_BAIT}"
 
 
-def _baited_model_in_the_coder_dispatch() -> tuple[Definition, Render, str]:
-    """The family member the dispatch bullet names carries the hole."""
-    assert CLAUDE.coder_dispatch is not None
-    defn = Definition(name="probe", kind=Kind.AGENTS_FILE, body=hole(AgentsFileText.CODER_DISPATCH))
+def _baited_step_down_model() -> tuple[Definition, Render, str]:
+    """The family member the step-down tier pins carries the hole."""
+    defn = _skill(body=f"use {hole(TuningText.STEP_DOWN_MODEL)}")
     ctx = Render(harness=CLAUDE, family=_BAITED_FAMILY, tier_map=dict(_BAITED_FAMILY.tiers))
-    return defn, ctx, CLAUDE.coder_dispatch(f"mid{_BAIT}")
+    return defn, ctx, f"use mid{_BAIT}"
 
 
 @pytest.mark.parametrize(
@@ -682,9 +738,9 @@ def _baited_model_in_the_coder_dispatch() -> tuple[Definition, Render, str]:
         _baited_optional_harness_text,
         _baited_family_overlay,
         _baited_scope_name,
-        _baited_model_in_the_coder_dispatch,
+        _baited_step_down_model,
     ],
-    ids=["clause", "harness-text", "optional-harness-text", "family-overlay", "scope-name", "model"],
+    ids=["clause", "harness-text", "optional-harness-text", "family-overlay", "scope-name", "step-down-model"],
 )
 def test_a_filled_value_carrying_a_hole_reaches_the_body_literally(case) -> None:
     defn, ctx, expected = case()
@@ -865,6 +921,34 @@ _DEFINITION_PATHS = sorted(path for path in (_PACKAGE / "definitions").glob("*.p
 def test_the_definition_modules_and_the_text_module_hold_their_structure() -> None:
     violations = check_structure([*_DEFINITION_PATHS, _PACKAGE / "clauses.py"])
     assert violations == [], "\n".join(violations)
+
+
+def test_dev_process_bodies_spell_each_term_through_its_constant() -> None:
+    """A project binds a term by its exact spelling, so a body writing one out literally drifts from the
+    constant every other mention renders from."""
+    tree = ast.parse((_PACKAGE / "definitions" / "dev_process.py").read_text(encoding="utf-8"))
+    terms = {
+        node.targets[0].id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and node.targets[0].id.endswith("_TERM")
+    }
+    assert terms, "no *_TERM constant found, so the check below would pass vacuously"
+    literals = [
+        node
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        for keyword in call.keywords
+        if keyword.arg == "body"
+        for node in ast.walk(keyword.value)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    found = [
+        f"a dev_process.py body writes out {term} as {value!r}"
+        for node in literals
+        for term, value in terms.items()
+        if value in node.value
+    ]
+    assert found == [], "\n".join(found)
 
 
 _DEFINITION_HEAD = "from adjagent import clauses\nfrom adjagent.definition import Definition\n"

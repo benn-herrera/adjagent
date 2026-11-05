@@ -21,6 +21,8 @@ the permission system's own-settings protections). If it doesn't exist, stop and
 improvise a location.
 
 ## Task management
+- **Before planning, briefing or dispatching an agent, accepting returned work, or making a
+  checkpoint commit, load the `dev-process` skill.**
 
 **PRINCIPLE**: erroneous, halting escalation of soluble problems destroys workflow.
 - Exhaust the written record before escalating: a decision "only the user can make" often dissolves
@@ -51,19 +53,6 @@ to right answers for tricky problems.
   reads after the task that produced it: fixtures, answer files, evaluation instruments, brief
   templates, requirements feeding an agent. A single-use dispatch brief is exempt; a durable
   artifact it drafts is not.
-
-@!agf-coder-dispatch!@
-
-- **Direction a sub-agent reads carries outcome and operative consequence only**, plus the guiding
-  principle where one still steers open choices. Decision history — who ruled, when, which branches
-  lost, the deciding narrative — stays in the audit record (changelog, ruling record, owner
-  channel), out of briefs, plan dispatch sections and table cells. A quotation that states the
-  requirement is direction; one that records who authorized it is history.
-- **A returned report is evidence, not a conclusion.** Its facts are the strong half — the agent has
-  just read the files — so check them against the artifact itself (the diff, the code, the rendered
-  output) before the commit that accepts the work. Its judgments, framings and hedges are the weak
-  half — it lacks this thread's context — so test them against what is already decided or ruled out.
-  An agent reopening a settled question is the normal case, not a signal.
 - **Attribute what you relay.** An agent's claim you did not check reaches the user marked as the
   agent's — once per source, not per sentence. Relayed unmarked means adopted: yours, and verified.
   A judgment you find plausible is still one you did not check.
@@ -116,22 +105,13 @@ changes cannot be seen at its source or corrected there.
   which parts have. Name it and where it lives; evidence belongs where it is dated — the commit, the
   report.
 - **The contract moves with the work.** Deliberate change updates SPEC.md, ARCHITECTURE.md and
-  CONVENTIONS.md in the change that motivates it. Coding work is not done, and a checkpoint does not
-  land, until the project docs it invalidates are updated.
+  CONVENTIONS.md in the change that motivates it. Coding work is not done until the project docs it
+  invalidates are updated.
   - **A mismatch you did not create — doc against doc, or code against doc — is evidence that
     something moved; establish what.** Check `git log` on both sides; whichever moved last is the
     candidate for current. If the code is newer and holds the project's principles, the document is
     stale: update it and state what you established. Disagreement with SPEC.md or ARCHITECTURE.md is
     not the tell for code being wrong — the tell is code that is newer *and* violates a principle.
-
-## Planning
-Read the primary sources the plan depends on — current files and state, not stale data or guesses —
-before presenting it. **Reading is not establishing: where one command settles a claim a plan step
-acts on — an import graph, what a call executes, where a symbol is defined — the step carries that
-command and the answer it gave, for the executing agent to re-run.** Where a document settles it,
-the step quotes the line and names the file. An approved plan runs to completion: surface any
-blocker needing user intervention during planning, never as a mid-run discovery. A plan or design
-you write that grows too large to read whole, you dice.
 
 ## Coding
 **INVARIANT**: NEVER JUST CODE FROM BASE BEHAVIOR.
@@ -155,6 +135,11 @@ you write that grows too large to read whole, you dice.
   an alias like `rm -i` still fires there and blocks on a prompt nobody answers. Tool commands and
   dispatched instructions call `command rm`, `command cp`, `command mv` and `command ls`. Scripts on
   disk run under their own shebang and are unaffected.
+- **Code that calls a network API follows the usage guidelines provided for it** — rate limits,
+  concurrency, `Retry-After`, identification — whether an ad-hoc script or product code. Compliance
+  is mandatory. A dispatch for network code that hits a non-local API without usage guidelines is a
+  blocking event: a dispatcher does not send it, and an agent that receives one reports it as a
+  Blocker.
 
 ## Acting on the user's words
 **No quotable go, no action.**

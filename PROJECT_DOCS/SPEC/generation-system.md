@@ -12,7 +12,11 @@ properties, independent of how they are implemented (see ARCHITECTURE.md):
   family's tuning, and a harness's names for its own paths and tools, are not held to it.
 - **Additive-only model tuning.** A family's tuning may extend a definition's base text at declared
   anchor points; it can never replace, suppress, or fork that text. A definition whose
-  anchors the loaded family does not fill is byte-identical, below its banner, to its base render.
+  anchors the loaded family does not fill is byte-identical, below its banner, to its base render
+  under the same harness and tier map. Base text may itself carry a value taken from the tier map
+  (the model a step-down names); no family tuning reaches it. The step-down default the process
+  skill offers appears in a render only where the tier map pins a model for the `medium` tier, and
+  nowhere else.
 - **Tier-keyed tuning, with recorded provenance.** Every agent definition declares a tier —
   one of `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability — and the family's tier
   map, the one model source on every harness, resolves it: the tier's family member is both what

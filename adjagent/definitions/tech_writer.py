@@ -241,6 +241,10 @@ no Windows environment available").
 {clauses.PE_LEAD}
 {clauses.pe_declare_bullet(act="create or modify")}
 {clauses.PE_STOP_BULLET}
-{clauses.pe_scope_creep_bullet(examples="rewrite adjacent docs, restructure things that weren't asked for")}""",
+{clauses.pe_scope_creep_bullet(examples="rewrite adjacent docs, restructure things that weren't asked for")}
+
+## Dissent
+
+{clauses.DISSENT}""",
     ),
 )

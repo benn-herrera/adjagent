@@ -17,14 +17,23 @@ from adjagent.definitions import discover
 from adjagent.errors import InputError
 from adjagent.harness import AgentFields, Harness, quoted
 from adjagent.loading import load
-from adjagent.vocabulary import ALL, AgentsFileText, Anchor, HarnessText, Kind, OptionalHarnessText, Tier, hole
+from adjagent.vocabulary import (
+    ALL,
+    AgentsFileText,
+    Anchor,
+    HarnessText,
+    Kind,
+    OptionalHarnessText,
+    Tier,
+    TuningText,
+    hole,
+)
 
 GENERATED_MARK = "!GENERATED! from "
 GENERATED_NOTICE = (
     "do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md."
 )
 PLACEHOLDER = re.compile(r"@![a-z0-9.-]+!@")
-_DISPATCH_TIER: Tier = "medium"  # the tier the agents file's coder-dispatch rule cites
 
 
 def keyed_by_path(
@@ -118,20 +127,21 @@ def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
 
 
 def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
-    """`body` with every placeholder filled in one pass: a harness text from ctx.harness, an anchor from
-    ctx.overlay for the definition's seat ("" where the family fills none), and for the agents file alone
-    its scope name and coder-dispatch bullet. A paragraph that fills to nothing is dropped with its blank
-    line, so an unfilled anchor or an optional harness text the harness supplies nothing for, standing as
-    its own paragraph, leaves no empty one. A placeholder-shaped span naming no key is refused, naming
-    `where`. Filled text is not rescanned."""
+    """`body` with every placeholder filled in one pass: a harness text from ctx.harness, an anchor
+    from ctx.overlay for the definition's seat ("" where the family fills none), the step-down model
+    from ctx.step_down_model for every kind, and for the agents file alone its scope name. A
+    paragraph that fills to nothing is dropped with its blank line, so an unfilled anchor or an
+    optional harness text the harness supplies nothing for, standing as its own paragraph, leaves no
+    empty one. A paragraph whose source holds a tuning hole that fills to "" is dropped whole,
+    whatever else it says. A placeholder-shaped span naming no key is refused, naming `where`.
+    Filled text is not rescanned."""
     seated = dataclasses.replace(ctx, seat=defn.tier)
     values = {hole(part): ctx.harness.text(part) for part in (*HarnessText, *OptionalHarnessText)}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
+    values[hole(TuningText.STEP_DOWN_MODEL)] = ctx.step_down_model
     if defn.kind is Kind.AGENTS_FILE:
         values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope
-        values[hole(AgentsFileText.CODER_DISPATCH)] = (
-            ctx.harness.coder_dispatch(ctx.model(_DISPATCH_TIER)) if ctx.harness.coder_dispatch else ""
-        )
+    unfilled_tuning = {hole(part) for part in TuningText if not values[hole(part)]}
 
     def value(match: re.Match[str]) -> str:
         if match[0] not in values:
@@ -140,7 +150,11 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
 
     paragraphs = body.split("\n\n")
     filled = [PLACEHOLDER.sub(value, paragraph) for paragraph in paragraphs]
-    return "\n\n".join(text for text, source in zip(filled, paragraphs) if text or not source)
+    return "\n\n".join(
+        text
+        for text, source in zip(filled, paragraphs)
+        if (text or not source) and unfilled_tuning.isdisjoint(PLACEHOLDER.findall(source))
+    )
 
 
 def filled_body(defn: Definition, ctx: Render) -> str:

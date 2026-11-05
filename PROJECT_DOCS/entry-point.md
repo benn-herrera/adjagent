@@ -1,6 +1,6 @@
 # THESIS - adjagent
 
-*Why this project has the shape it has*
+Why this project has the shape it has
 
 ---
 
@@ -18,6 +18,13 @@ Multiply by the model dimension and the question stops being tedious and becomes
 the failure is silent** — a clause that reached ten seats and not the eleventh is discovered later,
 by its consequences, in work unrelated to the edit that caused it.
 
+**Seats that hand work to one another share one engineering ethos**
+
+An architect's design sets what a coder builds; a reviewer checks the build against it, and a tech
+writer documents what was built. A handoff holds when both sides judge by the same standard. Roles
+differ; the standard does not. So shared text does more than prevent disagreement: it is how a set
+of individually capable agents carries one ethos.
+
 **An agent set should be useful in more than one harness context**
 
 The ability to specify model-family-specific tuning and harness-specific shaping falls naturally
@@ -25,7 +32,8 @@ from the basic capability and multiplies the utility.
 
 ## What follows
 
-Agreement that cannot be verified must be made unrepresentable. A span shared by many definitions
+The ethos is only as shared as the text. Agreement that cannot be verified must be made
+unrepresentable. A span shared by many definitions
 exists once and every definition is produced from it, so two copies cannot disagree because there is
 only one.
 

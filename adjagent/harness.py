@@ -4,8 +4,7 @@ A harness is everything rendered output differs on between harnesses: the
 directory and file names prose spells, the tool spellings, the model shape it
 accepts and the words that render no model at all, whether a map flag's bare
 value names the whole map, the frontmatter lines it reads, the rule a dispatched
-agent follows when running recipes in its shell, the agents file's
-coder-dispatch bullet as a callable over the rendered model, the files it
+agent follows when running recipes in its shell, the files it
 renders beside the definitions, the definitions it renders nothing for, the
 settings file it registers an MCP server in, and the guardrail hook it
 registers, where it has one. It holds no tier map, no family and
@@ -113,9 +112,6 @@ class Harness:
     mcp_tool_prefix: str  # "mcp__kbase__" / "kbase_"; this prefix + the tool's own name is its offered name
     recipe_rule: str  # the rule a dispatched agent follows running recipes in its shell; "" where there is none
     kbase_project_rule: str  # how a kbase session locates its project where the server serves many; "" otherwise
-    coder_dispatch: (
-        Callable[[str], str] | None
-    )  # the agents file's coder-dispatch bullet, built from the rendered model; None where the harness cannot choose a model per dispatch
     tools: Mapping[Tool, tuple[str, ...]]  # total over Tool, in Tool order, each non-empty
     model_pattern: re.Pattern[str]  # every tier's rendered text must fullmatch it
     model_shape: str  # the pattern in words; the only form a refusal shows
@@ -133,15 +129,15 @@ class Harness:
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
-        model_shape, an OptionalHarnessText field that is not a string, a coder_dispatch that is neither None nor
-        callable, a tools table not total in Tool order, an MCP settings contract lacking a canonical
-        path, a non-empty alternative name, or a builder, or a guardrail hook lacking a script path, a
-        settings path, a container path, a builder, or a recogniser.
+        model_shape, an OptionalHarnessText field that is not a string, a tools table not total in
+        Tool order, an MCP settings contract lacking a canonical path, a non-empty alternative name,
+        or a builder, or a guardrail hook lacking a script path, a settings path, a container path, a
+        builder, or a recogniser.
 
-        An empty string is refused of the fields a body naming them always renders, since every harness
-        supplies each HarnessText and a model shape. An OptionalHarnessText is a rule a harness imposes
-        or does not, so there "" is a value rather than a missing one: it drops the paragraph its
-        placeholder stands in."""
+        An empty string is refused of the fields a body naming them always renders, since every
+        harness supplies each HarnessText and a model shape. An OptionalHarnessText is a rule a
+        harness imposes or does not, so there "" is a value rather than a missing one: it drops the
+        paragraph its placeholder stands in."""
         if re.fullmatch(IDENTIFIER, self.name) is None:
             raise InputError(f"harness '{self.name}': name is not a strict-kebab identifier")
         if any(re.fullmatch(IDENTIFIER, name) is None for name in self.omits):
@@ -151,8 +147,6 @@ class Harness:
         for part in OptionalHarnessText:
             if not isinstance(self.text(part), str):
                 raise InputError(f"harness '{self.name}': {part.value} must be a string")
-        if self.coder_dispatch is not None and not callable(self.coder_dispatch):
-            raise InputError(f"harness '{self.name}': coder_dispatch must be a callable or None")
         if tuple(self.tools) != tuple(Tool) or not all(self.tools.values()):
             raise InputError(f"harness '{self.name}': tools table must name every Tool, in Tool order, non-empty")
         if not self.mcp.canonical or not all(self.mcp.alternatives) or not callable(self.mcp.entry):

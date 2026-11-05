@@ -20,6 +20,7 @@ TIER_MAP_FLAG = "--model-tier-map"
 ALIAS_MAP_FLAG = "--model-pin-tier-alias-map"
 DEFAULT_HARNESS = "claude"
 DEFAULT_FAMILY = "claude"
+STEP_DOWN_TIER: Tier = "medium"
 
 
 def parse_tier_map(spec: str, *, flag: str) -> dict[Tier, str]:
@@ -105,6 +106,13 @@ class Render:
         if self.seat is not None and self.tier_map[self.seat] in overlay.members:
             return overlay.members[self.tier_map[self.seat]]
         return overlay.text or ""
+
+    @property
+    def step_down_model(self) -> str:
+        """The STEP_DOWN_TIER's rendered model, or "" where that tier renders the harness's inherit text
+        and so pins nothing to step down to."""
+        model = self.model(STEP_DOWN_TIER)
+        return "" if model == self.harness.inherit_text else model
 
     @property
     def stock(self) -> tuple[Tier, ...]:

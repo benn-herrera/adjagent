@@ -49,7 +49,7 @@ Single-purpose agents invoked directly for non-coding work.
 
 ## Skills
 
-Two skills drive tools and ship in the default set of every harness, except that mage omits `adjagent`.
+Three skills ship in the default set of every harness, except that mage omits `adjagent`.
 
 - **`adjagent`** (`skills/adjagent/SKILL.md`): how a session changes, updates and inspects the
   installed set. It tells the session never to edit the installed definitions or the installed
@@ -83,4 +83,13 @@ Two skills drive tools and ship in the default set of every harness, except that
   `PROJECT_DOCS`). In make the arguments are `DOCDICER_ARGS`, `DOCDICER_ROOTS` and `DOCDICER_TREE`.
   The just form needs just 1.33 or later. The recipes fail with install instructions until
   `tools/docdicer --install` has built the venv.
+- **`dev-process`** (`skills/dev-process/SKILL.md`, with `references/`): one development process for
+  the main session, covering planning, dispatching agents, accepting their work, checkpoint commits,
+  post-plan review and releases as sequences of plans. A project's own rule in its `CONVENTIONS.md`
+  overrules the skill's. Where a rule needs a value the project has not recorded, such as the
+  runner targets that verify an edit, the session asks you and records the answer in `CONVENTIONS.md`
+  rather than guessing. The references cover starting a new project (`new-project.md`), recording
+  those values (`project-setup.md`), taking up a project whose process is already written
+  (`adopting.md`) and running a release (`release.md`). Mage carries it. The agents file points the
+  session at it ([Agents file](agents-file.md)).
 - **`kbase`**: the knowledge-base skill, delivered by a kb install ([Knowledge base](knowledge-base.md)).

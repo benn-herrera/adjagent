@@ -7,9 +7,7 @@ Must-see:
 - No user-facing behaviors or outcomes are designed here, that belongs to SPEC
 - No project mechanisms or code structure are put forth, that belongs to ARCHITECTURE
 - Edit PROJECT_DOCS/ leaves, never the root pointer files ([Project Documents](project-documents.md))
-- Briefing a seat
-  - A brief adds the task's facts to the seat's definition; it never widens or replaces the seat's question
-  - Before briefing a seat whose definition you have not read this session, read it
+- Process is the `dev-process` skill; [Planning and Execution](planning-and-execution/index.md) holds its local rules
 
 Contents:
 
@@ -34,16 +32,11 @@ Contents:
   - [Annotations on the floor](code-definitions-and-install/annotations-on-the-floor.md)
   - [Obviated code is deleted, not parked](code-definitions-and-install/obviated-code-is-deleted-not-parked.md)
 - [Planning and Execution](planning-and-execution/index.md)
-  - [The active plan](planning-and-execution/the-active-plan.md)
+  - [The gates](planning-and-execution/the-gates.md)
   - [Partly-planned work](planning-and-execution/partly-planned-work.md)
-  - [Normative pages outrank the plan](planning-and-execution/normative-pages-outrank-the-plan.md)
-  - [Dispatches name their seats first](planning-and-execution/dispatches-name-their-seats-first.md)
-  - [The gate after a change](planning-and-execution/the-gate-after-a-change.md)
   - [`render-diff` slots and output](planning-and-execution/render-diff-slots-and-output.md)
   - [A checkpoint includes the sweep](planning-and-execution/a-checkpoint-includes-the-sweep.md)
   - [Reference retakes follow acceptance](planning-and-execution/reference-retakes-follow-acceptance.md)
-  - [Plan work rating and dispatch](planning-and-execution/plan-work-rating-and-dispatch.md)
-  - [Plan dispatchability](planning-and-execution/plan-dispatchability.md)
 - [Adding Definitions](adding-definitions/index.md)
   - [Where it goes](adding-definitions/where-it-goes.md)
   - [What it is called](adding-definitions/what-it-is-called.md)
@@ -51,7 +44,6 @@ Contents:
   - [Skill references omit offered surface](adding-definitions/skill-references-omit-offered-surface.md)
   - [Group membership](adding-definitions/group-membership.md)
   - [Clause paragraphs](adding-definitions/clause-paragraphs.md)
-  - [Group membership](adding-definitions/group-membership.md)
   - [What `render-diff` shows](adding-definitions/what-render-diff-shows.md)
   - [Where the rest is](adding-definitions/where-the-rest-is.md)
 - [Section and rule heading brevity](section-and-rule-heading-brevity.md)

@@ -45,6 +45,8 @@ is a guess wearing a mechanism section.
 
 {clauses.verification_evidence()}
 
+{clauses.NO_PROCESS_LEFT_BEHIND}
+
 ## Dissent
 
 {clauses.DISSENT}""",

@@ -83,18 +83,11 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # The agents-file render.
 
 
-@pytest.mark.parametrize("harness", [CLAUDE, OPENCODE], ids=lambda harness: harness.name)
-def test_the_fresh_render_cites_the_medium_member_under_claude_only(harness: Harness) -> None:
-    user_dir = Path(harness.user_harness_dir).expanduser()
-    text = render_agents_file(harness, scope=scope_name(harness, user_dir))
+def test_the_fresh_render_holds_the_title_and_one_marker_span() -> None:
+    user_dir = Path(CLAUDE.user_harness_dir).expanduser()
+    text = render_agents_file(CLAUDE, scope=scope_name(CLAUDE, user_dir))
     lines, begin, end = marker_span(text, where="render")
     assert (lines[0], lines[begin], lines[end]) == ("# Global info and directives", _BEGIN, _END)
-    if harness is CLAUDE:
-        assert "`model: sonnet`" in text
-        assert "Coder dispatches" in text
-    else:
-        assert "`model: sonnet`" not in text
-        assert "Coder dispatches" not in text
     assert text.endswith(_END + "\n")
 
 
@@ -474,6 +467,18 @@ def test_every_harness_omits_a_name_the_package_discovers() -> None:
         if omitted not in discovered
     ]
     assert unknown == []
+
+
+@pytest.mark.parametrize("name", sorted(load("adjagent.harnesses", "HARNESS")))
+def test_every_skill_the_agents_file_cites_ships_in_the_harness_default_install(name: str) -> None:
+    """The agents file points at skills by name; a name a default install does not ship points at
+    nothing. A plugin always takes the kb set; any other harness's default install leaves it out."""
+    ctx = build_render(harness=name, family="claude", tier_spec=None, alias_spec=None)
+    cited = set(re.findall(r"`([a-z0-9-]+)`\s+skill\b", render_agents_file(ctx.harness, scope="probe")))
+    assert cited, "no skill citation parsed from the agents file, so the check below would pass vacuously"
+    renders = render_all(ctx, include=lambda defn: ctx.harness.is_plugin or not excluded(defn.name))
+    shipped = {path.parts[1] for path, _ in renders if path.parts[0] == "skills" and path.name == "SKILL.md"}
+    assert cited <= shipped, sorted(cited - shipped)
 
 
 @pytest.mark.parametrize(

@@ -34,7 +34,7 @@ machine of unknown Python.
     function interpolates it. A repeat is reported with both paths to it.
   - Each paragraph or list item appears once. The check reads the rendered text, filled under the
     claude render, collapsed as in the check above, and counts across every output in the prompt.
-  - A `clauses.py` constant that only fills a harness-string hole is not counted by the first check.
+  - A `clauses.py` constant that only fills a hole, of any kind, is not counted by the first check.
 - **A group's members carry what the group carries.** A group is the definitions whose own
   `Definition(...)` call names its anchor clause: `CODE_PRINCIPLES_CODER` for the coders,
   `CODE_PRINCIPLES_PLATFORM` for the platform experts. `tests/test_clause_groups.py` holds, per

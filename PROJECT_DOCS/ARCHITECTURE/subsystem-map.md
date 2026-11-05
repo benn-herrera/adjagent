@@ -65,6 +65,18 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   states how to run adjagent: the project's runner recipe where there is one, else the release tag
   installed into a venv and that venv's `adjagent`. The docdicer version the script installs is written once, as `VERSION` in
   `adjagent/docdicer-tools/docdicer`.
+- **Process skill** — `dev-process` (`definitions/dev_process.py`): one `SKILL.md` and four
+  references (`references/new-project.md`, `project-setup.md`, `adopting.md`, `release.md`), carried
+  as `SkillFile`s, in the default set under every harness, mage included. It states one development
+  process for the main session; the agents file's *Task management* points the session at it.
+  Each term the process names (active plan, edit gate, step-down model and the rest) is one
+  module-level `*_TERM` constant that every mention in the five files interpolates; a test reads
+  `dev_process.py` and fails where a term's value is written literally in a body string, so no two
+  mentions can name a slot differently. The skill is always delivered. The sentence naming the
+  default step-down model is `clauses.STEP_DOWN_MODEL`, the `tun` hole (Composition Model, Holes),
+  so that sentence alone renders only where the render pins a model for the step-down tier. The
+  agents file and this skill are installed separately, so the pointer can name a skill the install
+  has not written.
 - **Install machinery** — the one entry not rendered from a definition: `install.py` renders, copies
   and prunes; `preflight.py` runs that install into a scratch copy and compares (Install
   Consumption Model, Renders and copies); `agents_file.py` does the same for the agents file

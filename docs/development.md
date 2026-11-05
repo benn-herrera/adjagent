@@ -32,7 +32,7 @@ on whatever `python3` is installed. Using the repository directly does not requi
 
 Other targets:
 
-- `just test-changed [base]` is the gate after a change. It runs only the surfaces the uncommitted
+- `just test-changed [base]` is the edit gate, run after a change. It runs only the surfaces the uncommitted
   tree (plus, given `base`, the commits since it) touches, and says which paths chose each.
 - `just render [slug]` renders the full install product, kb set included, into `rendered/<slug>/`
   (slug defaults to `latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/`:
@@ -103,7 +103,7 @@ text with holes, read top to bottom as the file it renders.
 - To see what a change does, run `just render`, then `just render-diff`. An unknown placeholder fails
   at render; a definition module holding anything but imports, string constants and `DEFINITIONS`
   fails the suite.
-- The gate is `just test-changed`.
+- The edit gate is `just test-changed`; the checkpoint gate is `just test`.
 
 How to add a definition: [CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/adding-definitions/index.md).
 

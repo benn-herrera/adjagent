@@ -88,17 +88,29 @@ class AgentsFileText(Enum):
     """A value only the agents file's prose names, bound when it renders."""
 
     SCOPE_NAME = "scope_name"
-    CODER_DISPATCH = "coder_dispatch"
 
 
-def key(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText) -> str:
+class TuningText(Enum):
+    """A value computed from the render's tier map and harness, filled in a body of every kind; one that
+    fills to `""` drops its paragraph."""
+
+    STEP_DOWN_MODEL = "step_down_model"
+
+
+def key(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText | TuningText) -> str:
     """A render-time value's flat key: its enum value with each "_" read as "-"."""
     return "-".join(name.value.split("_"))
 
 
-def hole(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText) -> str:
+def hole(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText | TuningText) -> str:
     """The placeholder a definition body carries for a render-time value: `@!hrn-<key>!@` for a harness
     text, optional or not, `@!fam-<key>!@` for an overlay anchor, `@!agf-<key>!@` for an agents-file
-    value. No rendered prose spells `@!`."""
-    namespace = {HarnessText: "hrn", OptionalHarnessText: "hrn", Anchor: "fam", AgentsFileText: "agf"}[type(name)]
+    value, `@!tun-<key>!@` for a tuning value. No rendered prose spells `@!`."""
+    namespace = {
+        HarnessText: "hrn",
+        OptionalHarnessText: "hrn",
+        Anchor: "fam",
+        AgentsFileText: "agf",
+        TuningText: "tun",
+    }[type(name)]
     return f"@!{namespace}-{key(name)}!@"

@@ -2,8 +2,10 @@
 
 The agent definitions assume a set of operator-level working rules, published as one definition
 (`adjagent/definitions/harness_agents_file.py`) and rendered per harness. Among them: a project may
-keep its contract documents diced, as trees under `PROJECT_DOCS/`, and a plan or design too large to
-read whole is diced.
+keep its contract documents diced, as trees under `PROJECT_DOCS/`. Before planning, briefing or
+dispatching an agent, accepting returned work or making a checkpoint commit, the file tells the
+session to load the `dev-process` skill ([Definition sets](definition-sets.md)). The file also
+requires code that calls a network API to follow the usage guidelines provided for it.
 
 ## Installing it
 

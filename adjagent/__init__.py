@@ -42,4 +42,4 @@ The render is deterministic: the text of every file is a function of the
 definition, the harness, the family and the two maps, and of nothing else.
 """
 
-__version__ = "0.13.1"
+__version__ = "0.14.0"

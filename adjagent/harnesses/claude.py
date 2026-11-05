@@ -29,15 +29,8 @@ def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _coder_dispatch(model: str) -> str:
-    """The coder-dispatch bullet for a rendered model name."""
-    return f"""- Coder dispatches: when the brief is fully mechanical — every edit enumerated, no design choice, no
-  debugging — dispatch at `model: {model}`; otherwise the definition's pin stands."""
-
-
-_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them, and
-never hands back with a background command running. If a recipe times out, the agent hands back naming it
-instead of rerunning it in the background."""
+_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them.
+If a recipe times out, the agent hands back naming it instead of rerunning it in the background."""
 
 
 def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
@@ -106,7 +99,6 @@ HARNESS = Harness(
     mcp_tool_prefix="mcp__kbase__",
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule="",
-    coder_dispatch=_coder_dispatch,
     tools={
         Tool.READ: ("Read",),
         Tool.GREP: ("Grep",),

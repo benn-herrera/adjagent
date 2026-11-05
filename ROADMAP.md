@@ -20,7 +20,24 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 
 2. **Follow-ups from the 0.12.7 review**, unscheduled — `ROADMAP_PLANS/review-0.12.7-followups.md`.
 
-3. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
+3. **Legacy project comprehension skill**: how a session enters a brownfield project with known
+   and unknown issues, builds familiarity with it, and begins repair work. The target case is
+   projects whose debt accumulated through ungoverned agentic development. It follows the
+   development-process skill and should not assume that skill's workflow is already in place.
+
+4. **Render the claude set in plugin form**: the install renders into one adjagent-owned plugin
+   directory under `.claude/skills/adjagent/` — agents, commands, skills and a
+   `.claude-plugin/plugin.json` manifest, as the mage harness does — and registers it in
+   `.claude/settings.json`, the file the guardrail already registers in, so Claude Code loads it.
+   Tuning is unaffected: the plugin is rendered per install like today's output. Namespaced
+   definition names (`adjagent:<name>`) need every cross-reference in definition text rewritten at
+   render time, which covers item 5's purpose under claude. To settle against current Claude Code
+   documentation first: how a plugin at a project path is discovered and enabled; whether Claude
+   Code copies it into a cache, which would strand the writable state kept beside skills (the
+   docdicer venv, the kb runner include line's path); whether the plugin's own hooks and `.mcp.json`
+   replace the guardrail and kbase settings edits.
+
+5. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
    installs the agent and command definitions under a prefixed namespace so the set coexists with
    an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
    packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a

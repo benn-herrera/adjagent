@@ -4,7 +4,7 @@ A chunk with argument slots is a function taking keyword arguments and returning
 its text; a chunk with variants is one constant (or function) per variant,
 `CHUNK_VARIANT`. A function calls nothing, so a run of text that holds a slotted
 chunk is composed where a definition uses it. A definition interpolates these
-into its body at import. The harness strings are placeholders (spelled as
+into its body at import. The harness and tuning strings are placeholders (spelled as
 `vocabulary.hole` spells them), the only holes left for the renderer to fill.
 
 No constant carries a leading or trailing newline: a definition's body places
@@ -18,6 +18,7 @@ USER_HARNESS_DIR = "@!hrn-user-harness-dir!@"
 MCP_TOOL_PREFIX = "@!hrn-mcp-tool-prefix!@"
 RECIPE_RULE = "@!hrn-recipe-rule!@"
 KBASE_PROJECT_RULE = "@!hrn-kbase-project-rule!@"
+STEP_DOWN_MODEL = "@!tun-step-down-model!@"
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ def machine_guarantees(*, frame: str = MACHINE_GUARANTEES_FRAME) -> str:
     return f"""{MACHINE_GUARANTEES_LEAD} {frame} {MACHINE_GUARANTEES_TELLS}"""
 
 
-TESTS_NOT_RUNTIME_CHECKS = """**A deterministic job is a tested function, not a runtime check.** Write it once, unit-test it, call it. Runtime checks are for boundaries (*Runtime boundary checks*) and for results no finite test set settles; a check that fires only when your own code is wrong is a missing test."""
+TESTS_NOT_RUNTIME_CHECKS = """**A deterministic job is a tested function, not a runtime check.** Write it once, unit-test it, call it: a test, not a check rerun on every call, is what shows your own code correct. Runtime checks keep a job of their own — cheap diagnostics at boundaries (*Runtime boundary checks*) and over results no finite test set settles — and whether one earns its place is a weighing: what it would catch in the wild against the friction it adds to every later change."""
 
 MACHINE_GUARANTEES_CODER = f"""{MACHINE_GUARANTEES} When the assigned work makes agent-produced output a parser's input, or writes an always/every/never that nothing checks, report it as a Blocker naming the tool that must carry the guarantee. Do not build that tool yourself — that is a scope expansion."""
 
@@ -59,7 +60,9 @@ SEPARATION_OF_CONCERNS = """**Keep units ignorant of each other's internals.** T
 
 NAMES_READ_WITHOUT_THE_TASK = """**Name what you add for its scope, not your task.** A name you introduce at file, module or package scope is read among everything else in that scope, by someone who has not seen your task: where the scope holds more than one concern, the name carries its own (`plan_claude_md_merge`, not `plan_integration`)."""
 
-DISSENT = """If you believe a directive would produce technically incorrect output, state the concern and your recommended alternative before proceeding — do not silently comply."""
+DISSENT = """If you believe a directive would produce technically incorrect output, state the concern and your recommended alternative before proceeding — do not silently comply. A directive whose result would break an invariant the project states, where the directive does not itself say it changes that invariant, is not yours to settle: stop and report the collision, quoting both, and carry out neither side."""
+
+NO_PROCESS_LEFT_BEHIND = """**Nothing you start outlives your work.** No process you start is still running when you finish, and none waits on input nobody will give: a command reads the input you name or a closed stdin (`< /dev/null`), never a terminal, and one that can block runs under a timeout."""
 
 PROJECT_CONVENTIONS_OUTRANK = """**Project conventions outrank general practice.** The house style, idioms and defaults in this definition are what you bring to a project that states nothing. Where the project does state something — its CONVENTIONS.md, a file's own header or prelude, the settled style of the code around your change — the project wins and you match it rather than converting it to what is written here."""
 
@@ -80,6 +83,8 @@ CODE_PRINCIPLES_CODER = f"""{PROVE_REPLACEMENT_FIRST_CHANGE}
 
 {NAMES_READ_WITHOUT_THE_TASK}
 
+{NO_PROCESS_LEFT_BEHIND}
+
 {RECIPE_RULE}
 
 {PROJECT_CONVENTIONS_OUTRANK}"""
@@ -95,6 +100,8 @@ CODE_PRINCIPLES_PLATFORM = f"""{PROVE_REPLACEMENT_FIRST_CHANGE}
 
 {NAMES_READ_WITHOUT_THE_TASK}
 
+{NO_PROCESS_LEFT_BEHIND}
+
 {RECIPE_RULE}
 
 {PROJECT_CONVENTIONS_OUTRANK}"""
@@ -106,7 +113,7 @@ _BOUNDARIES = "external API calls, user input parsing, database writes, IPC, and
 
 
 def boundary_checks_lead(*, boundaries: str = _BOUNDARIES) -> str:
-    return f"""*Runtime boundary checks*: at significant system boundaries — {boundaries} — implement lightweight contract and expectation checks. What makes one a boundary is what the check reads, not where the line sits: data your own code did not compute, or state another thread or process may have changed underneath you. A check over a value your own code just computed, or over a state the code that reaches it has already refused, restates the design instead of testing it. Apply these only when the change directly touches or creates such a boundary; a fix internal to a module does not require new boundary checks."""
+    return f"""*Runtime boundary checks*: at significant system boundaries — {boundaries} — implement lightweight contract and expectation checks. What makes one a boundary is what the check reads, not where the line sits: data your own code did not compute, or state another thread or process may have changed underneath you. A check over a value your own code just computed, or over a state the code that reaches it has already refused, restates the design instead of testing it. Before writing a check, name what produces the state it refuses; a check whose refused state nothing reachable produces is not written. Apply these only when the change directly touches or creates such a boundary; a fix internal to a module does not require new boundary checks."""
 
 
 CHEAP_OVER_THOROUGH = (

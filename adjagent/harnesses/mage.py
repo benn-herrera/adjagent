@@ -36,9 +36,8 @@ def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
     return tuple(lines)
 
 
-_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them, and
-never hands back with a background command running. If a recipe times out, the agent hands back naming it
-instead of rerunning it in the background."""
+_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them.
+If a recipe times out, the agent hands back naming it instead of rerunning it in the background."""
 
 _KBASE_PROJECT_RULE = """This session's kbase server serves many projects, so run the probes above with `.` read as the
 project path you have established for kbase's tool calls, not as the directory you are standing in."""
@@ -67,7 +66,6 @@ HARNESS = Harness(
     mcp_tool_prefix="mcp_kbase_",
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule=_KBASE_PROJECT_RULE,
-    coder_dispatch=None,
     tools={
         Tool.READ: ("Read",),
         Tool.GREP: ("Grep",),
