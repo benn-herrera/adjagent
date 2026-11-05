@@ -9,19 +9,23 @@ directory's name.
 
 `adjagent/agents_file.py` implements the install SPEC.md specifies. It finds the span by the
 stripped ends of the marker lines, replaces it with the rendered span, and writes every other byte
-back as read; a file with no marker line gets the rendered span appended instead. Every check, including the git-status refusal over `adjagent/`, runs before the first
-write.
+back as read; a file with no marker line gets the rendered span appended instead. Every check runs before the first
+write. `checked_agents_file` makes the checks of the destination and carries no commit-state check.
+The git-status refusal over `adjagent/` is `agents_file.refuse_uncommitted`, applied by the callers
+only where the destination is live operator configuration, so a project directory is never refused.
 
 `install` uses it twice: for a plugin installed below its project root, and for a user-level install
 given `--install-global-agents-file`. It runs the checks (`checked_agents_file`) among its own
 pre-write checks and writes the file (`write_agents_file`) after its renders, so a refusal
-leaves the install unwritten. Where the file's text is identical to what the destination holds,
+leaves the install unwritten. It calls `refuse_uncommitted` only when the install is user-level, so
+the plugin below a project is not refused. Where the file's text is identical to what the destination holds,
 `write_agents_file` writes nothing, so no backup is made.
 
 The `install-agents-file` verb is reached through `agents_file.preflighted_agents_file_install`, the
 agents-file counterpart of the install preflight (Install Consumption Model, Renders and copies).
-After the directory check, a first `checked_agents_file` call, which writes nothing and carries the
-git-status refusal, yields the `path`, `destination`, `backup` and `native` of the run. Those paths,
+After the directory check and the git-status refusal, which applies only when
+`install_target.user_dir_harnesses(directory)` names a harness (it matches absolute user directories,
+so mage's relative `.` never matches), a first `checked_agents_file` call, which writes nothing, yields the `path`, `destination`, `backup` and `native` of the run. Those paths,
 relative to the directory, are the managed set of `preflight.run_preflighted`, whose scratch copy
 takes the directory's basename. The real `install_agents_file` runs on the copy with
 `real_directory` set to the real directory, which `checked_agents_file` reads for the

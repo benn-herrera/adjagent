@@ -27,6 +27,7 @@ from adjagent.vocabulary import (
     Tier,
     TuningText,
     hole,
+    reference,
 )
 
 GENERATED_MARK = "!GENERATED! from "
@@ -64,12 +65,13 @@ def definitions(*, include: Callable[[Definition], bool] | None = None) -> tuple
 
 
 def agent_fields(defn: Definition, ctx: Render) -> AgentFields:
-    """Map an agent through ctx.harness: model via ctx.model(defn.tier); tools to spellings (None for
-    ALL); governed as the de-duplicated image of ctx.harness.tools in table order."""
+    """Map an agent through ctx.harness: description filled as `filled_description` fills it; model via
+    ctx.model(defn.tier); tools to spellings (None for ALL); governed as the de-duplicated image of
+    ctx.harness.tools in table order."""
     table = ctx.harness.tools
     return AgentFields(
         name=defn.name,
-        description=defn.description,
+        description=filled_description(defn, ctx),
         model=ctx.model(defn.tier),
         color=defn.color,
         tools=None if defn.tools is ALL else tuple(spelling for tool in defn.tools for spelling in table[tool]),
@@ -114,7 +116,7 @@ def _field_lines(defn: Definition, ctx: Render) -> tuple[str, ...]:
     if defn.kind is Kind.DOCUMENT:
         return ctx.harness.document_frontmatter
     if defn.kind is Kind.SKILL:
-        return (f"name: {defn.name}", f"description: {quoted(cast(str, defn.description))}")
+        return (f"name: {defn.name}", f"description: {quoted(filled_description(defn, ctx))}")
     return ()
 
 
@@ -129,16 +131,24 @@ def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
 def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     """`body` with every placeholder filled in one pass: a harness text from ctx.harness, an anchor
     from ctx.overlay for the definition's seat ("" where the family fills none), the step-down model
-    from ctx.step_down_model for every kind, and for the agents file alone its scope name. A
-    paragraph that fills to nothing is dropped with its blank line, so an unfilled anchor or an
-    optional harness text the harness supplies nothing for, standing as its own paragraph, leaves no
-    empty one. A paragraph whose source holds a tuning hole that fills to "" is dropped whole,
+    from ctx.step_down_model for every kind, a reference to any discovered definition, the agents
+    file included, as ctx.harness.reference_prefix and its name, and for the agents file alone its
+    scope name. A paragraph that fills to nothing is dropped with its blank line, so an unfilled
+    anchor or an optional harness text the harness supplies nothing for, standing as its own
+    paragraph, leaves no empty one. A paragraph whose source holds a tuning hole that fills to "" is dropped whole,
     whatever else it says. A placeholder-shaped span naming no key is refused, naming `where`.
     Filled text is not rescanned."""
     seated = dataclasses.replace(ctx, seat=defn.tier)
     values = {hole(part): ctx.harness.text(part) for part in (*HarnessText, *OptionalHarnessText)}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
     values[hole(TuningText.STEP_DOWN_MODEL)] = ctx.step_down_model
+    values.update(
+        {
+            reference(named.name): ctx.harness.reference_prefix + named.name
+            for _, entries in discover()
+            for named in entries
+        }
+    )
     if defn.kind is Kind.AGENTS_FILE:
         values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope
     unfilled_tuning = {hole(part) for part in TuningText if not values[hole(part)]}
@@ -161,6 +171,12 @@ def filled_body(defn: Definition, ctx: Render) -> str:
     """The definition's own body, filled as `filled_text` fills it and named as the definition it belongs
     to."""
     return filled_text(defn.body, defn, ctx, where=f"definition '{defn.name}'")
+
+
+def filled_description(defn: Definition, ctx: Render) -> str:
+    """The definition's description, filled as `filled_text` fills a body and named as the definition's
+    description; only an agent's and a skill's are rendered, and each has one."""
+    return filled_text(cast(str, defn.description), defn, ctx, where=f"definition '{defn.name}' description")
 
 
 def render_definition(defn: Definition, ctx: Render, *, module: str) -> str:

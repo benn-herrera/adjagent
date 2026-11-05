@@ -114,3 +114,9 @@ def hole(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText | Tun
         TuningText: "tun",
     }[type(name)]
     return f"@!{namespace}-{key(name)}!@"
+
+
+def reference(name: str) -> str:
+    """The placeholder definition text carries where it names the definition `name`: `@!ref-<name>!@`,
+    filled with the harness's reference prefix followed by `name`."""
+    return f"@!ref-{name}!@"

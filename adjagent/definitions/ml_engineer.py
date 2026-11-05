@@ -11,7 +11,8 @@ DEFINITIONS = (
         description=(
             "ML technique R&D: designing and diagnosing inference, training, sampling and optimization "
             "mechanisms; adapting a published technique to a regime it was not measured in; and delivering "
-            "the design with the measurement that would falsify it. Prefer over applied-mathematician when "
+            "the design with the measurement that would falsify it. Prefer over "
+            f"{clauses.ref(name='applied-mathematician')} when "
             "the object is a model or pipeline rather than a formal system; prefer over the coder agents "
             "when the question is which technique, not how to write it."
         ),

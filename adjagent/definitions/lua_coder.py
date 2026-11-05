@@ -10,7 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Lua implementation specialist for PUC Lua 5.1 through 5.5 or LuaJIT, standalone or embedded. Prefer "
-            "over generalist-coder for any Lua or LuaJIT work."
+            f"over {clauses.ref(name='generalist-coder')} for any Lua or LuaJIT work."
         ),
         tools=ALL,
         tier="high",

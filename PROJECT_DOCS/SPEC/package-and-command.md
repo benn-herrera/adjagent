@@ -22,4 +22,5 @@ wheel:
 - Installing the harness agents file is not refused for uncommitted changes, because an installed
   package has no uncommitted state (Harness Agents File).
 
-From a clone, every one of these checks holds as before.
+From a clone, every one of these checks holds as before; the uncommitted-changes refusal there
+covers only the writes Harness Agents File names.

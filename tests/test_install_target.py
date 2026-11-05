@@ -5,6 +5,7 @@ the agents-file verb's harness inference.
 The package is imported from the repository root, which `just test` puts on PYTHONPATH.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -36,13 +37,11 @@ def _paths(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
 
 
-@pytest.fixture(autouse=True)
-def _home(tmp_path: Path, monkeypatch) -> Path:
-    """A home directory under `tmp_path`, created by the tests that use it: the resolver reads the home
-    directory on every install, and no test reads the real one."""
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
-    return home
+def test_the_suite_runs_under_a_scratch_home(_home: Path) -> None:
+    """The resolver reads the home directory on every install, so the suite must never see the real one."""
+    pwd = pytest.importorskip("pwd")
+    assert Path.home() == _home
+    assert Path.home() != Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
 def test_the_harness_flag_beats_a_harness_directory_in_the_target(tmp_path: Path) -> None:
@@ -142,12 +141,15 @@ def test_a_refused_install_leaves_no_root_behind(tmp_path: Path, capsys) -> None
     assert _paths(tmp_path) == ["justfile"]
 
 
-def test_a_mage_install_with_uncommitted_sources_writes_nothing(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_a_mage_install_below_its_project_with_uncommitted_sources_writes_its_agents_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A project install guards no live operator configuration, so the commit state refuses nothing."""
     monkeypatch.setattr(cli, "uncommitted_sources", _uncommitted)
     skills = tmp_path / "Mage/Skills"
     skills.mkdir(parents=True)
-    assert "uncommitted changes" in _refused(["install", str(skills)], capsys)
-    assert _paths(skills) == []
+    cli.main(["install", str(skills)])
+    assert (skills / "adjagent/CLAUDE.md").is_file()
 
 
 def test_a_mage_install_into_the_target_itself_writes_no_agents_file(tmp_path: Path, monkeypatch) -> None:
@@ -266,6 +268,15 @@ def test_the_global_agents_file_flag_with_uncommitted_sources_writes_nothing(_ho
     monkeypatch.setattr(cli, "uncommitted_sources", _uncommitted)
     (_home / ".claude").mkdir(parents=True)
     assert "uncommitted changes" in _refused(["install", str(_home), "--install-global-agents-file"], capsys)
+    assert _paths(_home) == [".claude"]
+
+
+def test_the_agents_file_verb_into_a_user_directory_with_uncommitted_sources_writes_nothing(
+    _home: Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(cli, "uncommitted_sources", _uncommitted)
+    (_home / ".claude").mkdir(parents=True)
+    assert "uncommitted changes" in _refused(["install-agents-file", str(_home / ".claude")], capsys)
     assert _paths(_home) == [".claude"]
 
 

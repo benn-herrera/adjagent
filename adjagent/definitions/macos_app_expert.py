@@ -10,7 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "macOS desktop development: AppKit, Swift/Objective-C, including sandboxing, XPC services and "
-            "notarization. Prefer over generalist-coder for any macOS desktop target."
+            f"notarization. Prefer over {clauses.ref(name='generalist-coder')} for any macOS desktop target."
         ),
         tools=ALL,
         tier="high",

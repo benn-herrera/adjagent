@@ -67,6 +67,7 @@ from adjagent.vocabulary import (
     Tool,
     TuningText,
     hole,
+    reference,
 )
 from devtools import render_diff
 from tests._structure import (
@@ -563,6 +564,44 @@ def test_the_text_module_spells_each_render_placeholder_as_the_renderer_fills_it
     assert getattr(adjagent.clauses, part.name) == hole(part)
 
 
+def test_the_text_module_spells_a_reference_as_the_renderer_fills_it() -> None:
+    assert adjagent.clauses.ref(name="python-coder") == reference("python-coder")
+
+
+_PREFIXED = [CLAUDE, dataclasses.replace(CLAUDE, reference_prefix="x:")]
+
+
+@pytest.mark.parametrize("harness", _PREFIXED, ids=["bare", "prefixed"])
+def test_a_reference_in_a_body_and_a_description_fills_with_the_prefix_and_name(harness: Harness) -> None:
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+    named = f"{harness.reference_prefix}python-coder"
+    agent = Definition(
+        name="probe",
+        kind=Kind.AGENT,
+        description=f"Prefer over {reference('python-coder')}.",
+        tools=ALL,
+        tier="high",
+        body=f"Hand it to `{reference('python-coder')}`.",
+    )
+    skill = _skill(description=f"Prefer over {reference('python-coder')}.")
+    agent_text = render_definition(agent, ctx, module="adjagent.definitions.probe")
+    assert f'description: "Prefer over {named}."' in agent_text.split("\n")
+    assert agent_text.endswith(f"Hand it to `{named}`.\n")
+    assert f'description: "Prefer over {named}."' in render_definition(skill, ctx, module="m").split("\n")
+
+
+@pytest.mark.parametrize("harness", _PREFIXED, ids=["bare", "prefixed"])
+@pytest.mark.parametrize("field", ["body", "description"])
+def test_a_reference_to_an_undiscovered_name_is_refused_naming_the_definition(harness: Harness, field: str) -> None:
+    hole_text = reference("nonesuch")
+    defn = Definition(name="probe", kind=Kind.AGENT, description="a probe", tools=ALL, tier="high", body="Own.")
+    defn = dataclasses.replace(defn, **{field: f"see {hole_text}"})
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+    with pytest.raises(InputError, match=re.escape("definition 'probe'")) as refused:
+        render_definition(defn, ctx, module="m")
+    assert f"unknown placeholder {hole_text}" in str(refused.value)
+
+
 _STEP_DOWN_BODY = f"before\n\nDefault: `{adjagent.clauses.STEP_DOWN_MODEL}`, unless bound.\n\nafter"
 
 
@@ -986,10 +1025,16 @@ def _definitions_of_files(files: str) -> str:
         (_definitions_of_files("(clauses.f(),)"), 3, CALL_RULE),
         (_definitions_of_files('(SkillFile(path="references/r.md", body=f"{len(_S)}"),)'), 3, CALL_RULE),
         (
-            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=clauses.f(), body="b"),)\n',
+            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=f"{{clauses.ref(name=\'x\')}}", body="b"),)\n',
+            3,
+            "",
+        ),
+        (
+            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=f"{{len(_S)}}", body="b"),)\n',
             3,
             CALL_RULE,
         ),
+        (f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", tools=clauses.f(), body="b"),)\n', 3, CALL_RULE),
         (f'{_DEFINITION_HEAD}DEFINITIONS = (Definition("p", "b", kind=Kind.AGENT),)\n', 3, DEFINITION_CALL_RULE),
         (f"{_DEFINITION_HEAD}def helper():\n    pass\n", 3, DEFINITION_TOP_RULE),
         (f"{_DEFINITION_HEAD}DEFINITIONS = (_ONE,)\n", 3, DEFINITION_TOP_RULE),
@@ -1211,9 +1256,11 @@ def test_a_paragraph_two_supporting_files_write_out_is_found() -> None:
 
 _CLAUSE_GRAPH = clause_graph((_PACKAGE / "clauses.py").read_text(encoding="utf-8"))
 _HARNESS_STRINGS = {hole(part) for part in HarnessText}
+# A reference names one definition, like a harness string names one directory: a sentence's word,
+# not a span a prompt could deliver twice.
 _SENTENCE_HOLES = frozenset(
     name for name, value in vars(adjagent.clauses).items() if isinstance(value, str) and value in _HARNESS_STRINGS
-)
+) | {adjagent.clauses.ref.__name__}
 
 
 @dataclass(frozen=True)

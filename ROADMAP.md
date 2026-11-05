@@ -37,13 +37,15 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    docdicer venv, the kb runner include line's path); whether the plugin's own hooks and `.mcp.json`
    replace the guardrail and kbase settings edits.
 
-5. **(KEEP LAST) Definition namespace prefix** (`just install --name-prefix=aa- <project>`):
-   installs the agent and command definitions under a prefixed namespace so the set coexists with
-   an existing fleet — generic names (`python-coder.md`) are the collision surface; the tool
-   packages are self-namespaced and stay bare. Default empty renders today's bytes. Requires a
-   render pass substituting every cross-reference site (dispatch names, slash-command names in
-   prose) with a lint against bare fleet names. Nothing outside the definition text
-   names an agent, so the rendered prose is the whole substitution set and no runtime route has to
-   carry the prefix. The harness agents file (`adjagent/definitions/harness_agents_file.py`) is in
-   it, so agent references inside that file — the prompt-engineer review rule, any seat named by
-   the working preferences — render with the prefix applied at install.
+5. **Rename the project to `devpro`**, its own plan after item 4 lands: the PyPI package, the
+   `adjagent` CLI and Python package, the plugin namespace (`devpro:<name>` under claude and mage),
+   the agents-file fence markers, the `!GENERATED!` banner, the repository, its docs, and the
+   references in sibling projects that install it.
+   - The `dev-process` skill becomes `development`: `devpro:development` under claude and mage.
+     Every text that names it moves with it, the agents-file pointer sentence and sibling
+     projects' CONVENTIONS included.
+   - The `adjagent` skill needs a new name that is not `devpro`.
+   - opencode has no namespacing, so its names carry the `devpro-` prefix: the reference holes
+     fill `devpro-<name>`, and the serialized file and directory names are prefixed to match
+     (`devpro-architect.md`, `skills/devpro-development/`). This keeps the set from colliding
+     with an existing fleet's generic names under every harness.

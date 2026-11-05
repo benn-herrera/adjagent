@@ -3,6 +3,8 @@
 # installed into a throwaway venv made from $1, it runs as the shipped package rather than as the
 # checkout. Every wheel-side command runs with PYTHONPATH unset and GIT_CEILING_DIRECTORIES at the
 # scratch directory, so neither the working tree nor the repository around it can answer for it.
+# From the scratch directory's creation on, HOME is a fresh, empty home inside it, removed on exit,
+# so no install here reads or writes the operator's real one.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"
@@ -35,7 +37,9 @@ fi
 scratch="${PROJECT_ROOT}/.claude-temp/check-wheel"
 venv="${scratch}/venv"
 command rm -rf "${scratch}"
-mkdir -p "${scratch}"
+mkdir -p "${scratch}/home"
+trap 'command rm -rf "${scratch}/home"' EXIT
+export HOME="${scratch}/home"
 "${python}" -m venv "${venv}"
 "${venv}/${PYBIN}/python${EXE}" -m pip install -q --disable-pip-version-check --no-index "${wheel}"
 

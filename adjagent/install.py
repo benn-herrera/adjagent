@@ -22,7 +22,7 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from adjagent.agents_file import AgentsFileWrite, checked_agents_file, write_agents_file
+from adjagent.agents_file import AgentsFileWrite, checked_agents_file, refuse_uncommitted, write_agents_file
 from adjagent.context import Render, harnesses
 from adjagent.errors import InputError
 from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite
@@ -1089,17 +1089,16 @@ def install(
     ships with the other resources and every install registers it in the project's settings file; when
     it fails, neither happens, the install goes on, and the report names why and what an earlier
     install left in place. A plugin harness installed below its project root — ROOT is not the project
-    root — also has its agents file installed at ROOT, refused while `uncommitted` names a change; it is
-    called only for such an install. A user-level install — ROOT is the harness's user harness
-    directory, decided here from ROOT and the harness whatever route reached it — renders the
-    definitions, prunes and removes the legacy trees, and writes nothing else: no package, resource
-    file, guardrail probe or registration, MCP entry or runner line; with `global_agents_file` it also
-    installs the agents file at ROOT, under the same `uncommitted` refusal, a flag a project install
-    ignores. ROOT may be absent, and is created only once every
-    check has passed. A file at a render, harness-file or resource target that does not carry what
-    that class of file states as its origin — this repository's generated banner or installed header,
-    or the marker a harness-rendered file states about itself — or a symlink or non-directory between
-    ROOT and such a target, refuses the install; package destinations are replaced whole unchecked. A
+    root — also has its agents file installed at ROOT, whatever the sources' commit state. A
+    user-level install — ROOT is the harness's user harness directory, decided here from ROOT and the
+    harness whatever route reached it — renders the definitions, prunes and removes the legacy trees,
+    and writes nothing else: no package, resource file, guardrail probe or registration, MCP entry or
+    runner line; with `global_agents_file` it also installs the agents file at ROOT, refused while
+    `uncommitted` names a change, a flag a project install ignores; `uncommitted` is called only for
+    such an install. ROOT may be absent, and is created only once every check has passed. A file at a
+    render, harness-file or resource target that does not carry what that class of file states as its
+    origin — this repository's generated banner or installed header, or the marker a harness-rendered
+    file states about itself — or a symlink or non-directory between ROOT and such a target, refuses the install; package destinations are replaced whole unchecked. A
     refusal of the root, of the render, of a target it would overwrite, of the runner file, of the MCP
     settings file, of the harness directory the guardrail entry cannot name or of the guardrail
     settings file writes nothing; a settings path that is a symlink or not a regular file is reported
@@ -1171,7 +1170,9 @@ def install(
     if _installs_agents_file(
         root, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
     ):
-        agents_file = checked_agents_file(root, ctx.harness, uncommitted=uncommitted(), real_directory=real_root)
+        if user_level:
+            refuse_uncommitted(uncommitted())
+        agents_file = checked_agents_file(root, ctx.harness, real_directory=real_root)
     # Read before the destination is replaced, which removes the venv with the rest of the package.
     rebuild_docdicer_venv = _docdicer_venv_to_rebuild(root, user_level=user_level)
 
@@ -1234,7 +1235,6 @@ def _install_managed_paths(
     project: Path,
     user_level: bool,
     global_agents_file: bool,
-    uncommitted: Callable[[], tuple[str, ...]],
 ) -> list[tuple[Path, list[str]]]:
     """(base, paths relative to it) for everything an install into `root` may read or write, the
     project root first: what it writes by, never a listing of ROOT, which in a user harness directory
@@ -1262,7 +1262,7 @@ def _install_managed_paths(
     if _installs_agents_file(
         root, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
     ):
-        write = checked_agents_file(root, harness, uncommitted=uncommitted())
+        write = checked_agents_file(root, harness)
         agents_paths = (write.path, write.destination, write.backup, write.native)
         under_root += [path.relative_to(root).as_posix() for path in agents_paths if path is not None]
     return [(project, under_project), (root, under_root)]
@@ -1299,7 +1299,6 @@ def preflighted_install(
         project=project,
         user_level=user_level,
         global_agents_file=global_agents_file,
-        uncommitted=uncommitted,
     )
     dry_run_notes: list[str] = []
     if _docdicer_venv_to_rebuild(root, user_level=user_level):

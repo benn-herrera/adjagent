@@ -10,7 +10,8 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Shell and build-DSL specialist: bash/zsh/POSIX sh, justfiles, Makefiles, CMake and shell embedded in "
-            "CI. Prefer over go-coder or generalist-coder for any change whose substance is shell or a build DSL."
+            f"CI. Prefer over {clauses.ref(name='go-coder')} or {clauses.ref(name='generalist-coder')} for any "
+            "change whose substance is shell or a build DSL."
         ),
         tools=ALL,
         tier="medium",

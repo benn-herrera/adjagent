@@ -6,6 +6,7 @@ accepts and the words that render no model at all, whether a map flag's bare
 value names the whole map, the frontmatter lines it reads, the rule a dispatched
 agent follows when running recipes in its shell, the files it
 renders beside the definitions, the definitions it renders nothing for, the
+prefix a definition's name takes where other definition text names it, the
 settings file it registers an MCP server in, and the guardrail hook it
 registers, where it has one. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
@@ -126,6 +127,7 @@ class Harness:
     omits: frozenset[str] = frozenset()  # definition names it renders nothing for
     default_tier_spec: str | None = None  # the --model-tier-map value used when none is given; None: the family's tiers
     plugin_parent_dir: str = ""  # a plugin's: the trailing path of the directory its plugins sit in; "" otherwise
+    reference_prefix: str = ""  # put before a definition's name wherever definition text names it; "" names it bare
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or

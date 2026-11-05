@@ -4,8 +4,9 @@ A chunk with argument slots is a function taking keyword arguments and returning
 its text; a chunk with variants is one constant (or function) per variant,
 `CHUNK_VARIANT`. A function calls nothing, so a run of text that holds a slotted
 chunk is composed where a definition uses it. A definition interpolates these
-into its body at import. The harness and tuning strings are placeholders (spelled as
-`vocabulary.hole` spells them), the only holes left for the renderer to fill.
+into its body at import. The harness and tuning strings, and the references to other
+definitions, are placeholders (spelled as `vocabulary.hole` and `vocabulary.reference`
+spell them), the only holes left for the renderer to fill.
 
 No constant carries a leading or trailing newline: a definition's body places
 the blank lines between paragraphs.
@@ -19,6 +20,13 @@ MCP_TOOL_PREFIX = "@!hrn-mcp-tool-prefix!@"
 RECIPE_RULE = "@!hrn-recipe-rule!@"
 KBASE_PROJECT_RULE = "@!hrn-kbase-project-rule!@"
 STEP_DOWN_MODEL = "@!tun-step-down-model!@"
+
+
+def ref(*, name: str) -> str:
+    """The reference hole naming the definition `name`, spelled as `vocabulary.reference` spells it: the
+    only way definition text names another definition."""
+    return f"@!ref-{name}!@"
+
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
 

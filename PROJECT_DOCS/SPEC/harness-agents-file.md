@@ -3,7 +3,7 @@
 The repository publishes a recommended operator agents file as one definition, rendered per
 supported harness. It is installed only by explicit act, into a directory the operator names — the
 harness's user-global directory or a project's own. `install` installs it in two cases, through
-the same mechanism and refusals: for a plugin harness (mage) installed below its project root,
+the same mechanism: for a plugin harness (mage) installed below its project root,
 whose agents file belongs in the plugin directory at ROOT, and for a user-level ROOT given
 `--install-global-agents-file`; for any other harness it never does.
 
@@ -30,8 +30,12 @@ backup of the prior content beside it; identical output writes nothing, so insta
 nothing. `install-agents-file` says so: where the run would change nothing it reports the agents file
 up to date and touches no file, a backup and a redirect included. With `--dry-run` it prints whether
 the agents file, and any redirect file it would create, would be created or changed, writes nothing
-and exits 0; its paths are relative to the directory named. Installation from a clone is refused while the generator's sources carry uncommitted
-changes; an installed package has no uncommitted state and is not refused (Package and Command).
+and exits 0; its paths are relative to the directory named. Run from a clone, two writes are refused
+while the generator's sources carry uncommitted changes, because they alter live operator
+configuration: `install-agents-file` into a harness's user-global directory, and the agents-file write
+of a user-level `install`. No project install is refused, nor is `install-agents-file` into a project
+directory, a mage plugin below a project included. An installed package has no uncommitted state and
+is not refused (Package and Command).
 Publishing an improvement is a manual edit to the agents-file definition.
 
 Neither direction is a symlink, so a write to this repository can never silently rewrite live

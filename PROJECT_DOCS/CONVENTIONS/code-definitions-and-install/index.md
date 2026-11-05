@@ -5,6 +5,7 @@ Contents:
 - [Definition modules hold only constants](definition-modules-hold-only-constants.md)
 - [Shared text is one constant](shared-text-is-one-constant.md)
 - [Composed text is never rescanned](composed-text-is-never-rescanned.md)
+- [Cross-references are holes](cross-references-are-holes.md)
 - [Recipe notes go above the recipe](recipe-notes-go-above-the-recipe.md)
 - [Long recipe bodies are scripts](long-recipe-bodies-are-scripts.md)
 - [Never comment in a rendered body](never-comment-in-a-rendered-body.md)

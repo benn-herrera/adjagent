@@ -26,6 +26,7 @@ from adjagent.agents_file import install_agents_file, marker_span, scope_name
 from adjagent.cli import main
 from adjagent.context import Render, build_render
 from adjagent.definition import Definition
+from adjagent.definitions import discover
 from adjagent.errors import InputError
 from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
 from adjagent.harness import Harness
@@ -51,7 +52,7 @@ from adjagent.install import (
 )
 from adjagent.loading import load
 from adjagent.render import definitions, filled_body, render_agents_file, render_all, render_definition
-from adjagent.vocabulary import Kind
+from adjagent.vocabulary import Kind, reference
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
 _END = " <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->"
@@ -69,15 +70,6 @@ def _files(root: Path) -> dict[str, bytes]:
         for path in sorted(root.rglob("*"))
         if path.is_symlink() or path.is_file()
     }
-
-
-@pytest.fixture(autouse=True)
-def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A home directory under `tmp_path`, created by the tests that use it: an install reads the home
-    directory to tell whether ROOT is user-level, and no test reads the real one."""
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
-    return home
 
 
 # The agents-file render.
@@ -207,10 +199,9 @@ def test_an_unsafe_destination_is_refused_with_nothing_written(
     assert _files(tmp_path) == before
 
 
-def test_uncommitted_sources_refuse_the_install(tmp_path: Path) -> None:
-    with pytest.raises(InputError, match=re.escape("has uncommitted changes (?? adjagent/x.py)")):
-        _install(tmp_path, uncommitted=("?? adjagent/x.py",))
-    assert _files(tmp_path) == {}
+def test_uncommitted_sources_refuse_no_install_into_a_project_directory(tmp_path: Path) -> None:
+    _install(tmp_path, uncommitted=("?? adjagent/x.py",))
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == render_agents_file(OPENCODE, scope=tmp_path.name)
 
 
 @pytest.mark.parametrize("git_entry", ["directory", "file", None])
@@ -492,11 +483,14 @@ def test_every_harness_omits_a_name_the_package_discovers() -> None:
 
 @pytest.mark.parametrize("name", sorted(load("adjagent.harnesses", "HARNESS")))
 def test_every_skill_the_agents_file_cites_ships_in_the_harness_default_install(name: str) -> None:
-    """The agents file points at skills by name; a name a default install does not ship points at
-    nothing. A plugin always takes the kb set; any other harness's default install leaves it out."""
+    """The agents file points at skills through reference holes; a name a default install does not ship
+    points at nothing. A plugin always takes the kb set; any other harness's default install leaves it
+    out."""
     ctx = build_render(harness=name, family="claude", tier_spec=None, alias_spec=None)
-    cited = set(re.findall(r"`([a-z0-9-]+)`\s+skill\b", render_agents_file(ctx.harness, scope="probe")))
-    assert cited, "no skill citation parsed from the agents file, so the check below would pass vacuously"
+    every = [defn for _, entries in discover() for defn in entries]
+    [agents_file] = [defn for defn in every if defn.kind is Kind.AGENTS_FILE]
+    cited = {defn.name for defn in every if defn.kind is Kind.SKILL and reference(defn.name) in agents_file.body}
+    assert cited, "the agents file references no skill, so the check below would pass vacuously"
     renders = render_all(ctx, include=lambda defn: ctx.harness.is_plugin or not excluded(defn.name))
     shipped = {path.parts[1] for path, _ in renders if path.parts[0] == "skills" and path.name == "SKILL.md"}
     assert cited <= shipped, sorted(cited - shipped)

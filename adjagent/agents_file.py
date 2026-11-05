@@ -8,8 +8,9 @@ appended after a blank line; an absent file is written whole; any other file is 
 harness's user directory the file is the harness's own name; anywhere else it is AGENTS.md, and a
 harness that reads another name gets that file as the redirect `@AGENTS.md`. A destination whose only
 content is `@<path>` is followed one hop, within DIR. A write that changes the file first copies it
-to the one rolling `backup.<name>` beside it. Every check runs before the first write, and the
-install is refused, when run from a checkout, while this package has uncommitted changes.
+to the one rolling `backup.<name>` beside it. Every check runs before the first write, and an
+install into a harness's user directory is refused, when run from a checkout, while this package has
+uncommitted changes; an install into a project directory is not.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from adjagent.errors import InputError
 from adjagent.harness import Harness
+from adjagent.install_target import user_dir_harnesses
 from adjagent.preflight import run_preflighted
 from adjagent.render import appended_paragraph, render_agents_file, write_text_verbatim
 
@@ -129,14 +131,32 @@ def _refuse_unless_directory(directory: Path) -> None:
         raise InputError(f"'{directory}' is not an existing directory")
 
 
+def refuse_uncommitted(uncommitted: tuple[str, ...]) -> None:
+    """Refuse while `uncommitted` (uncommitted_sources) names any change: an install into live operator
+    configuration would publish sources nobody has committed."""
+    if uncommitted:
+        raise InputError(
+            f"{__package__}/ has uncommitted changes ({', '.join(uncommitted)}) — commit them before "
+            "installing; nothing written"
+        )
+
+
+def _refuse_uncommitted_in_user_dir(directory: Path, uncommitted: tuple[str, ...]) -> None:
+    """`refuse_uncommitted` where `directory` is a harness's absolute user directory; a project directory,
+    mage's relative user directory included, is never refused."""
+    if user_dir_harnesses(directory):
+        refuse_uncommitted(uncommitted)
+
+
 def install_agents_file(
     directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], real_directory: Path | None = None
 ) -> None:
     """Install `harness`'s agents file into `directory`, refusing while `uncommitted`
-    (uncommitted_sources) names any change; nothing is written until every check has passed.
-    `real_directory` is as `checked_agents_file` takes it."""
+    (uncommitted_sources) names any change and the directory is a harness's user directory; nothing is
+    written until every check has passed. `real_directory` is as `checked_agents_file` takes it."""
     _refuse_unless_directory(directory)
-    write_agents_file(checked_agents_file(directory, harness, uncommitted=uncommitted, real_directory=real_directory))
+    _refuse_uncommitted_in_user_dir(directory if real_directory is None else real_directory, uncommitted)
+    write_agents_file(checked_agents_file(directory, harness, real_directory=real_directory))
 
 
 def preflighted_agents_file_install(
@@ -148,7 +168,8 @@ def preflighted_agents_file_install(
     written; with `dry_run`, what would be created or changed is printed relative to `directory` and
     nothing is written; otherwise the install runs. Every refusal names `directory`, never the copy."""
     _refuse_unless_directory(directory)
-    write = checked_agents_file(directory, harness, uncommitted=uncommitted)
+    _refuse_uncommitted_in_user_dir(directory, uncommitted)
+    write = checked_agents_file(directory, harness)
     paths = [write.path, write.destination, write.backup, *([] if write.native is None else [write.native])]
     run_preflighted(
         [(directory, [str(path.relative_to(directory)) for path in paths])],
@@ -159,19 +180,13 @@ def preflighted_agents_file_install(
     )
 
 
-def checked_agents_file(
-    directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], real_directory: Path | None = None
-) -> AgentsFileWrite:
-    """Every check of installing `harness`'s agents file into `directory`, writing nothing. An absent
-    `directory` reads as an empty one. `real_directory` is the directory the file is for, where
-    `directory` is a scratch copy of it: whether it is the harness's user directory, and the scope the
-    file is titled with, are read from it. It defaults to `directory`."""
+def checked_agents_file(directory: Path, harness: Harness, *, real_directory: Path | None = None) -> AgentsFileWrite:
+    """Every check of installing `harness`'s agents file into `directory`, writing nothing; the commit
+    state of the sources is its callers' to check. An absent `directory` reads as an empty one.
+    `real_directory` is the directory the file is for, where `directory` is a scratch copy of it:
+    whether it is the harness's user directory, and the scope the file is titled with, are read from it.
+    It defaults to `directory`."""
     identity = directory if real_directory is None else real_directory
-    if uncommitted:
-        raise InputError(
-            f"{__package__}/ has uncommitted changes ({', '.join(uncommitted)}) — commit them before "
-            "installing; nothing written"
-        )
     native = None
     destination = directory / harness.agents_file
     if not _in_user_dir(harness, identity) and harness.agents_file != STANDARD_AGENTS_FILE:

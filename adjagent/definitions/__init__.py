@@ -6,7 +6,9 @@ holds imports, string constants and `DEFINITIONS`, a non-empty tuple of
 `Definition` values whose `body` is a string, usually an f-string over
 `adjagent.clauses` (imported as `from adjagent import clauses`, written
 `{clauses.NAME}`) and the module's own constants; its only render-time holes are the
-`vocabulary.hole` placeholders, which the renderer fills. A module with several
+`vocabulary.hole` placeholders and the references to other definitions
+(`{clauses.ref(name="...")}`), which the renderer fills. A `description` follows the
+rule `body=` does, and names another definition the same way. A module with several
 outputs has a longer tuple. There is no list to join. A skill's supporting files
 are its `files`, each a `SkillFile(path=…, body=…)` whose body follows the rule
 `body=` does: its own constants, `clauses.<name>(...)` and a `.format` on one of

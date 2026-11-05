@@ -46,7 +46,8 @@ line, every existing byte kept.
   and leaves the redirect alone. A redirect to another redirect, or to a file outside `<dir>`, is
   refused for you to merge by hand.
 - A file with marker lines other than one begin line followed by one end line is refused with
-  nothing written, as is any run from a clone while `adjagent/` has uncommitted changes.
+  nothing written. Run from a clone while `adjagent/` has uncommitted changes, an install into a
+  harness's user-global directory is refused too; one into a project directory is not.
 - A write that changes the file keeps one rolling `backup.<name>` of what it replaced.
 
 ## Up to date and `--dry-run`

@@ -12,7 +12,9 @@ that the shell did not expand it. The resolver does not decide whether the insta
 `install` does, from `user_dir_harnesses(ROOT)` naming the harness, whatever the route to ROOT, and
 then renders and prunes and skips the packages, resource files, guardrail and kb emissions. `install.py` writes the agents file at ROOT for a plugin whose ROOT is
 not the project root, and for a user-level install given `--install-global-agents-file`, a flag a
-project install ignores. The verb takes no `kbase` argument: it
+project install ignores. Only the second is refused while `adjagent/` has uncommitted changes
+(`agents_file.refuse_uncommitted`, called only when the install is user-level): no project install is,
+the plugin below a project included. The verb takes no `kbase` argument: it
 writes, copies, verifies and locates no `kbase` executable. It refuses, with nothing written, a
 TARGET that is not an existing directory; a harness it cannot tell, or two harness directories in
 the target, without `--harness`; a ROOT that exists and is not a directory ("is not a

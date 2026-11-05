@@ -9,8 +9,8 @@ DEFINITIONS = (
         name="go-coder",
         kind=Kind.AGENT,
         description=(
-            "Go implementation specialist. Prefer over generalist-coder for any Go file modification or Go "
-            "project task."
+            f"Go implementation specialist. Prefer over {clauses.ref(name='generalist-coder')} for any Go file "
+            "modification or Go project task."
         ),
         tools=ALL,
         tier="high",
