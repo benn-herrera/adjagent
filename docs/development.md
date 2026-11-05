@@ -40,7 +40,7 @@ Other targets:
   root instead, `rendered/<slug>/CLAUDE.md` beside `.mcp.json`, with no `harness/` directory and no
   `Makefile`: the slot is installed with `--subdir=`, so the plugin's root is the slot itself. A slug
   starting with `reference` is refused.
-- `just render-diff [a] [b]` compares two slots (reference against latest by default) by text, with
+- `just render-diff [a] [b]` compares two slots (reference-claude against latest by default) by text, with
   each file's banner replaced by one constant line, and reports differences without failing on them.
 - `just retake-reference` re-takes the baseline slots `render-diff` compares against. Run it only
   after a content change is accepted.
