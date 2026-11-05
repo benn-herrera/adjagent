@@ -39,12 +39,13 @@ user-level install, with the same refusals.
 
 The install replaces only the block between the `adjagent` marker lines and keeps everything outside
 it; put your own rules outside the markers. Edits inside the block are not preserved. An absent file
-is written whole.
+is written whole, and a file with no marker lines gets the block appended at its end after a blank
+line, every existing byte kept.
 
 - If the destination holds nothing but a single `@<path>` import, the install goes into that target
   and leaves the redirect alone. A redirect to another redirect, or to a file outside `<dir>`, is
   refused for you to merge by hand.
-- A file without exactly one begin marker line followed by one end marker line is refused with
+- A file with marker lines other than one begin line followed by one end line is refused with
   nothing written, as is any run from a clone while `adjagent/` has uncommitted changes.
 - A write that changes the file keeps one rolling `backup.<name>` of what it replaced.
 

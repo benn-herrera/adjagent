@@ -3,13 +3,13 @@ installed by replacing its block and keeping every other byte of the live file.
 
 The block runs from the begin marker line through the end marker line. A marker line is recognised
 by its whitespace-stripped ends alone, so a block any earlier revision wrote is still found. A live
-file with one ordered marker pair has that span replaced; an absent file is written whole; any other
-file is refused. In the harness's user directory the file is the harness's own name; anywhere else
-it is AGENTS.md, and a harness that reads another name gets that file as the redirect `@AGENTS.md`.
-A destination whose only content is `@<path>` is followed one hop, within DIR. A write that changes
-the file first copies it to the one rolling `backup.<name>` beside it. Every check runs before the
-first write, and the install is refused, when run from a checkout, while this package has uncommitted
-changes.
+file with one ordered marker pair has that span replaced; one with no marker line has the block
+appended after a blank line; an absent file is written whole; any other file is refused. In the
+harness's user directory the file is the harness's own name; anywhere else it is AGENTS.md, and a
+harness that reads another name gets that file as the redirect `@AGENTS.md`. A destination whose only
+content is `@<path>` is followed one hop, within DIR. A write that changes the file first copies it
+to the one rolling `backup.<name>` beside it. Every check runs before the first write, and the
+install is refused, when run from a checkout, while this package has uncommitted changes.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 from adjagent.errors import InputError
 from adjagent.harness import Harness
 from adjagent.preflight import run_preflighted
-from adjagent.render import render_agents_file, write_text_verbatim
+from adjagent.render import appended_paragraph, render_agents_file, write_text_verbatim
 
 BEGIN = ("<!-- vvv-adjagent", "adjagent-vvv -->")
 END = ("<!-- ^^^-adjagent", "adjagent-^^^ -->")
@@ -48,6 +48,10 @@ def marker_span(text: str, *, where: str) -> tuple[list[str], int, int]:
             "begin line followed by one end line around the block; nothing written"
         )
     return lines, begins[0], ends[0]
+
+
+def _has_no_marker_line(text: str) -> bool:
+    return not any(_is_marker(line, BEGIN) or _is_marker(line, END) for line in text.split("\n"))
 
 
 def _in_user_dir(harness: Harness, directory: Path) -> bool:
@@ -188,9 +192,13 @@ def checked_agents_file(
     if existing is None:
         text = rendered
     else:
-        old, first, last = marker_span(existing, where=str(path))
         new, begin, end = marker_span(rendered, where="the harness agents-file definition")
-        text = "\n".join([*old[:first], *new[begin : end + 1], *old[last + 1 :]])
+        block = "\n".join(new[begin : end + 1])
+        if _has_no_marker_line(existing):
+            text = appended_paragraph(existing, block)
+        else:
+            old, first, last = marker_span(existing, where=str(path))
+            text = "\n".join([*old[:first], block, *old[last + 1 :]])
     return AgentsFileWrite(
         path=path, existing=existing, text=text, destination=destination, backup=backup, native=native
     )

@@ -126,8 +126,8 @@ def test_install_replaces_only_the_span_and_keeps_every_other_byte(tmp_path: Pat
 @pytest.mark.parametrize(
     "prior, message",
     [
-        ("# mine\n\nno markers\n", "found 0 begin and 0 end"),
         (f"{_BEGIN}\n{_BEGIN}\n{_END}\n", "found 2 begin and 1 end"),
+        (f"# mine\n{_END}\n", "found 0 begin and 1 end"),
         (f"{_END}\n{_BEGIN}\n", "found 1 begin and 1 end"),
     ],
 )
@@ -136,6 +136,30 @@ def test_a_file_without_one_ordered_marker_pair_is_refused(tmp_path: Path, prior
     with pytest.raises(InputError, match=message):
         _install(tmp_path)
     assert _files(tmp_path) == {"AGENTS.md": prior.encode()}
+
+
+@pytest.mark.parametrize(
+    "prior, separator",
+    [
+        ("", ""),
+        ("# mine\r\nkeep\r\n\n", ""),
+        ("# mine\r\nkeep\r\n", "\n"),
+        ("# mine\r\nkeep  ", "\n\n"),
+    ],
+)
+def test_a_file_without_marker_lines_gets_the_block_appended(
+    tmp_path: Path, capsys, prior: str, separator: str
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    target.write_bytes(prior.encode())
+    _install(tmp_path)
+    expected = (prior + separator + "\n".join(_block(OPENCODE)) + "\n").encode()
+    assert target.read_bytes() == expected
+    assert (tmp_path / "backup.AGENTS.md").read_bytes() == prior.encode()
+    capsys.readouterr()
+    _install(tmp_path)
+    assert capsys.readouterr().out == f"unchanged {target}\n"
+    assert target.read_bytes() == expected
 
 
 def _symlink_destination(tmp_path: Path) -> None:
@@ -256,15 +280,12 @@ def test_a_project_directory_under_claude_writes_agents_md_and_the_redirect(tmp_
 
 def test_this_repositorys_claude_redirect_is_followed_and_left_alone(tmp_path: Path) -> None:
     """This repository's own pair: CLAUDE.md is `@AGENTS.md`, and AGENTS.md is the operator's text
-    with no block, refused until the operator places a marker pair in it."""
+    with no block, which the install appends."""
     redirect = (REPO_ROOT / "CLAUDE.md").read_bytes()
     own = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert redirect == b"@AGENTS.md\n" and _BEGIN not in own
+    assert redirect == b"@AGENTS.md\n" and _BEGIN not in own and own.endswith("\n")
     (tmp_path / "CLAUDE.md").write_bytes(redirect)
     (tmp_path / "AGENTS.md").write_text(own, encoding="utf-8")
-    with pytest.raises(InputError, match="AGENTS.md: found 0 begin and 0 end"):
-        _install(tmp_path, CLAUDE)
-    (tmp_path / "AGENTS.md").write_text(f"{own}\n{_BEGIN}\n{_END}\n", encoding="utf-8")
     _install(tmp_path, CLAUDE)
     assert (tmp_path / "CLAUDE.md").read_bytes() == redirect
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "\n".join([own, *_block(CLAUDE), ""])

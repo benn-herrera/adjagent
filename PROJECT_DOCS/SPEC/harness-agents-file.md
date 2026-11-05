@@ -19,8 +19,9 @@ operator's act, never the install's.
 The installed file carries the repository's content as **one delimited block**, from its begin
 marker line through its end marker line, recognised by their fixed ends so a block any earlier
 revision wrote is still found; installation replaces that span and keeps every other byte of the
-file as the operator's, writes an absent file whole, and refuses with nothing written a file without
-exactly one ordered marker pair. A destination whose only content is one `@<path>` import is a
+file as the operator's, writes an absent file whole, appends the block at the end of a file with no
+marker line, every existing byte kept, and refuses with nothing written a file with any other
+marker lines than one ordered pair. A destination whose only content is one `@<path>` import is a
 redirect followed one hop, within the named directory, and never rewritten itself; a longer chain,
 or a target outside that directory, is refused with nothing written.
 

@@ -9,7 +9,7 @@ directory's name.
 
 `adjagent/agents_file.py` implements the install SPEC.md specifies. It finds the span by the
 stripped ends of the marker lines, replaces it with the rendered span, and writes every other byte
-back as read. Every check, including the git-status refusal over `adjagent/`, runs before the first
+back as read; a file with no marker line gets the rendered span appended instead. Every check, including the git-status refusal over `adjagent/`, runs before the first
 write.
 
 `install` uses it twice: for a plugin installed below its project root, and for a user-level install

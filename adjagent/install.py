@@ -31,6 +31,7 @@ from adjagent.preflight import VENV_DIR, run_preflighted
 from adjagent.render import (
     GENERATED_MARK,
     GENERATED_NOTICE,
+    appended_paragraph,
     render_all,
     write_renders,
     write_text_verbatim,
@@ -1039,15 +1040,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str, real_project
         print(f"rewrote the KB include line in {path}")
         return
     line = kb_include_line(runner=runner, harness_relpath=harness_relpath)
-    if not text:
-        appended = f"{line}\n"
-    elif text.endswith("\n\n"):
-        appended = f"{text}{line}\n"
-    elif text.endswith("\n"):
-        appended = f"{text}\n{line}\n"
-    else:
-        appended = f"{text}\n\n{line}\n"
-    write_text_verbatim(path, appended)
+    write_text_verbatim(path, appended_paragraph(text, line))
     print(f"installed: appended the KB include line to {path}")
 
 

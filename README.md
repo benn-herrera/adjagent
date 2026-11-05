@@ -23,8 +23,8 @@ project's `.venv/` (the project's existing one, or one it creates), then install
 project for both harnesses and the operator-level agents file for each.
 
 The last two lines of the recipe write outside the project: `~/.claude/CLAUDE.md` and
-`~/.config/opencode/AGENTS.md`. They replace only the block between adjagent's marker lines and keep
-the rest of each file ([Agents file](docs/agents-file.md)). A project that uses one harness drops the
+`~/.config/opencode/AGENTS.md`. They replace only the block between adjagent's marker lines, or append
+the block to a file that has none, and keep the rest of each file ([Agents file](docs/agents-file.md)). A project that uses one harness drops the
 other harness's `install` line and `install-agents-file` line.
 
 Justfile:

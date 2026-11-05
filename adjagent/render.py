@@ -219,6 +219,17 @@ def write_text_verbatim(path: Path, text: str) -> None:
         stream.write(text)
 
 
+def appended_paragraph(text: str, paragraph: str) -> str:
+    """`text` unchanged, then `paragraph` after one blank line, ending with a newline."""
+    if not text:
+        return f"{paragraph}\n"
+    if text.endswith("\n\n"):
+        return f"{text}{paragraph}\n"
+    if text.endswith("\n"):
+        return f"{text}\n{paragraph}\n"
+    return f"{text}\n\n{paragraph}\n"
+
+
 def write_renders(out: Path, renders: Iterable[tuple[PurePosixPath, str]]) -> list[Path]:
     """Write each text under `out` (an existing directory, else InputError) as utf-8 with no newline
     translation, creating parents and overwriting; return the paths written."""
