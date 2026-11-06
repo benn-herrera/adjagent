@@ -2175,14 +2175,20 @@ def _assert_dry_run_predicts(argv: list[str], *, project: Path, capsys) -> dict[
     groups = _dry_run_groups(capsys.readouterr().out)
     assert _state(project) == state
     main(argv)
+    assert groups == _changed_since(files, directories, project=project)
+    return groups
+
+
+def _changed_since(files: dict[str, bytes], directories: set[str], *, project: Path) -> dict[str, set[str]]:
+    """What changed under `project` since it held `files` and `directories`, as a dry run groups it,
+    each group present only where it holds a path."""
     after = _files_through_links(project)
     actual = {
         "created": set(after) - set(files),
         "changed": {path for path in set(after) & set(files) if after[path] != files[path]},
         "removed": (set(files) - set(after)) | (directories - _directories_through_links(project)),
     }
-    assert groups == {group: paths for group, paths in actual.items() if paths}
-    return groups
+    return {group: paths for group, paths in actual.items() if paths}
 
 
 def _kb_install_with_a_runner_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
@@ -2843,19 +2849,25 @@ def test_a_symlink_at_a_render_target_is_written_through(tmp_path: Path, capsys,
 @pytest.mark.parametrize(
     "relative, named, kb",
     [
-        ("agents", "missing", []),
-        ("agents/python-coder.md", "missing/python-coder.md", []),
-        (CLAUDE.mcp.canonical, "missing/shared.json", ["--with-kb"]),
+        (f"{_CLAUDE_PLUGIN_RELPATH}/agents", "missing", []),
+        (f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md", "missing/python-coder.md", []),
+        (f"{_CLAUDE_PLUGIN_RELPATH}/{CLAUDE.mcp.canonical}", "missing/shared.json", ["--with-kb"]),
+        ("Makefile", "missing/Makefile", ["--with-kb"]),
     ],
-    ids=["dangling-on-the-way", "dangling-into-a-missing-directory", "mcp-file-into-a-missing-directory"],
+    ids=[
+        "dangling-on-the-way",
+        "dangling-into-a-missing-directory",
+        "mcp-file-into-a-missing-directory",
+        "makefile-into-a-missing-directory",
+    ],
 )
 def test_a_link_nothing_can_be_written_through_is_refused_with_nothing_written(
     tmp_path: Path, capsys, relative: str, named: str, kb: list[str], dry_run: list[str]
 ) -> None:
     """The copy a dry run reads holds nothing where a link dangles, so the refusal reads the real path, and
     both runs refuse alike."""
-    argv, project, root, outside = _linked_claude_project(tmp_path)
-    link = _link(_claude_plugin(root) / relative, outside / named)
+    argv, project, _, outside = _linked_claude_project(tmp_path)
+    link = _link(project / relative, outside / named)
     before = (_state(project), _state(outside))
     with pytest.raises(SystemExit) as exit_info:
         main([*argv, *kb, *dry_run])
@@ -2878,32 +2890,44 @@ def _run_outcome(argv: list[str], capsys, *, planted: Path) -> tuple[object, lis
 
 
 @pytest.mark.parametrize(
-    "harness_args, planted, foreseen",
+    "harness_args, planted",
     [
-        (["--harness=claude"], f"{_CLAUDE_PLUGIN_RELPATH}/agents", True),
-        (["--harness=opencode", "--subdir=tools", "--with-kb"], ".opencode", False),
-        (["--harness=claude", "--subdir=tools"], ".claude", True),
+        (["--harness=claude"], f"{_CLAUDE_PLUGIN_RELPATH}/agents"),
+        (["--harness=opencode", "--subdir=tools", "--with-kb"], ".opencode"),
+        (["--harness=claude", "--subdir=tools"], ".claude"),
     ],
     ids=["render-target", "mcp-write-target", "retired-entry-target"],
 )
-def test_a_dry_run_foresees_a_file_on_the_way_except_to_the_mcp_settings_file(
-    tmp_path: Path, capsys, harness_args: list[str], planted: str, foreseen: bool
-) -> None:
-    """Today's behaviour, pinned. The render refusal and the retired entry's silence are foreseen. The copy
-    holds nothing below a managed path whose directory is a file, so the dry run predicts the MCP file
-    created, where the real install reports the file in the way and writes nothing there."""
+def test_a_dry_run_foresees_a_file_on_the_way(tmp_path: Path, capsys, harness_args: list[str], planted: str) -> None:
     project = tmp_path / "project"
     (project / "tools").mkdir(parents=True)
     path = _plant(project / planted, "mine\n")
     argv = ["install", str(project), *harness_args]
+    files, directories = _files_through_links(project), _directories_through_links(project)
     dry_code, dry_lines, groups = _run_outcome([*argv, "--dry-run"], capsys, planted=path)
     real_code, real_lines, _ = _run_outcome(argv, capsys, planted=path)
-    assert dry_code == real_code
-    if foreseen:
-        assert dry_lines == real_lines
-    else:
-        assert dry_lines == [] and [f"{path} is not a directory" in line for line in real_lines] == [True]
-        assert f"{planted}/opencode.jsonc" in groups["created"]
+    assert (dry_code, dry_lines) == (real_code, real_lines)
+    assert groups == _changed_since(files, directories, project=project)
+
+
+@pytest.mark.parametrize("relative", [".claude", ".claude/skills"])
+def test_a_linked_harness_directory_or_surface_installs_through_the_link(tmp_path: Path, capsys, relative: str) -> None:
+    """ROOT reached through a link is inside the project as the project spells it."""
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = _link(project / relative, outside)
+    groups = _assert_dry_run_predicts(["install", str(project), "--harness=claude"], project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created"]
+    assert link.is_symlink()
+    assert (project / _CLAUDE_PLUGIN_RELPATH / "agents/python-coder.md").is_file()
+
+
+def test_a_project_named_through_a_linked_parent_installs_with_paths_shown_as_named(tmp_path: Path, capsys) -> None:
+    (tmp_path / "real" / "project").mkdir(parents=True)
+    project = _link(tmp_path / "alias", tmp_path / "real") / "project"
+    groups = _assert_dry_run_predicts(["install", str(project), "--harness=claude"], project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created"]
 
 
 def test_a_linked_directory_on_a_resource_path_is_written_through(tmp_path: Path, capsys) -> None:
@@ -2992,6 +3016,27 @@ def test_a_symlinked_package_destination_stays_a_link_and_holds_the_fresh_packag
     _assert_dry_run_predicts(argv, project=project, capsys=capsys)
     assert link.is_symlink()
     assert (named / "docdicer").is_file() and not (named / "stale.py").exists()
+
+
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["install", "dry-run"])
+def test_a_dangling_package_destination_into_a_missing_directory_is_refused_with_nothing_written(
+    tmp_path: Path, capsys, dry_run: list[str]
+) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    link = _link(root / _DOCDICER_TOOLS, outside / "missing" / "tools")
+    before = (_state(project), _state(outside))
+    with pytest.raises(SystemExit) as exit_info:
+        main([*argv, *dry_run])
+    assert exit_info.value.code == 2
+    assert f"'{link}'" in capsys.readouterr().err
+    assert (_state(project), _state(outside)) == before
+
+
+def test_a_file_at_a_package_destination_is_replaced_by_the_package(tmp_path: Path, capsys) -> None:
+    argv, project, root, _ = _linked_claude_project(tmp_path)
+    tools = _plant(root / _DOCDICER_TOOLS)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert (tools / "docdicer").is_file()
 
 
 def _stale_render_below_a_linked_directory(root: Path, outside: Path) -> tuple[Path, Path]:

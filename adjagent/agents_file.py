@@ -371,7 +371,9 @@ def checked_followed_agents_file(
     state. `global_dir` may be a scratch copy of the harness's user harness directory, and
     `real_project` is as `checked_agents_file` takes `real_directory`."""
     if not _marked(global_dir / harness.agents_file):
-        return FollowedAgentsFile(write=checked_agents_file(project, harness, real_directory=real_project), removal=None)
+        return FollowedAgentsFile(
+            write=checked_agents_file(project, harness, real_directory=real_project), removal=None
+        )
     refuse_uncommitted(uncommitted())
     write = checked_agents_file(global_dir, harness, real_directory=user_dir(harness))
     return FollowedAgentsFile(write=write, removal=_checked_project_copy_removal(project))

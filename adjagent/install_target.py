@@ -7,8 +7,9 @@ The harness is, in order: the one `--harness` names; the one whose harness direc
 target — its project harness directory, or, in the home directory, its user harness directory; the
 one the target itself is a harness directory of, matched on the target's trailing path elements;
 otherwise none, and the install is refused. Every directory name is read from the harnesses' own
-values, so none is spelled here. The target is normalised lexically, for that matching; symlinks are
-followed only for the home-directory comparison and the project root.
+values, so none is spelled here. The target is normalised lexically, for that matching and for the
+harness directory and project root built from it; symlinks are followed only for the home-directory
+comparison.
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ _HOME_PREFIX = "~/"
 
 @dataclass(frozen=True)
 class InstallTarget:
-    """A resolved install: the harness's name; the harness directory, built from the target normalised
-    without following symlinks; and the project root, symlinks followed."""
+    """A resolved install: the harness's name; and the harness directory and the project root, each
+    built from the target normalised without following symlinks."""
 
     harness: str
     harness_dir: Path
@@ -109,14 +110,14 @@ def resolve_install_target(target: Path, *, harness: str | None, subdir: str | N
     name = _detected_harness(target, at_home=at_home) if harness is None else harness
     selected = harness_named(name)
     in_home = _user_dir_in_home(selected) if at_home else None
-    project_root = target.resolve()
+    project_root = target
     if subdir is not None:
         harness_dir = target / subdir
     elif in_home is not None:
         harness_dir = target / in_home
     elif not selected.is_standalone_plugin and _is_own_dir(target, selected):
         harness_dir = target
-        project_root = target.parent.resolve()
+        project_root = target.parent
     else:
         harness_dir = target / selected.project_harness_dir
     return InstallTarget(harness=name, harness_dir=harness_dir, project_root=project_root)

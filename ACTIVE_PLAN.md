@@ -16,8 +16,8 @@ Design: `ACTIVE_PLAN_DESIGN.md`, cited here as D-n. The plan's work starts at `3
 | P3 | Guardrail registration in the plugin; retired settings entries removed | expert | shipped | python-coder, then tech-writer | done: `be18345` |
 | P3a | The agents file follows the set | expert | shipped | python-coder, then tech-writer | done: `eafe371` |
 | P3b | A symlink is what it names (R8) | expert | shipped | python-coder, then tech-writer | done (P3b checkpoint commit) |
-| P4 | Pre-release testing | user-run, with agent-run parts | throwaway | scratch | not started |
-| P5 | Post-plan review, revision, burndown | review | — | reviewers | not started |
+| P4 | Pre-release testing | user-run, with agent-run parts | throwaway | scratch | done: A–C pass (fix `01a27e9`); D unverified, mage ships namespaced |
+| P5 | Post-plan review, revision, burndown | review | — | reviewers | four reviewers dispatched on `1049e2f..HEAD` |
 
 Packages share one build and one test suite, so they run **serially**: one dispatch at a time, each
 on the agent's own model. No package is mechanical, so none runs on the step-down model.
@@ -416,6 +416,10 @@ of about 60 lines; the scratch home empty):
    one kbase server; one guardrail block message per blocked call.
 6. Coordinator: `git worktree remove "$PWD/.claude-temp/prerelease/v0.14.0"`.
 
+**Results so far:** A, B and C pass; C found empty directories left by prune, fixed in `01a27e9`.
+A settings container emptied by retired-entry removal stays: nothing tells whether it predates the
+install. D is **unverified**: the mage release with namespacing has not shipped.
+
 **D. Mage namespacing** (R7). This step needs no scratch home: it touches only the Mage plugin
 directory.
 - The owner installs the set into their mage `Mage/Skills` and opens a mage session.
@@ -445,7 +449,8 @@ own done-line, or ruled by the owner.
   - `tech-writer`, for `PROJECT_DOCS/`, `docs/` and `README.md`.
   - `prompt-engineer`, for definition descriptions, bodies, the agents file and R5's sentence in
     the `adjagent` skill.
-- Each gets the contract documents and the diff `3d36ff6..HEAD`, not this plan or the design.
+- Each gets the contract documents and the diff `1049e2f..HEAD` (everything since 0.14.0), not this
+  plan or the design.
 - `prompt-engineer`'s brief adds:
   - whether `adjagent:<name>` reads naturally at each converted site;
   - whether the kbase skill's server wording holds when the server shows as

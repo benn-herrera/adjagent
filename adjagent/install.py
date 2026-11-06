@@ -347,25 +347,29 @@ def _refuse_foreign_targets(
     render_targets: Iterable[Path],
     resource_targets: Iterable[Path],
     harness_targets: Iterable[tuple[Path, str]],
+    package_destinations: Iterable[Path],
 ) -> None:
     """Refuse an install that would overwrite a file it did not write, or write below a path under
     `root` that is not a directory. A target passes as `_foreign_on_path` reads it, judged by the claim
     its class makes of it: a render by its generated banner, a resource by its installed header, a
-    harness-rendered file — `(path, marker)` — by the marker that file states about itself. Each target's
-    counterpart under `real_root`, the directory `root` is or is a scratch copy of, is also read for a
-    link `_dangling_on_path` names: a copy holds nothing where a link dangles, so only the real path
-    shows it. Every failing path is named once in the one refusal, so the operator clears them in one
-    pass."""
+    harness-rendered file — `(path, marker)` — by the marker that file states about itself. A package
+    destination, replaced whole, makes no claim. Each target's and destination's counterpart under
+    `real_root`, the directory `root` is or is a scratch copy of, is also read for a link
+    `_dangling_on_path` names: a copy holds nothing where a link dangles, so only the real path shows it.
+    Every failing path is named once in the one refusal, so the operator clears them in one pass."""
     claims = [
         *((target, _is_ours) for target in render_targets),
         *((target, _is_our_resource) for target in resource_targets),
         *((target, partial(_is_our_harness_file, marker=marker)) for target, marker in harness_targets),
     ]
-    failing = (
-        _dangling_on_path(real_root / target.relative_to(root), base=real_root)
-        or _foreign_on_path(target, root=root, ours=ours)
-        for target, ours in claims
-    )
+    failing = [
+        *(
+            _dangling_on_path(real_root / target.relative_to(root), base=real_root)
+            or _foreign_on_path(target, root=root, ours=ours)
+            for target, ours in claims
+        ),
+        *(_dangling_on_path(real_root / target.relative_to(root), base=real_root) for target in package_destinations),
+    ]
     foreign = list(dict.fromkeys(path for path in failing if path is not None))
     if foreign:
         named = ", ".join(f"'{target}'" for target in foreign)
@@ -1045,12 +1049,20 @@ def _utf8_text(path: Path) -> str:
         raise InputError(f"'{path}' is not readable UTF-8 text: {exc}") from exc
 
 
-def _check_runner(project: Path) -> None:
+def _check_runner(project: Path, *, real_project: Path) -> None:
     """Read `project`'s runner file before an install's first write: an unreadable or undecodable file is
-    refused there, not raised out of the write phase with packages and renders already landed."""
+    refused there, not raised out of the write phase with packages and renders already landed. Where
+    there is none, a `Makefile` link at `real_project` that the created one could not be written through
+    is refused: the copy a dry run installs into holds nothing where a link dangles."""
     found = _runner_file(project)
     if found is not None:
         _utf8_text(found[1])
+        return
+    dangling = _dangling_on_path(real_project / "Makefile", base=real_project)
+    if dangling is not None:
+        raise InputError(
+            f"install would create the KB include line's Makefile through '{dangling}', which names nothing"
+        )
 
 
 def kb_include_line(*, runner: str, harness_relpath: str) -> str:
@@ -1097,16 +1109,22 @@ def _named_harnesses(text: str, *, runner: str) -> list[_NamedLine]:
     return found
 
 
-def _harness_relpath(root: Path, project: Path) -> str:
-    """ROOT's path relative to the project root — the `<harness-relpath>` every consumer-facing line
-    under the project spells. A ROOT outside the project root is refused."""
-    resolved = root.resolve()
-    if not resolved.is_relative_to(project):
+def _lexical(path: Path) -> Path:
+    """`path` made absolute and normalised without following symlinks."""
+    return Path(os.path.normpath(path.absolute()))
+
+
+def _harness_relpath(root: Path, lexical_project: Path) -> str:
+    """ROOT's path relative to the project root, both judged as spelled, links not followed — the
+    `<harness-relpath>` every consumer-facing line under the project spells. A ROOT outside the project
+    root is refused."""
+    lexical = _lexical(root)
+    if not lexical.is_relative_to(lexical_project):
         raise InputError(
-            f"install root '{root}' is not inside project root '{project}' — "
+            f"install root '{root}' is not inside project root '{lexical_project}' — "
             "the harness directory must sit under the project it installs into"
         )
-    return resolved.relative_to(project).as_posix()
+    return lexical.relative_to(lexical_project).as_posix()
 
 
 def install_kb_include_line(project: Path, *, harness_relpath: str, real_project: Path | None = None) -> None:
@@ -1178,11 +1196,12 @@ def install_kb_include_line(project: Path, *, harness_relpath: str, real_project
 
 
 def _installs_agents_file(
-    harness_dir: Path, harness: Harness, *, project: Path, user_level: bool, global_agents_file: bool
+    harness_dir: Path, harness: Harness, *, lexical_project: Path, user_level: bool, global_agents_file: bool
 ) -> bool:
     """Whether an install into `harness_dir` writes an agents file there: a standalone plugin installed
-    below its project root, or a user-level install given `global_agents_file`."""
-    plugin_below_project = harness.is_standalone_plugin and harness_dir.resolve() != project
+    below its project root, judged as both are spelled, or a user-level install given
+    `global_agents_file`."""
+    plugin_below_project = harness.is_standalone_plugin and _lexical(harness_dir) != lexical_project
     return plugin_below_project or (user_level and global_agents_file)
 
 
@@ -1204,15 +1223,20 @@ def _standing_docdicer_venvs(root: Path, *, harness_dir: Path, user_level: bool)
 
 
 def _clear_package_destination(destination: Path) -> None:
-    """Leave nothing at `destination` for the package copy to sit beside: a directory is removed whole.
-    A link stays and is copied through — the directory it names emptied, or made where it dangles."""
-    if not destination.is_symlink():
-        shutil.rmtree(destination, ignore_errors=True)
+    """Leave nothing at `destination` for the package copy to sit beside: a directory is removed whole,
+    and any other file there unlinked, the destination being the repository's whole. A link stays and
+    is copied through — the directory it names emptied, or made where it dangles, its own directory
+    standing, as the refusals before the first write ensure."""
+    if destination.is_symlink():
+        if destination.is_dir():
+            for entry in destination.iterdir():
+                _remove_entry(entry, remove=shutil.rmtree if entry.is_dir() else Path.unlink)
+        else:
+            destination.resolve().mkdir()
     elif destination.is_dir():
-        for entry in destination.iterdir():
-            _remove_entry(entry, remove=shutil.rmtree if entry.is_dir() else Path.unlink)
-    else:
-        destination.resolve().mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(destination)
+    elif destination.exists():
+        destination.unlink()
 
 
 def _report_shadowing(root: Path, *, harness: Harness, user_level: bool) -> None:
@@ -1287,7 +1311,8 @@ def install(
     that does not carry what that class of file states as its origin — this repository's generated
     banner or installed header, or the marker a harness-rendered file states about itself — or a
     non-directory between the harness directory and such a target, refuses the install; package
-    destinations are replaced whole unchecked. A refusal of the harness directory or ROOT, of the
+    destinations are replaced whole, refused only where a link nothing can be written through stands
+    at or on the way to one. A refusal of the harness directory or ROOT, of the
     render, of a target it would overwrite, of the runner file or of the MCP settings file writes
     nothing; a settings path that is not a regular file is reported and left alone, and the removal of a
     retired entry never refuses.
@@ -1311,13 +1336,14 @@ def install(
     _refuse_root(harness_dir)
     _refuse_root(root)
     project = harness_dir.resolve() if project_root is None else Path(project_root).resolve()
+    lexical_project = _lexical(harness_dir if project_root is None else Path(project_root))
     # The settings file's own base: a harness that keeps its file at ROOT resolves its paths against
     # ROOT, every other against the project root.
     mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
     user_level = ctx.harness.name in user_dir_harnesses(harness_dir if real_harness_dir is None else real_harness_dir)
     # A user-level harness directory need not sit under its project root — a user directory may be a
     # symlink out of home — and nothing a user-level install writes spells its path from there.
-    harness_relpath = "" if user_level else _harness_relpath(root, project)
+    harness_relpath = "" if user_level else _harness_relpath(root, lexical_project)
     kb_included = (
         with_kb
         or ctx.harness.is_standalone_plugin
@@ -1329,6 +1355,7 @@ def install(
     # directory it would write through, an install including kb's runner file and MCP settings file,
     # and the agents file's. ROOT itself is created only after all of them.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
+    destinations = [] if user_level else _packages(kb_included=kb_included)
     package_files = [] if user_level else package_copies(root, kb_included=kb_included)
     resource_files = [] if user_level else harness_resource_copies(root, harness=ctx.harness.name)
     guardrail = None if user_level else ctx.harness.guardrail
@@ -1366,12 +1393,13 @@ def install(
             for relative, _ in renders
             if relative in harness_markers
         ],
+        package_destinations=[root / destination for _, destination in destinations],
     )
     # Everything this install copies, in one list: `keep` and the report below count a harness's own
     # files with the packages', so neither reads as a stale render.
     copies = [*package_files, *resource_files]
     if writes_include_line:
-        _check_runner(project)
+        _check_runner(project, real_project=project if real_project is None else real_project)
     if writes_mcp:
         _, mcp_container = ctx.harness.mcp.entry(command=KBASE_NAME)
         mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
@@ -1385,7 +1413,11 @@ def install(
             raise InputError(f"install would write the kbase MCP entry through '{dangling}', which names nothing")
     agents_file: AgentsFileWrite | None = None
     if _installs_agents_file(
-        harness_dir, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
+        harness_dir,
+        ctx.harness,
+        lexical_project=lexical_project,
+        user_level=user_level,
+        global_agents_file=global_agents_file,
     ):
         if user_level:
             refuse_uncommitted(uncommitted())
@@ -1403,7 +1435,7 @@ def install(
     rebuild_docdicer_venv = bool(_standing_docdicer_venvs(root, harness_dir=harness_dir, user_level=user_level))
 
     root.mkdir(parents=True, exist_ok=True)
-    for _, destination in [] if user_level else _packages(kb_included=kb_included):
+    for _, destination in destinations:
         _clear_package_destination(root / destination)
     for source, target in package_files:
         data = source.read_bytes()
@@ -1477,12 +1509,13 @@ def _install_managed_paths(
     harness: Harness,
     *,
     project: Path,
+    lexical_project: Path,
     user_level: bool,
     global_agents_file: bool,
 ) -> list[tuple[Path, list[str]]]:
     """(base, paths relative to it) for everything an install into `harness_dir` may read or write: the
-    project root, the harness directory, ROOT and the harness's user harness directory, in that order,
-    ROOT keeping its position below the harness directory. What it writes by, never a listing of either
+    project root as spelled, the harness directory, ROOT and the harness's user harness directory, in
+    that order, ROOT keeping its position below the harness directory. What it writes by, never a listing of either
     directory, which in a user harness directory holds the operator's own trees. Under the harness directory, the surfaces the prune walks,
     each legacy tree, every package destination an install straight into it wrote, and the agents
     file's paths where the run writes one, and the guardrail script such an install left; under ROOT,
@@ -1514,7 +1547,11 @@ def _install_managed_paths(
         under_project += [*_JUSTFILE_NAMES, *_MAKEFILE_NAMES]
         under_project += [entry.settings for entry in harness.retired_entries]
     if _installs_agents_file(
-        harness_dir, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
+        harness_dir,
+        harness,
+        lexical_project=lexical_project,
+        user_level=user_level,
+        global_agents_file=global_agents_file,
     ):
         write = checked_agents_file(harness_dir, harness)
         under_harness_dir += [path.relative_to(harness_dir).as_posix() for path in write.paths]
@@ -1528,7 +1565,7 @@ def _install_managed_paths(
             else:
                 under_global_dir.append(path.relative_to(global_dir).as_posix())
     return [
-        (project, under_project),
+        (lexical_project, under_project),
         (harness_dir, under_harness_dir),
         (root, under_root),
         (global_dir, under_global_dir),
@@ -1559,19 +1596,21 @@ def preflighted_install(
     _refuse_root(harness_dir)
     _refuse_root(root)
     project = harness_dir.resolve() if project_root is None else Path(project_root).resolve()
+    lexical_project = _lexical(harness_dir if project_root is None else Path(project_root))
     user_level = ctx.harness.name in user_dir_harnesses(harness_dir)
     managed = _install_managed_paths(
         harness_dir,
         ctx.harness,
         project=project,
+        lexical_project=lexical_project,
         user_level=user_level,
         global_agents_file=global_agents_file,
     )
     dry_run_notes: list[str] = []
     venvs = _standing_docdicer_venvs(root, harness_dir=harness_dir, user_level=user_level)
     if venvs:
-        relpath = PurePosixPath(_harness_relpath(root, project))
-        replaced = " and ".join(_harness_relpath(venv, project) for venv in venvs)
+        relpath = PurePosixPath(_harness_relpath(root, lexical_project))
+        replaced = " and ".join(_harness_relpath(venv, lexical_project) for venv in venvs)
         dry_run_notes.append(
             f"the install would also replace {replaced} and run "
             f"'{relpath / DOCDICER_TOOLS_SCRIPT} --install', which needs the network"
@@ -1593,6 +1632,6 @@ def preflighted_install(
         ),
         dry_run=dry_run,
         target=harness_dir,
-        report_root=project,
+        report_root=lexical_project,
         dry_run_notes=dry_run_notes,
     )

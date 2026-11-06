@@ -43,19 +43,28 @@ class Difference:
 
 def _scratch_bases(bases: Sequence[Path], *, scratch: Path) -> tuple[list[Path], list[int]]:
     """Each real base's counterpart under `scratch`, in order, and the indexes of the outermost bases. A
-    base inside an earlier one (symlinks followed) sits at the same position below that one's
-    counterpart, so the relation between them holds in the copy; any other base is outermost and sits
-    at `scratch/<index>/<its own name>`."""
-    resolved = [base.resolve() for base in bases]
+    base inside an earlier one — as spelled, else with symlinks followed — sits at the same position
+    below that one's counterpart, so the relation between them holds in the copy; any other base is
+    outermost and sits at `scratch/<index>/<its own name>`."""
+    spellings = [[Path(os.path.normpath(base.absolute())) for base in bases], [base.resolve() for base in bases]]
     placed: list[Path] = []
     outermost: list[int] = []
-    for index, base in enumerate(resolved):
-        outer = next((earlier for earlier in range(index) if base.is_relative_to(resolved[earlier])), None)
-        if outer is None:
+    for index, base in enumerate(bases):
+        nesting = next(
+            (
+                (earlier, forms[index].relative_to(forms[earlier]))
+                for forms in spellings
+                for earlier in range(index)
+                if forms[index].is_relative_to(forms[earlier])
+            ),
+            None,
+        )
+        if nesting is None:
             placed.append(scratch / str(index) / base.name)
             outermost.append(index)
         else:
-            placed.append(placed[outer] / base.relative_to(resolved[outer]))
+            earlier, relative = nesting
+            placed.append(placed[earlier] / relative)
     return placed, outermost
 
 
@@ -77,7 +86,8 @@ def _copy_managed(managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_base
     names: a directory as its tree, a file as its bytes, a dangling link as nothing, and every link below
     them dereferenced, so the copy holds no link and nothing in it points back into the target. Every
     `.venv` is left out. A directory a managed path sits in is created where the real one exists, since
-    an install's checks read whether it does."""
+    an install's checks read whether it does; where a regular file stands in its place instead, the
+    outermost such file is copied, so the install meets the same obstacle."""
     for (base, paths), scratch_base in zip(managed, scratch_bases):
         if base.is_dir():
             scratch_base.mkdir(parents=True, exist_ok=True)
@@ -85,6 +95,18 @@ def _copy_managed(managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_base
             real, copy = base / relative, scratch_base / relative
             if real.parent.is_dir():
                 copy.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                obstacle = next(
+                    (
+                        parent
+                        for parent in reversed(tuple(Path(relative).parents)[:-1])
+                        if (base / parent).exists() and not (base / parent).is_dir()
+                    ),
+                    None,
+                )
+                if obstacle is not None and (base / obstacle).is_file():
+                    (scratch_base / obstacle).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(base / obstacle, scratch_base / obstacle)
             if real.is_dir():
                 _copy_tree(real, copy)
             elif real.is_file():
@@ -151,7 +173,9 @@ def preflight(
         for (base, scratch_base), (prior, prior_directories) in zip(outer, before):
             after, after_directories = _tree(scratch_base)
             created += [base / relative for relative in sorted(after - prior)]
-            removed += [base / relative for relative in sorted((prior - after) | (prior_directories - after_directories))]
+            removed += [
+                base / relative for relative in sorted((prior - after) | (prior_directories - after_directories))
+            ]
             changed += [
                 base / relative
                 for relative in sorted(after & prior)
