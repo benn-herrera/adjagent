@@ -364,7 +364,7 @@ output, and `rendered/` is gitignored.
 **A. Fresh project** (`.claude-temp/prerelease/fresh/`, holding a `justfile` and one markdown file
 of about 60 lines; the scratch home empty):
 1. Coordinator:
-   `HOME="$PWD/.claude-temp/prerelease/home" just install-with-kb "$PWD/.claude-temp/prerelease/fresh"`.
+   `HOME="$PWD/.claude-temp/prerelease/home" just install-with-kb "$PWD/.claude-temp/prerelease/fresh" --harness=claude`.
    - The output ends with R5's sentence.
    - A second run reports up to date and prints no sentence (D-9.8).
 2. Coordinator, or the user where the sandbox refuses:
@@ -399,12 +399,12 @@ of about 60 lines; the scratch home empty):
 
 **C. Migration** (`.claude-temp/prerelease/migrate/`, scratch home `home-migrate`, empty):
 1. Coordinator: `git worktree add "$PWD/.claude-temp/prerelease/v0.14.0" v0.14.0`, then
-   `HOME="$PWD/.claude-temp/prerelease/home-migrate" just --justfile "$PWD/.claude-temp/prerelease/v0.14.0/justfile" install-with-kb "$PWD/.claude-temp/prerelease/migrate"`.
+   `HOME="$PWD/.claude-temp/prerelease/home-migrate" just --justfile "$PWD/.claude-temp/prerelease/v0.14.0/justfile" install-with-kb "$PWD/.claude-temp/prerelease/migrate" --harness=claude`.
 2. User: `"$PWD/.claude-temp/prerelease/migrate/.claude/skills/docdicer/tools/docdicer" --install`.
 3. Coordinator adds a project hook of its own to `.claude/settings.json` and an unrelated server to
    `.mcp.json`, then commits everything in the scratch repo.
 4. Coordinator:
-   `HOME="$PWD/.claude-temp/prerelease/home-migrate" just install-with-kb "$PWD/.claude-temp/prerelease/migrate" --dry-run`,
+   `HOME="$PWD/.claude-temp/prerelease/home-migrate" just install-with-kb "$PWD/.claude-temp/prerelease/migrate" --harness=claude --dry-run`,
    output recorded; then the same command without `--dry-run`; then
    `git -C "$PWD/.claude-temp/prerelease/migrate" status --porcelain` and
    `git -C "$PWD/.claude-temp/prerelease/migrate" diff`.

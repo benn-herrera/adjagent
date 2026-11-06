@@ -16,7 +16,9 @@ layout's, printing each; one that is a link has the link removed (`_remove_entry
 stays. A user-level install removes none. `prune` walks through linked directories (`_files_below`,
 ending at a cycle), judges a file by the file it names and compares what it keeps by resolved path,
 and removes a link, never its target, where a stale entry or an emptied directory is one. The walk then
-removes each directory that leaves empty, up to its surface. That walk needs no carve-out for a
+removes each directory that leaves empty, upward from the removed file to the first directory that
+still holds anything — the surface itself included, the harness directory never. Only a stale file's
+ancestors are visited, so a directory that held nothing before the install stays. That walk needs no carve-out for a
 package destination: the table's one row, the docdicer tools package, and the kb toolchain's
 destination both sit inside a surface — `skills/docdicer/tools/` and `skills/kbase/kb-tools/`, each
 in its skill's own directory — where every file they hold is stamped installed or left unstamped,
@@ -106,9 +108,10 @@ the install. No version marker or stamp file takes part.
   `_refuse_root` runs on the real ROOT first, and an `InputError` or `OSError` from the copy or the
   run is raised as an `InputError` with each scratch base replaced by the real one, so no refusal
   and no printed path names the copy.
-- **The comparison** is of files, the real side read through its links; directories are not
-  compared. A path in the copy only is created, in the target only is removed, and in both is changed
-  when `filecmp.cmp(shallow=False)` is false or `stat.S_IMODE` differs. `.venv` directories are
+- **The comparison** is of files, the real side read through its links. A path in the copy only is
+  created, in the target only is removed, and in both is changed when `filecmp.cmp(shallow=False)` is
+  false or `stat.S_IMODE` differs. Directories are compared for removal alone: one in the copy before
+  the run and gone after it is removed, and the dry run lists it with a trailing `/`. `.venv` directories are
   outside it, so a present venv alone never makes an install proceed.
 - **The outcome** (`run_preflighted`): with no difference, `up to date: <ROOT> — nothing written` and
   a return, the target untouched — no file, no package destination, no `tools/.venv`, no re-run;

@@ -29,7 +29,7 @@ VENV_DIR = ".venv"
 @dataclass(frozen=True)
 class Difference:
     """What an install would do to its target, each path a real one: the files it would create, those
-    whose bytes or mode it would change, and those it would remove; and the lines it would print on
+    whose bytes or mode it would change, and the files and directories it would remove; and the lines it would print on
     stderr — what it would leave alone or skip — naming the real target."""
 
     created: tuple[Path, ...]
@@ -91,13 +91,15 @@ def _copy_managed(managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_base
                 shutil.copy2(real, copy)
 
 
-def _tree_files(base: Path) -> set[Path]:
-    """Every file below `base`, relative to it, outside any `.venv`."""
-    found: set[Path] = set()
+def _tree(base: Path) -> tuple[set[Path], set[Path]]:
+    """Every file and every directory below `base`, relative to it, outside any `.venv`."""
+    files: set[Path] = set()
+    directories: set[Path] = set()
     for directory, subdirs, names in os.walk(base):
         subdirs[:] = [name for name in subdirs if name != VENV_DIR]
-        found.update(Path(directory, name).relative_to(base) for name in names)
-    return found
+        files.update(Path(directory, name).relative_to(base) for name in names)
+        directories.update(Path(directory, name).relative_to(base) for name in subdirs)
+    return files, directories
 
 
 def _differs(copy: Path, real: Path) -> bool:
@@ -135,7 +137,7 @@ def preflight(
         stderr = io.StringIO()
         try:
             _copy_managed(managed, scratch_bases=scratch_bases)
-            before = [_tree_files(scratch_base) for _, scratch_base in outer]
+            before = [_tree(scratch_base) for _, scratch_base in outer]
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
                 install(scratch_bases)
         except (InputError, OSError) as exc:
@@ -146,10 +148,10 @@ def preflight(
         created: list[Path] = []
         changed: list[Path] = []
         removed: list[Path] = []
-        for (base, scratch_base), prior in zip(outer, before):
-            after = _tree_files(scratch_base)
+        for (base, scratch_base), (prior, prior_directories) in zip(outer, before):
+            after, after_directories = _tree(scratch_base)
             created += [base / relative for relative in sorted(after - prior)]
-            removed += [base / relative for relative in sorted(prior - after)]
+            removed += [base / relative for relative in sorted((prior - after) | (prior_directories - after_directories))]
             changed += [
                 base / relative
                 for relative in sorted(after & prior)
@@ -159,8 +161,10 @@ def preflight(
 
 
 def _shown(path: Path, *, report_root: Path) -> str:
-    """`path` relative to `report_root` where it sits below it, else whole."""
-    return str(path.relative_to(report_root)) if path.is_relative_to(report_root) else str(path)
+    """`path` relative to `report_root` where it sits below it, else whole; a directory with a trailing
+    `/`."""
+    shown = str(path.relative_to(report_root)) if path.is_relative_to(report_root) else str(path)
+    return f"{shown}/" if path.is_dir() else shown
 
 
 def run_preflighted(

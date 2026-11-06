@@ -377,7 +377,8 @@ def _refuse_foreign_targets(
 
 def prune(harness_dir: Path, *, keep: set[Path]) -> list[Path]:
     """Remove every regular file under the harness directory's surfaces that is not in `keep`, would
-    ship, and is ours; then each directory that leaves empty, up to its surface.
+    ship, and is ours; then each directory that leaves empty, walking upward from the file to the first
+    directory that still holds anything, the surface included and the harness directory never.
 
     A ROOT below the harness directory lies inside its skills surface, so this one walk reaches both
     ROOT's stale renders and what a layout writing straight into the harness directory left there.
@@ -410,7 +411,7 @@ def prune(harness_dir: Path, *, keep: set[Path]) -> list[Path]:
         path.unlink()
     for path in stale:
         parent = path.parent
-        while parent.parent != harness_dir and parent.is_dir() and not any(parent.iterdir()):
+        while parent != harness_dir and parent.is_dir() and not any(parent.iterdir()):
             _remove_entry(parent, remove=Path.rmdir)
             parent = parent.parent
     return stale

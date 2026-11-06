@@ -2136,6 +2136,15 @@ def _files_through_links(root: Path) -> dict[str, bytes]:
     return found
 
 
+def _directories_through_links(root: Path) -> set[str]:
+    """Every directory below `root`, links followed, each shown with the trailing `/` a dry run gives it."""
+    return {
+        f"{Path(directory, name).relative_to(root).as_posix()}/"
+        for directory, subdirs, _ in os.walk(root, followlinks=True)
+        for name in subdirs
+    }
+
+
 def _dry_run_groups(out: str) -> dict[str, set[str]]:
     """The paths a dry run printed under each of its `created`, `changed` and `removed` headings."""
     groups: dict[str, set[str]] = {}
@@ -2158,9 +2167,9 @@ def _no_uncommitted(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _assert_dry_run_predicts(argv: list[str], *, project: Path, capsys) -> dict[str, set[str]]:
     """Run `argv` with `--dry-run`, then for real: the dry run touches nothing under `project`, and the
-    paths it prints are exactly those the real run then creates, changes and removes, each link read as
-    what it names. Its groups."""
-    files, state = _files_through_links(project), _state(project)
+    paths it prints are exactly those the real run then creates, changes and removes — the directories
+    it removes among them — each link read as what it names. Its groups."""
+    files, directories, state = _files_through_links(project), _directories_through_links(project), _state(project)
     capsys.readouterr()
     main([*argv, "--dry-run"])
     groups = _dry_run_groups(capsys.readouterr().out)
@@ -2170,7 +2179,7 @@ def _assert_dry_run_predicts(argv: list[str], *, project: Path, capsys) -> dict[
     actual = {
         "created": set(after) - set(files),
         "changed": {path for path in set(after) & set(files) if after[path] != files[path]},
-        "removed": set(files) - set(after),
+        "removed": (set(files) - set(after)) | (directories - _directories_through_links(project)),
     }
     assert groups == {group: paths for group, paths in actual.items() if paths}
     return groups
@@ -2307,7 +2316,14 @@ def test_a_dry_run_lists_a_legacy_tree_and_a_stale_render_as_removed(tmp_path: P
     (root / "agents/kb_tools/helper.py").write_text("x = 1\n", encoding="utf-8")
     (root / "agents/gone.md").write_text(_NEW_BANNER, encoding="utf-8")
     groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
-    assert groups == {"removed": {".claude/agents/kb_tools/helper.py", ".claude/agents/gone.md"}}
+    assert groups == {
+        "removed": {
+            ".claude/agents/kb_tools/helper.py",
+            ".claude/agents/gone.md",
+            ".claude/agents/kb_tools/",
+            ".claude/agents/",
+        }
+    }
 
 
 @pytest.mark.usefixtures("_no_uncommitted")
@@ -2482,6 +2498,34 @@ def test_an_install_over_the_flat_layout_leaves_none_of_its_generated_files_pack
 
 
 @pytest.mark.parametrize(
+    "planted, kept",
+    [
+        ((), ()),
+        (("agents/sub/mine.md",), ("agents", "agents/sub")),
+        (("agents/sub/",), ("agents", "agents/sub")),
+    ],
+    ids=["migration", "a-users-own-file", "an-already-empty-directory"],
+)
+def test_the_prune_removes_each_directory_it_empties_up_to_the_harness_directory(
+    tmp_path: Path, planted: tuple[str, ...], kept: tuple[str, ...]
+) -> None:
+    """A planted path ending in `/` is an empty directory. The flat layout's `agents/` and `commands/`
+    hold only generated files, so each goes with its last one unless something the prune does not remove
+    stands in it."""
+    project, root = _flat_claude_project(tmp_path)
+    assert (root / "agents").is_dir() and (root / "commands").is_dir()
+    for relative in planted:
+        if relative.endswith("/"):
+            (root / relative).mkdir(parents=True)
+        else:
+            _plant(root / relative, "mine\n")
+    _definition_install(root, with_kb=True, project_root=project)
+    assert root.is_dir()
+    assert {relative for relative in ("agents", "agents/sub", "commands") if (root / relative).exists()} == set(kept)
+    assert all((root / relative).exists() for relative in planted)
+
+
+@pytest.mark.parametrize(
     "kbase, removed",
     [
         ({"command": "kbase", "args": ["mcp"]}, True),
@@ -2512,7 +2556,7 @@ def test_a_dry_run_over_the_flat_layout_predicts_the_migration_and_a_second_run_
     project, _ = _flat_claude_project(tmp_path)
     argv = ["install", str(project), "--harness=claude", "--with-kb"]
     groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
-    assert ".claude/agents/python-coder.md" in groups["removed"]
+    assert {".claude/agents/python-coder.md", ".claude/agents/", ".claude/commands/"} <= groups["removed"]
     assert ".claude/skills/kbase/kb-tools/runner-snippets/kb.just" in groups["removed"]
     assert f".claude/{_GUARDRAIL}" in groups["removed"]
     assert {_SETTINGS, ".mcp.json"} <= groups["changed"]

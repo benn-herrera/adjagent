@@ -85,7 +85,8 @@ Neither install is refused.
 ## Upgrading from the flat layout
 
 Releases before the plugin form wrote the set directly under `.claude/` (`.claude/agents/`,
-`.claude/skills/docdicer/tools/`). A project install over it removes the generated files there and the
+`.claude/skills/docdicer/tools/`). A project install over it removes the generated files there, each folder
+that leaves empty (`.claude/agents/` and `.claude/commands/` when they held nothing of yours), and the
 old package folders, printing `removed retired package destination <path>` for each, and rebuilds a
 docdicer `tools/.venv` it found at either place. A user-level install removes no package folder.
 
@@ -126,7 +127,8 @@ Changing `--harness`, `--family`, the model maps or `--with-kb` changes bytes, s
 proceeds. A `.venv` directory is not install output and is outside the comparison.
 
 `--dry-run` runs the same comparison and writes nothing. It prints what the install would change,
-grouped as created, changed and removed, each path relative to the project root, and exits 0:
+grouped as created, changed and removed, each path relative to the project root, and exits 0. A
+folder the install would remove is listed under removed with a trailing `/`:
 
 ```text
 dry run, nothing written — the install would change these files under /home/me/foo:
