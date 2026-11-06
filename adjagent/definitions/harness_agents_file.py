@@ -49,7 +49,7 @@ to right answers for tricky problems.
   would run, how long it takes and what it would settle, and let the user decide.
 
 ### Subagent handling
-- **Durable model-facing artifacts get {clauses.ref(name="prompt-engineer")} review before first use** — anything a model
+- **Durable model-facing artifacts get `{clauses.ref(name="prompt-engineer")}` review before first use** — anything a model
   reads after the task that produced it: fixtures, answer files, evaluation instruments, brief
   templates, requirements feeding an agent. A single-use dispatch brief is exempt; a durable
   artifact it drafts is not.

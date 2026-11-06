@@ -111,10 +111,13 @@ A work package is dispatchable only when:
   scope can be checked against a diff;
 - each fact it acts on carries the command and its answer, or the quoted line. *Purpose:* the
   executor re-runs the check instead of trusting a reading that may have gone stale;
-- a change to a type, signature, test double, or behaviour a test or fixture pins lists every
-  referencing file, with the {REFERENCE_SEARCH_TERM} and its answer. *Purpose:* no referencing file
-  is found broken after the package reports done, and updating an expectation the change forces is
-  in scope;
+- a change to a type, signature or test double lists every referencing file, with the
+  {REFERENCE_SEARCH_TERM} and its answer. *Purpose:* no referencing file is found broken after the package
+  reports done;
+- a package that changes a stated behaviour names the tests and fixtures pinning it, and updating
+  them is in scope; a test failing on behaviour the package does not state it changes is reported as
+  a finding, never edited to pass. *Purpose:* an expectation moves only with its requirement, so an
+  invariant test still stops wrong work;
 - its done-line is stated in runner targets. *Purpose:* done is a run anyone can repeat, not a
   judgment;
 - a before/after measurement done-line carries a passing run on the base commit, taken during
@@ -128,11 +131,12 @@ A work package is dispatchable only when:
 A plan whose packages fail this is neither offered for approval nor dispatched. *Purpose:* what is
 approved can run as approved.
 
-Each plan section gets one review and one revision; a revision applying that review's findings is
-not re-reviewed. A later change — a package added, a decision reversed, a section rewritten — gets a
-review of the changed text only, plus a check that the rest of the plan cites no superseded form of
-it. Settled calls are not reopened unless the change targets them. *Purpose:* each round reviews
-only text no reviewer has seen, so review converges instead of re-litigating.
+Each plan section gets one `{clauses.ref(name="prompt-engineer")}` review and one revision; a
+revision applying that review's findings is not re-reviewed. A later change — a package added, a
+decision reversed, a section rewritten — gets a review of the changed text only, plus a check that
+the rest of the plan cites no superseded form of it. Settled calls are not reopened unless the
+change targets them. *Purpose:* each round reviews only text no reviewer has seen, so review
+converges instead of re-litigating.
 
 ## Dispatch
 

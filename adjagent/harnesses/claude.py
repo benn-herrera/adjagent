@@ -25,8 +25,8 @@ from adjagent.vocabulary import Tool
 # Claude Code registers a freshly written plugin's components only after a restart or `/reload-plugins`.
 # The sentence names the symptom and the remedy alone: the cause is Claude Code's and may change.
 _RELOAD_RULE = (
-    "If the new agents are not available after using `adjagent install`, use `/reload-plugins` to rescan the "
-    "agent list."
+    "If the new agents are not available after using `adjagent install`, `/reload-plugins` rescans the agent "
+    "list."
 )
 
 
