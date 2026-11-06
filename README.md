@@ -22,10 +22,24 @@ Add the recipe for your project's runner. It installs adjagent, pinned to `AGENT
 project's `.venv/` (the project's existing one, or one it creates), then installs the agent set into the
 project for both harnesses and the operator-level agents file for each.
 
-The last two lines of the recipe write outside the project: `~/.claude/CLAUDE.md` and
-`~/.config/opencode/AGENTS.md`. They replace only the block between adjagent's marker lines, or append
-the block to a file that has none, and keep the rest of each file ([Agents file](docs/agents-file.md)). A project that uses one harness drops the
-other harness's `install` line and `install-agents-file` line.
+The install writes in two places besides the installed trees:
+
+- **The project root.** `AGENTS.md` holds the operator working rules as one marked block, and under
+  claude `CLAUDE.md` is created as the one-line `@AGENTS.md` redirect. A `CLAUDE.md` holding anything
+  else is refused with nothing written ([Refusals](docs/install-reference.md#refusals)). A write that
+  changes an agents file keeps one rolling `backup.<name>` beside it, such as `backup.AGENTS.md`.
+- **Your home directory.** The last two lines of the recipe write `~/.claude/CLAUDE.md` and
+  `~/.config/opencode/AGENTS.md`. They replace only the block between adjagent's marker lines, or
+  append the block to a file that has none, and keep the rest of each file, with the same backup.
+
+The first run therefore keeps the block in the project's `AGENTS.md`, since your home files hold none
+yet, and then adds it to the home files. Every later run finds the block there, keeps it current
+there and removes the project's copy, leaving the rest of `AGENTS.md`. A run that would change nothing
+writes nothing ([Agents file](docs/agents-file.md)). A project that uses one harness drops the other
+harness's `install` line and `install-agents-file` line.
+
+Under claude the set is a plugin: invoke its agents and commands as `adjagent:<name>`, and run
+`/reload-plugins` (or restart Claude Code) after an install for new definitions to register.
 
 Justfile:
 
@@ -67,6 +81,9 @@ project's `.gitignore`:
 .opencode/
 ```
 
+The project's `AGENTS.md` and `CLAUDE.md` are not installed trees: the install may write them (above),
+so decide whether to commit them.
+
 The `.venv/` entry a Python project conventionally ignores covers the venv; add it if the project
 ignores nothing there. The docdicer tools' own venv needs no entry: its `.gitignore` is installed
 with it.
@@ -79,7 +96,7 @@ To add the knowledge-base set, add `--with-kb` to the two `install .` lines and 
 ## Previewing and re-installing
 
 `--dry-run` prints what an install would create, change and remove, grouped and relative to the
-project root, and writes nothing:
+project root (a path outside it prints absolute), and writes nothing:
 
 ```sh
 .venv/bin/adjagent install . --harness=claude --dry-run

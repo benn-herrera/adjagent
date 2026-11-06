@@ -7,6 +7,10 @@ dispatching an agent, accepting returned work or making a checkpoint commit, the
 session to load the `dev-process` skill ([Definition sets](definition-sets.md)). The file also
 requires code that calls a network API to follow the usage guidelines provided for it.
 
+The global file names `adjagent:` definitions, which resolve only where the adjagent plugin loads. In
+a project or session where it does not (see [Plugin does not load](install-reference.md#plugin-does-not-load)),
+those names point at nothing.
+
 ## Installing it
 
 ```sh
@@ -48,15 +52,15 @@ a project install never puts it there first.
 - It holds none: the install keeps the block in the project's `AGENTS.md`, creating the file if
   absent. Under claude it also creates `CLAUDE.md` as the one-line `@AGENTS.md` redirect where absent,
   and refuses, with nothing written, a `CLAUDE.md` holding anything else. With the block in your global
-  file the project's `CLAUDE.md` is never read.
+  file the install neither reads nor writes the project's `CLAUDE.md`.
 
 Run from a clone while `adjagent/` has uncommitted changes, the write into your global file is
 refused; the project's `AGENTS.md` and redirect are not.
 
-Each block's begin marker line carries the adjagent version that last changed its content. An install
-whose block content is identical writes nothing, whatever the versions. An install older than the
-version in the file leaves the block and prints "not downgraded" with both versions. A block with no
-version, or one that is not a release number, is rewritten.
+Each block's begin marker line carries the adjagent version that last changed its content. The block
+is rewritten when its content differs; an install older than the stamped version leaves it and prints
+"not downgraded" with both versions. The full rule is in
+[SPEC](../PROJECT_DOCS/SPEC/harness-agents-file.md).
 
 ### A project with several contributors
 
@@ -75,16 +79,17 @@ The flag lives in the clone's index, so it is not shared; every contributor sets
 
 Limit: git avoids touching a file with the flag set, so a pull that brings an upstream change to
 `AGENTS.md` stops with "Your local changes to the following files would be overwritten by merge".
-Clear the flag, merge, then set it again:
+With the flag cleared, git sees the install's difference as a local change to `AGENTS.md`, so
+discard or commit that difference first. Then clear the flag, pull, re-run the install and set the
+flag again:
 
 ```sh
+# first discard or commit the install's difference to AGENTS.md
 git update-index --no-skip-worktree AGENTS.md
 git pull
+# re-run your install recipe, which rewrites the block
 git update-index --skip-worktree AGENTS.md
 ```
-
-With the flag cleared, git sees the install's difference as a local change to `AGENTS.md`: commit it
-or set it aside before the pull, as for any local change.
 
 ### Symlinks
 

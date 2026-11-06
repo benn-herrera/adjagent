@@ -21,8 +21,9 @@ A target holding both `.claude/` and `.opencode/`, or neither and not itself a h
 refused until you pass `--harness`.
 
 `--harness=opencode` installs into `.opencode/`, each harness's project directory. `--subdir=DIR`
-makes `<target>/DIR` the harness directory instead, and `--subdir=` the target itself. A target that
-is itself a harness directory is installed into directly.
+makes `<target>/DIR` the harness directory instead, and `--subdir=` the target itself; under claude
+the plugin then lands at `<DIR>/skills/adjagent`. A target that is itself a harness directory is
+installed into directly.
 
 ## What an install writes
 
@@ -61,6 +62,19 @@ included, and where that venv existed it then runs `tools/docdicer --install` to
 run fails, the install says so in one line naming the command; its exit status and its other writes
 are unaffected.
 
+### Plugin does not load
+
+Symptom: after the install and a restart or `/reload-plugins`, `adjagent:<name>` agents or commands
+are missing. Causes and remedies, per [Claude Code plugin loading](https://code.claude.com/docs/en/plugins/loading):
+
+- **Managed settings skip skills-directory plugins.** An organization's managed settings can stop
+  Claude Code loading plugins from a `skills/` directory. Remedy: ask the administrator to allow
+  it; nothing in the install changes this.
+- **The `kbase` server is unapproved.** On a kb install the plugin's `kbase` MCP server needs
+  per-server approval before its tools appear. Remedy: approve it when Claude Code asks.
+- **Something else failed.** Open `/plugin` and read the Errors tab for the plugin's load error.
+- **A user-level `adjagent` plugin shadows the project's.** See [below](#a-user-level-plugin-shadows-the-projects).
+
 ## User-level installs
 
 A home-directory target is a user-level install: `adjagent install ~ --harness=claude` (or
@@ -84,16 +98,39 @@ Neither install is refused.
 
 ## Upgrading from the flat layout
 
-Releases before the plugin form wrote the set directly under `.claude/` (`.claude/agents/`,
-`.claude/skills/docdicer/tools/`). A project install over it removes the generated files there, each folder
-that leaves empty (`.claude/agents/` and `.claude/commands/` when they held nothing of yours), and the
-old package folders, printing `removed retired package destination <path>` for each, and rebuilds a
-docdicer `tools/.venv` it found at either place. A user-level install removes no package folder.
+The plugin form first ships in the release after 0.14.0; 0.14.0 and earlier wrote the set directly
+under `.claude/` (`.claude/agents/`, `.claude/skills/docdicer/tools/`). Run the install over it and
+expect these changes, in the order you meet them:
+
+1. **Invocation.** Agents and commands are now invoked as `adjagent:<name>`. Autocomplete may still
+   offer the bare name; type the prefixed one.
+2. **Start, trust, reload.** The plugin loads only for a session started at the project root, after
+   the trust dialog. A newly trusted project needs `/reload-plugins` or a restart before the
+   plugin's components register. A session that began before the first plugin install keeps its old
+   bare-named agents loaded, even though the install deleted their files: restart it once. After
+   that, `/reload-plugins` picks up every later install. If the plugin still does not appear, see
+   [Plugin does not load](#plugin-does-not-load).
+3. **Settings and hook.** The install removes its own entry from `.claude/settings.json`, on a kb
+   install its `kbase` entry from `.mcp.json`, and `.claude/hooks/guardrail.pl`; the plugin's own
+   `hooks/hooks.json` registers the new hook. Your other entries stay. What is left alone and why:
+   [Guardrail](guardrail.md#claude).
+4. **Include line (kb install).** The install rewrites the existing runner include line in place to
+   the plugin's path; it adds no second line. The `.gitignore` line for `.mcp.json` is no longer
+   needed, because the project's `.mcp.json` no longer carries the `kbase` entry.
+5. **Agents file.** The install keeps the agents-file block current in one place: your global file
+   where it already holds the block, otherwise the project's `AGENTS.md`, plus a `CLAUDE.md` that
+   holds only `@AGENTS.md`. The block names `adjagent:` definitions. A `CLAUDE.md` with other
+   content is refused ([Refusals](#refusals)); details in [Agents file](agents-file.md).
+
+The install also removes the generated files of the flat layout, each folder that leaves empty
+(`.claude/agents/` and `.claude/commands/` when they held nothing of yours), and the old package
+folders, printing `removed retired package destination <path>` for each, and rebuilds a docdicer
+`tools/.venv` it found at either place. A user-level install removes no package folder.
 
 ## Mage
 
-`adjagent install <plugins-parent> --harness=mage` creates `<plugins-parent>/adjagent`. The names and
-paths inside the plugin are unchanged: the surfaces sit at its top level, with the manifest at
+`adjagent install <plugins-parent> --harness=mage` creates `<plugins-parent>/adjagent`. Inside that
+plugin the layout is the claude plugin's: the surfaces sit at its top level, with the manifest at
 `.claude-plugin/plugin.json` beside them, rendered rather than copied. Mage ships no hook, always
 installs the kb set, and writes no include line and no `Makefile`: a plugin is not a repo project.
 The install writes the agents file as `<plugin>/CLAUDE.md`, so a normal install needs no second step.
@@ -127,7 +164,8 @@ Changing `--harness`, `--family`, the model maps or `--with-kb` changes bytes, s
 proceeds. A `.venv` directory is not install output and is outside the comparison.
 
 `--dry-run` runs the same comparison and writes nothing. It prints what the install would change,
-grouped as created, changed and removed, each path relative to the project root, and exits 0. A
+grouped as created, changed and removed, each path relative to the project root (absolute where
+the path is outside it), and exits 0. A
 folder the install would remove is listed under removed with a trailing `/`:
 
 ```text
@@ -161,7 +199,12 @@ An install refuses, writing nothing, to:
 - overwrite a file at one of its paths that carries no banner of this project's, such as your own
   `agents/python-coder.md`;
 - write below a non-directory on the way to one of its targets, or through a dangling symlink on the
-  way to one, or at one whose named path sits in a directory that does not exist.
+  way to one, or at one whose named path sits in a directory that does not exist;
+- keep the block in a project whose `CLAUDE.md` holds anything but the one-line `@AGENTS.md`
+  redirect. Remedy: move that content into `AGENTS.md` and replace `CLAUDE.md` with `@AGENTS.md`;
+- write an agents file (the project's `AGENTS.md`, or your global one) that holds marker lines other
+  than one begin line followed by one end line. Remedy: leave exactly one ordered pair around the
+  block, or delete the stray marker lines ([Agents file](agents-file.md#what-it-replaces)).
 
 The refusal names each such path; move or remove them and install again. A symlink anywhere else
 is the file or directory it names: the install writes through it, and a dangling one at a target has

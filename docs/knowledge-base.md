@@ -7,7 +7,7 @@ per-project facts live in the consuming project's `kb-root/AGENTS.md`, not in th
 set is **generated** from its definition module.
 
 A base install omits it. `adjagent install --with-kb` (`just install-with-kb` in a clone) delivers it.
-Under mage it is always delivered; a plain mage install without a kbase source refuses instead.
+Under mage it is always delivered.
 
 ## Requirements
 

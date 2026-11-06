@@ -62,9 +62,10 @@ adjagent/                 the generator and every definition, run as `python3 -m
   clauses.py              shared text: named string constants, small functions for slotted text
   definitions/            one module per definition, or per set that shares text and ships together
   harnesses/              one module per harness (claude, mage, opencode), each defining HARNESS
-    resources/            one directory per harness: the files it ships, copied into the install's
-                          install's root as they stand (opencode/plugins/guardrail.ts,
-                          claude/hooks/guardrail.pl)
+    resources/            one directory per harness: the files it ships, copied as they stand into
+                          the install's root (opencode/plugins/guardrail.ts, claude/hooks/guardrail.pl);
+                          the root is where the install writes the set: the plugin directory
+                          under claude, the harness directory under opencode and mage
   families/               one module per model family, each defining FAMILY
   kb-tools/               shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
                           a kb install only as skills/kbase/kb-tools/

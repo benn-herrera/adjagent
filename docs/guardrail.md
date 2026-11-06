@@ -15,8 +15,9 @@ records: read them with kbase's `query` tool and change them with its `write` to
 file-tool call on a path there, a shell command naming one, and a recursive search rooted in
 `kb-root/` that could reach one; the refusal says how to exclude `.index` from the search. A path is
 judged where its symlinks lead. `test -e`, `test -d`, `test -f`, `[ -e … ]` and `stat` on those paths
-are allowed. The check is on only while the harness directory holds the kbase skill's `SKILL.md`, and
-the hook looks for it on every call, so a base install never sees it.
+are allowed. The check is on only while the kbase skill's `SKILL.md` is present, and the hook looks for it
+on every call, so a base install never sees it. Under claude it is looked for under the plugin
+(`skills/kbase/SKILL.md` beside `hooks/`); under opencode, in the harness directory.
 
 ## Claude
 
@@ -28,13 +29,15 @@ its registration, reports the reason in one line and installs everything else. A
 registration from an earlier install are left in place and named.
 
 The registration runs the script only if it is a readable file. Where it is missing, a call prints
-`guardrail hook: no readable script at <path>` and goes ahead, rather than being blocked.
+`guardrail hook: no readable script at <path>` and goes ahead, rather than being blocked. A project
+entry left in `.claude/settings.json` that names the old `.claude/hooks/guardrail.pl` prints this with
+that old path; delete the entry (see below).
 
 Earlier versions registered the hook in your project's `.claude/settings.json` and kept the script at
 `.claude/hooks/guardrail.pl`. A project install that installs the new hook cleans those up:
 
 - It removes our entry from `.claude/settings.json`, and on a kb install our `kbase` entry from the
-  project's `.mcp.json`. Every other byte stays, including your own hooks; a list or object left
+  project's `.mcp.json`; the `.mcp.json` cleanup does not depend on the hook installing. Every other byte stays, including your own hooks; a list or object left
   empty reads `[]` or `{}`. A user-level install removes none, because it never wrote them.
 - It removes `.claude/hooks/guardrail.pl` when it carries the `!INSTALLED! ... adjagent` header.
 - It removes only an entry whose command is exactly the one an install wrote, so a hook of yours that
@@ -45,7 +48,8 @@ Earlier versions registered the hook in your project's `.claude/settings.json` a
   `PreToolUse` or `mcpServers` of the wrong shape (`null` included), sits behind a non-directory,
   or is not a regular file is left untouched, and the cleanup never refuses the install. If it
   still holds our old hook command or `kbase` entry, the install says so, and you remove the entry
-  by hand.
+  by hand. A hook entry left in the project's `.claude/settings.json` after `.claude/hooks/guardrail.pl`
+  is gone prints `guardrail hook: no readable script at` the old path on each call; delete that entry.
 
 ## Opencode
 
