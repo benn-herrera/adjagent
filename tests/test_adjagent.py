@@ -1302,7 +1302,7 @@ class _PromptOutput:
 
 def _prompts(sources: dict[str, str]) -> list[list[_PromptOutput]]:
     """Every prompt: an output alone, or a command or skill body with each output an `@` line of it
-    names, one level deep."""
+    names, transitively."""
     outputs = []
     for module, source in sources.items():
         roots = body_roots(source, _CLAUSE_GRAPH)
@@ -1324,14 +1324,24 @@ def _prompts(sources: dict[str, str]) -> list[list[_PromptOutput]]:
 
 
 def _loaded(output: _PromptOutput, outputs: list[_PromptOutput]) -> list[_PromptOutput]:
-    """The outputs `output`'s `@` lines name: a line names an output when its path ends in the output's."""
-    named = [PurePosixPath(line[1:].strip()).parts for line in output.text.splitlines() if line.startswith("@")]
-    return [
-        target
-        for parts in named
-        for target in outputs
-        if target.path is not None and parts[-len(target.path.parts) :] == target.path.parts
-    ]
+    """The outputs `output`'s `@` lines name, and those named by the `@` lines of each such output that
+    loads, transitively, each once in first-reached order and never `output` itself. A line names an
+    output when its path ends in the output's."""
+    reached: list[_PromptOutput] = []
+    pending = [output]
+    while pending:
+        current = pending.pop(0)
+        named = [PurePosixPath(line[1:].strip()).parts for line in current.text.splitlines() if line.startswith("@")]
+        for parts in named:
+            for target in outputs:
+                if target.path is None or parts[-len(target.path.parts) :] != target.path.parts:
+                    continue
+                if target is output or target in reached:
+                    continue
+                reached.append(target)
+                if target.loads:
+                    pending.append(target)
+    return reached
 
 
 def _double_clause_deliveries(sources: dict[str, str]) -> list[str]:
@@ -1361,6 +1371,21 @@ def test_no_prompt_delivers_a_span_twice(check: Callable[[dict[str, str]], list[
     sources = {f"adjagent.definitions.{path.stem}": path.read_text(encoding="utf-8") for path in _DEFINITION_PATHS}
     found = check(sources)
     assert found == [], "\n".join(found)
+
+
+def _chain_output(name: str, *loads: str) -> _PromptOutput:
+    text = "\n".join(f"@commands/{target}.md" for target in loads)
+    return _PromptOutput(label=f"commands/{name}.md", path=PurePosixPath(f"commands/{name}.md"), text=text, roots=(), loads=True)
+
+
+def test_loaded_follows_at_lines_transitively() -> None:
+    a, b, c = _chain_output("a", "b"), _chain_output("b", "c"), _chain_output("c")
+    assert _loaded(a, [a, b, c]) == [b, c]
+
+
+def test_loaded_terminates_on_a_cycle() -> None:
+    a, b = _chain_output("a", "b"), _chain_output("b", "a")
+    assert _loaded(a, [a, b]) == [b]
 
 
 def test_a_clause_a_composite_already_delivers_is_refused_with_both_paths() -> None:

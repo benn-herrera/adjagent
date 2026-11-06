@@ -1,6 +1,7 @@
 """Definitions that share an anchor clause form a group, and every member carries what its group's
 table lists, unless an exemption states why not."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -210,6 +211,24 @@ def check_clause_groups(
     return messages
 
 
+def check_exemption_quotes(exemptions: dict[tuple[str, str], str], sources: dict[str, str]) -> list[str]:
+    """Every quote in an exemption reason, written `module.py ("a ... b")`, that its module does not
+    carry, one message each, naming the definition, the clause and the module or fragment. `sources`
+    maps a module file name to its text; a fragment is the quote between ` ... ` markers, matched
+    with whitespace collapsed."""
+    messages = []
+    collapsed = {module: " ".join(text.split()) for module, text in sources.items()}
+    for (definition, clause), reason in sorted(exemptions.items()):
+        for module, quote in re.findall(r'(\w+\.py) \("(.+?)"\)', reason):
+            if module not in collapsed:
+                messages.append(f"{definition}: exemption from {clause} quotes {module}, which is not a definition module")
+                continue
+            for fragment in quote.split(" ... "):
+                if fragment not in collapsed[module]:
+                    messages.append(f"{definition}: exemption from {clause} quotes {fragment!r}, absent from {module}")
+    return messages
+
+
 def _real_carried() -> dict[str, set[str]]:
     carried: dict[str, set[str]] = {}
     for path in sorted(_DEFINITIONS.glob("*.py")):
@@ -279,3 +298,26 @@ def test_the_check_reports_each_disagreement(
 
 def test_the_check_is_silent_on_agreement() -> None:
     assert check_clause_groups({"g": _GROUP}, {}, _CARRIED, _DEFINED) == []
+
+
+def test_every_exemption_quote_occurs_in_its_definition_module() -> None:
+    sources = {path.name: path.read_text(encoding="utf-8") for path in _DEFINITIONS.glob("*.py")}
+    assert check_exemption_quotes(EXEMPTIONS, sources) == []
+
+
+def test_an_exemption_quote_absent_from_its_module_is_reported() -> None:
+    exemptions = {("d", "C"): 'm.py ("stdout is the data ... go to stderr")'}
+    messages = check_exemption_quotes(exemptions, {"m.py": "stdout is the data channel; output go to stdout"})
+    assert len(messages) == 1
+    assert "d" in messages[0] and "C" in messages[0] and "go to stderr" in messages[0]
+
+
+def test_an_exemption_quote_from_an_unknown_module_is_reported() -> None:
+    messages = check_exemption_quotes({("d", "C"): 'gone.py ("x")'}, {"m.py": "x"})
+    assert len(messages) == 1
+    assert "gone.py" in messages[0]
+
+
+def test_an_exemption_quote_spanning_a_line_break_is_found() -> None:
+    exemptions = {("d", "C"): 'm.py ("stdout is the data ... go to stderr")'}
+    assert check_exemption_quotes(exemptions, {"m.py": "stdout is the\n    data channel; all\n  go to stderr"}) == []

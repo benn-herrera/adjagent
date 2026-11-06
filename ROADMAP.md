@@ -69,11 +69,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    accept every name the hook receives, and add a case row for each (`guardrail.ts` `shellTools`
    and its tool `switch`; `tests/test_guardrail.py` `_OPENCODE_ONLY_TOOLS`).
 
-10. **The two guardrails handle a malformed filter glob differently.** A Grep `glob: "[z-a]"` under
-    `kb-root` throws in both regex builders (`guardrail.pl` `glob_re`, `guardrail.ts` `globRegExp`):
-    Perl's `eval` turns it into exit 1 and fails open, TS blocks without the `Blocked:` prefix. Both
-    should treat a filter whose regex does not compile as no filter, with a case row.
-
 11. **Nothing checks that the kbase names the skill cites are offered.** Every `kbase://` URI, tool
     and op `adjagent/definitions/kbase.py` names goes unchecked against kbase's surface. A test
     that runs `kbase mcp` (`initialize`, `tools/list`, `resources/list`) and asserts each cited name
@@ -84,11 +79,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     `kbRecords`), so a record file a later kbase adds passes silently. Passing a Grep/Glob rooted in
     `kb-root/` only when its filter's last segment ends in `.md` drops both lists; it is a behaviour
     change to both scripts and the case table together.
-
-13. **Stated guardrail behaviours with no case row** in `tests/guardrail_cases.json`:
-    `find kb-root -path '*/.index' -prune …`, which the refusal message itself recommends;
-    `grep -r --exclude-dir .index …`, the space form; and a Glob whose search root is built from
-    `path` plus the pattern's literal segments (`{pattern:"**/*.yaml", path:"kb-root"}`, refused).
 
 14. **ARCHITECTURE retells the kbase skill's text.** The kb set entry in
     `PROJECT_DOCS/ARCHITECTURE/subsystem-map.md` retells the router's branches, the `installing.md`
@@ -134,18 +124,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     kbase's prose instruction alone. Check whether mage's plugin format carries a hook; if it does
     not, record the gap in SPEC.
 
-23. **One guardrail test never reaches the check it names.**
-    `tests/test_guardrail.py` `test_guardrail_pl_passes_a_tool_other_than_bash` plants no kb signal,
-    so the script exits before the mutation check. Plant the signal, or delete the test; its case
-    row survives.
-
-24. **`_OPENCODE_TOOLS` names the wrong side.** In `tests/test_guardrail.py` it is used as the set of
-    Claude tools; rename it or bind `_CLAUDE_TOOLS`.
-
-25. **A guardrail test re-derives the staged script's path by directory depth.** `tests/test_guardrail.py`
-    uses `script.relative_to(script.parents[1])`; `script.relative_to(HARNESS_RESOURCES_SOURCE /
-    harness.name)` states it.
-
 26. **`just test` does not hold the own-paragraph rule for module text beside a clause.**
     `PROJECT_DOCS/CONVENTIONS/adding-definitions/clause-paragraphs.md` says `just test` holds none of
     it; `devtools/clause_join_sites.py` (`just clause-join-sites`) reports join sites, but no test
@@ -163,12 +141,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     sits in context beside every command and skill (`tests/test_adjagent.py` `_prompts`, `_loaded`;
     SPEC `generation-system.md` defines a prompt without it).
 
-30. **The double-delivery check follows `@` lines one level deep only** (`tests/test_adjagent.py`
-    `_loaded`).
-
 31. **A coder or platform expert that never carries its group's anchor is outside every group**, so
     nothing checks it: `tests/test_clause_groups.py` `check_clause_groups` flags only a carrier
     missing from its group or a member missing the anchor, and `GROUPS` is hand-listed.
-
-32. **Exemption reasons quote definition text that nothing checks.** `tests/test_clause_groups.py`
-    `EXEMPTIONS` quotes definition text; `check_clause_groups` never confirms the quotes exist.

@@ -122,5 +122,10 @@
   {"tool": "Grep", "input": {"pattern": "claim", "path": "kb-root", "glob": "*.md"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
   {"tool": "Grep", "input": {"pattern": "claim"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
   {"tool": "Glob", "input": {"pattern": "kb-root/**/*.md"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
-  {"tool": "patch", "input": {"patchText": "*** Begin Patch\n*** Update File: kb-root/a.md\n@@\n-x\n+y\n*** End Patch"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null}
+  {"tool": "patch", "input": {"patchText": "*** Begin Patch\n*** Update File: kb-root/a.md\n@@\n-x\n+y\n*** End Patch"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
+  {"tool": "Grep", "input": {"pattern": "claim", "path": "kb-root", "glob": "[z-a]"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
+  {"tool": "Glob", "input": {"pattern": "kb-root/[z-a]"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
+  {"command": "find kb-root -path '*/.index' -prune -o -name '*.md' -print", "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
+  {"command": "grep -r --exclude-dir .index foo kb-root", "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": null},
+  {"tool": "Glob", "input": {"pattern": "**/*.yaml", "path": "kb-root"}, "files": ["@harness@/skills/kbase/SKILL.md", "kb-root/a.md", "kb-root/.index/nodes.yaml"], "reason": "kb-root/.index/ holds kbase's records: read them with kbase's `query` tool and change them with its `write` tool; exclude .index from this search (grep: --exclude-dir=.index; rg: -g '!**/.index/**'; find: -path '*/.index' -prune; Grep: a glob (opencode: include) no .index file matches; Glob: a pattern no .index file matches)"}
 ]

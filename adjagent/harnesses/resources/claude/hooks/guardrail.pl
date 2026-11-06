@@ -183,8 +183,8 @@ sub search_reason {
   return $index_path if under($base, $subject);
   return undef if !under($base, $kb);
   if (defined $filter && $filter ne '') {
-    my $re = glob_re($filter =~ s{.*/}{}sr);
-    return undef if !grep { $_ =~ $re } @kb_records;
+    my $re = eval { glob_re($filter =~ s{.*/}{}sr) };
+    return undef if !defined $re || !grep { $_ =~ $re } @kb_records;
   }
   return $index_search;
 }

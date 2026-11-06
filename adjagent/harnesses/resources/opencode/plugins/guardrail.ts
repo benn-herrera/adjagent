@@ -160,7 +160,12 @@ function searchReason(base: string, filter: string | undefined, kb: string, subj
   if (under(base, subject)) return indexPath
   if (!under(base, kb)) return null
   if (filter) {
-    const re = globRegExp(filter.replace(/^.*\//s, ""))
+    let re: RegExp
+    try {
+      re = globRegExp(filter.replace(/^.*\//s, ""))
+    } catch {
+      return null
+    }
     if (!kbRecords.some((name) => re.test(name))) return null
   }
   return indexSearch
