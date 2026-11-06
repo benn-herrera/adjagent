@@ -18,14 +18,12 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
    `tests/test_adjagent.py` (ARCHITECTURE.md, Why There Is No Verification Verb);
    behavioral ones do not yet.
 
-2. **Follow-ups from the 0.12.7 review**, unscheduled — `ROADMAP_PLANS/review-0.12.7-followups.md`.
-
-3. **Legacy project comprehension skill**: how a session enters a brownfield project with known
+2. **Legacy project comprehension skill**: how a session enters a brownfield project with known
    and unknown issues, builds familiarity with it, and begins repair work. The target case is
    projects whose debt accumulated through ungoverned agentic development. It follows the
    development-process skill and should not assume that skill's workflow is already in place.
 
-4. **Rename the project to `devpro`**, its own plan: the PyPI package, the
+3. **Rename the project to `devpro`**, its own plan: the PyPI package, the
    `adjagent` CLI and Python package, the plugin namespace (`devpro:<name>` under claude and mage),
    the agents-file fence markers, the `!GENERATED!` banner, the repository, its docs, and the
    references in sibling projects that install it.
@@ -38,29 +36,139 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
      (`devpro-architect.md`, `skills/devpro-development/`). This keeps the set from colliding
      with an existing fleet's generic names under every harness.
 
-5. **Split `adjagent/install.py` into modules.** It holds the JSON text editor (`_splice`,
+4. **Split `adjagent/install.py` into modules.** It holds the JSON text editor (`_splice`,
    `_without_item` and the scanner under them), the settings merge and retired-entry removal
    (`mcp_merge`, `_retired_items`, `_remove_retired_entry`) and the runner-file line
    (`install_kb_include_line`) beside the install itself.
 
-6. **Share the decisions `install` and `_install_managed_paths` both make.** Whether the guardrail
+5. **Share the decisions `install` and `_install_managed_paths` both make.** Whether the guardrail
    registers, whether the MCP entry is written and which retired entries are retiring are decided
    twice in `adjagent/install.py`, once in `install` and once in `_install_managed_paths`. Each
    would be a helper both call.
 
-7. **Move retired entries onto `GuardrailHook` and `McpSettings`, and delete `Replacement`.** A
+6. **Move retired entries onto `GuardrailHook` and `McpSettings`, and delete `Replacement`.** A
    `RetiredEntry` in `Harness.retired_entries` (`adjagent/harness.py`; claude's two in
    `adjagent/harnesses/claude.py`) names the `Replacement` whose write licenses its removal, a fact
    that belongs on the hook or the MCP settings it is replaced by.
 
-8. **State the minimum Claude Code version that loads a plugin from a project's skills directory.**
+7. **State the minimum Claude Code version that loads a plugin from a project's skills directory.**
    Under claude the set is a plugin at `.claude/skills/adjagent/`. No document states the Claude Code
    version that loads one, and README.md's Requirements section names none; the version is not yet
    established from any source.
 
-9. **Give the kbase router's not-offered branch the plugin reload remedy.** Under claude the
+8. **Give the kbase router's not-offered branch the plugin reload remedy.** Under claude the
    plugin's `kbase` tools appear after a fresh install only once the plugins are reloaded. The "A
    path" branch of the router and `references/installing.md` (both in
    `adjagent/definitions/kbase.py`) say only to restart or reconnect the server. The `reload_rule`
    hole names agents, not tools, so reusing it there would misdirect the model; the remedy needs a
    harness hole of its own.
+
+9. **Verify the opencode guardrail's tool names against the opencode runner.** Which tool names
+   reach `execute.before` is unverified: only `patch` is matched, not `apply_patch`; a `list` tool
+   taking `path` is not handled; the `shell` alias is accepted but never sent. Probe the runner,
+   accept every name the hook receives, and add a case row for each (`guardrail.ts` `shellTools`
+   and its tool `switch`; `tests/test_guardrail.py` `_OPENCODE_ONLY_TOOLS`).
+
+10. **The two guardrails handle a malformed filter glob differently.** A Grep `glob: "[z-a]"` under
+    `kb-root` throws in both regex builders (`guardrail.pl` `glob_re`, `guardrail.ts` `globRegExp`):
+    Perl's `eval` turns it into exit 1 and fails open, TS blocks without the `Blocked:` prefix. Both
+    should treat a filter whose regex does not compile as no filter, with a case row.
+
+11. **Nothing checks that the kbase names the skill cites are offered.** Every `kbase://` URI, tool
+    and op `adjagent/definitions/kbase.py` names goes unchecked against kbase's surface. A test
+    that runs `kbase mcp` (`initialize`, `tools/list`, `resources/list`) and asserts each cited name
+    is offered would catch drift; it fails, not skips, without `kbase`.
+
+12. **The guardrails hard-code kbase's private record names.** The Grep/Glob judgement depends on
+    `nodes.yaml`, `edges.yaml` and `format.yaml` (`guardrail.pl` `@kb_records`, `guardrail.ts`
+    `kbRecords`), so a record file a later kbase adds passes silently. Passing a Grep/Glob rooted in
+    `kb-root/` only when its filter's last segment ends in `.md` drops both lists; it is a behaviour
+    change to both scripts and the case table together.
+
+13. **Stated guardrail behaviours with no case row** in `tests/guardrail_cases.json`:
+    `find kb-root -path '*/.index' -prune …`, which the refusal message itself recommends;
+    `grep -r --exclude-dir .index …`, the space form; and a Glob whose search root is built from
+    `path` plus the pattern's literal segments (`{pattern:"**/*.yaml", path:"kb-root"}`, refused).
+
+14. **ARCHITECTURE retells the kbase skill's text.** The kb set entry in
+    `PROJECT_DOCS/ARCHITECTURE/subsystem-map.md` retells the router's branches, the `installing.md`
+    walkthrough and `KB_RUNNER_TARGETS`, a second home for definition prose. It should keep the
+    mechanism only and cite `adjagent/definitions/kbase.py` for the content.
+
+15. **How a work contributes to strength is stated three times in the kbase reading reference.**
+    `clauses.kb_orientation`, `reading.md`'s "Pending does not propagate" and its works paragraph
+    (`adjagent/definitions/kbase.py`) each state the `bearing × rigor` contribution and the pending
+    rule; `scoring-system.md` only links out. One statement should hold it.
+
+16. **`_venv` breaks the three-line recipe rule.** `python.just`'s `_venv` is a bash shebang body
+    of about twelve lines; `PROJECT_DOCS/CONVENTIONS/code-definitions-and-install/long-recipe-bodies-are-scripts.md`
+    says a body over three command lines is a script and has no shebang exemption. Either state the
+    exemption or move the body to `devtools/scripts/`.
+
+17. **Must-see lists repeat boundary boilerplate.** The SPEC, ARCHITECTURE and CONVENTIONS
+    `entry-point.md` Must-see bullets are mostly the volumes' boundary lines; they should keep
+    content that would hurt to miss.
+
+18. **Claude's guardrail runs perl on every file-tool call on base installs.** The registration's
+    matcher (`adjagent/harnesses/claude.py` `_guardrail_registration`) covers every file tool on
+    every claude install; on a base install the script finds no kb signal and passes the call.
+    Measure perl startup per call first, and narrow the matcher to `Bash` on base installs only if
+    the cost matters.
+
+19. **The guardrail's behaviour is restated in four documents:** SPEC
+    `deployed-surfaces/shipped-files.md`, ARCHITECTURE `install-consumption-model/guardrail-hook.md`,
+    CONVENTIONS `guardrails-change-together.md` and `docs/guardrail.md`. ARCHITECTURE should cite
+    SPEC for what is blocked, CONVENTIONS keep only the process rules, and `docs/guardrail.md`
+    keep the user's symptom and remedy.
+
+20. **SPEC names a code constant.** `PROJECT_DOCS/SPEC/deployed-surfaces/shipped-files.md` names
+    `SHIPPED_PACKAGES`, against its entry point's no-code-structure rule; the outcome stays in SPEC
+    and the constant's name moves to ARCHITECTURE.
+
+21. **The kbase router's KB probe does not name its form.** The router (`adjagent/definitions/kbase.py`)
+    says the probe tests that `kb-root/.index/` exists; a Glob or Read probe of it is refused by the
+    guardrail while `test -d` passes, so the router should name `test -d`.
+
+22. **Mage has no guardrail.** `adjagent/harnesses/mage.py` sets `guardrail=None` and SPEC
+    `shipped-files.md` says mage ships none, so a mage install's `.index/` protection rests on
+    kbase's prose instruction alone. Check whether mage's plugin format carries a hook; if it does
+    not, record the gap in SPEC.
+
+23. **One guardrail test never reaches the check it names.**
+    `tests/test_guardrail.py` `test_guardrail_pl_passes_a_tool_other_than_bash` plants no kb signal,
+    so the script exits before the mutation check. Plant the signal, or delete the test; its case
+    row survives.
+
+24. **`_OPENCODE_TOOLS` names the wrong side.** In `tests/test_guardrail.py` it is used as the set of
+    Claude tools; rename it or bind `_CLAUDE_TOOLS`.
+
+25. **A guardrail test re-derives the staged script's path by directory depth.** `tests/test_guardrail.py`
+    uses `script.relative_to(script.parents[1])`; `script.relative_to(HARNESS_RESOURCES_SOURCE /
+    harness.name)` states it.
+
+26. **`just test` does not hold the own-paragraph rule for module text beside a clause.**
+    `PROJECT_DOCS/CONVENTIONS/adding-definitions/clause-paragraphs.md` says `just test` holds none of
+    it; `devtools/clause_join_sites.py` (`just clause-join-sites`) reports join sites, but no test
+    fails on a new one.
+
+27. **A shared sentence written out inside a longer paragraph is not checked for double delivery.**
+    `tests/test_adjagent.py` `_double_paragraphs` compares whole prose units and never splits them
+    into sentences.
+
+28. **The double-delivery check fills only the claude family under the claude harness.**
+    `tests/test_adjagent.py` `_prompts` fills with `_CLAUDE_RENDER`, so family overlay text and other
+    harnesses' text go unchecked.
+
+29. **The installed agents file is never part of a prompt in the double-delivery check**, though it
+    sits in context beside every command and skill (`tests/test_adjagent.py` `_prompts`, `_loaded`;
+    SPEC `generation-system.md` defines a prompt without it).
+
+30. **The double-delivery check follows `@` lines one level deep only** (`tests/test_adjagent.py`
+    `_loaded`).
+
+31. **A coder or platform expert that never carries its group's anchor is outside every group**, so
+    nothing checks it: `tests/test_clause_groups.py` `check_clause_groups` flags only a carrier
+    missing from its group or a member missing the anchor, and `GROUPS` is hand-listed.
+
+32. **Exemption reasons quote definition text that nothing checks.** `tests/test_clause_groups.py`
+    `EXEMPTIONS` quotes definition text; `check_clause_groups` never confirms the quotes exist.
