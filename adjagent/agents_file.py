@@ -81,15 +81,10 @@ def _stamp(release: tuple[int, ...]) -> str:
     return ".".join(str(part) for part in release)
 
 
-def user_dir(harness: Harness) -> Path:
-    """`harness`'s user harness directory, `~` read from HOME."""
-    return Path(harness.user_harness_dir).expanduser()
-
-
 def _in_user_dir(harness: Harness, directory: Path) -> bool:
     """A relative user directory is resolved against `directory`, so mage's `.` is the destination
     itself; an absolute one is unaffected, since joining with an absolute path yields it."""
-    return (directory / user_dir(harness)).resolve() == directory.resolve()
+    return (directory / harness.user_dir).resolve() == directory.resolve()
 
 
 def scope_name(harness: Harness, directory: Path) -> str:
@@ -269,6 +264,12 @@ def checked_agents_file(directory: Path, harness: Harness, *, real_directory: Pa
     )
 
 
+def _backed_up_write(path: Path, *, backup: Path, text: str) -> None:
+    """Copy `path` to `backup`, then write `text` to `path`."""
+    shutil.copyfile(path, backup)
+    write_text_verbatim(path, text)
+
+
 def write_agents_file(write: AgentsFileWrite) -> None:
     """Write what `checked_agents_file` passed, backing up a file it changes."""
     path = write.path
@@ -279,11 +280,11 @@ def write_agents_file(write: AgentsFileWrite) -> None:
         print(f"unchanged {path}{via}")
     else:
         if write.existing is None:
+            write_text_verbatim(path, write.text)
             note = " — no prior file, no backup"
         else:
-            shutil.copyfile(path, write.backup)
+            _backed_up_write(path, backup=write.backup, text=write.text)
             note = f" — prior content backed up to {write.backup}"
-        write_text_verbatim(path, write.text)
         print(f"wrote {path}{via}{note}")
     if write.native is not None and not write.native.exists():
         write.native.write_text(f"{REDIRECT_PREFIX}{STANDARD_AGENTS_FILE}\n", encoding="utf-8")
@@ -375,7 +376,7 @@ def checked_followed_agents_file(
             write=checked_agents_file(project, harness, real_directory=real_project), removal=None
         )
     refuse_uncommitted(uncommitted())
-    write = checked_agents_file(global_dir, harness, real_directory=user_dir(harness))
+    write = checked_agents_file(global_dir, harness, real_directory=harness.user_dir)
     return FollowedAgentsFile(write=write, removal=_checked_project_copy_removal(project))
 
 
@@ -386,8 +387,7 @@ def write_followed_agents_file(followed: FollowedAgentsFile) -> None:
     removal = followed.removal
     if removal is None:
         return
-    shutil.copyfile(removal.path, removal.backup)
-    write_text_verbatim(removal.path, removal.text)
+    _backed_up_write(removal.path, backup=removal.backup, text=removal.text)
     print(
         f"removed the adjagent block from {removal.path} — the user-global agents file {followed.write.path} "
         f"holds it — prior content backed up to {removal.backup}"

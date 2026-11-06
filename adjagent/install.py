@@ -33,13 +33,12 @@ from adjagent.agents_file import (
     checked_agents_file,
     checked_followed_agents_file,
     refuse_uncommitted,
-    user_dir,
     write_agents_file,
     write_followed_agents_file,
 )
 from adjagent.context import Render, harnesses
 from adjagent.errors import InputError
-from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite, Replacement, RetiredEntry
+from adjagent.harness import EntryClaim, GuardrailHook, Harness, McpSite, Replacement, RetiredEntry
 from adjagent.install_target import user_dir_harnesses
 from adjagent.preflight import VENV_DIR, run_preflighted
 from adjagent.render import (
@@ -894,7 +893,7 @@ class _Claimed(NamedTuple):
 
     item: str | int
     value: object
-    claim: HookClaim
+    claim: EntryClaim
 
 
 def _retired_claims(data: dict, *, entry: RetiredEntry) -> list[_Claimed]:
@@ -910,19 +909,26 @@ def _retired_claims(data: dict, *, entry: RetiredEntry) -> list[_Claimed]:
     else:
         items = list(enumerate(node)) if isinstance(node, list) else []
     claims = [_Claimed(item, value, entry.claim(value)) for item, value in items]
-    return [claimed for claimed in claims if claimed.claim is not HookClaim.NONE]
+    return [claimed for claimed in claims if claimed.claim is not EntryClaim.NONE]
 
 
-def _editable_settings(target: Path, *, entry: RetiredEntry) -> tuple[str, dict] | None:
-    """`target`'s text and parse where the removal can edit it: UTF-8 plain JSON whose path to `entry`'s
-    container holds the types that container needs. None otherwise — the removal never refuses."""
+def _retired_items(project: Path, *, entry: RetiredEntry) -> tuple[Path, str, list[_Claimed]] | None:
+    """The project's settings file `entry.settings`, its text, and each item in it holding `entry`, where
+    the removal can edit that file: a regular file `_settings_obstacle` names nothing of, in UTF-8 plain
+    JSON whose path to `entry`'s container holds the types that container needs. None otherwise — the
+    removal never refuses."""
+    target = project / entry.settings
+    if not _settings_to_read(target, base=project):
+        return None
     try:
         plain = _plain_json_object(target)
-        if plain is not None:
-            _refuse_wrong_types(plain[1], target=target, container=entry.container, leaf=dict if entry.member else list)
+        if plain is None:
+            return None
+        text, data = plain
+        _refuse_wrong_types(data, target=target, container=entry.container, leaf=dict if entry.member else list)
     except InputError:
         return None
-    return plain
+    return target, text, _retired_claims(data, entry=entry)
 
 
 def _names_text(path: Path, text: str) -> bool:
@@ -951,28 +957,26 @@ def _remove_retired_entry(project: Path, *, entry: RetiredEntry) -> None:
     file — a dangling link names none — or one holding no such item, is left with nothing said. More
     than one such item, or one holding the entry beside a command of the project's own, is reported with
     each printed and the file left untouched: removing it whole would delete the project's command. So
-    is one the removal cannot make with certainty. A file `_editable_settings` cannot read, and a path
-    `_settings_obstacle` names, are left untouched, and reported only where the text found there holds
-    `entry.trace`. Nothing here refuses the install."""
+    is one the removal cannot make with certainty. A file `_retired_items` cannot read is left
+    untouched, and reported only where the text found there holds `entry.trace`. Nothing here refuses the
+    install."""
     target = project / entry.settings
     if not target.exists():
         return
     slot = _retired_slot(entry)
     unread = f"it names an earlier install's {slot}: remove that by hand"
-    obstacle = _settings_obstacle(target, base=project)
-    plain = None if obstacle is not None else _editable_settings(target, entry=entry)
-    if plain is None:
+    retired = _retired_items(project, entry=entry)
+    if retired is None:
         # Searched as text: only a file naming the entry may strand it.
         if _names_text(target, entry.trace):
-            why = obstacle or f"{target} is not a JSON object the removal can edit"
+            why = _settings_obstacle(target, base=project) or f"{target} is not a JSON object the removal can edit"
             _report_left_alone(f"{target} not edited: {why} — left untouched; {unread}")
         return
-    text, data = plain
-    found = _retired_claims(data, entry=entry)
+    _, text, found = retired
     if not found:
         return
     by_hand = f"remove this entry by hand: {'; '.join(json.dumps(claimed.value) for claimed in found)}"
-    if len(found) > 1 or found[0].claim is HookClaim.SHARED:
+    if len(found) > 1 or found[0].claim is EntryClaim.SHARED:
         items = ", ".join(str(claimed.item) for claimed in found)
         _report_left_alone(
             f"{target} holds an earlier install's {slot} in {items}, not one item holding it alone — "
@@ -993,23 +997,17 @@ def _earlier_guardrail(
     """What an earlier install left registering the guardrail: its script under ROOT, and under the
     harness directory where a layout writing straight into it put one, where each carries the installed
     header; its registration under ROOT where that carries its marker; and each project settings file
-    holding an entry of `retired` its recogniser accepts. A settings file the removal would not read, or
-    one that cannot be read or parsed, is not named."""
+    holding an entry of `retired` its recogniser accepts. A settings file the removal would not edit is
+    not named."""
     scripts = dict.fromkeys((root / guardrail.script, harness_dir / guardrail.script))
     left = [script for script in scripts if _is_our_resource(script)]
     registration = root / guardrail.registration.path
     if _is_our_harness_file(registration, marker=guardrail.registration.marker):
         left.append(registration)
     for entry in retired:
-        settings = project / entry.settings
-        if not _settings_to_read(settings, base=project):
-            continue
-        try:
-            plain = _plain_json_object(settings)
-        except InputError:
-            continue
-        if plain is not None and _retired_claims(plain[1], entry=entry):
-            left.append(settings)
+        items = _retired_items(project, entry=entry)
+        if items is not None and items[2]:
+            left.append(items[0])
     return left
 
 
@@ -1141,7 +1139,7 @@ def install_kb_include_line(project: Path, *, harness_relpath: str, real_project
     examined: a second runner file's stale line is left to the operator and is non-fatal. Nothing is
     written when `project` is this repository — its own runner is the generator's, not a consumer's.
     `real_project`, defaulting to `project`, is the project that is, where `project` is a scratch copy
-    of it: the repository test reads it."""
+    of it."""
     if (project if real_project is None else real_project) == REPO_ROOT:
         return
     found = _runner_file(project)
@@ -1251,7 +1249,7 @@ def _report_shadowing(root: Path, *, harness: Harness, user_level: bool) -> None
             f"{root} is user-level: the harness loads it in place of every project's plugin of the same name"
         )
         return
-    user_root = Path(harness.user_harness_dir).expanduser() / harness.plugin_dir
+    user_root = harness.user_dir / harness.plugin_dir
     if all(_is_our_harness_file(user_root / file.path, marker=file.marker) for file in harness.rendered_files):
         _report_left_alone(
             f"{root} is shadowed by {user_root}, a user-level plugin of the same name: the harness loads that "
@@ -1273,65 +1271,19 @@ def install(
     real_project: Path | None = None,
     global_dir: Path | None = None,
 ) -> None:
-    """Install into ROOT, `harness_dir / ctx.harness.plugin_dir`: render every included definition and
-    every file the harness renders of its own into ROOT, replace each package destination whole — a
-    `.venv` under it included — with a stamped copy, copy the harness's own resource files into ROOT as
-    they stand, write the renders over what is there, then prune the harness directory's surfaces,
-    which hold ROOT's. An install that includes kb — `with_kb` names it, the harness is a standalone
-    plugin, which always takes the kb set, or ROOT or the harness directory holds the evidence of an
-    earlier kb install (the sticky rule, per install and not per project: the kbase skill's router
-    carrying this repository's banner) — also replaces the kb-tools destination whole with the package,
-    so nothing an earlier version placed there survives, and writes the harness's `kbase` MCP entry and,
-    for a harness that is not a standalone plugin, the consumer's runner include line, naming ROOT's
-    snippets. The entry's command is the bare `kbase`, resolved from PATH, and goes in the harness's own
-    MCP settings file, which sits at the project root or, under a harness whose file is the plugin's, at
-    ROOT. Every install removes each tree an earlier version installed under the harness directory. A
-    project install of a harness whose ROOT lies below its harness directory also removes the package
-    destinations an install straight into the harness directory wrote there, naming each. A harness
-    with a guardrail hook has its script run once on this machine first: when that run succeeds the
-    script ships with the other resources, the harness's registration file is written beside it under
-    ROOT, the guardrail script a layout writing straight into the harness directory left there is
-    removed where it carries the installed header, and so is each retired entry the registration
-    replaces; when it fails, none of that happens, the install goes on, and the report names why and
-    what an earlier install left in place. Each retired entry the `kbase` MCP entry replaces is removed
-    on a project install that includes kb. A standalone plugin installed below its project root also
-    has its agents file installed in its harness directory, whatever the sources' commit state. Every
-    other project install keeps the agents-file block current in one place, as
-    `agents_file.checked_followed_agents_file` decides: in the user-global agents file under
-    `global_dir` — the harness's user harness directory, or a scratch copy of it — where that file
-    holds the block, refused while `uncommitted` names a change, and otherwise in the project's
-    AGENTS.md. A user-level install — the harness directory is the harness's user harness directory,
-    decided here from it and the harness whatever route reached it — renders the definitions, prunes,
-    removes the legacy trees and, on a kb install under a harness whose MCP settings file is the plugin's, writes
-    that entry; it writes nothing else: no package, resource file, guardrail probe or registration,
-    project MCP entry, retired-entry removal or runner line. With `global_agents_file` it also installs
-    the agents file in the harness directory, refused while `uncommitted` names a change, a flag a
-    project install ignores; `uncommitted` is called only for such an install and for a write into the
-    user-global agents file. ROOT may be absent, and is created only once every check has passed. A file at a render, harness-file or resource target
-    that does not carry what that class of file states as its origin — this repository's generated
-    banner or installed header, or the marker a harness-rendered file states about itself — or a
-    non-directory between the harness directory and such a target, refuses the install; package
-    destinations are replaced whole, refused only where a link nothing can be written through stands
-    at or on the way to one. A refusal of the harness directory or ROOT, of the
-    render, of a target it would overwrite, of the runner file or of the MCP settings file writes
-    nothing; a settings path that is not a regular file is reported and left alone, and the removal of a
-    retired entry never refuses.
+    """Install the set `ctx` renders into ROOT, `harness_dir / ctx.harness.plugin_dir`. Every check runs
+    first, so a refusal writes nothing; then the writes; then the removals.
 
-    Where a project install finds the docdicer tools' `.venv` before its first write, under ROOT or
-    under the harness directory, it afterwards calls `tool_install` with the installed docdicer script,
-    so the venv the replacement removed is rebuilt at ROOT to match the script. `tool_install` returns
-    None on success or one line saying how the run failed; a failure is printed naming the command, and
-    the install's outcome is otherwise unaffected.
-
-    A plugin a user-level one of the same name shadows is reported, and so is a user-level plugin,
-    which shadows every project's. After the install, the harness's reload rule is printed where it has
-    one.
-
-    `real_harness_dir` and `real_project` name the harness directory and project root the install is
-    for, where `harness_dir` and `project_root` are a scratch copy of them; each defaults to the path
-    written. The decisions that compare a path with a fixed location read them: whether the install is
-    user-level, whether the project is this repository, and the agents file's user-directory test and
-    title."""
+    `verbose` prints each file written. `with_kb` asks for the kb set; an earlier kb install, or a
+    standalone-plugin harness, includes it unasked. `project_root` is the project the harness directory
+    belongs to, defaulting to `harness_dir`. `uncommitted` names the uncommitted changes to the sources,
+    called only where a write must refuse on them. `tool_install` rebuilds the docdicer tools' `.venv`
+    from the installed script the path names, returning None or one line saying how it failed.
+    `global_agents_file` has a user-level install write the agents file too; a project install ignores
+    it. `real_harness_dir` and `real_project` are the harness directory and project root the install is
+    for, where `harness_dir` and `project_root` are a scratch copy of them, each defaulting to the path
+    written. `global_dir` is the harness's user harness directory, or a scratch copy of it, defaulting
+    to the directory itself."""
     root = harness_dir / ctx.harness.plugin_dir
     _refuse_root(harness_dir)
     _refuse_root(root)
@@ -1427,7 +1379,7 @@ def install(
         followed = checked_followed_agents_file(
             project,
             ctx.harness,
-            global_dir=user_dir(ctx.harness) if global_dir is None else global_dir,
+            global_dir=ctx.harness.user_dir if global_dir is None else global_dir,
             uncommitted=uncommitted,
             real_project=real_project,
         )
@@ -1555,7 +1507,7 @@ def _install_managed_paths(
     ):
         write = checked_agents_file(harness_dir, harness)
         under_harness_dir += [path.relative_to(harness_dir).as_posix() for path in write.paths]
-    global_dir = user_dir(harness)
+    global_dir = harness.user_dir
     under_global_dir: list[str] = []
     if _keeps_the_block_current(harness, user_level=user_level):
         followed = checked_followed_agents_file(project, harness, global_dir=global_dir, uncommitted=lambda: ())

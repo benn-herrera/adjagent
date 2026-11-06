@@ -15,8 +15,8 @@ use warnings;
 # Scratch trees a command may write into without the edit tools.
 my @scratch = ('.claude-temp', 'test-data/transient');
 
-# A kb install's signal, the kbase skill in this script's own harness directory: never the root or
-# the working directory, which --subdir makes wrong.
+# A kb install's signal, the kbase skill in this script's ROOT, the directory above `hooks/`: never
+# the project root or the working directory, which --subdir makes wrong.
 (my $kb_signal = $0) =~ s{[^/]*/[^/]*\z}{skills/kbase/SKILL.md};
 
 # kbase's records, in <root>/kb-root/.index/.

@@ -25,6 +25,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Protocol
 
 from adjagent import __version__
@@ -98,7 +99,7 @@ class McpSettings:
     entry: McpEntryBuilder
 
 
-class HookClaim(Enum):
+class EntryClaim(Enum):
     """What one item of a settings file holds of an entry an earlier install wrote: none of it, only it,
     or it beside a command of the project's own."""
 
@@ -138,7 +139,7 @@ class RetiredEntry:
     settings: str
     container: tuple[str, ...]
     member: str
-    claim: Callable[[object], HookClaim]
+    claim: Callable[[object], EntryClaim]
     replacement: Replacement
     trace: str
 
@@ -152,7 +153,7 @@ class Harness:
     project_harness_dir: str  # ".claude" / ".opencode"
     project_temp_dir: str  # ".claude-temp" / ".opencode-temp"
     user_harness_dir: str  # "~/.claude" / "~/.config/opencode"
-    mcp_tool_prefix: str  # "mcp__kbase__" / "kbase_"; this prefix + the tool's own name is its offered name
+    mcp_tool_prefix: str  # this prefix + the tool's own name is its offered name
     recipe_rule: str  # the rule a dispatched agent follows running recipes in its shell; "" where there is none
     kbase_project_rule: str  # how a kbase session locates its project where the server serves many; "" otherwise
     tools: Mapping[Tool, tuple[str, ...]]  # total over Tool, in Tool order, each non-empty
@@ -230,6 +231,11 @@ class Harness:
         """Whether this harness's harness directory is itself a plugin: its files sit at its own root, so
         its user harness directory is `.`."""
         return self.user_harness_dir == "."
+
+    @property
+    def user_dir(self) -> Path:
+        """The user harness directory, `~` read from HOME."""
+        return Path(self.user_harness_dir).expanduser()
 
     def text(self, part: HarnessText | OptionalHarnessText) -> str:
         """The value of the string field `part` names; "" where an optional one is supplied nowhere."""

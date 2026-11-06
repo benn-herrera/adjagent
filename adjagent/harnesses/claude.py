@@ -10,10 +10,10 @@ from adjagent.harness import (
     PLUGIN_MANIFEST,
     PLUGIN_NAME,
     AgentFields,
+    EntryClaim,
     GuardrailHook,
     Harness,
     HarnessFile,
-    HookClaim,
     McpSettings,
     McpSite,
     Replacement,
@@ -88,13 +88,13 @@ _GUARDRAIL_COMMAND = re.compile(
 )
 
 
-def _guardrail_claim(element: object) -> HookClaim:
+def _guardrail_claim(element: object) -> EntryClaim:
     """What a PreToolUse element holds of the guardrail an earlier install registered in the project's
     settings file: a command is ours only when it is exactly the one that install wrote, for any harness
     directory."""
     commands = element.get("hooks") if isinstance(element, dict) else None
     if not isinstance(commands, list):
-        return HookClaim.NONE
+        return EntryClaim.NONE
     ours = [
         isinstance(hook, dict)
         and isinstance(hook.get("command"), str)
@@ -102,17 +102,17 @@ def _guardrail_claim(element: object) -> HookClaim:
         for hook in commands
     ]
     if not any(ours):
-        return HookClaim.NONE
-    return HookClaim.ALONE if all(ours) else HookClaim.SHARED
+        return EntryClaim.NONE
+    return EntryClaim.ALONE if all(ours) else EntryClaim.SHARED
 
 
-def _kbase_claim(value: object) -> HookClaim:
+def _kbase_claim(value: object) -> EntryClaim:
     """Whether the project `.mcp.json`'s `kbase` server is the one an earlier install wrote, read from its
     command alone, the one field every earlier version wrote alike: the bare `kbase`, or a path to an
     executable of that name."""
     command = value.get("command") if isinstance(value, dict) else None
     ours = isinstance(command, str) and PurePosixPath(command).name == "kbase"
-    return HookClaim.ALONE if ours else HookClaim.NONE
+    return EntryClaim.ALONE if ours else EntryClaim.NONE
 
 
 HARNESS = Harness(

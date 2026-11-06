@@ -126,7 +126,7 @@ def resolve_install_target(target: Path, *, harness: str | None, subdir: str | N
 def _absolute_user_dir(harness: Harness) -> Path | None:
     """`harness`'s user harness directory, `~` expanded, or None where it is relative: a relative one
     names no directory of its own."""
-    path = Path(harness.user_harness_dir).expanduser()
+    path = harness.user_dir
     return path if path.is_absolute() else None
 
 

@@ -47,7 +47,7 @@ HARNESS = Harness(
     # the harness's own directory: CLAUDE.md sits beside .mcp.json, at the plugin's root
     user_harness_dir=".",
     plugin_parent_dir="Mage/Skills",
-    # mage namespaces a plugin's agents and commands as Claude Code does
+    # mage namespaces a plugin's agents, commands and skills as Claude Code does
     reference_prefix=f"{PLUGIN_NAME}:",
     mcp_tool_prefix="mcp_kbase_",
     recipe_rule=_RECIPE_RULE,

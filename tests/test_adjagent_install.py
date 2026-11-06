@@ -1776,7 +1776,6 @@ def test_mcp_settings_the_merge_cannot_use_are_refused_before_the_first_write(
 # A hook the project registered itself, which no install may touch.
 _SED_HOOK = '{"matcher": "Bash", "hooks": [{"type": "command", "command": "./block-sed.sh"}]}'
 _REMOVE_BY_HAND = "left untouched; remove this entry by hand:"
-_UNREAD = "left untouched; it names an earlier install's 'hooks.PreToolUse' element: remove that by hand"
 
 
 def _unparsed_settings(hook: dict) -> str:
@@ -1882,13 +1881,13 @@ def test_settings_the_removal_cannot_edit_are_never_refused_and_reported_only_wh
     seed = _UNEDITABLE_SETTINGS[kind](_retired_hook_entry(".claude") if names_ours else json.loads(_SED_HOOK))
     root = _claude_root(project, seed)
     settings = project / _SETTINGS
-    reason = f"{settings} is not a JSON object the removal can edit"
     capsys.readouterr()
     _definition_install(root, project_root=project)
     assert (_claude_plugin(root) / _REGISTRATION).is_file()
     assert settings.read_bytes() == seed
-    reported = [line for line in capsys.readouterr().err.splitlines() if _UNREAD in line]
-    assert [reason in line for line in reported] == ([True] if names_ours else [])
+    err = capsys.readouterr().err
+    reported = [line for line in err.splitlines() if f"{settings} " in line and "by hand" in line]
+    assert len(reported) == (1 if names_ours else 0)
 
 
 @pytest.mark.parametrize(
@@ -2416,7 +2415,7 @@ def test_a_settings_file_left_alone_is_reported_on_an_up_to_date_target(
     main([*argv, *dry_run])
     printed = capsys.readouterr()
     assert _UP_TO_DATE in printed.out
-    assert f"{project / _SETTINGS} is not a JSON object the removal can edit — {_UNREAD}" in printed.err
+    assert any(f"{project / _SETTINGS} " in line and "by hand" in line for line in printed.err.splitlines())
 
 
 @pytest.mark.parametrize("linked", ["{}\n", None], ids=["link-outside-the-project", "dangling-link"])
@@ -2960,7 +2959,7 @@ def test_a_symlinked_settings_file_has_the_retired_entry_removed_through_the_lin
     assert link.is_symlink()
     assert named.read_text(encoding="utf-8") == '{"hooks": {"PreToolUse": []}}'
     err = capsys.readouterr().err
-    assert _UNREAD not in err and _REMOVE_BY_HAND not in err
+    assert "by hand" not in err
 
 
 @pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
