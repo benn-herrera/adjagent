@@ -59,7 +59,7 @@ CONVENTIONS.md, and a binding replaces the default. A term marked — has no def
 | {REFERENCE_SEARCH_TERM} | `git grep -l '<name>'` | lists every file that references a name |
 | {STEP_DOWN_MODEL_TERM} | the model the sentence after this table names; — where none follows | the model a mechanical dispatch runs on |
 | {STEP_DOWN_APPLICATION_TERM} | — | how a mechanical dispatch gets the {STEP_DOWN_MODEL_TERM} where a dispatch cannot choose its model |
-| {POST_PLAN_REVIEWERS_TERM} | the agent whose domain each change touched: the coder for each changed language, `architect` where structure changed, `tech-writer` where documents changed, `prompt-engineer` where model-facing text changed | the agents that review a finished plan |
+| {POST_PLAN_REVIEWERS_TERM} | the agent whose domain each change touched: the coder for each changed language, `{clauses.ref(name="architect")}` where structure changed, `{clauses.ref(name="tech-writer")}` where documents changed, `{clauses.ref(name="prompt-engineer")}` where model-facing text changed | the agents that review a finished plan |
 | {BURNDOWN_LIST_TERM} | `<plan>_REVIEW_BURNDOWN.md` beside the plan, `<plan>` being its file name without `.md` | the post-plan review's findings, which the revision agents execute from |
 | {PLAN_SIZE_LIMIT_TERM} | 800 lines | the length past which a plan or design is diced |
 
@@ -97,7 +97,7 @@ the project's own gate would refuse.
   the landing does not edit the document or leaf.
   *Purpose:* a disagreement between plan and requirement is resolved in the open, never by quietly
   rewriting the requirement.
-- A plan or design longer than the {PLAN_SIZE_LIMIT_TERM} is diced (the `docdicer` skill), and dispatches
+- A plan or design longer than the {PLAN_SIZE_LIMIT_TERM} is diced (the `{clauses.ref(name="docdicer")}` skill), and dispatches
   cite its leaves. *Purpose:* each executor reads whole the part it acts on.
 - An approved plan runs to completion: blockers that need the user surface during planning.
   *Purpose:* the user approves once and is not called back mid-run for a question planning could
@@ -114,18 +114,29 @@ A work package is dispatchable only when:
 - a change to a type, signature or test double lists every referencing file, with the
   {REFERENCE_SEARCH_TERM} and its answer. *Purpose:* no referencing file is found broken after the package
   reports done;
+- a package that changes a stated behaviour names the tests and fixtures pinning it, and updating
+  them is in scope; a test failing on behaviour the package does not state it changes is reported as
+  a finding, never edited to pass. *Purpose:* an expectation moves only with its requirement, so an
+  invariant test still stops wrong work;
 - its done-line is stated in runner targets. *Purpose:* done is a run anyone can repeat, not a
   judgment;
 - a before/after measurement done-line carries a passing run on the base commit, taken during
   planning. *Purpose:* a failed comparison is known to come from the change, not from a baseline that
   never passed;
-- it has had `prompt-engineer` usability review, then `architect` revision. *Purpose:* the agent that
+- it has had `{clauses.ref(name="prompt-engineer")}` usability review, then `{clauses.ref(name="architect")}` revision. *Purpose:* the agent that
   executes it can act on it before it costs a dispatch;
 - its brief names the {EDIT_GATE_TERM}'s targets, run after each edit. *Purpose:* each edit is
   verified while its cause is fresh.
 
 A plan whose packages fail this is neither offered for approval nor dispatched. *Purpose:* what is
 approved can run as approved.
+
+Each plan section gets one `{clauses.ref(name="prompt-engineer")}` review and one revision; a
+revision applying that review's findings is not re-reviewed. A later change — a package added, a
+decision reversed, a section rewritten — gets a review of the changed text only, plus a check that
+the rest of the plan cites no superseded form of it. Settled calls are not reopened unless the
+change targets them. *Purpose:* each round reviews only text no reviewer has seen, so review
+converges instead of re-litigating.
 
 ## Dispatch
 
@@ -188,7 +199,7 @@ approved can run as approved.
   changes and their tests against the project's standards and fitness for purpose. *Purpose:* they
   judge what shipped, not how well it matches the plan's account of itself.
 - The review's findings go to the {BURNDOWN_LIST_TERM}. *Purpose:* revision works from one list.
-- The {BURNDOWN_LIST_TERM} gets `prompt-engineer` usability review, then revision by its author,
+- The {BURNDOWN_LIST_TERM} gets `{clauses.ref(name="prompt-engineer")}` usability review, then revision by its author,
   before any revision agent is dispatched from it. *Purpose:* the agents that execute from it can
   act on each item without inventing what it leaves open.
 - The review of a release's hardening plan (`references/release.md`), and any review the user asks
@@ -215,12 +226,12 @@ one's answer feeds the next.
    service, app, document set, paper, analysis.
 2. **Whether it needs code.** Where it does, settle its language and platform: draw out the user's
    constraints — target platform, ecosystem, deployment, performance, their own familiarity — and
-   the `architect` agent may propose from them. This skill recommends no language. *Purpose:* the
+   the `{clauses.ref(name="architect")}` agent may propose from them. This skill recommends no language. *Purpose:* the
    choice follows the project's constraints, not a habit.
 3. **The contract documents**, drafted from 1 and 2: THESIS.md by you with the user; SPEC.md and
-   ARCHITECTURE.md by `architect`, or SPEC.md by `tech-writer` for a project with no code;
+   ARCHITECTURE.md by `{clauses.ref(name="architect")}`, or SPEC.md by `{clauses.ref(name="tech-writer")}` for a project with no code;
    CONVENTIONS.md by you, from the choices made in 2. A project with no code may omit
-   ARCHITECTURE.md, at the owner's choice. Dicing them is the `docdicer` skill's. *Purpose:* each
+   ARCHITECTURE.md, at the owner's choice. Dicing them is the `{clauses.ref(name="docdicer")}` skill's. *Purpose:* each
    document is drafted by the agent whose discipline it needs.
 4. **A runner**, if one is needed: `just` by default; `make` only where the project has targets that
    must rebuild only when their inputs are newer than their outputs. A project on an ecosystem's

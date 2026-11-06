@@ -15,6 +15,7 @@ Contents:
   - [Definition modules hold only constants](code-definitions-and-install/definition-modules-hold-only-constants.md)
   - [Shared text is one constant](code-definitions-and-install/shared-text-is-one-constant.md)
   - [Composed text is never rescanned](code-definitions-and-install/composed-text-is-never-rescanned.md)
+  - [Cross-references are holes](code-definitions-and-install/cross-references-are-holes.md)
   - [Recipe notes go above the recipe](code-definitions-and-install/recipe-notes-go-above-the-recipe.md)
   - [Long recipe bodies are scripts](code-definitions-and-install/long-recipe-bodies-are-scripts.md)
   - [Never comment in a rendered body](code-definitions-and-install/never-comment-in-a-rendered-body.md)

@@ -15,12 +15,12 @@ beside the definitions it holds the kb-tools package, the harness's MCP entry, t
 line and, where the harness ships them, its own resource files — the whole product, which is what
 makes a `render-diff` a comparison of the kb half too. A slot holds the claude hook script only
 where `perl` passes the probe on that machine, so a `render-diff` against a reference taken
-elsewhere can show it. Those three slots (claude, opencode, and the
-gemma-4 family, which fills the overlay anchors) are the baseline, written only by
-`just retake-reference`, so a `render-diff` after a change reports that change and nothing the
-baseline already held. No mage slot is taken: the manifest carries `__version__`, so a mage baseline
-would churn on every bump (CONVENTIONS.md, Version has one home). A mage render is inspected ad hoc
-with `just render mage --harness=mage`.
+elsewhere can show it. Those four slots (`reference-claude`, `reference-mage`, `reference-opencode`,
+and `reference-gemma`, the gemma-4 family, which fills the overlay anchors) are the baseline, written
+only by `just retake-reference`, so a `render-diff` after a change reports that change and nothing the
+baseline already held. The claude and mage manifests and every slot's agents-file begin marker carry `__version__`, so after
+a bump the claude and mage slots each show the manifest line and the marker line, and the other
+slots the marker line alone (CONVENTIONS.md, Version has one home).
 
 `tests/test_adjagent.py` holds the package's properties: each kind's frontmatter against literal
 lines, a skill's directory — its two fields and a comment-bannered reference — against literal

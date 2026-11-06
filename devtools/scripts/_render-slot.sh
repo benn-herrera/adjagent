@@ -6,6 +6,12 @@
 # The harness's agents file lands in one of two shapes: at the slot root as `<agents-file>`, for a
 # harness whose own files sit at its root (`user-harness-dir` `.` — a plugin, whose `.mcp.json` is
 # written beside it), otherwise under `harness/<name>/<agents-file>`.
+#
+# The slot is the install's harness directory (`--subdir=`), so a claude slot holds the plugin, the
+# set it renders, at <slot>/skills/adjagent/.
+#
+# HOME is a fresh, empty scratch home for the whole render, removed on exit, so nothing the render
+# runs reads or writes the operator's real one.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${RENDERED_DIR:?RENDERED_DIR is empty or unset — run this script through its justfile recipe}"
@@ -13,6 +19,11 @@ set -euo pipefail
 
 slug="${1}"
 shift
+scratch_home="${PROJECT_ROOT}/.claude-temp/render-home/${slug}"
+command rm -rf "${scratch_home}"
+mkdir -p "${scratch_home}"
+trap 'command rm -rf "${scratch_home}"' EXIT
+export HOME="${scratch_home}"
 harness=""
 args=("${@+"${@}"}")
 for arg in "${args[@]+"${args[@]}"}"; do

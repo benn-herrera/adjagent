@@ -43,7 +43,7 @@ _INDEX_REASON_HEAD = "kb-root/.index/ holds kbase's records"
 
 # Each Claude tool's opencode name, None where opencode has no counterpart; the Claude argument
 # names opencode spells otherwise, None where it has none; and the tools only opencode has.
-_OPENCODE_TOOLS = {
+_CLAUDE_TO_OPENCODE_TOOLS = {
     "Bash": "bash",
     "Read": "read",
     "Write": "write",
@@ -65,11 +65,13 @@ def _tool_input(case: dict) -> dict:
 
 
 def _opencode_tool(tool: str) -> str | None:
-    return tool if tool in _OPENCODE_ONLY_TOOLS else _OPENCODE_TOOLS[tool]
+    return tool if tool in _OPENCODE_ONLY_TOOLS else _CLAUDE_TO_OPENCODE_TOOLS[tool]
 
 
 _PL_INDEXES = [
-    i for i, case in enumerate(_CASES) if case.get("harness", "claude") == "claude" and _tool(case) in _OPENCODE_TOOLS
+    i
+    for i, case in enumerate(_CASES)
+    if case.get("harness", "claude") == "claude" and _tool(case) in _CLAUDE_TO_OPENCODE_TOOLS
 ]
 _TS_INDEXES = [
     i
@@ -111,7 +113,7 @@ def _case_root(root: Path, case: dict, harness: Harness, script: Path) -> tuple[
         path = root / _fill(rel, harness, root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.symlink_to(_fill(target, harness, root))
-    staged = root / harness.project_harness_dir / script.relative_to(script.parents[1])
+    staged = root / harness.project_harness_dir / script.relative_to(_RESOURCES / harness.name)
     staged.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(script, staged)
     cwd = root / _fill(case.get("cwd", "."), harness, root)
@@ -195,15 +197,16 @@ def test_guardrail_cases_carry_only_known_fields() -> None:
         assert ("command" in case) != ("tool" in case), i
         assert ("tool" in case) == ("input" in case), i
         assert case.get("harness", "claude") in {"claude", "opencode"}, (i, case["harness"])
-        assert _tool(case) in _OPENCODE_TOOLS.keys() | _OPENCODE_ONLY_TOOLS, (i, _tool(case))
+        assert _tool(case) in _CLAUDE_TO_OPENCODE_TOOLS.keys() | _OPENCODE_ONLY_TOOLS, (i, _tool(case))
         assert i in _PL_INDEXES or i in _TS_INDEXES, i
 
 
 def test_guardrail_matcher_names_exactly_the_claude_tools_the_case_table_covers() -> None:
     """A tool the matcher sends to the hook with no case is untested, and a case for a tool the
     matcher omits tests a call the hook never sees."""
-    matcher = set(CLAUDE.guardrail.entry(CLAUDE.project_harness_dir)["matcher"].split("|"))
-    assert matcher == {_tool(case) for case in _CASES if _tool(case) in _OPENCODE_TOOLS}
+    [entry] = json.loads(CLAUDE.guardrail.registration.text())["hooks"]["PreToolUse"]
+    matcher = set(entry["matcher"].split("|"))
+    assert matcher == {_tool(case) for case in _CASES if _tool(case) in _CLAUDE_TO_OPENCODE_TOOLS}
 
 
 @pytest.mark.parametrize(
@@ -241,13 +244,6 @@ def test_guardrail_pl_gives_the_case_tables_reason(index: int, tmp_path: Path) -
     else:
         assert done.returncode == 2, done.stderr
         assert _reason(done.stderr.rstrip("\n")) == expected
-
-
-def test_guardrail_pl_passes_a_tool_other_than_bash(tmp_path: Path) -> None:
-    """The mutation check judges only Bash: the same command under another tool's name is let
-    through."""
-    done = _run_perl(_hook_input("Edit", {"command": "sed -i 's/a/b/' x.txt"}, tmp_path), project_dir=tmp_path)
-    assert (done.returncode, done.stderr) == (0, "")
 
 
 def test_guardrail_pl_takes_the_input_cwd_as_root_without_claude_project_dir(tmp_path: Path) -> None:

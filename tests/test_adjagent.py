@@ -51,6 +51,7 @@ from adjagent.render import (
     filled_body,
     filled_text,
     keyed_by_path,
+    render_agents_file,
     render_all,
     render_definition,
     render_skill_file,
@@ -67,6 +68,7 @@ from adjagent.vocabulary import (
     Tool,
     TuningText,
     hole,
+    reference,
 )
 from devtools import render_diff
 from tests._structure import (
@@ -262,10 +264,11 @@ def test_opencode_frontmatter_matches_the_pre_1_0_render() -> None:
     )
 
 
-_PYTHON_CODER_DESCRIPTION = (
-    'description: "Python implementation specialist. Prefer over generalist-coder for any Python file modification '
-    'or Python project task."'
-)
+def _python_coder_description(harness: Harness) -> str:
+    return (
+        f'description: "Python implementation specialist. Prefer over {harness.reference_prefix}generalist-coder for '
+        'any Python file modification or Python project task."'
+    )
 
 
 @pytest.mark.parametrize(
@@ -273,11 +276,11 @@ _PYTHON_CODER_DESCRIPTION = (
     [
         (
             Render(harness=CLAUDE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers)),
-            ("name: python-coder", _PYTHON_CODER_DESCRIPTION, "model: opus", 'color: "#3776AB"'),
+            ("name: python-coder", _python_coder_description(CLAUDE), "model: opus", 'color: "#3776AB"'),
         ),
         (
             Render(harness=OPENCODE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT),
-            (_PYTHON_CODER_DESCRIPTION, 'color: "#3776AB"', "mode: subagent"),
+            (_python_coder_description(OPENCODE), 'color: "#3776AB"', "mode: subagent"),
         ),
     ],
     ids=["claude", "opencode"],
@@ -466,7 +469,7 @@ def test_the_manifest_is_the_only_render_of_a_mage_plugin_carrying_the_version()
 
 @pytest.mark.parametrize(
     "harness, tool_name",
-    [(CLAUDE, "mcp__kbase__query"), (MAGE, "mcp_kbase_query"), (OPENCODE, "kbase_query")],
+    [(CLAUDE, "mcp__plugin_adjagent_kbase__query"), (MAGE, "mcp_kbase_query"), (OPENCODE, "kbase_query")],
 )
 def test_the_kb_reading_reference_names_the_harness_mcp_tool(harness: Harness, tool_name: str) -> None:
     """The rendered instruction must name the callable the selected host actually exposes."""
@@ -536,7 +539,7 @@ def test_a_skill_file_body_follows_the_definition_body_rule() -> None:
         (HarnessText.PROJECT_TEMP_DIR, OPENCODE, ".opencode-temp"),
         (HarnessText.USER_HARNESS_DIR, CLAUDE, "~/.claude"),
         (HarnessText.USER_HARNESS_DIR, OPENCODE, "~/.config/opencode"),
-        (HarnessText.MCP_TOOL_PREFIX, CLAUDE, "mcp__kbase__"),
+        (HarnessText.MCP_TOOL_PREFIX, CLAUDE, "mcp__plugin_adjagent_kbase__"),
         (HarnessText.MCP_TOOL_PREFIX, OPENCODE, "kbase_"),
     ],
 )
@@ -561,6 +564,66 @@ def test_the_text_module_spells_each_render_placeholder_as_the_renderer_fills_it
     part: HarnessText | OptionalHarnessText | TuningText,
 ) -> None:
     assert getattr(adjagent.clauses, part.name) == hole(part)
+
+
+def test_the_text_module_spells_a_reference_as_the_renderer_fills_it() -> None:
+    assert adjagent.clauses.ref(name="python-coder") == reference("python-coder")
+
+
+_PREFIXED = [CLAUDE, dataclasses.replace(CLAUDE, reference_prefix="x:")]
+
+
+@pytest.mark.parametrize("harness", _PREFIXED, ids=["bare", "prefixed"])
+def test_a_reference_in_a_body_and_a_description_fills_with_the_prefix_and_name(harness: Harness) -> None:
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+    named = f"{harness.reference_prefix}python-coder"
+    agent = Definition(
+        name="probe",
+        kind=Kind.AGENT,
+        description=f"Prefer over {reference('python-coder')}.",
+        tools=ALL,
+        tier="high",
+        body=f"Hand it to `{reference('python-coder')}`.",
+    )
+    skill = _skill(description=f"Prefer over {reference('python-coder')}.")
+    agent_text = render_definition(agent, ctx, module="adjagent.definitions.probe")
+    assert f'description: "Prefer over {named}."' in agent_text.split("\n")
+    assert agent_text.endswith(f"Hand it to `{named}`.\n")
+    assert f'description: "Prefer over {named}."' in render_definition(skill, ctx, module="m").split("\n")
+
+
+@pytest.mark.parametrize("harness", _PREFIXED, ids=["bare", "prefixed"])
+@pytest.mark.parametrize("field", ["body", "description"])
+def test_a_reference_to_an_undiscovered_name_is_refused_naming_the_definition(harness: Harness, field: str) -> None:
+    hole_text = reference("nonesuch")
+    defn = Definition(name="probe", kind=Kind.AGENT, description="a probe", tools=ALL, tier="high", body="Own.")
+    defn = dataclasses.replace(defn, **{field: f"see {hole_text}"})
+    ctx = Render(harness=harness, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
+    with pytest.raises(InputError, match=re.escape("definition 'probe'")) as refused:
+        render_definition(defn, ctx, module="m")
+    assert f"unknown placeholder {hole_text}" in str(refused.value)
+
+
+_NAMESPACED = [harness for harness in (CLAUDE, MAGE, OPENCODE) if harness.reference_prefix]
+
+
+@pytest.mark.parametrize("harness", _NAMESPACED, ids=lambda harness: harness.name)
+def test_a_reference_prefix_changes_nothing_but_the_reference_sites(harness: Harness) -> None:
+    """Every rendered file, the agents file included, read with each prefix occurrence removed is the
+    render of the same harness with the prefix empty, and that bare render spells the prefix nowhere: a
+    prefix reaches no text but the references it is put before."""
+    bare = dataclasses.replace(harness, reference_prefix="")
+    prefix = harness.reference_prefix
+
+    def rendered(each: Harness) -> dict[PurePosixPath, str]:
+        ctx = Render(harness=each, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
+        return {**dict(render_all(ctx)), PurePosixPath("<agents file>"): render_agents_file(each, scope="x")}
+
+    prefixed, plain = rendered(harness), rendered(bare)
+    assert prefixed.keys() == plain.keys()
+    assert {path: text.replace(prefix, "") for path, text in prefixed.items()} == plain
+    assert [path for path, text in plain.items() if prefix in text] == []
+    assert any(prefix in text for text in prefixed.values())
 
 
 _STEP_DOWN_BODY = f"before\n\nDefault: `{adjagent.clauses.STEP_DOWN_MODEL}`, unless bound.\n\nafter"
@@ -986,10 +1049,16 @@ def _definitions_of_files(files: str) -> str:
         (_definitions_of_files("(clauses.f(),)"), 3, CALL_RULE),
         (_definitions_of_files('(SkillFile(path="references/r.md", body=f"{len(_S)}"),)'), 3, CALL_RULE),
         (
-            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=clauses.f(), body="b"),)\n',
+            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=f"{{clauses.ref(name=\'x\')}}", body="b"),)\n',
+            3,
+            "",
+        ),
+        (
+            f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", description=f"{{len(_S)}}", body="b"),)\n',
             3,
             CALL_RULE,
         ),
+        (f'{_DEFINITION_HEAD}DEFINITIONS = (Definition(name="p", tools=clauses.f(), body="b"),)\n', 3, CALL_RULE),
         (f'{_DEFINITION_HEAD}DEFINITIONS = (Definition("p", "b", kind=Kind.AGENT),)\n', 3, DEFINITION_CALL_RULE),
         (f"{_DEFINITION_HEAD}def helper():\n    pass\n", 3, DEFINITION_TOP_RULE),
         (f"{_DEFINITION_HEAD}DEFINITIONS = (_ONE,)\n", 3, DEFINITION_TOP_RULE),
@@ -1211,9 +1280,11 @@ def test_a_paragraph_two_supporting_files_write_out_is_found() -> None:
 
 _CLAUSE_GRAPH = clause_graph((_PACKAGE / "clauses.py").read_text(encoding="utf-8"))
 _HARNESS_STRINGS = {hole(part) for part in HarnessText}
+# A reference names one definition, like a harness string names one directory: a sentence's word,
+# not a span a prompt could deliver twice.
 _SENTENCE_HOLES = frozenset(
     name for name, value in vars(adjagent.clauses).items() if isinstance(value, str) and value in _HARNESS_STRINGS
-)
+) | {adjagent.clauses.ref.__name__}
 
 
 @dataclass(frozen=True)
@@ -1231,7 +1302,7 @@ class _PromptOutput:
 
 def _prompts(sources: dict[str, str]) -> list[list[_PromptOutput]]:
     """Every prompt: an output alone, or a command or skill body with each output an `@` line of it
-    names, one level deep."""
+    names, transitively."""
     outputs = []
     for module, source in sources.items():
         roots = body_roots(source, _CLAUSE_GRAPH)
@@ -1253,14 +1324,24 @@ def _prompts(sources: dict[str, str]) -> list[list[_PromptOutput]]:
 
 
 def _loaded(output: _PromptOutput, outputs: list[_PromptOutput]) -> list[_PromptOutput]:
-    """The outputs `output`'s `@` lines name: a line names an output when its path ends in the output's."""
-    named = [PurePosixPath(line[1:].strip()).parts for line in output.text.splitlines() if line.startswith("@")]
-    return [
-        target
-        for parts in named
-        for target in outputs
-        if target.path is not None and parts[-len(target.path.parts) :] == target.path.parts
-    ]
+    """The outputs `output`'s `@` lines name, and those named by the `@` lines of each such output that
+    loads, transitively, each once in first-reached order and never `output` itself. A line names an
+    output when its path ends in the output's."""
+    reached: list[_PromptOutput] = []
+    pending = [output]
+    while pending:
+        current = pending.pop(0)
+        named = [PurePosixPath(line[1:].strip()).parts for line in current.text.splitlines() if line.startswith("@")]
+        for parts in named:
+            for target in outputs:
+                if target.path is None or parts[-len(target.path.parts) :] != target.path.parts:
+                    continue
+                if target is output or target in reached:
+                    continue
+                reached.append(target)
+                if target.loads:
+                    pending.append(target)
+    return reached
 
 
 def _double_clause_deliveries(sources: dict[str, str]) -> list[str]:
@@ -1290,6 +1371,23 @@ def test_no_prompt_delivers_a_span_twice(check: Callable[[dict[str, str]], list[
     sources = {f"adjagent.definitions.{path.stem}": path.read_text(encoding="utf-8") for path in _DEFINITION_PATHS}
     found = check(sources)
     assert found == [], "\n".join(found)
+
+
+def _chain_output(name: str, *loads: str) -> _PromptOutput:
+    text = "\n".join(f"@commands/{target}.md" for target in loads)
+    return _PromptOutput(
+        label=f"commands/{name}.md", path=PurePosixPath(f"commands/{name}.md"), text=text, roots=(), loads=True
+    )
+
+
+def test_loaded_follows_at_lines_transitively() -> None:
+    a, b, c = _chain_output("a", "b"), _chain_output("b", "c"), _chain_output("c")
+    assert _loaded(a, [a, b, c]) == [b, c]
+
+
+def test_loaded_terminates_on_a_cycle() -> None:
+    a, b = _chain_output("a", "b"), _chain_output("b", "a")
+    assert _loaded(a, [a, b]) == [b]
 
 
 def test_a_clause_a_composite_already_delivers_is_refused_with_both_paths() -> None:

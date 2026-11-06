@@ -3,25 +3,39 @@ installed by replacing its block and keeping every other byte of the live file.
 
 The block runs from the begin marker line through the end marker line. A marker line is recognised
 by its whitespace-stripped ends alone, so a block any earlier revision wrote is still found. A live
-file with one ordered marker pair has that span replaced; an absent file is written whole; any other
-file is refused. In the harness's user directory the file is the harness's own name; anywhere else
-it is AGENTS.md, and a harness that reads another name gets that file as the redirect `@AGENTS.md`.
-A destination whose only content is `@<path>` is followed one hop, within DIR. A write that changes
-the file first copies it to the one rolling `backup.<name>` beside it. Every check runs before the
-first write, and the install is refused, when run from a checkout, while this package has uncommitted
-changes.
+file with one ordered marker pair has that span replaced; one with no marker line has the block
+appended after a blank line; an absent file is written whole; any other file is refused. In the
+harness's user directory the file is the harness's own name; anywhere else it is AGENTS.md, and a
+harness that reads another name gets that file as the redirect `@AGENTS.md`. A destination whose only
+content is `@<path>` is followed one hop, within DIR. A write that changes the file first copies it
+to the one rolling `backup.<name>` beside it. Every check runs before the first write, and an
+install into a harness's user directory is refused, when run from a checkout, while this package has
+uncommitted changes; an install into a project directory is not.
+
+The begin marker line carries the version that wrote the block. A block whose lines between the
+markers already match is left as it stands, whatever its stamp; a differing one is replaced unless
+its stamp is a later release than this one, which is reported and left.
+
+A project install keeps the block in one place (`checked_followed_agents_file`): in the harness's
+user-global agents file where that already holds a marker line, removing the project's AGENTS.md
+copy of the span, and otherwise in the project's AGENTS.md.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from adjagent.errors import InputError
 from adjagent.harness import Harness
+from adjagent.install_target import user_dir_harnesses
 from adjagent.preflight import run_preflighted
-from adjagent.render import render_agents_file, write_text_verbatim
+from adjagent.render import appended_paragraph, render_agents_file, write_text_verbatim
 
 BEGIN = ("<!-- vvv-adjagent", "adjagent-vvv -->")
 END = ("<!-- ^^^-adjagent", "adjagent-^^^ -->")
@@ -50,10 +64,27 @@ def marker_span(text: str, *, where: str) -> tuple[list[str], int, int]:
     return lines, begins[0], ends[0]
 
 
+def _has_no_marker_line(text: str) -> bool:
+    return not any(_is_marker(line, BEGIN) or _is_marker(line, END) for line in text.split("\n"))
+
+
+def _release(begin_line: str) -> tuple[int, ...] | None:
+    """The release version a begin marker line is stamped with — its first word after the marker's
+    opening, dot-separated digits — or None where that word is no such version."""
+    words = begin_line.strip().removeprefix(BEGIN[0]).split()
+    if not words or not re.fullmatch(r"\d+(?:\.\d+)*", words[0]):
+        return None
+    return tuple(int(part) for part in words[0].split("."))
+
+
+def _stamp(release: tuple[int, ...]) -> str:
+    return ".".join(str(part) for part in release)
+
+
 def _in_user_dir(harness: Harness, directory: Path) -> bool:
     """A relative user directory is resolved against `directory`, so mage's `.` is the destination
     itself; an absolute one is unaffected, since joining with an absolute path yields it."""
-    return (directory / Path(harness.user_harness_dir).expanduser()).resolve() == directory.resolve()
+    return (directory / harness.user_dir).resolve() == directory.resolve()
 
 
 def scope_name(harness: Harness, directory: Path) -> str:
@@ -61,14 +92,16 @@ def scope_name(harness: Harness, directory: Path) -> str:
     return GLOBAL_SCOPE if _in_user_dir(harness, directory) else directory.resolve().name
 
 
-def _refuse_unless_regular_or_absent(path: Path) -> None:
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        raise InputError(f"{path} is a symlink or not a regular file — nothing written")
+def _refuse_unless_file_or_absent(path: Path) -> None:
+    """A symlink is the file it names, read and written through and never refused for being one; a
+    dangling one is an absent file."""
+    if path.exists() and not path.is_file():
+        raise InputError(f"{path} is not a regular file — nothing written")
 
 
 def _read(path: Path) -> str | None:
     """The file's text with line endings untranslated, or None when there is no file."""
-    _refuse_unless_regular_or_absent(path)
+    _refuse_unless_file_or_absent(path)
     if not path.exists():
         return None
     try:
@@ -96,7 +129,8 @@ def _followed(destination: Path, *, directory: Path) -> tuple[Path, str | None]:
         return destination, existing
     target = destination.parent / reference
     refusal = f"{destination} redirects to {target}"
-    if not target.resolve().is_relative_to(directory.resolve()):
+    # Compared by path, not resolved, so a symlink below `directory` stands for the file it names.
+    if not Path(os.path.normpath(target.absolute())).is_relative_to(os.path.normpath(directory.absolute())):
         raise InputError(f"{refusal}, which is outside {directory} — nothing written")
     if not target.parent.is_dir():
         raise InputError(f"{refusal}, whose directory does not exist — nothing written")
@@ -110,7 +144,8 @@ def _followed(destination: Path, *, directory: Path) -> tuple[Path, str | None]:
 class AgentsFileWrite:
     """An agents-file install whose every check has passed: the file it writes and that file's present
     text, the text it writes there, the destination it reached that file through, the rolling backup,
-    and the harness's native file that takes the redirect, where one does."""
+    the harness's native file that takes the redirect, where one does, and why a differing block is
+    left as it stands, where it is."""
 
     path: Path
     existing: str | None
@@ -118,6 +153,12 @@ class AgentsFileWrite:
     destination: Path
     backup: Path
     native: Path | None
+    left: str | None = None
+
+    @property
+    def paths(self) -> tuple[Path, ...]:
+        """Every path the write reads or writes."""
+        return (self.path, self.destination, self.backup, *(() if self.native is None else (self.native,)))
 
 
 def _refuse_unless_directory(directory: Path) -> None:
@@ -125,14 +166,32 @@ def _refuse_unless_directory(directory: Path) -> None:
         raise InputError(f"'{directory}' is not an existing directory")
 
 
+def refuse_uncommitted(uncommitted: tuple[str, ...]) -> None:
+    """Refuse while `uncommitted` (uncommitted_sources) names any change: an install into live operator
+    configuration would publish sources nobody has committed."""
+    if uncommitted:
+        raise InputError(
+            f"{__package__}/ has uncommitted changes ({', '.join(uncommitted)}) — commit them before "
+            "installing; nothing written"
+        )
+
+
+def _refuse_uncommitted_in_user_dir(directory: Path, uncommitted: tuple[str, ...]) -> None:
+    """`refuse_uncommitted` where `directory` is a harness's absolute user directory; a project directory,
+    mage's relative user directory included, is never refused."""
+    if user_dir_harnesses(directory):
+        refuse_uncommitted(uncommitted)
+
+
 def install_agents_file(
     directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], real_directory: Path | None = None
 ) -> None:
     """Install `harness`'s agents file into `directory`, refusing while `uncommitted`
-    (uncommitted_sources) names any change; nothing is written until every check has passed.
-    `real_directory` is as `checked_agents_file` takes it."""
+    (uncommitted_sources) names any change and the directory is a harness's user directory; nothing is
+    written until every check has passed. `real_directory` is as `checked_agents_file` takes it."""
     _refuse_unless_directory(directory)
-    write_agents_file(checked_agents_file(directory, harness, uncommitted=uncommitted, real_directory=real_directory))
+    _refuse_uncommitted_in_user_dir(directory if real_directory is None else real_directory, uncommitted)
+    write_agents_file(checked_agents_file(directory, harness, real_directory=real_directory))
 
 
 def preflighted_agents_file_install(
@@ -144,10 +203,10 @@ def preflighted_agents_file_install(
     written; with `dry_run`, what would be created or changed is printed relative to `directory` and
     nothing is written; otherwise the install runs. Every refusal names `directory`, never the copy."""
     _refuse_unless_directory(directory)
-    write = checked_agents_file(directory, harness, uncommitted=uncommitted)
-    paths = [write.path, write.destination, write.backup, *([] if write.native is None else [write.native])]
+    _refuse_uncommitted_in_user_dir(directory, uncommitted)
+    write = checked_agents_file(directory, harness)
     run_preflighted(
-        [(directory, [str(path.relative_to(directory)) for path in paths])],
+        [(directory, [str(path.relative_to(directory)) for path in write.paths])],
         install=lambda bases: install_agents_file(bases[0], harness, uncommitted=uncommitted, real_directory=directory),
         dry_run=dry_run,
         target=directory,
@@ -155,19 +214,13 @@ def preflighted_agents_file_install(
     )
 
 
-def checked_agents_file(
-    directory: Path, harness: Harness, *, uncommitted: tuple[str, ...], real_directory: Path | None = None
-) -> AgentsFileWrite:
-    """Every check of installing `harness`'s agents file into `directory`, writing nothing. An absent
-    `directory` reads as an empty one. `real_directory` is the directory the file is for, where
-    `directory` is a scratch copy of it: whether it is the harness's user directory, and the scope the
-    file is titled with, are read from it. It defaults to `directory`."""
+def checked_agents_file(directory: Path, harness: Harness, *, real_directory: Path | None = None) -> AgentsFileWrite:
+    """Every check of installing `harness`'s agents file into `directory`, writing nothing; the commit
+    state of the sources is its callers' to check. An absent `directory` reads as an empty one.
+    `real_directory` is the directory the file is for, where `directory` is a scratch copy of it:
+    whether it is the harness's user directory, and the scope the file is titled with, are read from it.
+    It defaults to `directory`."""
     identity = directory if real_directory is None else real_directory
-    if uncommitted:
-        raise InputError(
-            f"{__package__}/ has uncommitted changes ({', '.join(uncommitted)}) — commit them before "
-            "installing; nothing written"
-        )
     native = None
     destination = directory / harness.agents_file
     if not _in_user_dir(harness, identity) and harness.agents_file != STANDARD_AGENTS_FILE:
@@ -183,33 +236,159 @@ def checked_agents_file(
     if path == native:
         raise InputError(f"{destination} redirects to {native}, which may hold only the redirect — nothing written")
     backup = path.with_name(BACKUP_PREFIX + path.name)
-    _refuse_unless_regular_or_absent(backup)
+    _refuse_unless_file_or_absent(backup)
     rendered = render_agents_file(harness, scope=scope_name(harness, identity))
+    left = None
     if existing is None:
         text = rendered
     else:
-        old, first, last = marker_span(existing, where=str(path))
         new, begin, end = marker_span(rendered, where="the harness agents-file definition")
-        text = "\n".join([*old[:first], *new[begin : end + 1], *old[last + 1 :]])
+        block = new[begin : end + 1]
+        if _has_no_marker_line(existing):
+            text = appended_paragraph(existing, "\n".join(block))
+        else:
+            old, first, last = marker_span(existing, where=str(path))
+            held, installing = _release(old[first]), _release(block[0])
+            if old[first + 1 : last] == block[1:-1]:
+                text = existing
+            elif held is not None and installing is not None and installing < held:
+                text = existing
+                left = (
+                    f"not downgraded: {path} holds the block from adjagent {_stamp(held)}, newer than this "
+                    f"{_stamp(installing)} — left as it stands"
+                )
+            else:
+                text = "\n".join([*old[:first], *block, *old[last + 1 :]])
     return AgentsFileWrite(
-        path=path, existing=existing, text=text, destination=destination, backup=backup, native=native
+        path=path, existing=existing, text=text, destination=destination, backup=backup, native=native, left=left
     )
+
+
+def _backed_up_write(path: Path, *, backup: Path, text: str) -> None:
+    """Copy `path` to `backup`, then write `text` to `path`."""
+    shutil.copyfile(path, backup)
+    write_text_verbatim(path, text)
 
 
 def write_agents_file(write: AgentsFileWrite) -> None:
     """Write what `checked_agents_file` passed, backing up a file it changes."""
     path = write.path
     via = "" if path == write.destination else f" (redirect {write.destination.name} followed)"
+    if write.left is not None:
+        print(write.left, file=sys.stderr)
     if write.text == write.existing:
         print(f"unchanged {path}{via}")
     else:
         if write.existing is None:
+            write_text_verbatim(path, write.text)
             note = " — no prior file, no backup"
         else:
-            shutil.copyfile(path, write.backup)
+            _backed_up_write(path, backup=write.backup, text=write.text)
             note = f" — prior content backed up to {write.backup}"
-        write_text_verbatim(path, write.text)
         print(f"wrote {path}{via}{note}")
     if write.native is not None and not write.native.exists():
         write.native.write_text(f"{REDIRECT_PREFIX}{STANDARD_AGENTS_FILE}\n", encoding="utf-8")
         print(f"wrote {write.native} — redirect to {STANDARD_AGENTS_FILE}")
+
+
+def _lenient_text(path: Path) -> str:
+    """The file's text, undecodable bytes replaced; empty where there is no file. For deciding where the
+    block lives, never for writing."""
+    return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+
+def _marked(destination: Path) -> bool:
+    """Whether `destination`, or the file a redirect there names, holds any marker line."""
+    text = _lenient_text(destination)
+    reference = _redirect(text)
+    if reference is not None:
+        text = _lenient_text(destination.parent / reference)
+    return not _has_no_marker_line(text)
+
+
+@dataclass(frozen=True)
+class ProjectCopyRemoval:
+    """A project's copy of the block whose removal every check has passed: the file holding it and that
+    file's present text, the text left once the span is gone, the destination it was reached through,
+    and the rolling backup."""
+
+    path: Path
+    existing: str
+    text: str
+    destination: Path
+    backup: Path
+
+    @property
+    def paths(self) -> tuple[Path, ...]:
+        return (self.path, self.destination, self.backup)
+
+
+def _checked_project_copy_removal(project: Path) -> ProjectCopyRemoval | None:
+    """The removal of the block from `project`'s AGENTS.md, a redirect there followed; None where it
+    holds no marker line, so a file without one is not read for writing."""
+    destination = project / STANDARD_AGENTS_FILE
+    if not _marked(destination):
+        return None
+    path, existing = _followed(destination, directory=project)
+    lines, first, last = marker_span(existing or "", where=str(path))
+    backup = path.with_name(BACKUP_PREFIX + path.name)
+    _refuse_unless_file_or_absent(backup)
+    return ProjectCopyRemoval(
+        path=path,
+        existing=existing or "",
+        text="\n".join([*lines[:first], *lines[last + 1 :]]),
+        destination=destination,
+        backup=backup,
+    )
+
+
+@dataclass(frozen=True)
+class FollowedAgentsFile:
+    """Where a project install keeps the block current: the write that does it, and, where that write is
+    into the user-global agents file, the removal of the project's own copy."""
+
+    write: AgentsFileWrite
+    removal: ProjectCopyRemoval | None
+
+    @property
+    def paths(self) -> tuple[Path, ...]:
+        """Every path the install reads or writes for it."""
+        return (*self.write.paths, *(() if self.removal is None else self.removal.paths))
+
+
+def checked_followed_agents_file(
+    project: Path,
+    harness: Harness,
+    *,
+    global_dir: Path,
+    uncommitted: Callable[[], tuple[str, ...]],
+    real_project: Path | None = None,
+) -> FollowedAgentsFile:
+    """Every check of keeping `harness`'s block current for a project install, writing nothing. Where the
+    user-global agents file in `global_dir` holds a marker line, the block is kept there, refused while
+    `uncommitted` (uncommitted_sources) names any change, and the project's AGENTS.md loses its copy of
+    the span; the project's native file is not read. Otherwise the block is kept in the project's
+    AGENTS.md as `checked_agents_file` keeps it, the native redirect included, whatever the commit
+    state. `global_dir` may be a scratch copy of the harness's user harness directory, and
+    `real_project` is as `checked_agents_file` takes `real_directory`."""
+    if not _marked(global_dir / harness.agents_file):
+        return FollowedAgentsFile(
+            write=checked_agents_file(project, harness, real_directory=real_project), removal=None
+        )
+    refuse_uncommitted(uncommitted())
+    write = checked_agents_file(global_dir, harness, real_directory=harness.user_dir)
+    return FollowedAgentsFile(write=write, removal=_checked_project_copy_removal(project))
+
+
+def write_followed_agents_file(followed: FollowedAgentsFile) -> None:
+    """Write what `checked_followed_agents_file` passed: the block, then the removal of the project's copy,
+    backed up and reported with why. The project's file stays, empty or not."""
+    write_agents_file(followed.write)
+    removal = followed.removal
+    if removal is None:
+        return
+    _backed_up_write(removal.path, backup=removal.backup, text=removal.text)
+    print(
+        f"removed the adjagent block from {removal.path} — the user-global agents file {followed.write.path} "
+        f"holds it — prior content backed up to {removal.backup}"
+    )

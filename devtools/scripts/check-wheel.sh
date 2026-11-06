@@ -3,6 +3,8 @@
 # installed into a throwaway venv made from $1, it runs as the shipped package rather than as the
 # checkout. Every wheel-side command runs with PYTHONPATH unset and GIT_CEILING_DIRECTORIES at the
 # scratch directory, so neither the working tree nor the repository around it can answer for it.
+# From the scratch directory's creation on, HOME is a fresh, empty home inside it, removed on exit,
+# so no install here reads or writes the operator's real one.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"
@@ -35,7 +37,9 @@ fi
 scratch="${PROJECT_ROOT}/.claude-temp/check-wheel"
 venv="${scratch}/venv"
 command rm -rf "${scratch}"
-mkdir -p "${scratch}"
+mkdir -p "${scratch}/home"
+trap 'command rm -rf "${scratch}/home"' EXIT
+export HOME="${scratch}/home"
 "${python}" -m venv "${venv}"
 "${venv}/${PYBIN}/python${EXE}" -m pip install -q --disable-pip-version-check --no-index "${wheel}"
 
@@ -52,12 +56,13 @@ script_help="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --help)"
 module_help="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -m adjagent --help)"
 [[ "${script_help}" == "${module_help}" ]] || fail "adjagent --help differs from python -m adjagent --help"
 
-for project in from-wheel from-checkout; do
-  mkdir -p "${project}/.claude"
-  : > "${project}/justfile"
+# Each project is named `project`: its AGENTS.md is titled with the project directory's name.
+for side in from-wheel from-checkout; do
+  mkdir -p "${side}/project/.claude"
+  : > "${side}/project/justfile"
 done
-from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${scratch}/from-wheel" --with-kb > /dev/null
-PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${scratch}/from-checkout" --with-kb > /dev/null
+from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${scratch}/from-wheel/project" --with-kb > /dev/null
+PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${scratch}/from-checkout/project" --with-kb > /dev/null
 diff -r from-wheel from-checkout || fail "the wheel's install differs from the checkout's"
 
 mkdir plugins

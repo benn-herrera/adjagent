@@ -1,22 +1,31 @@
 ### Harnesses and families
 
 A harness is a `Harness` dataclass (`adjagent/harness.py`) holding everything that differs between
-harnesses: the seven hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__kbase__`
+harnesses: the eight hole strings — `HarnessText.MCP_TOOL_PREFIX` among them, `mcp__plugin_adjagent_kbase__`
 under claude, `mcp_kbase_` under mage and `kbase_` under opencode, a server tool's offered name
-being that prefix plus the tool's own, and the last two, `recipe_rule` and `kbase_project_rule`
-(supplied under mage alone, whose server is started `--project-dir-required`), typed
-`OptionalHarnessText` where the other five are `HarnessText` — the tool spellings, the model shape it accepts, the text
+being that prefix plus the tool's own, and the last three, `recipe_rule`, `kbase_project_rule`
+(supplied under mage alone, whose server is started `--project-dir-required`) and `reload_rule`
+(supplied under claude alone: the sentence a claude install prints and the `adjagent` skill carries),
+typed `OptionalHarnessText` where the other five are `HarnessText` — the tool spellings, the model shape it accepts, the text
 `inherit` renders as (`inherit_text`) with the further `inherit_synonyms` rendering that same text, whether a bare
 `--model-tier-map` value is the whole map (`bare_tier_spec_is_all`), the frontmatter emitter,
 `mcp` (`McpSettings`), the settings file and server entry a kb install registers, its `site` (`McpSite`)
-naming the directory that file sits in — the project root, or, under mage, ROOT — `guardrail`
-(`GuardrailHook` or `None`), the hook script and settings entry a claude install registers (Install
-Consumption Model), `rendered_files` (`HarnessFile`), the files it renders of its own beside the
-definitions — mage's manifest — `omits`, the definition names it renders nothing for, `default_tier_spec`, the
+naming the directory that file sits in — the project root, or, under claude and mage, ROOT — `guardrail`
+(`GuardrailHook` or `None`), the hook script and the registration file beside it that a claude install
+writes (Install Consumption Model), `retired_entries` (`RetiredEntry`, empty by default), the entries
+earlier installs registered in the project's settings files that an install removes (claude's guardrail
+element and `kbase` member), `rendered_files` (`HarnessFile`), the files it renders of its own beside the
+definitions — the plugin manifest, `harness.PLUGIN_MANIFEST`, one value claude and mage share, version
+included — `plugin_dir`, the path below the harness directory the set is written into (`skills/adjagent`
+under claude; empty otherwise, so ROOT is the harness directory), `reference_prefix`, put before a
+definition's name wherever definition text names it (`adjagent:` under claude and mage, empty under
+opencode), `omits`, the definition names it renders nothing for, `default_tier_spec`, the
 `--model-tier-map` value used when none is given (`None`: the family's tiers; opencode's is
 `default`, read by `build_render`), and `plugin_parent_dir`, a plugin's trailing path of the
 directory its plugins sit in (`Mage/Skills`; empty otherwise), by which install target detection
-knows a plugin.
+knows a plugin (`Harness.is_standalone_plugin`: its harness directory is itself a plugin). The plugin
+name is one constant, `harness.PLUGIN_NAME`; the manifest's `name`, both `reference_prefix` values,
+claude's `plugin_dir` and claude's MCP prefix are each derived from it.
 `inherit_synonyms` and `bare_tier_spec_is_all` differ between claude and opencode, as the strings
 above do, and mage holds claude's assumed values (model pattern, aliases, tool spellings,
 frontmatter) as copies it may revise independently: opencode holds `("default",)` and `True`, with

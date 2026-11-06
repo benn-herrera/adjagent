@@ -79,11 +79,12 @@ render *args:
 _render-slot slug *args:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh "$@"
 
-[doc("[dev] re-take the three oracle slots rendered/reference, reference-opencode and reference-gemma from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
+[doc("[dev] re-take the four oracle slots rendered/reference-claude, reference-opencode, reference-gemma and reference-mage from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
 retake-reference:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference-claude
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference-opencode --harness=opencode --model-tier-map=all=inherit
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference-gemma --family=gemma-4 --model-pin-tier-alias-map=all=sonnet
+    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh reference-mage --harness=mage
 
 [private]
 render-agents-file harness out:
@@ -124,8 +125,8 @@ check-links: _venv
 # (devtools/render_diff.py states the rules). A copied file's `!INSTALLED!` banner
 # is replaced the same way. Two files are the same when that text is identical. The
 # output keeps `diff -rq`'s two line forms.
-[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
-render-diff a="reference" b="latest":
+[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference-claude, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
+render-diff a="reference-claude" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
 [doc("[dev] run tooling python tests and the markdown link check: no argument runs all four (adjagent + dupe_sweep pytest, then docs: just check-links with its defaults, then wheel: just check-wheel); a surface argument (adjagent, dupe_sweep, docs, wheel) runs only that one; further arguments, never given to docs or wheel, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]

@@ -38,9 +38,15 @@ Other targets:
   (slug defaults to `latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/`:
   `CLAUDE.md` by default, or another harness's with `--harness=NAME`. Under mage it lands at the slot
   root instead, `rendered/<slug>/CLAUDE.md` beside `.mcp.json`, with no `harness/` directory and no
-  `Makefile`: the slot is installed with `--subdir=`, so the plugin's root is the slot itself. A slug
-  starting with `reference` is refused.
-- `just render-diff [a] [b]` compares two slots (reference against latest by default) by text, with
+  `Makefile`: the slot is installed with `--subdir=`, so the plugin's root is the slot itself. Under
+  claude the slot is the harness directory and holds the plugin at `<slot>/skills/adjagent/`, with
+  `.claude-plugin/plugin.json` and `.mcp.json` inside it and no `agents/` at the slot root. A claude
+  or opencode slot also holds the project's `AGENTS.md` and, under claude, the `CLAUDE.md` redirect
+  (`@AGENTS.md`). A slug starting with `reference` is refused.
+- A slot renders under a scratch `HOME` that is empty and removed afterward, so the install finds no
+  user-global agents file and writes the block into the slot's `AGENTS.md`, never into the real
+  `~/.claude` or `~/.config/opencode`. `just check-wheel` runs under a scratch home the same way.
+- `just render-diff [a] [b]` compares two slots (reference-claude against latest by default) by text, with
   each file's banner replaced by one constant line, and reports differences without failing on them.
 - `just retake-reference` re-takes the baseline slots `render-diff` compares against. Run it only
   after a content change is accepted.
@@ -56,9 +62,10 @@ adjagent/                 the generator and every definition, run as `python3 -m
   clauses.py              shared text: named string constants, small functions for slotted text
   definitions/            one module per definition, or per set that shares text and ships together
   harnesses/              one module per harness (claude, mage, opencode), each defining HARNESS
-    resources/            one directory per harness: the files it ships, copied into the install's
-                          harness directory as they stand (opencode/plugins/guardrail.ts,
-                          claude/hooks/guardrail.pl)
+    resources/            one directory per harness: the files it ships, copied as they stand into
+                          the install's root (opencode/plugins/guardrail.ts, claude/hooks/guardrail.pl);
+                          the root is where the install writes the set: the plugin directory
+                          under claude, the harness directory under opencode and mage
   families/               one module per model family, each defining FAMILY
   kb-tools/               shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
                           a kb install only as skills/kbase/kb-tools/
@@ -79,7 +86,8 @@ ROADMAP_PLANS/            tracked home for planned work not yet ready to execute
 ```
 
 `agents/`, `commands/` and `skills/` are not directories in this repository. They are the three
-deployed surfaces of the product, produced into `<project>/.claude/` by an install or into
+deployed surfaces of the product, produced into `<project>/.claude/skills/adjagent/` (the plugin) by
+an install or into
 `rendered/` by `just render`. A definition module registers by existing in `definitions/`; its `kind`
 and `folder` decide where it lands, and a skill's `files` add the supporting files beneath its own
 directory. The full layout is in

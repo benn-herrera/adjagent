@@ -14,8 +14,10 @@ harness reads, and the description is the whole of what a session sees before it
 it carries the conditions under which the skill applies, so discovery needs no command of its own.
 A supporting file has no frontmatter. A consuming project receives the install product — the three
 surfaces together with the packages delivered alongside them by explicit mapping (below), the files
-the installing harness ships (below), and, under mage, one file more, `.claude-plugin/plugin.json`,
-the manifest a plugin is discovered by, rendered and neither a surface nor a definition — by
+the installing harness ships (below), and, under claude and mage, `.claude-plugin/plugin.json`, the
+manifest a plugin is discovered by, and, under claude, `hooks/hooks.json`, the guardrail's
+registration, written only where the guardrail's install-time run succeeds, each rendered and neither
+a surface nor a definition — by
 **install**, one of two deployment shapes; the other, the mage plugin distribution (below), is a
 release artifact an install builds and a consumer unpacks. Install has two types, and no
 other:

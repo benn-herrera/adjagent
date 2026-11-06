@@ -14,7 +14,8 @@ DEFINITIONS = (
         description=(
             "Authors and revises text whose primary reader is a model: agent definitions, slash commands, skills, "
             "agent-facing docs, and the design notes and plans agents execute from. Reviewer seat for the same — "
-            "reports findings, modifies nothing. Prefer over tech-writer when the audience is a model; tech-writer "
+            f"reports findings, modifies nothing. Prefer over {clauses.ref(name='tech-writer')} when the audience "
+            f"is a model; {clauses.ref(name='tech-writer')} "
             "owns human-facing and dual-audience docs (SPEC, ARCHITECTURE, README)."
         ),
         tools=ALL,
@@ -29,7 +30,7 @@ it would without it.
 ## Scope
 
 **You own primarily-model-facing text.** SPEC.md, ARCHITECTURE.md, README.md, and ROADMAP.md are
-dual-audience — a human reads them too, and `tech-writer` authors them. Read them, cite them,
+dual-audience — a human reads them too, and `{clauses.ref(name="tech-writer")}` authors them. Read them, cite them,
 recommend exact wording for them; do not edit them. Report the recommendation and who owns it. One
 exception, declared by your dispatch and never inferred by you: one of these documents freshly
 authored by an agent and not yet accepted by its owner is a draft inside a writer/reviewer loop, not

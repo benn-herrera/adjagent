@@ -14,48 +14,58 @@ family, so the installed set agrees with itself.
 - The kb set runs on macOS or Linux only; native Windows is unsupported for it. It needs kbase, which
   you install, among its other requirements ([Knowledge base](docs/knowledge-base.md#requirements)).
 
-Adjagent installs for three harnesses: claude (`.claude/`), opencode (`.opencode/`) and mage (a plugin).
+Adjagent installs for three harnesses: claude (one plugin, `.claude/skills/adjagent/`, whose agents run as `adjagent:<name>`), opencode (`.opencode/`) and mage (a plugin).
 
 ## Quick Start Guide
 
-Add the recipe for your project's runner. It installs adjagent, pinned to `AGENTS_VER`, into the
+Add the recipe for your project's runner. It installs adjagent, pinned to `ADJAGENT_VER`, into the
 project's `.venv/` (the project's existing one, or one it creates), then installs the agent set into the
-project for both harnesses and the operator-level agents file for each.
+project for both harnesses.
 
-The last two lines of the recipe write outside the project: `~/.claude/CLAUDE.md` and
-`~/.config/opencode/AGENTS.md`. They replace only the block between adjagent's marker lines and keep
-the rest of each file ([Agents file](docs/agents-file.md)). A project that uses one harness drops the
-other harness's `install` line and `install-agents-file` line.
+Besides the installed trees, the install keeps the operator working rules as one marked block in one
+place: your global agents file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`) if it already
+holds the block, otherwise the project's `AGENTS.md`, where under claude `CLAUDE.md` is created as the
+one-line `@AGENTS.md` redirect. A `CLAUDE.md` holding anything else is refused with nothing written
+([Refusals](docs/install-reference.md#refusals)). Only the block is replaced, and the rest of each file
+is kept; a write that changes an agents file keeps one rolling `backup.<name>` beside it, such as
+`backup.AGENTS.md`. A run that would change nothing writes nothing ([Agents file](docs/agents-file.md)).
+A project that uses one harness drops the other harness's `install` line.
+
+Under claude the set is a plugin: invoke its agents and commands as `adjagent:<name>`, and run
+`/reload-plugins` (or restart Claude Code) after an install for new definitions to register.
 
 Justfile:
 
 ```just
-AGENTS_VER := "v0.13.1"
-AGENTS_VENV := ".venv"
-# installs the pinned adjagent into the project's venv, then installs the agent set
+ADJAGENT_VER := "0.15.0"
+VENV := justfile_dir() / ".venv"
+PYTHON := "\"" + VENV + "/bin/python" + "\""
+ADJAGENT := "\"" + VENV + "/bin/adjagent" + "\""
 agents:
-  [ -x "{{AGENTS_VENV}}/bin/python" ] || python3 -m venv "{{AGENTS_VENV}}"
-  [ "v$("{{AGENTS_VENV}}/bin/adjagent" --version 2>/dev/null)" = "{{AGENTS_VER}}" ] || "{{AGENTS_VENV}}/bin/python" -m pip install "git+https://github.com/benn-herrera/adjagent@{{AGENTS_VER}}"
-  "{{AGENTS_VENV}}/bin/adjagent" install . --harness=claude
-  "{{AGENTS_VENV}}/bin/adjagent" install . --harness=opencode
-  "{{AGENTS_VENV}}/bin/adjagent" install-agents-file ~/.claude
-  "{{AGENTS_VENV}}/bin/adjagent" install-agents-file ~/.config/opencode
+  #!/usr/bin/env bash
+  set -euo pipefail
+  [[ -x {{PYTHON}} ]] || python3 -m venv "{{VENV}}"
+  [[ -x {{ADJAGENT}} && "$({{ADJAGENT}} --version)" == "{{ADJAGENT_VER}}" ]] || \
+    {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
+  {{ADJAGENT}} install . --harness=claude
+  {{ADJAGENT}} install . --harness=opencode
 ```
 
 Makefile:
 
 ```make
-AGENTS_VER := v0.13.1
-AGENTS_VENV := .venv
-
+SHELL := /bin/bash
+ADJAGENT_VER := 0.15.0
+VENV := .venv
+PYTHON := $(VENV)/bin/python
+ADJAGENT := $(VENV)/bin/adjagent
 .PHONY: agents
 agents:
-	[ -x "$(AGENTS_VENV)/bin/python" ] || python3 -m venv "$(AGENTS_VENV)"
-	[ "v$$("$(AGENTS_VENV)/bin/adjagent" --version 2>/dev/null)" = "$(AGENTS_VER)" ] || "$(AGENTS_VENV)/bin/python" -m pip install "git+https://github.com/benn-herrera/adjagent@$(AGENTS_VER)"
-	"$(AGENTS_VENV)/bin/adjagent" install . --harness=claude
-	"$(AGENTS_VENV)/bin/adjagent" install . --harness=opencode
-	"$(AGENTS_VENV)/bin/adjagent" install-agents-file ~/.claude
-	"$(AGENTS_VENV)/bin/adjagent" install-agents-file ~/.config/opencode
+	[[ -x "$(PYTHON)" ]] || python3 -m venv "$(VENV)"
+	[[ -x "$(ADJAGENT)" && "$$("$(ADJAGENT)" --version)" == "$(ADJAGENT_VER)" ]] || \
+	  "$(PYTHON)" -m pip install "git+https://github.com/benn-herrera/adjagent@v$(ADJAGENT_VER)"
+	"$(ADJAGENT)" install . --harness=claude
+	"$(ADJAGENT)" install . --harness=opencode
 ```
 
 Run `just agents` or `make agents`. The recipe never recreates or clears an existing `.venv`, and runs
@@ -67,20 +77,22 @@ project's `.gitignore`:
 .opencode/
 ```
 
+The project's `AGENTS.md` and `CLAUDE.md` are not installed trees: the install may write them (above),
+so decide whether to commit them.
+
 The `.venv/` entry a Python project conventionally ignores covers the venv; add it if the project
 ignores nothing there. The docdicer tools' own venv needs no entry: its `.gitignore` is installed
 with it.
 
-To update, change `AGENTS_VER` to the new release tag and run the recipe again. Everything it
+To update, change `ADJAGENT_VER` to the new release's version and run the recipe again. Everything it
 installs is documented in the [install reference](docs/install-reference.md).
 
-To add the knowledge-base set, add `--with-kb` to the two `install .` lines, add `.mcp.json` to
-`.gitignore`, and install kbase first ([Knowledge base](docs/knowledge-base.md)).
+To add the knowledge-base set, add `--with-kb` to the two `install .` lines and install kbase first ([Knowledge base](docs/knowledge-base.md)).
 
 ## Previewing and re-installing
 
 `--dry-run` prints what an install would create, change and remove, grouped and relative to the
-project root, and writes nothing:
+project root (a path outside it prints absolute), and writes nothing:
 
 ```sh
 .venv/bin/adjagent install . --harness=claude --dry-run
@@ -97,7 +109,7 @@ of your own. A bare `pip install` outside a venv is refused on Homebrew and most
 `~/Library/Python/3.9/bin`, which is not on `PATH`.
 
 ```sh
-pipx install "git+https://github.com/benn-herrera/adjagent@v0.13.1"
+pipx install "git+https://github.com/benn-herrera/adjagent@v0.15.0"
 pipx ensurepath   # puts pipx's bin directory on PATH; open a new shell afterwards
 adjagent --help
 adjagent install ~/projects/foo
@@ -107,7 +119,7 @@ Or, with a venv:
 
 ```sh
 python3 -m venv ~/.venvs/adjagent
-~/.venvs/adjagent/bin/pip install "git+https://github.com/benn-herrera/adjagent@v0.13.1"
+~/.venvs/adjagent/bin/pip install "git+https://github.com/benn-herrera/adjagent@v0.15.0"
 ~/.venvs/adjagent/bin/adjagent install ~/projects/foo
 ```
 

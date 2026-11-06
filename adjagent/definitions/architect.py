@@ -167,7 +167,7 @@ Systematically evaluate (use judgment about which apply):
 2. **Unused Features & Dependencies**: Dependencies used partially? "Just in case" code paths?
    Transitive deps posing version conflict/supply chain risk?
 3. **Security**: Trust boundary violations? Exploitable serialization? FFI memory safety? TOCTOU
-   races/concurrency hazards? Secret handling? — *Skip this dimension when security-reviewer
+   races/concurrency hazards? Secret handling? — *Skip this dimension when `{clauses.ref(name="security-reviewer")}`
    findings are being provided; the security reviewer covers it with greater depth. Apply only in
    standalone reviews.*
 4. **Deviation from Standards**: Following language/ecosystem conventions? Reinventing wheels?

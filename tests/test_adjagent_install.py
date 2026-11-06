@@ -4,17 +4,19 @@ write nothing, the redirects, the kb-tools package and its banner, the docdicer 
 venv rebuild, the kb install path, the MCP
 settings merge, the runner include line, the harness resources a harness ships as they stand, the
 prune, the refusal to overwrite a file without this repository's banner, the claude guardrail hook's
-probe and settings merge, and the checkout premise with the checks that stand down outside one.
+probe and registration, the removal of entries earlier installs registered, and the checkout premise with the checks that stand down outside one.
 
 The package is imported from the repository root, which `just test` puts on PYTHONPATH.
 """
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import cast
@@ -26,9 +28,10 @@ from adjagent.agents_file import install_agents_file, marker_span, scope_name
 from adjagent.cli import main
 from adjagent.context import Render, build_render
 from adjagent.definition import Definition
+from adjagent.definitions import discover
 from adjagent.errors import InputError
 from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
-from adjagent.harness import Harness
+from adjagent.harness import Harness, McpSite
 from adjagent.harnesses.claude import HARNESS as CLAUDE
 from adjagent.harnesses.mage import HARNESS as MAGE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
@@ -50,10 +53,19 @@ from adjagent.install import (
     uncommitted_sources,
 )
 from adjagent.loading import load
-from adjagent.render import definitions, filled_body, render_agents_file, render_all, render_definition
-from adjagent.vocabulary import Kind
+from adjagent.render import (
+    definitions,
+    filled_body,
+    render_agents_file,
+    render_all,
+    render_definition,
+    rendered_definitions,
+)
+from adjagent.vocabulary import Kind, reference
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
+"""The begin marker line an earlier, unstamped revision wrote."""
+_STAMPED_BEGIN = f" <!-- vvv-adjagent {__version__} do not edit at or between marker lines. adjagent-vvv -->"
 _END = " <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->"
 
 
@@ -71,15 +83,6 @@ def _files(root: Path) -> dict[str, bytes]:
     }
 
 
-@pytest.fixture(autouse=True)
-def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A home directory under `tmp_path`, created by the tests that use it: an install reads the home
-    directory to tell whether ROOT is user-level, and no test reads the real one."""
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
-    return home
-
-
 # The agents-file render.
 
 
@@ -87,7 +90,7 @@ def test_the_fresh_render_holds_the_title_and_one_marker_span() -> None:
     user_dir = Path(CLAUDE.user_harness_dir).expanduser()
     text = render_agents_file(CLAUDE, scope=scope_name(CLAUDE, user_dir))
     lines, begin, end = marker_span(text, where="render")
-    assert (lines[0], lines[begin], lines[end]) == ("# Global info and directives", _BEGIN, _END)
+    assert (lines[0], lines[begin], lines[end]) == ("# Global info and directives", _STAMPED_BEGIN, _END)
     assert text.endswith(_END + "\n")
 
 
@@ -126,8 +129,8 @@ def test_install_replaces_only_the_span_and_keeps_every_other_byte(tmp_path: Pat
 @pytest.mark.parametrize(
     "prior, message",
     [
-        ("# mine\n\nno markers\n", "found 0 begin and 0 end"),
         (f"{_BEGIN}\n{_BEGIN}\n{_END}\n", "found 2 begin and 1 end"),
+        (f"# mine\n{_END}\n", "found 0 begin and 1 end"),
         (f"{_END}\n{_BEGIN}\n", "found 1 begin and 1 end"),
     ],
 )
@@ -138,15 +141,74 @@ def test_a_file_without_one_ordered_marker_pair_is_refused(tmp_path: Path, prior
     assert _files(tmp_path) == {"AGENTS.md": prior.encode()}
 
 
-def _symlink_destination(tmp_path: Path) -> None:
-    (tmp_path / "real.md").write_text(f"{_BEGIN}\n{_END}\n", encoding="utf-8")
-    (tmp_path / "AGENTS.md").symlink_to("real.md")
+@pytest.mark.parametrize(
+    "prior, separator",
+    [
+        ("", ""),
+        ("# mine\r\nkeep\r\n\n", ""),
+        ("# mine\r\nkeep\r\n", "\n"),
+        ("# mine\r\nkeep  ", "\n\n"),
+    ],
+)
+def test_a_file_without_marker_lines_gets_the_block_appended(
+    tmp_path: Path, capsys, prior: str, separator: str
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    target.write_bytes(prior.encode())
+    _install(tmp_path)
+    expected = (prior + separator + "\n".join(_block(OPENCODE)) + "\n").encode()
+    assert target.read_bytes() == expected
+    assert (tmp_path / "backup.AGENTS.md").read_bytes() == prior.encode()
+    capsys.readouterr()
+    _install(tmp_path)
+    assert capsys.readouterr().out == f"unchanged {target}\n"
+    assert target.read_bytes() == expected
 
 
-def _symlink_backup(tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").write_text(f"{_BEGIN}\n{_END}\n", encoding="utf-8")
-    (tmp_path / "elsewhere.md").write_text("x", encoding="utf-8")
-    (tmp_path / "backup.AGENTS.md").symlink_to("elsewhere.md")
+def _stamped(stamp: str, *, content: list[str]) -> str:
+    """A file holding the rendered block with its begin line stamped `stamp` in place of this version
+    and `content` between the marker lines."""
+    begin, *_, end = _block(OPENCODE)
+    return "\n".join(["mine", begin.replace(__version__, stamp), *content, end, ""])
+
+
+_CURRENT = _block(OPENCODE)[1:-1]
+
+
+@pytest.mark.parametrize(
+    "stamp, content, rewritten",
+    [
+        ("0.0.1", _CURRENT, False),
+        ("99.0.0", _CURRENT, False),
+        ("0.0.1", ["old"], True),
+        (__version__, ["old"], True),
+        ("99.0.0", ["old"], False),
+    ],
+    ids=["identical-older", "identical-newer", "older", "same", "newer"],
+)
+def test_the_stamp_decides_a_differing_block_and_identical_content_is_never_rewritten(
+    tmp_path: Path, capsys, stamp: str, content: list[str], rewritten: bool
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    prior = _stamped(stamp, content=content)
+    target.write_text(prior, encoding="utf-8")
+    _install(tmp_path)
+    captured = capsys.readouterr()
+    if rewritten:
+        assert target.read_text(encoding="utf-8") == "\n".join(["mine", *_block(OPENCODE), ""])
+        assert (tmp_path / "backup.AGENTS.md").read_text(encoding="utf-8") == prior
+    else:
+        assert _files(tmp_path) == {"AGENTS.md": prior.encode()}
+    downgrade = stamp == "99.0.0" and content != _CURRENT
+    assert ("not downgraded" in captured.err and f"99.0.0, newer than this {__version__}" in captured.err) is downgrade
+
+
+def test_an_unstamped_block_is_rewritten_and_stamped(tmp_path: Path) -> None:
+    """The not-a-release row is the planted `version[abc1234]` fence above."""
+    target = tmp_path / "AGENTS.md"
+    target.write_text(f"{_BEGIN}\nold\n{_END}\n", encoding="utf-8")
+    _install(tmp_path)
+    assert target.read_text(encoding="utf-8") == "\n".join([*_block(OPENCODE), ""])
 
 
 def _non_utf8(tmp_path: Path) -> None:
@@ -166,8 +228,6 @@ def _redirect_outside(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "plant, directory, message",
     [
-        (_symlink_destination, ".", "AGENTS.md is a symlink or not a regular file"),
-        (_symlink_backup, ".", "backup.AGENTS.md is a symlink or not a regular file"),
         (_non_utf8, ".", "AGENTS.md is not UTF-8 text"),
         (_redirect_chain, ".", "which is itself a redirect"),
         (_redirect_outside, "inner", "which is outside"),
@@ -183,10 +243,9 @@ def test_an_unsafe_destination_is_refused_with_nothing_written(
     assert _files(tmp_path) == before
 
 
-def test_uncommitted_sources_refuse_the_install(tmp_path: Path) -> None:
-    with pytest.raises(InputError, match=re.escape("has uncommitted changes (?? adjagent/x.py)")):
-        _install(tmp_path, uncommitted=("?? adjagent/x.py",))
-    assert _files(tmp_path) == {}
+def test_uncommitted_sources_refuse_no_install_into_a_project_directory(tmp_path: Path) -> None:
+    _install(tmp_path, uncommitted=("?? adjagent/x.py",))
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == render_agents_file(OPENCODE, scope=tmp_path.name)
 
 
 @pytest.mark.parametrize("git_entry", ["directory", "file", None])
@@ -256,15 +315,12 @@ def test_a_project_directory_under_claude_writes_agents_md_and_the_redirect(tmp_
 
 def test_this_repositorys_claude_redirect_is_followed_and_left_alone(tmp_path: Path) -> None:
     """This repository's own pair: CLAUDE.md is `@AGENTS.md`, and AGENTS.md is the operator's text
-    with no block, refused until the operator places a marker pair in it."""
+    with no block, which the install appends."""
     redirect = (REPO_ROOT / "CLAUDE.md").read_bytes()
     own = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert redirect == b"@AGENTS.md\n" and _BEGIN not in own
+    assert redirect == b"@AGENTS.md\n" and _BEGIN not in own and own.endswith("\n")
     (tmp_path / "CLAUDE.md").write_bytes(redirect)
     (tmp_path / "AGENTS.md").write_text(own, encoding="utf-8")
-    with pytest.raises(InputError, match="AGENTS.md: found 0 begin and 0 end"):
-        _install(tmp_path, CLAUDE)
-    (tmp_path / "AGENTS.md").write_text(f"{own}\n{_BEGIN}\n{_END}\n", encoding="utf-8")
     _install(tmp_path, CLAUDE)
     assert (tmp_path / "CLAUDE.md").read_bytes() == redirect
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "\n".join([own, *_block(CLAUDE), ""])
@@ -375,13 +431,33 @@ class _ToolInstalls:
 _PLUGIN = "plugins/guardrail.ts"
 _GUARDRAIL = "hooks/guardrail.pl"
 _SETTINGS = ".claude/settings.json"
+# A claude install writes the set into its plugin, below the harness directory it is given.
+_CLAUDE_PLUGIN_RELPATH = f".claude/{CLAUDE.plugin_dir}"
 
 
-def _hook_entry(harness_relpath: str) -> dict:
-    """The PreToolUse entry an install whose harness directory is `harness_relpath` writes. What the
-    command does is pinned by running it (`test_the_registered_command_...`), not by its spelling."""
-    assert CLAUDE.guardrail is not None
-    return CLAUDE.guardrail.entry(harness_relpath)
+def _claude_plugin(harness_dir: Path) -> Path:
+    return harness_dir / CLAUDE.plugin_dir
+
+
+def _claude_mcp_file(harness_dir: Path) -> Path:
+    """The plugin's own MCP settings file, its directory created so a test can seed it."""
+    plugin = _claude_plugin(harness_dir)
+    plugin.mkdir(parents=True, exist_ok=True)
+    return plugin / CLAUDE.mcp.canonical
+
+
+_REGISTRATION = "hooks/hooks.json"
+
+
+def _retired_hook_entry(harness_relpath: str, *, matcher: str = "Bash|Read|Write|Edit|NotebookEdit|Grep|Glob") -> dict:
+    """The PreToolUse entry an earlier install registered in the project's settings file, its script
+    under `harness_relpath`, spelled as that install wrote it: the entry an install now removes."""
+    prefix = "" if harness_relpath == "." else f"{harness_relpath}/"
+    command = (
+        f's="$CLAUDE_PROJECT_DIR/{prefix}hooks/guardrail.pl"; if [ -f "$s" ] && [ -r "$s" ]; then exec perl "$s"; '
+        'fi; echo "guardrail hook: no readable script at $s" >&2; exit 1'
+    )
+    return {"matcher": matcher, "hooks": [{"type": "command", "command": command}]}
 
 
 def test_an_opencode_install_copies_the_harnesss_plugin_byte_verbatim(tmp_path: Path) -> None:
@@ -395,18 +471,18 @@ def test_an_opencode_install_copies_the_harnesss_plugin_byte_verbatim(tmp_path: 
     assert copied.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
 
 
-def test_a_fresh_claude_install_ships_the_guardrail_and_registers_it_in_a_new_settings_file(tmp_path: Path) -> None:
-    """Where the probe passes, the hook script lands byte-verbatim and executable under ROOT, and the
-    project gains `.claude/settings.json` holding the one entry that runs it."""
+def test_a_fresh_claude_install_ships_the_guardrail_and_registers_it_in_the_plugin(tmp_path: Path) -> None:
+    """Where the probe passes, the hook script lands byte-verbatim and executable under ROOT beside the
+    plugin's one registration, and the project gains no settings file."""
     root = tmp_path / ".claude"
     root.mkdir()
     _definition_install(root, project_root=tmp_path)
-    copied = root / _GUARDRAIL
+    copied = _claude_plugin(root) / _GUARDRAIL
     assert copied.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "claude" / _GUARDRAIL).read_bytes()
     assert os.access(copied, os.X_OK)
-    assert json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8")) == {
-        "hooks": {"PreToolUse": [_hook_entry(".claude")]}
-    }
+    registration = json.loads((_claude_plugin(root) / _REGISTRATION).read_text(encoding="utf-8"))
+    assert list(registration) == ["hooks"] and len(registration["hooks"]["PreToolUse"]) == 1
+    assert not (tmp_path / _SETTINGS).exists()
 
 
 def test_a_second_install_leaves_the_copied_plugin_standing_and_prunes_only_the_stale_render(
@@ -469,16 +545,30 @@ def test_every_harness_omits_a_name_the_package_discovers() -> None:
     assert unknown == []
 
 
+@pytest.mark.parametrize("with_kb", [False, True], ids=["base", "kb"])
 @pytest.mark.parametrize("name", sorted(load("adjagent.harnesses", "HARNESS")))
-def test_every_skill_the_agents_file_cites_ships_in_the_harness_default_install(name: str) -> None:
-    """The agents file points at skills by name; a name a default install does not ship points at
-    nothing. A plugin always takes the kb set; any other harness's default install leaves it out."""
+def test_every_reference_names_a_definition_the_same_install_ships(name: str, with_kb: bool) -> None:
+    """A reference hole fills for any discovered name, so one naming a definition the install omits
+    renders pointing at nothing. Every reference in the source text — body, description and supporting
+    files — of each definition a default install renders, and of the agents file, names a definition
+    rendered beside it. A plugin always takes the kb set."""
     ctx = build_render(harness=name, family="claude", tier_spec=None, alias_spec=None)
-    cited = set(re.findall(r"`([a-z0-9-]+)`\s+skill\b", render_agents_file(ctx.harness, scope="probe")))
-    assert cited, "no skill citation parsed from the agents file, so the check below would pass vacuously"
-    renders = render_all(ctx, include=lambda defn: ctx.harness.is_plugin or not excluded(defn.name))
-    shipped = {path.parts[1] for path, _ in renders if path.parts[0] == "skills" and path.name == "SKILL.md"}
-    assert cited <= shipped, sorted(cited - shipped)
+    kb_included = with_kb or ctx.harness.is_standalone_plugin
+    shipped = [
+        defn for _, defn in rendered_definitions(ctx, include=lambda defn: kb_included or not excluded(defn.name))
+    ]
+    every = [defn for _, entries in discover() for defn in entries]
+    [agents_file] = [defn for defn in every if defn.kind is Kind.AGENTS_FILE]
+    citations = {
+        (citing.name, cited.name)
+        for citing in (*shipped, agents_file)
+        for text in (citing.body, citing.description or "", *(file.body for file in citing.files))
+        for cited in every
+        if reference(cited.name) in text
+    }
+    assert citations, "no definition references another, so the check below would pass vacuously"
+    shipped_names = {defn.name for defn in shipped}
+    assert sorted(pair for pair in citations if pair[1] not in shipped_names) == []
 
 
 @pytest.mark.parametrize(
@@ -513,7 +603,8 @@ def test_a_default_install_writes_no_kb_definition_and_no_kb_side_config(tmp_pat
     root.mkdir()
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
     _definition_install(root, project_root=project)
-    files = _files(root)
+    plugin = _claude_plugin(root)
+    files = _files(plugin)
     assert "agents/python-coder.md" in files
     for relative in (
         *_KB_DEFINITIONS,
@@ -521,8 +612,8 @@ def test_a_default_install_writes_no_kb_definition_and_no_kb_side_config(tmp_pat
         "skills/kbase/kb-tools/runner-snippets/kb.just",
     ):
         assert relative not in files
-    assert not (root / "skills/kbase").exists()
-    assert not (project / ".mcp.json").exists()
+    assert not (plugin / "skills/kbase").exists()
+    assert not (plugin / ".mcp.json").exists() and not (project / ".mcp.json").exists()
     assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
     assert not (project / "Makefile").exists()
 
@@ -535,22 +626,24 @@ def test_a_kb_install_writes_the_kb_definitions_the_package_the_mcp_entry_and_th
     root.mkdir()
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=project)
+    plugin = _claude_plugin(root)
     for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES):
-        assert (root / relative).is_file()
-    kb_just = (root / "skills/kbase/kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
+        assert (plugin / relative).is_file()
+    kb_just = (plugin / "skills/kbase/kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
     source_just = (PACKAGE_ROOT / "kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
-    kb_mk = (root / "skills/kbase/kb-tools/runner-snippets/kb.mk").read_text(encoding="utf-8").split("\n")
+    kb_mk = (plugin / "skills/kbase/kb-tools/runner-snippets/kb.mk").read_text(encoding="utf-8").split("\n")
     assert kb_just[0].startswith("# !INSTALLED! from adjagent/kb-tools/runner-snippets/kb.just — ")
     assert kb_just[1:] == source_just
     assert kb_mk[0].startswith("# !INSTALLED! from adjagent/kb-tools/runner-snippets/kb.mk — ")
-    assert json.loads((project / ".mcp.json").read_text(encoding="utf-8")) == {
+    assert json.loads((plugin / ".mcp.json").read_text(encoding="utf-8")) == {
         "mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}
     }
+    assert not (project / ".mcp.json").exists()
     assert (project / "justfile").read_text(encoding="utf-8") == (
-        "# mine\n\nimport? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
+        f"# mine\n\nimport? '{_CLAUDE_PLUGIN_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     )
     captured = capsys.readouterr()
-    assert f"wrote {project / '.mcp.json'} with the kbase MCP entry" in captured.out
+    assert f"wrote {plugin / '.mcp.json'} with the kbase MCP entry" in captured.out
     assert "appended the KB include line" in captured.out
 
 
@@ -563,9 +656,24 @@ def test_an_installed_kbase_router_makes_a_plain_install_sticky(tmp_path: Path) 
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=project)
     _definition_install(root, project_root=project)
-    after = _files(root)
+    after = _files(_claude_plugin(root))
     for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES, "skills/kbase/kb-tools/runner-snippets/kb.just"):
         assert relative in after
+
+
+def test_a_flat_layout_kbase_router_makes_a_plain_install_into_the_plugin_sticky(tmp_path: Path) -> None:
+    """An install over the layout that wrote straight into the harness directory reads that layout's
+    router too, so the first plain install after the upgrade keeps kb, in the plugin."""
+    project = tmp_path
+    root = project / ".claude"
+    router = root / "skills/kbase/SKILL.md"
+    router.parent.mkdir(parents=True)
+    router.write_text(_rendered(_CLAUDE_RENDER, "skills/kbase/SKILL.md"), encoding="utf-8")
+    _definition_install(root, project_root=project)
+    after = _files(_claude_plugin(root))
+    for relative in (*_KB_SKILL_FILES, "skills/kbase/kb-tools/runner-snippets/kb.just"):
+        assert relative in after
+    assert not router.exists()
 
 
 def test_a_sticky_install_removes_the_executable_an_earlier_version_installed(tmp_path: Path) -> None:
@@ -576,18 +684,19 @@ def test_a_sticky_install_removes_the_executable_an_earlier_version_installed(tm
     root = project / ".claude"
     root.mkdir()
     _definition_install(root, with_kb=True, project_root=project)
-    executable = root / "skills/kbase/kb-tools/kbase"
+    plugin = _claude_plugin(root)
+    executable = plugin / "skills/kbase/kb-tools/kbase"
     executable.write_bytes(_KBASE_BYTES)
     signature = executable.with_name("kbase.asc")
     signature.write_bytes(b"-----BEGIN PGP SIGNATURE-----\n")
-    (project / ".mcp.json").write_text(
-        json.dumps({"mcpServers": {"kbase": {"command": ".claude/skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}),
+    (plugin / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"kbase": {"command": "skills/kbase/kb-tools/kbase", "args": ["mcp"]}}}),
         encoding="utf-8",
     )
     _definition_install(root, project_root=project)
     assert not executable.exists() and not signature.exists()
-    assert (root / "skills/kbase/kb-tools/runner-snippets/kb.just").is_file()
-    settings = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    assert (plugin / "skills/kbase/kb-tools/runner-snippets/kb.just").is_file()
+    settings = json.loads((plugin / ".mcp.json").read_text(encoding="utf-8"))
     assert settings == {"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}}
 
 
@@ -619,16 +728,17 @@ def test_a_kb_tools_tree_without_the_router_is_not_sticky(tmp_path: Path) -> Non
     definitions, no MCP entry, no runner include line, and the tree left as it was found."""
     project = tmp_path
     root = project / ".claude"
-    snippets = root / "skills/kbase/kb-tools/runner-snippets"
+    plugin = _claude_plugin(root)
+    snippets = plugin / "skills/kbase/kb-tools/runner-snippets"
     snippets.mkdir(parents=True)
     (snippets / "kb.just").write_text("# stale snippet\n", encoding="utf-8")
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
     _definition_install(root, project_root=project)
-    files = _files(root)
+    files = _files(plugin)
     for relative in (*_KB_DEFINITIONS, *_KB_SKILL_FILES):
         assert relative not in files
     assert (snippets / "kb.just").read_text(encoding="utf-8") == "# stale snippet\n"
-    assert not (project / ".mcp.json").exists()
+    assert not (plugin / ".mcp.json").exists()
     assert (project / "justfile").read_text(encoding="utf-8") == "# mine\n"
 
 
@@ -657,8 +767,9 @@ def test_the_cli_with_kb_flag_installs_the_kb_skill_files_and_the_skill_kb_tools
     root = tmp_path / ".claude"
     root.mkdir()
     main(["install", str(root), "--harness=claude", "--with-kb"])
-    assert all((root / relative).is_file() for relative in _KB_SKILL_FILES)
-    snippets = root / "skills/kbase/kb-tools/runner-snippets"
+    plugin = _claude_plugin(root)
+    assert all((plugin / relative).is_file() for relative in _KB_SKILL_FILES)
+    snippets = plugin / "skills/kbase/kb-tools/runner-snippets"
     assert (snippets / "kb.just").is_file() and (snippets / "kb.mk").is_file()
 
 
@@ -675,17 +786,18 @@ def test_an_excluded_run_prunes_a_stale_kb_definition_it_did_not_write(tmp_path:
 def test_a_kb_install_prunes_a_stale_reference_and_keeps_a_user_file(tmp_path: Path, capsys) -> None:
     """A supporting file is ours by its own first line, so prune needs no rule keyed on the skill."""
     root = tmp_path / ".claude"
-    references = root / "skills/kbase/references"
+    plugin = _claude_plugin(root)
+    references = plugin / "skills/kbase/references"
     references.mkdir(parents=True)
     stale = references / "gone.md"
     stale.write_text(f"{_COMMENT_BANNER}\n\nold text\n", encoding="utf-8")
-    mine = root / "skills/kbase/notes.md"
+    mine = plugin / "skills/kbase/notes.md"
     mine.write_text("---\nmine\n---\n", encoding="utf-8")
     capsys.readouterr()
     _definition_install(root, with_kb=True, project_root=tmp_path)
     assert not stale.exists()
     assert mine.read_text(encoding="utf-8") == "---\nmine\n---\n"
-    assert all((root / relative).is_file() for relative in _KB_SKILL_FILES)
+    assert all((plugin / relative).is_file() for relative in _KB_SKILL_FILES)
     assert f"pruned {stale}" in capsys.readouterr().out
 
 
@@ -735,9 +847,8 @@ def test_a_banner_naming_a_foreign_module_is_not_ours(tmp_path: Path) -> None:
     assert mine.read_text(encoding="utf-8") == text
 
 
-def test_prune_leaves_a_symlink_standing(tmp_path: Path) -> None:
-    """Prune removes regular files only: a symlink under a surface is the consumer's, whatever it
-    points at."""
+def test_prune_unlinks_a_symlink_to_a_stale_render_and_leaves_the_file_it_names(tmp_path: Path) -> None:
+    """The link is judged by the file it names, which is a stale render; removing it removes the link."""
     root = tmp_path / ".claude"
     (root / "agents").mkdir(parents=True)
     target = tmp_path / "outside.md"
@@ -745,7 +856,7 @@ def test_prune_leaves_a_symlink_standing(tmp_path: Path) -> None:
     link = root / "agents/link.md"
     link.symlink_to(target)
     _definition_install(root, project_root=tmp_path)
-    assert link.is_symlink()
+    assert not os.path.lexists(link)
     assert target.read_text(encoding="utf-8") == _NEW_BANNER
 
 
@@ -782,21 +893,21 @@ def test_the_mcp_merge_keeps_every_unrelated_key(tmp_path: Path) -> None:
     kept."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
-    (project / ".mcp.json").write_text(
+    settings = _claude_mcp_file(root)
+    settings.write_text(
         json.dumps(
             {
                 "permissions": {"allow": ["Bash"]},
                 "mcpServers": {
                     "other": {"command": "x"},
-                    "kbase": {"command": ".claude/skills/kbase/kb-tools/kbase", "args": ["mcp"]},
+                    "kbase": {"command": "skills/kbase/kb-tools/kbase", "args": ["mcp"]},
                 },
             }
         ),
         encoding="utf-8",
     )
     _definition_install(root, with_kb=True, project_root=project)
-    data = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    data = json.loads(settings.read_text(encoding="utf-8"))
     assert data["permissions"] == {"allow": ["Bash"]}
     assert data["mcpServers"]["other"] == {"command": "x"}
     assert data["mcpServers"]["kbase"] == {"command": "kbase", "args": ["mcp"]}
@@ -826,7 +937,7 @@ def test_the_opencode_mcp_entry_lands_in_the_discovered_file_in_the_v2_shape(tmp
         (
             ".claude",
             _CLAUDE_RENDER,
-            ".mcp.json",
+            f"{_CLAUDE_PLUGIN_RELPATH}/.mcp.json",
             {"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}},
         ),
         (
@@ -999,7 +1110,7 @@ def test_the_mcp_splice_leaves_every_byte_outside_the_entry_slot(tmp_path: Path)
     being touched."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
+    mcp = _claude_mcp_file(root)
     seed = (
         "{\n"
         '    "permissions": {"allow": ["Bash", "Read"], "deny": []},\n'
@@ -1009,9 +1120,9 @@ def test_the_mcp_splice_leaves_every_byte_outside_the_entry_slot(tmp_path: Path)
         '    "theme": "dark"\n'
         "}\n"
     )
-    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    mcp.write_text(seed, encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=project)
-    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    text = mcp.read_text(encoding="utf-8")
     head, other, tail = seed.partition('"other": {"command": "x", "args": [1, 2.50, true]}')
     assert other and text.startswith(head) and text.endswith(tail)
     before = json.loads(seed)
@@ -1023,10 +1134,10 @@ def test_a_compact_one_line_mcp_file_gains_the_entry_inline(tmp_path: Path) -> N
     """The file states no indent, so none is invented: the entry goes in on the line it finds."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
-    (project / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+    mcp = _claude_mcp_file(root)
+    mcp.write_text('{"mcpServers": {}}', encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=project)
-    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    text = mcp.read_text(encoding="utf-8")
     assert "\n" not in text
     assert json.loads(text) == {"mcpServers": {"kbase": _built_entry(CLAUDE)}}
 
@@ -1036,11 +1147,11 @@ def test_a_settings_file_without_the_container_gains_it_whole(tmp_path: Path) ->
     line indented like the sibling it lands beside."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
+    mcp = _claude_mcp_file(root)
     seed = '{\n  "permissions": {"allow": ["Bash"]}\n}\n'
-    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    mcp.write_text(seed, encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=project)
-    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    text = mcp.read_text(encoding="utf-8")
     assert text.startswith('{\n  "permissions": {"allow": ["Bash"]},\n  "mcpServers": ')
     assert text.endswith("\n}\n")
     assert json.loads(text) == {
@@ -1054,12 +1165,12 @@ def test_an_existing_kbase_entry_is_replaced_where_it_stands(tmp_path: Path) -> 
     keeps its bytes: an upgraded project loses an absolute command without a hand edit."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
+    mcp = _claude_mcp_file(root)
     prior = '{"command": "/old/absolute/kbase", "args": ["mcp", "--kb-root", "/old"]}'
     seed = f'{{\n  "mcpServers": {{\n    "kbase": {prior},\n    "other": {{"command": "x"}}\n  }}\n}}\n'
-    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    mcp.write_text(seed, encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=project)
-    text = (project / ".mcp.json").read_text(encoding="utf-8")
+    text = mcp.read_text(encoding="utf-8")
     head, found, tail = seed.partition(prior)
     assert found and text.startswith(head) and text.endswith(tail)
     assert json.loads(text)["mcpServers"] == {"kbase": _built_entry(CLAUDE), "other": {"command": "x"}}
@@ -1070,11 +1181,11 @@ def test_a_crlf_mcp_file_keeps_its_line_endings(tmp_path: Path) -> None:
     ending: a CRLF file stays CRLF through the merge."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
+    mcp = _claude_mcp_file(root)
     seed = '{\r\n  "mcpServers": {\r\n  }\r\n}\r\n'
-    (project / ".mcp.json").write_bytes(seed.encode("utf-8"))
+    mcp.write_bytes(seed.encode("utf-8"))
     _definition_install(root, with_kb=True, project_root=project)
-    raw = (project / ".mcp.json").read_bytes()
+    raw = mcp.read_bytes()
     assert b"\n" not in raw.replace(b"\r\n", b"")
     assert json.loads(raw.decode("utf-8")) == {"mcpServers": {"kbase": _built_entry(CLAUDE)}}
 
@@ -1084,15 +1195,15 @@ def test_a_duplicate_container_key_is_reported_and_left_byte_identical(tmp_path:
     writes nothing — the install still succeeded — rather than picking one."""
     project = tmp_path
     root = project / ".claude"
-    root.mkdir()
+    mcp = _claude_mcp_file(root)
     seed = '{"mcpServers": {"other": {"command": "x"}}, "mcpServers": {}}\n'
-    (project / ".mcp.json").write_text(seed, encoding="utf-8")
+    mcp.write_text(seed, encoding="utf-8")
     capsys.readouterr()
     _definition_install(root, with_kb=True, project_root=project)
-    assert (project / ".mcp.json").read_text(encoding="utf-8") == seed
+    assert mcp.read_text(encoding="utf-8") == seed
     err = capsys.readouterr().err
     entry = _built_entry(CLAUDE)
-    assert f"{project / '.mcp.json'} could not be edited safely — left untouched; merge this entry by hand:" in err
+    assert f"{mcp} could not be edited safely — left untouched; merge this entry by hand:" in err
     assert json.dumps(entry) in err
 
 
@@ -1119,7 +1230,7 @@ def test_the_include_line_is_appended_to_an_existing_justfile(tmp_path: Path) ->
     (tmp_path / "justfile").write_text("default:\n  @echo hi\n", encoding="utf-8")
     _definition_install(root, with_kb=True, project_root=tmp_path)
     assert (tmp_path / "justfile").read_text(encoding="utf-8") == (
-        "default:\n  @echo hi\n\nimport? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
+        f"default:\n  @echo hi\n\nimport? '{_CLAUDE_PLUGIN_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     )
 
 
@@ -1157,15 +1268,17 @@ def test_a_second_harness_writes_no_include_line_and_reports_the_first(tmp_path:
         "adj-tools/kb-tools/runner-snippets",
         "custom/kb-tools/runner-snippets",
         "kb-tools/runner-snippets",
+        "skills/kbase/kb-tools/runner-snippets",
     ],
-    ids=["hyphen", "underscore", "adj-tools", "hand-written", "short-tree"],
+    ids=["hyphen", "underscore", "adj-tools", "hand-written", "short-tree", "flat-layout"],
 )
 def test_an_include_line_for_this_harness_under_any_tree_is_rewritten_in_place(
     tmp_path: Path, capsys, snippets_path: str
 ) -> None:
-    """A line naming this harness is this harness's line whatever tree its path spells — a legacy
-    destination's, or one no release here wrote — so it is replaced where it stands and the file keeps
-    one include line rather than gaining a second beside a dead one."""
+    """A line naming this harness directory is this install's line whatever tree its path spells — a
+    legacy destination's, the layout that wrote straight into the harness directory, or one no release
+    here wrote — so its whole path is replaced where it stands, naming the plugin's snippets, and the
+    file keeps one include line rather than gaining a second beside a dead one."""
     project = tmp_path
     root = project / ".claude"
     root.mkdir()
@@ -1173,7 +1286,8 @@ def test_an_include_line_for_this_harness_under_any_tree_is_rewritten_in_place(
     capsys.readouterr()
     _definition_install(root, with_kb=True, project_root=project)
     text = (project / "justfile").read_text(encoding="utf-8")
-    assert text == "default:\n  @echo hi\n\nimport? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
+    expected = f"import? '{_CLAUDE_PLUGIN_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'"
+    assert text == f"default:\n  @echo hi\n\n{expected}\n"
     assert text.count("runner-snippets") == 1
     assert "rewrote the KB include line" in capsys.readouterr().out
 
@@ -1312,9 +1426,10 @@ def test_a_shipped_package_leaves_its_tests_and_documents_behind_and_refuses_a_r
     install(
         root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed, tool_install=_ToolInstalls()
     )
-    assert (root / "adj-tools/probe_pkg/tool.py").is_file()
-    assert not (root / "adj-tools/probe_pkg/tests").exists()
-    assert not (root / "adj-tools/probe_pkg/SPEC.md").exists()
+    plugin = _claude_plugin(root)
+    assert (plugin / "adj-tools/probe_pkg/tool.py").is_file()
+    assert not (plugin / "adj-tools/probe_pkg/tests").exists()
+    assert not (plugin / "adj-tools/probe_pkg/SPEC.md").exists()
     before = _files(tmp_path)
     with pytest.raises(InputError, match="is this repository or inside a source it copies from"):
         install(package, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
@@ -1327,14 +1442,15 @@ def test_a_direct_install_into_the_user_directory_is_user_level(_home: Path) -> 
     install(
         root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=_ToolInstalls()
     )
-    assert (root / "agents").is_dir()
-    assert not (root / "hooks").exists() and not (root / "settings.json").exists()
+    assert (_claude_plugin(root) / "agents").is_dir()
+    assert not (_claude_plugin(root) / "hooks").exists() and not (root / "settings.json").exists()
 
 
 # The docdicer tools package: copied into the docdicer skill's own directory, its launcher stamped by
 # name, and its venv rebuilt after an install that replaced it.
 
-_DOCDICER_TOOLS = "skills/docdicer/tools"
+# Below a claude harness directory: the plugin's own docdicer tools destination.
+_DOCDICER_TOOLS = f"{CLAUDE.plugin_dir}/skills/docdicer/tools"
 _DOCDICER_SOURCE = PACKAGE_ROOT / "docdicer-tools"
 
 
@@ -1452,7 +1568,8 @@ def test_a_failed_tool_install_is_reported_and_the_install_completes(tmp_path: P
         tool_install=_ToolInstalls(failure="exited 1"),
     )
     assert all(
-        (root / path).is_file() for path, _ in render_all(_CLAUDE_RENDER, include=lambda d: not excluded(d.name))
+        (_claude_plugin(root) / path).is_file()
+        for path, _ in render_all(_CLAUDE_RENDER, include=lambda d: not excluded(d.name))
     )
     assert (root / _DOCDICER_TOOLS / "docdicer").is_file() and (root / _DOCDICER_TOOLS / ".gitignore").is_file()
     script = str(root / _DOCDICER_TOOLS / "docdicer")
@@ -1487,7 +1604,8 @@ def test_the_install_verb_hands_the_tool_install_runner_to_the_install(
 
 @pytest.fixture(scope="module")
 def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A consumer root installed with kb included: the whole product plus the kb-tools package."""
+    """A consumer's ROOT, the claude plugin, installed with kb included: the whole product plus the
+    kb-tools package."""
     project = tmp_path_factory.mktemp("consumer")
     root = project / ".claude"
     root.mkdir()
@@ -1502,7 +1620,7 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
             uncommitted=_committed,
             tool_install=_ToolInstalls(),
         )
-    return root
+    return _claude_plugin(root)
 
 
 def test_install_writes_every_render_and_stamps_the_packages_once(installed: Path) -> None:
@@ -1552,7 +1670,7 @@ def _rendered(ctx: Render, relative: str) -> str:
 
 def test_a_hand_written_file_at_a_render_target_is_refused_with_nothing_written(tmp_path: Path) -> None:
     root = tmp_path / ".claude"
-    mine = root / "agents/python-coder.md"
+    mine = _claude_plugin(root) / "agents/python-coder.md"
     mine.parent.mkdir(parents=True)
     mine.write_text("---\nname: python-coder\n---\n\nmy own agent\n", encoding="utf-8")
     before = _files(tmp_path)
@@ -1561,24 +1679,11 @@ def test_a_hand_written_file_at_a_render_target_is_refused_with_nothing_written(
     assert _files(tmp_path) == before
 
 
-def _symlink_to_rendered_output(target: Path) -> None:
-    """A symlink whose referent carries the banner: the link itself is what fails."""
-    referent = target.parent.parent / "referent.md"
-    referent.write_text(_rendered(_CLAUDE_RENDER, "agents/python-coder.md"), encoding="utf-8")
-    target.symlink_to(referent)
-
-
-def _directory(target: Path) -> None:
-    target.mkdir()
-    (target / "inside.md").write_text("mine\n", encoding="utf-8")
-
-
-@pytest.mark.parametrize("plant", [_symlink_to_rendered_output, _directory], ids=["symlink", "directory"])
-def test_a_symlink_or_directory_at_a_render_target_is_refused_with_nothing_written(tmp_path: Path, plant) -> None:
+def test_a_directory_at_a_render_target_is_refused_with_nothing_written(tmp_path: Path) -> None:
     root = tmp_path / ".claude"
-    target = root / "agents/python-coder.md"
-    target.parent.mkdir(parents=True)
-    plant(target)
+    target = _claude_plugin(root) / "agents/python-coder.md"
+    target.mkdir(parents=True)
+    (target / "inside.md").write_text("mine\n", encoding="utf-8")
     before = _files(tmp_path)
     with pytest.raises(InputError, match=re.escape(f"'{target}'")):
         _definition_install(root, project_root=tmp_path)
@@ -1606,13 +1711,14 @@ def test_a_reinstall_overwrites_its_own_renders_kb_skill_files_included(tmp_path
     root = tmp_path / ".claude"
     root.mkdir()
     _definition_install(root, with_kb=True, project_root=tmp_path)
+    plugin = _claude_plugin(root)
     edited = ("agents/python-coder.md", "skills/kbase/references/reading.md")
     for relative in edited:
-        with (root / relative).open("a", encoding="utf-8") as handle:
+        with (plugin / relative).open("a", encoding="utf-8") as handle:
             handle.write("a local edit\n")
     _definition_install(root, with_kb=True, project_root=tmp_path)
     for relative in edited:
-        assert (root / relative).read_text(encoding="utf-8") == _rendered(_CLAUDE_RENDER, relative)
+        assert (plugin / relative).read_text(encoding="utf-8") == _rendered(_CLAUDE_RENDER, relative)
 
 
 @pytest.mark.parametrize(
@@ -1674,20 +1780,25 @@ def test_mcp_settings_the_merge_cannot_use_are_refused_before_the_first_write(
     tmp_path: Path, settings: bytes, message: str
 ) -> None:
     root = tmp_path / ".claude"
-    root.mkdir()
-    (tmp_path / ".mcp.json").write_bytes(settings)
+    _claude_mcp_file(root).write_bytes(settings)
     before = _files(tmp_path)
     with pytest.raises(InputError, match=re.escape(message)):
         _definition_install(root, with_kb=True, project_root=tmp_path)
     assert _files(tmp_path) == before
 
 
-# The claude guardrail hook: shipped and registered in the project's `.claude/settings.json` when one
-# run of the script on this machine succeeds, every byte of that file outside our entry kept.
+# The claude guardrail hook: shipped and registered in the plugin's own `hooks/hooks.json` when one run
+# of the script on this machine succeeds, and the entry an earlier install registered in the project's
+# `.claude/settings.json` then removed, every other byte of that file kept.
 
 # A hook the project registered itself, which no install may touch.
 _SED_HOOK = '{"matcher": "Bash", "hooks": [{"type": "command", "command": "./block-sed.sh"}]}'
-_BY_HAND = "left untouched; merge this entry by hand:"
+_REMOVE_BY_HAND = "left untouched; remove this entry by hand:"
+
+
+def _unparsed_settings(hook: dict) -> str:
+    """A settings file Claude Code would not read as strict JSON, holding `hook`."""
+    return f'{{\n  // mine\n  "hooks": {{"PreToolUse": [{json.dumps(hook)}]}}\n}}\n'
 
 
 def _claude_root(project: Path, settings: str | bytes | None = None) -> Path:
@@ -1700,102 +1811,101 @@ def _claude_root(project: Path, settings: str | bytes | None = None) -> Path:
     return root
 
 
-def test_an_existing_settings_file_gains_the_entry_beside_the_projects_own_hook(tmp_path: Path) -> None:
-    """Our entry is appended after the project's `sed` hook at its indent and line ending; every other
-    byte — other keys, the project's hook, CRLF endings — is kept."""
+def test_an_earlier_entry_after_the_projects_own_hook_is_removed_and_every_other_byte_kept(tmp_path: Path) -> None:
+    """The earlier entry goes with the separator before it; every other byte — other keys, the
+    project's hook, CRLF endings — is kept."""
     head = f'{{\r\n  "permissions": {{"allow": ["Bash"]}},\r\n  "hooks": {{\r\n    "PreToolUse": [\r\n      {_SED_HOOK}'
+    earlier = f",\r\n      {json.dumps(_retired_hook_entry('.claude'))}"
     tail = '\r\n    ]\r\n  },\r\n  "model": "opus"\r\n}\r\n'
-    root = _claude_root(tmp_path, head + tail)
+    root = _claude_root(tmp_path, head + earlier + tail)
     _definition_install(root, project_root=tmp_path)
-    raw = (tmp_path / _SETTINGS).read_bytes()
-    assert raw.startswith(head.encode()) and raw.endswith(tail.encode())
-    assert b"\n" not in raw.replace(b"\r\n", b"")
-    assert json.loads(raw) == {
-        "permissions": {"allow": ["Bash"]},
-        "hooks": {"PreToolUse": [json.loads(_SED_HOOK), _hook_entry(".claude")]},
-        "model": "opus",
-    }
+    assert (tmp_path / _SETTINGS).read_bytes() == (head + tail).encode()
 
 
-def test_a_reinstall_replaces_our_entry_in_place_and_a_second_changes_no_byte(tmp_path: Path, capsys) -> None:
-    """The entry a `--subdir=a` install wrote is ours, though it names another harness directory: one
-    guardrail per project, so this install's entry replaces it where it stands, ahead of the project's
-    hook, and the next install finds nothing to change."""
+@pytest.mark.parametrize(
+    "earlier",
+    [
+        _retired_hook_entry(".claude"),
+        _retired_hook_entry("a"),
+        _retired_hook_entry(_CLAUDE_PLUGIN_RELPATH),
+        _retired_hook_entry(".claude", matcher="Bash"),
+    ],
+    ids=["flat-layout", "another-subdir", "plugin-script", "bash-only"],
+)
+def test_an_earlier_entry_ahead_of_the_projects_own_hook_is_removed_and_a_second_install_changes_no_byte(
+    tmp_path: Path, capsys, earlier: dict
+) -> None:
+    """Whatever harness directory or matcher an earlier install wrote, its entry is ours: one guardrail
+    per project. It goes with the separator after it, and the next install finds nothing to change."""
     head = '{\n  "hooks": {\n    "PreToolUse": [\n      '
-    tail = f",\n      {_SED_HOOK}\n    ]\n  }}\n}}\n"
-    root = _claude_root(tmp_path, head + json.dumps(_hook_entry("a")) + tail)
+    tail = f"{_SED_HOOK}\n    ]\n  }}\n}}\n"
+    root = _claude_root(tmp_path, f"{head}{json.dumps(earlier)},\n      {tail}")
+    capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     settings = tmp_path / _SETTINGS
-    first = settings.read_text(encoding="utf-8")
-    assert first.startswith(head) and first.endswith(tail)
-    assert json.loads(first)["hooks"]["PreToolUse"] == [_hook_entry(".claude"), json.loads(_SED_HOOK)]
-    capsys.readouterr()
+    assert settings.read_text(encoding="utf-8") == head + tail
+    assert _REMOVE_BY_HAND not in capsys.readouterr().err
     _definition_install(root, project_root=tmp_path)
-    assert settings.read_text(encoding="utf-8") == first
-    assert f"{settings} already registers the guardrail hook" in capsys.readouterr().out
+    assert settings.read_text(encoding="utf-8") == head + tail
 
 
-def test_an_earlier_bash_only_entry_is_replaced_in_place(tmp_path: Path, capsys) -> None:
-    """The entry an install from before the file tools were matched wrote is ours: it is replaced whole,
-    ahead of the project's hook, and the operator is not sent to merge by hand."""
-    earlier = {"matcher": "Bash", "hooks": _hook_entry(".claude")["hooks"]}
-    seed = json.dumps({"hooks": {"PreToolUse": [earlier, json.loads(_SED_HOOK)]}}, indent=2) + "\n"
+def test_an_earlier_entry_alone_in_its_array_leaves_the_array_empty_in_place(tmp_path: Path) -> None:
+    seed = json.dumps({"hooks": {"PreToolUse": [_retired_hook_entry(".claude")]}}, indent=2) + "\n"
     root = _claude_root(tmp_path, seed)
-    capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
-    settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
-    assert settings["hooks"]["PreToolUse"] == [_hook_entry(".claude"), json.loads(_SED_HOOK)]
-    assert _BY_HAND not in capsys.readouterr().err
+    assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == '{\n  "hooks": {\n    "PreToolUse": []\n  }\n}\n'
 
 
 @pytest.mark.parametrize(
     "pre_tool_use",
     [
-        [_hook_entry("a"), _hook_entry(".claude")],
-        [{"matcher": "Bash", "hooks": [*_hook_entry(".claude")["hooks"], *json.loads(_SED_HOOK)["hooks"]]}],
+        [_retired_hook_entry("a"), _retired_hook_entry(".claude")],
+        [{"matcher": "Bash", "hooks": [*_retired_hook_entry(".claude")["hooks"], *json.loads(_SED_HOOK)["hooks"]]}],
     ],
     ids=["two-entries", "beside-the-projects-own"],
 )
 def test_settings_naming_our_command_ambiguously_are_reported_and_left_untouched(
     tmp_path: Path, capsys, pre_tool_use: list
 ) -> None:
-    """Replacing either of two entries leaves the other, and replacing an entry that also runs the
-    project's hook deletes it, so the operator merges by hand."""
+    """Removing one of two entries leaves the other, and removing an entry that also runs the project's
+    hook deletes it, so the operator removes by hand, shown each entry."""
     seed = json.dumps({"hooks": {"PreToolUse": pre_tool_use}}, indent=2) + "\n"
     root = _claude_root(tmp_path, seed)
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
     err = capsys.readouterr().err
-    assert _BY_HAND in err and json.dumps(_hook_entry(".claude")) in err
+    assert _REMOVE_BY_HAND in err and all(json.dumps(element) in err for element in pre_tool_use)
 
 
-def test_jsonc_settings_are_reported_and_left_untouched(tmp_path: Path, capsys) -> None:
-    seed = '{\n  // mine\n  "hooks": {}\n}\n'
-    root = _claude_root(tmp_path, seed)
-    capsys.readouterr()
-    _definition_install(root, project_root=tmp_path)
-    assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
-    assert f"{tmp_path / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in capsys.readouterr().err
+# How each settings file the removal cannot edit holds a PreToolUse element: strict JSON or not, decodable
+# or not, or the container wrong-typed.
+_UNEDITABLE_SETTINGS = {
+    "unparsed": lambda hook: _unparsed_settings(hook).encode(),
+    "non-utf8": lambda hook: b"\xff\xfe" + json.dumps({"hooks": {"PreToolUse": [hook]}}).encode() + b"\n",
+    "non-object-hooks": lambda hook: json.dumps({"hooks": [hook]}).encode() + b"\n",
+}
 
 
-@pytest.mark.parametrize(
-    "settings, message",
-    [
-        (b"\xff\xfe{}\n", "is not readable UTF-8 text"),
-        (b'{"hooks": []}\n', "holds a 'hooks' that is not an object"),
-        (b'{"hooks": {"PreToolUse": {}}}\n', "holds a 'hooks.PreToolUse' that is not an array"),
-    ],
-    ids=["non-utf8", "non-object-hooks", "non-array-pre-tool-use"],
-)
-def test_guardrail_settings_the_merge_cannot_use_are_refused_before_the_first_write(
-    tmp_path: Path, settings: bytes, message: str
+@pytest.mark.parametrize("names_ours", [True, False], ids=["names-our-command", "names-none"])
+@pytest.mark.parametrize("kind", list(_UNEDITABLE_SETTINGS))
+def test_settings_the_removal_cannot_edit_are_never_refused_and_reported_only_where_they_name_our_command(
+    tmp_path: Path, capsys, names_ours: bool, kind: str
 ) -> None:
-    root = _claude_root(tmp_path, settings)
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match=re.escape(message)):
-        _definition_install(root, project_root=tmp_path)
-    assert _files(tmp_path) == before
+    """The install completes and the file is not edited. Only a file whose text holds the command an
+    earlier install wrote may strand that entry, so only it is reported."""
+    project = tmp_path / "project"
+    project.mkdir()
+    seed = _UNEDITABLE_SETTINGS[kind](_retired_hook_entry(".claude") if names_ours else json.loads(_SED_HOOK))
+    root = _claude_root(project, seed)
+    settings = project / _SETTINGS
+    capsys.readouterr()
+    _definition_install(root, project_root=project)
+    assert (_claude_plugin(root) / _REGISTRATION).is_file()
+    assert settings.read_bytes() == seed
+    err = capsys.readouterr().err
+    reported = [line for line in err.splitlines() if f"{settings} " in line and "by hand" in line]
+    assert len(reported) == (1 if names_ours else 0)
 
 
 @pytest.mark.parametrize(
@@ -1810,28 +1920,35 @@ def test_a_failed_probe_installs_everything_else_and_neither_ships_nor_registers
     root = _claude_root(tmp_path)
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
-    assert (root / "agents/python-coder.md").is_file()
-    assert not (root / _GUARDRAIL).exists()
+    assert (_claude_plugin(root) / "agents/python-coder.md").is_file()
+    assert not (_claude_plugin(root) / _GUARDRAIL).exists()
+    assert not (_claude_plugin(root) / _REGISTRATION).exists()
     assert not (tmp_path / _SETTINGS).exists()
     [skipped] = [line for line in capsys.readouterr().err.splitlines() if line.startswith("guardrail hook skipped")]
     assert reason in skipped and "left in place" not in skipped
 
 
-def test_a_failed_probe_after_an_install_leaves_its_script_and_entry_and_names_them(
+def test_a_failed_probe_leaves_every_earlier_script_and_registration_and_names_them(
     tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Nothing replaces them, so the plugin's script and registration, the flat layout's script and the
+    settings entry an earlier install wrote all stay, each named."""
     root = _claude_root(tmp_path)
     _definition_install(root, project_root=tmp_path)
+    flat = _plant(root / _GUARDRAIL, (_claude_plugin(root) / _GUARDRAIL).read_text(encoding="utf-8"))
+    seed = json.dumps({"hooks": {"PreToolUse": [_retired_hook_entry(".claude")]}}) + "\n"
+    (tmp_path / _SETTINGS).write_text(seed, encoding="utf-8")
     before = _files(tmp_path)
     monkeypatch.setattr("adjagent.install.GUARDRAIL_INTERPRETER", "adjagent-no-such-perl")
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     after = _files(tmp_path)
-    for relative in (f".claude/{_GUARDRAIL}", _SETTINGS):
+    left = [_claude_plugin(root) / _GUARDRAIL, flat, _claude_plugin(root) / _REGISTRATION, tmp_path / _SETTINGS]
+    for path in left:
+        relative = path.relative_to(tmp_path).as_posix()
         assert after[relative] == before[relative]
-    assert (
-        f"left in place from an earlier install: {root / _GUARDRAIL}, {tmp_path / _SETTINGS}" in capsys.readouterr().err
-    )
+    named = ", ".join(str(path) for path in left)
+    assert f"left in place from an earlier install: {named}" in capsys.readouterr().err
 
 
 def test_an_opencode_install_writes_no_claude_settings_file(tmp_path: Path) -> None:
@@ -1842,43 +1959,44 @@ def test_an_opencode_install_writes_no_claude_settings_file(tmp_path: Path) -> N
     assert not (root / _GUARDRAIL).exists()
 
 
-@pytest.mark.parametrize("subdir", ["tools/agents", "."], ids=["subdir", "project-root"])
+@pytest.mark.parametrize("subdir", ["tools/agents", ".", 'a"b $c'], ids=["subdir", "project-root", "shell-syntax"])
 def test_the_registered_command_runs_the_script_the_install_wrote(tmp_path: Path, subdir: str) -> None:
-    """The settings file stays `.claude/settings.json` wherever ROOT sits, and the command it registers,
-    run as Claude Code runs it, reaches the script under ROOT: it blocks an in-place edit and allows a
-    plain command."""
+    """The command the plugin registers, run as Claude Code runs it, reaches the script under ROOT
+    wherever ROOT sits, a directory name a shell reads as syntax included: it blocks an in-place edit and
+    allows a plain command."""
     root = tmp_path / subdir
     root.mkdir(parents=True, exist_ok=True)
     _definition_install(root, project_root=tmp_path)
-    assert (root / _GUARDRAIL).is_file()
-    assert _run_registered_hook(tmp_path, "sed -i x f").returncode == 2
-    assert _run_registered_hook(tmp_path, "echo hi").returncode == 0
+    assert (_claude_plugin(root) / _GUARDRAIL).is_file()
+    assert _run_registered_hook(_claude_plugin(root), project=tmp_path, command="sed -i x f").returncode == 2
+    assert _run_registered_hook(_claude_plugin(root), project=tmp_path, command="echo hi").returncode == 0
 
 
 def test_a_missing_script_does_not_block_and_names_the_path(tmp_path: Path) -> None:
-    """Perl exits 2 on a script it cannot open, which Claude Code reads as a block, so a settings file
-    committed without the hooks directory would block every call the matcher names. The registered command instead
-    exits with another status and names the missing script."""
+    """Perl exits 2 on a script it cannot open, which Claude Code reads as a block, so a plugin left
+    without its script would block every call the matcher names. The registered command instead exits 1
+    and names the missing script."""
     root = _claude_root(tmp_path)
     _definition_install(root, project_root=tmp_path)
-    (root / _GUARDRAIL).unlink()
-    result = _run_registered_hook(tmp_path, "sed -i x f")
-    assert result.returncode not in (0, 2)
-    assert result.stderr.count("\n") == 1 and str(root / _GUARDRAIL) in result.stderr
+    script = _claude_plugin(root) / _GUARDRAIL
+    script.unlink()
+    result = _run_registered_hook(_claude_plugin(root), project=tmp_path, command="sed -i x f")
+    assert result.returncode == 1
+    assert result.stderr.count("\n") == 1 and str(script) in result.stderr
 
 
-def _run_registered_hook(project: Path, command: str) -> subprocess.CompletedProcess:
-    """The one command `project`'s settings file registers, run under `sh -c` with
+def _run_registered_hook(plugin: Path, *, project: Path, command: str) -> subprocess.CompletedProcess:
+    """The one command `plugin`'s registration names, run under `sh -c` with `CLAUDE_PLUGIN_ROOT` and
     `CLAUDE_PROJECT_DIR` set and a Bash payload for `command` on stdin."""
-    settings = json.loads((project / _SETTINGS).read_text(encoding="utf-8"))
-    [[hook]] = [element["hooks"] for element in settings["hooks"]["PreToolUse"]]
+    registration = json.loads((plugin / _REGISTRATION).read_text(encoding="utf-8"))
+    [[hook]] = [element["hooks"] for element in registration["hooks"]["PreToolUse"]]
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(project)}
     return subprocess.run(
         ["sh", "-c", hook["command"]],
         input=json.dumps(payload),
         capture_output=True,
         encoding="utf-8",
-        env={**os.environ, "CLAUDE_PROJECT_DIR": str(project)},
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(plugin), "CLAUDE_PROJECT_DIR": str(project)},
         check=False,
     )
 
@@ -1890,21 +2008,27 @@ _PROJECT_GUARDRAIL = {
 }
 
 
-def test_a_projects_own_hook_running_a_guardrail_pl_is_kept_and_ours_appended(tmp_path: Path) -> None:
-    """Only the command an install writes is ours: a project hook naming a `hooks/guardrail.pl` of its
-    own is the project's, and replacing it would delete it."""
-    root = _claude_root(tmp_path, json.dumps({"hooks": {"PreToolUse": [_PROJECT_GUARDRAIL]}}, indent=2) + "\n")
+def test_a_projects_own_hook_running_a_guardrail_pl_is_kept_byte_for_byte(tmp_path: Path) -> None:
+    """Only the command an earlier install wrote is ours: a project hook naming a `hooks/guardrail.pl` of
+    its own is the project's, and removing it would delete it."""
+    seed = json.dumps({"hooks": {"PreToolUse": [_PROJECT_GUARDRAIL]}}, indent=2) + "\n"
+    root = _claude_root(tmp_path, seed)
     _definition_install(root, project_root=tmp_path)
-    settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
-    assert settings["hooks"]["PreToolUse"] == [_PROJECT_GUARDRAIL, _hook_entry(".claude")]
+    assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
+
+
+def test_a_flat_layout_script_without_the_installed_header_is_kept(tmp_path: Path) -> None:
+    root = _claude_root(tmp_path)
+    mine = _plant(root / _GUARDRAIL, "print 'mine';\n")
+    _definition_install(root, project_root=tmp_path)
+    assert mine.read_text(encoding="utf-8") == "print 'mine';\n"
 
 
 def test_a_failed_probe_names_neither_a_script_nor_an_entry_an_install_did_not_write(
     tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = _claude_root(tmp_path, json.dumps({"hooks": {"PreToolUse": [_PROJECT_GUARDRAIL]}}) + "\n")
-    (root / "hooks").mkdir()
-    (root / _GUARDRAIL).write_text("print 'mine';\n", encoding="utf-8")
+    _plant(_claude_plugin(root) / _GUARDRAIL, "print 'mine';\n")
     monkeypatch.setattr("adjagent.install.GUARDRAIL_INTERPRETER", "adjagent-no-such-perl")
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
@@ -1928,15 +2052,6 @@ def test_a_probe_that_hangs_fails_within_its_timeout(tmp_path: Path, capsys, mon
     assert "did not exit within 0.5 seconds" in skipped
 
 
-def test_a_harness_directory_the_hook_command_cannot_quote_is_refused_with_nothing_written(tmp_path: Path) -> None:
-    root = tmp_path / 'a"b'
-    root.mkdir()
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="cannot quote"):
-        _definition_install(root, project_root=tmp_path)
-    assert _files(tmp_path) == before
-
-
 def _plant_file(path: Path, outside: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("mine\n", encoding="utf-8")
@@ -1947,41 +2062,18 @@ def _plant_directory(path: Path, outside: Path) -> None:
     (path / "inside.json").write_text("{}\n", encoding="utf-8")
 
 
-def _plant_link(path: Path, outside: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(outside / "shared.json")
-
-
-def _plant_dangling_link(path: Path, outside: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(outside / "missing.json")
-
-
-def _plant_directory_link(path: Path, outside: Path) -> None:
-    path.symlink_to(outside, target_is_directory=True)
-
-
 def _standing(path: Path) -> object:
-    """What stands at `path`, compared without following it: a link's target text, a directory's files,
-    a file's bytes."""
-    if path.is_symlink():
-        return str(path.readlink())
+    """What stands at `path`: a directory's files, a file's bytes."""
     return _files(path) if path.is_dir() else path.read_bytes()
 
 
-@pytest.mark.parametrize(
-    "planted, plant",
-    [(".claude/agents", _plant_file), (".claude/hooks", _plant_directory_link)],
-    ids=["file-on-a-render-path", "symlink-on-a-resource-path"],
-)
-def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
-    tmp_path: Path, planted: str, plant
-) -> None:
+def test_a_file_on_a_render_targets_path_is_refused_with_nothing_written(tmp_path: Path) -> None:
+    planted = f"{_CLAUDE_PLUGIN_RELPATH}/agents"
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     project.mkdir()
     root = _claude_root(project)
-    plant(project / planted, outside)
+    _plant_file(project / planted, outside)
     before = _files(tmp_path)
     with pytest.raises(InputError, match=re.escape(f"'{project / planted}'")):
         _definition_install(root, project_root=project)
@@ -1991,31 +2083,26 @@ def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
 @pytest.mark.parametrize(
     "ctx, kb, subdir, planted, plant, reason",
     [
-        (_CLAUDE_RENDER, False, ".claude", _SETTINGS, _plant_directory, "is not a regular file"),
-        (_CLAUDE_RENDER, False, "tools", ".claude", _plant_file, "is not a directory"),
-        (_CLAUDE_RENDER, False, ".claude", _SETTINGS, _plant_link, "is a symlink"),
-        (_CLAUDE_RENDER, False, ".claude", _SETTINGS, _plant_dangling_link, "is a symlink"),
-        (_CLAUDE_RENDER, True, ".claude", ".mcp.json", _plant_directory, "is not a regular file"),
-        (_CLAUDE_RENDER, True, ".claude", ".mcp.json", _plant_link, "is a symlink"),
-        (_CLAUDE_RENDER, True, ".claude", ".mcp.json", _plant_dangling_link, "is a symlink"),
+        (
+            _CLAUDE_RENDER,
+            True,
+            ".claude",
+            f"{_CLAUDE_PLUGIN_RELPATH}/.mcp.json",
+            _plant_directory,
+            "is not a regular file",
+        ),
         (_OPENCODE_RENDER, True, "tools", ".opencode", _plant_file, "is not a directory"),
     ],
     ids=[
-        "guardrail-directory",
-        "guardrail-parent-file",
-        "guardrail-symlink",
-        "guardrail-dangling-symlink",
         "mcp-directory",
-        "mcp-symlink",
-        "mcp-dangling-symlink",
         "mcp-parent-file",
     ],
 )
 def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_standing(
     tmp_path: Path, capsys, ctx: Render, kb: bool, subdir: str, planted: str, plant, reason: str
 ) -> None:
-    """The install completes; the merge writes nothing there or through it — a symlink's target, dangling
-    or not, outside the project included — and names the path with the entry to merge by hand."""
+    """The install completes; the merge writes nothing there and names the path with the entry to merge
+    by hand."""
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     (outside / "shared.json").write_text('{"shared": true}\n', encoding="utf-8")
@@ -2027,7 +2114,7 @@ def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_stan
     _definition_install(root, ctx, with_kb=kb if kb else None, project_root=project)
     assert (_standing(project / planted), _files(outside)) == before
     err = capsys.readouterr().err
-    assert any(f"{project / planted} {reason}" in line and _BY_HAND in line for line in err.splitlines())
+    assert any(f"{project / planted} {reason}" in line and "left untouched; " in line for line in err.splitlines())
 
 
 # The preflight: `install` and `install-agents-file` first run into a scratch copy of the paths they
@@ -2055,6 +2142,26 @@ def _state(base: Path) -> dict[str, tuple[bytes, int, int]]:
     return state
 
 
+def _files_through_links(root: Path) -> dict[str, bytes]:
+    """Every file below `root`, links followed as the install follows them, with the bytes it names."""
+    found = {}
+    for directory, _, names in os.walk(root, followlinks=True):
+        for name in names:
+            path = Path(directory, name)
+            if path.is_file():
+                found[path.relative_to(root).as_posix()] = path.read_bytes()
+    return found
+
+
+def _directories_through_links(root: Path) -> set[str]:
+    """Every directory below `root`, links followed, each shown with the trailing `/` a dry run gives it."""
+    return {
+        f"{Path(directory, name).relative_to(root).as_posix()}/"
+        for directory, subdirs, _ in os.walk(root, followlinks=True)
+        for name in subdirs
+    }
+
+
 def _dry_run_groups(out: str) -> dict[str, set[str]]:
     """The paths a dry run printed under each of its `created`, `changed` and `removed` headings."""
     groups: dict[str, set[str]] = {}
@@ -2077,21 +2184,28 @@ def _no_uncommitted(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _assert_dry_run_predicts(argv: list[str], *, project: Path, capsys) -> dict[str, set[str]]:
     """Run `argv` with `--dry-run`, then for real: the dry run touches nothing under `project`, and the
-    paths it prints are exactly those the real run then creates, changes and removes. Its groups."""
-    files, state = _files(project), _state(project)
+    paths it prints are exactly those the real run then creates, changes and removes — the directories
+    it removes among them — each link read as what it names. Its groups."""
+    files, directories, state = _files_through_links(project), _directories_through_links(project), _state(project)
     capsys.readouterr()
     main([*argv, "--dry-run"])
     groups = _dry_run_groups(capsys.readouterr().out)
     assert _state(project) == state
     main(argv)
-    after = _files(project)
+    assert groups == _changed_since(files, directories, project=project)
+    return groups
+
+
+def _changed_since(files: dict[str, bytes], directories: set[str], *, project: Path) -> dict[str, set[str]]:
+    """What changed under `project` since it held `files` and `directories`, as a dry run groups it,
+    each group present only where it holds a path."""
+    after = _files_through_links(project)
     actual = {
         "created": set(after) - set(files),
         "changed": {path for path in set(after) & set(files) if after[path] != files[path]},
-        "removed": set(files) - set(after),
+        "removed": (set(files) - set(after)) | (directories - _directories_through_links(project)),
     }
-    assert groups == {group: paths for group, paths in actual.items() if paths}
-    return groups
+    return {group: paths for group, paths in actual.items() if paths}
 
 
 def _kb_install_with_a_runner_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
@@ -2206,6 +2320,30 @@ def test_a_dry_run_on_a_user_directory_predicts_the_install(
     assert ".claude/CLAUDE.md" in groups["changed"] and ".claude/backup.CLAUDE.md" in groups["created"]
 
 
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize(
+    ("harness", "writes_mcp"),
+    [(CLAUDE, True), (OPENCODE, False)],
+    ids=["claude", "opencode"],
+)
+def test_a_dry_run_of_a_user_level_kb_install_predicts_the_install(
+    tmp_path: Path, capsys, harness: Harness, writes_mcp: bool
+) -> None:
+    """The kbase MCP entry goes in at user level only where the harness keeps its settings file at ROOT,
+    and no retired entry is removed there."""
+    home = tmp_path / "home"
+    harness.user_dir.mkdir(parents=True)
+    argv = ["install", str(home), f"--harness={harness.name}", "--with-kb", "--install-global-agents-file"]
+    retired, retired_text = home / ".mcp.json", '{"mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}}\n'
+    if harness is CLAUDE:
+        retired.write_text(retired_text, encoding="utf-8")
+    groups = _assert_dry_run_predicts(argv, project=home, capsys=capsys)
+    mcp_name = PurePosixPath(harness.mcp.canonical).name
+    assert any(PurePosixPath(path).name == mcp_name for path in groups["created"]) is writes_mcp
+    if harness is CLAUDE:
+        assert retired.read_text(encoding="utf-8") == retired_text
+
+
 def test_a_dry_run_after_a_family_change_lists_the_renders_as_changed(tmp_path: Path, capsys) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -2221,11 +2359,18 @@ def test_a_dry_run_lists_a_legacy_tree_and_a_stale_render_as_removed(tmp_path: P
     root.mkdir(parents=True)
     argv = ["install", str(project), "--harness=claude"]
     main(argv)
-    (root / "agents/kb_tools").mkdir()
+    (root / "agents/kb_tools").mkdir(parents=True)
     (root / "agents/kb_tools/helper.py").write_text("x = 1\n", encoding="utf-8")
     (root / "agents/gone.md").write_text(_NEW_BANNER, encoding="utf-8")
     groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
-    assert groups == {"removed": {".claude/agents/kb_tools/helper.py", ".claude/agents/gone.md"}}
+    assert groups == {
+        "removed": {
+            ".claude/agents/kb_tools/helper.py",
+            ".claude/agents/gone.md",
+            ".claude/agents/kb_tools/",
+            ".claude/agents/",
+        }
+    }
 
 
 @pytest.mark.usefixtures("_no_uncommitted")
@@ -2270,13 +2415,12 @@ def test_no_printed_path_or_refusal_names_the_scratch_copy(
     argv = ["install", str(project), "--harness=claude", "--dry-run"]
     main(argv)
     printed = capsys.readouterr().out
-    (root / "agents").mkdir()
-    (root / "agents/python-coder.md").write_text("mine\n", encoding="utf-8")
+    mine = _plant(_claude_plugin(root) / "agents/python-coder.md", "mine\n")
     with pytest.raises(SystemExit) as exit_info:
         main(argv)
     assert exit_info.value.code == 2
     refusal = capsys.readouterr().err
-    assert f"'{root / 'agents/python-coder.md'}'" in refusal
+    assert f"'{mine}'" in refusal
     assert str(scratch) not in printed + refusal
     assert list(scratch.iterdir()) == []
 
@@ -2287,12 +2431,14 @@ def test_a_dry_run_through_a_symlinked_skill_directory_writes_nowhere(tmp_path: 
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     (outside / "notes.txt").write_text("mine\n", encoding="utf-8")
-    (project / ".claude/skills").mkdir(parents=True)
-    (project / ".claude/skills/kbase").symlink_to(outside.resolve(), target_is_directory=True)
+    skills = _claude_plugin(project / ".claude") / "skills"
+    skills.mkdir(parents=True)
+    (skills / "kbase").symlink_to(outside.resolve(), target_is_directory=True)
     before = (_state(project), _state(outside))
     capsys.readouterr()
     main(["install", str(project), "--harness=claude", "--with-kb", "--dry-run"])
-    assert ".claude/skills/kbase/SKILL.md" in _dry_run_groups(capsys.readouterr().out)["created"]
+    created = _dry_run_groups(capsys.readouterr().out)["created"]
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/skills/kbase/SKILL.md" in created
     assert (_state(project), _state(outside)) == before
 
 
@@ -2300,25 +2446,26 @@ def test_a_dry_run_through_a_symlinked_skill_directory_writes_nowhere(tmp_path: 
 def test_a_settings_file_left_alone_is_reported_on_an_up_to_date_target(
     tmp_path: Path, capsys, dry_run: list[str]
 ) -> None:
-    """The entry to merge by hand is printed on every run that leaves the file alone, not only the one
-    that first wrote the rest."""
+    """What to remove by hand is printed on every run that leaves the file alone, not only the one that
+    first wrote the rest."""
     project = tmp_path / "project"
     project.mkdir()
-    _claude_root(project, '{\n  // mine\n  "hooks": {}\n}\n')
+    _claude_root(project, _unparsed_settings(_retired_hook_entry(".claude")))
     argv = ["install", str(project), "--harness=claude"]
     main(argv)
     capsys.readouterr()
     main([*argv, *dry_run])
     printed = capsys.readouterr()
     assert _UP_TO_DATE in printed.out
-    assert f"{project / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in printed.err
+    assert any(f"{project / _SETTINGS} " in line and "by hand" in line for line in printed.err.splitlines())
 
 
 @pytest.mark.parametrize("linked", ["{}\n", None], ids=["link-outside-the-project", "dangling-link"])
-def test_a_symlinked_settings_file_the_install_leaves_alone_is_up_to_date(
+def test_a_symlinked_settings_file_holding_no_retired_entry_is_up_to_date(
     tmp_path: Path, capsys, linked: str | None
 ) -> None:
-    """The copy keeps the link a link, so the run into it leaves the file alone as the real install does."""
+    """A claude install writes the settings file only to remove a retired entry: a link to a file holding
+    none has nothing to remove, and a dangling one has no file to remove it from, so nothing is created."""
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     project.mkdir()
@@ -2333,3 +2480,658 @@ def test_a_symlinked_settings_file_the_install_leaves_alone_is_up_to_date(
     assert _UP_TO_DATE in capsys.readouterr().out
     main([*argv, "--dry-run"])
     assert _dry_run_groups(capsys.readouterr().out) == {}
+
+
+# The claude plugin: an install over the layout that wrote the set straight into the harness directory
+# leaves none of that layout's generated files or package destinations, and a user-level plugin
+# shadowing a project's is reported.
+
+# The layout an earlier release wrote: the set straight into `.claude/`, its guardrail script beside it,
+# the MCP entry in the project's own `.mcp.json`, no manifest, and every reference bare. Its guardrail
+# entry in the project's settings file is planted as that release wrote it.
+_FLAT_CLAUDE_RENDER = Render(
+    harness=dataclasses.replace(
+        CLAUDE,
+        plugin_dir="",
+        reference_prefix="",
+        mcp=dataclasses.replace(CLAUDE.mcp, site=McpSite.PROJECT),
+        rendered_files=(),
+        guardrail=None,
+        retired_entries=(),
+    ),
+    family=CLAUDE_FAMILY,
+    tier_map=dict(CLAUDE_FAMILY.tiers),
+)
+_FLAT_SETTINGS_HEAD = f'{{\n  "hooks": {{\n    "PreToolUse": [\n      {_SED_HOOK}'
+_FLAT_SETTINGS_TAIL = "\n    ]\n  }\n}\n"
+
+
+def _flat_claude_project(tmp_path: Path) -> tuple[Path, Path]:
+    """A project holding a kb install in the flat layout, with a runner file and the guardrail entry
+    beside the project's own hook: the project and its `.claude/`."""
+    project, root = _claude_project(tmp_path)
+    (project / "justfile").write_text("# mine\n", encoding="utf-8")
+    _definition_install(root, _FLAT_CLAUDE_RENDER, with_kb=True, project_root=project)
+    earlier = f",\n      {json.dumps(_retired_hook_entry('.claude'))}"
+    (project / _SETTINGS).write_text(_FLAT_SETTINGS_HEAD + earlier + _FLAT_SETTINGS_TAIL, encoding="utf-8")
+    return project, root
+
+
+def test_an_install_over_the_flat_layout_leaves_none_of_its_generated_files_package_destinations_or_entries(
+    tmp_path: Path, capsys
+) -> None:
+    """Below the harness directory only the plugin, the project's own files and settings file remain,
+    every retired package destination is named as removed, the include line names the plugin's snippets,
+    and the earlier guardrail and kbase entries are gone from the project's settings files with every
+    other byte kept."""
+    project, root = _flat_claude_project(tmp_path)
+    assert (root / _GUARDRAIL).is_file()
+    assert "kbase" in json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    mine = _plant(root / "skills/mine/SKILL.md", "---\nname: mine\n---\n\nmy own skill\n")
+    capsys.readouterr()
+    _definition_install(root, with_kb=True, project_root=project)
+    out = capsys.readouterr().out
+    outside_plugin = {relative for relative in _files(root) if not relative.startswith(f"{CLAUDE.plugin_dir}/")}
+    assert outside_plugin == {"settings.json", "skills/mine/SKILL.md"}
+    assert not (root / "hooks").exists()
+    assert mine.read_text(encoding="utf-8") == "---\nname: mine\n---\n\nmy own skill\n"
+    for destination in ("skills/docdicer/tools", "skills/kbase/kb-tools"):
+        assert f"removed retired package destination {root / destination}" in out
+    assert not (_claude_plugin(root) / "SKILL.md").exists()
+    line = f"import? '{_CLAUDE_PLUGIN_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'"
+    assert (project / "justfile").read_text(encoding="utf-8") == f"# mine\n\n{line}\n"
+    assert (project / _SETTINGS).read_text(encoding="utf-8") == _FLAT_SETTINGS_HEAD + _FLAT_SETTINGS_TAIL
+    assert (project / ".mcp.json").read_text(encoding="utf-8") == '{\n  "mcpServers": {}\n}\n'
+
+
+@pytest.mark.parametrize(
+    "planted, kept",
+    [
+        ((), ()),
+        (("agents/sub/mine.md",), ("agents", "agents/sub")),
+        (("agents/sub/",), ("agents", "agents/sub")),
+    ],
+    ids=["migration", "a-users-own-file", "an-already-empty-directory"],
+)
+def test_the_prune_removes_each_directory_it_empties_up_to_the_harness_directory(
+    tmp_path: Path, planted: tuple[str, ...], kept: tuple[str, ...]
+) -> None:
+    """A planted path ending in `/` is an empty directory. The flat layout's `agents/` and `commands/`
+    hold only generated files, so each goes with its last one unless something the prune does not remove
+    stands in it."""
+    project, root = _flat_claude_project(tmp_path)
+    assert (root / "agents").is_dir() and (root / "commands").is_dir()
+    for relative in planted:
+        if relative.endswith("/"):
+            (root / relative).mkdir(parents=True)
+        else:
+            _plant(root / relative, "mine\n")
+    _definition_install(root, with_kb=True, project_root=project)
+    assert root.is_dir()
+    assert {relative for relative in ("agents", "agents/sub", "commands") if (root / relative).exists()} == set(kept)
+    assert all((root / relative).exists() for relative in planted)
+
+
+@pytest.mark.parametrize(
+    "kbase, removed",
+    [
+        ({"command": "kbase", "args": ["mcp"]}, True),
+        ({"command": "/opt/kb/bin/kbase", "args": ["mcp", "--root", "/p"]}, True),
+        ({"command": "node", "args": ["kbase"]}, False),
+    ],
+    ids=["bare-command", "path-to-kbase", "another-server"],
+)
+def test_only_a_kb_install_removes_an_earlier_kbase_entry_from_the_projects_mcp_file(
+    tmp_path: Path, kbase: dict, removed: bool
+) -> None:
+    """The plugin's own entry replaces it, so only an install writing that removes it; the recogniser
+    reads the command alone, and the project's other server stays byte for byte."""
+    project, root = _claude_project(tmp_path)
+    other = '"other": {"command": "x"}'
+    seed = f'{{\n  "mcpServers": {{\n    {other},\n    "kbase": {json.dumps(kbase)}\n  }}\n}}\n'
+    mcp_file = _plant(project / ".mcp.json", seed)
+    _definition_install(root, project_root=project)
+    assert mcp_file.read_text(encoding="utf-8") == seed
+    _definition_install(root, with_kb=True, project_root=project)
+    expected = f'{{\n  "mcpServers": {{\n    {other}\n  }}\n}}\n' if removed else seed
+    assert mcp_file.read_text(encoding="utf-8") == expected
+
+
+def test_a_dry_run_over_the_flat_layout_predicts_the_migration_and_a_second_run_is_up_to_date(
+    tmp_path: Path, capsys
+) -> None:
+    project, _ = _flat_claude_project(tmp_path)
+    argv = ["install", str(project), "--harness=claude", "--with-kb"]
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert {".claude/agents/python-coder.md", ".claude/agents/", ".claude/commands/"} <= groups["removed"]
+    assert ".claude/skills/kbase/kb-tools/runner-snippets/kb.just" in groups["removed"]
+    assert f".claude/{_GUARDRAIL}" in groups["removed"]
+    assert {_SETTINGS, ".mcp.json"} <= groups["changed"]
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created"]
+    main(argv)
+    assert _UP_TO_DATE in capsys.readouterr().out
+
+
+def test_a_docdicer_venv_at_the_flat_destination_is_rebuilt_in_the_plugin(tmp_path: Path, capsys) -> None:
+    project, root = _flat_claude_project(tmp_path)
+    flat_venv = _plant(root / "skills/docdicer/tools/.venv/marker").parent
+    runner = _ToolInstalls()
+    _preflighted(root, project=project, tool_install=runner, dry_run=True)
+    assert ".claude/skills/docdicer/tools/.venv" in capsys.readouterr().out
+    _preflighted(root, project=project, tool_install=runner)
+    assert not flat_venv.exists()
+    assert runner.scripts == [root / _DOCDICER_TOOLS / "docdicer"]
+
+
+def test_a_user_level_install_removes_no_package_destination(_home: Path) -> None:
+    """A user-level install ships no package, so it writes no replacement and removes none."""
+    root = _home / ".claude"
+    planted = _plant(root / "skills/kbase/kb-tools/runner-snippets/kb.just")
+    install(
+        root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=_ToolInstalls()
+    )
+    assert planted.is_file()
+
+
+def _user_level_plugin(home: Path) -> Path:
+    """A user-level claude plugin installed under `home`: its manifest's path."""
+    root = home / ".claude"
+    root.mkdir(parents=True)
+    install(
+        root, _CLAUDE_RENDER, verbose=False, project_root=home, uncommitted=_committed, tool_install=_ToolInstalls()
+    )
+    return _claude_plugin(root) / ".claude-plugin/plugin.json"
+
+
+def test_a_project_plugin_a_user_level_one_shadows_is_reported_on_every_run(
+    tmp_path: Path, _home: Path, capsys
+) -> None:
+    """The report reads the real home, so an up-to-date run and a dry run make it too."""
+    _user_level_plugin(_home)
+    project = tmp_path / "project"
+    project.mkdir()
+    argv = ["install", str(project), "--harness=claude"]
+    shadowed = f"{_claude_plugin(project / '.claude')} is shadowed by {_claude_plugin(_home / '.claude')}"
+    for run in (argv, argv, [*argv, "--dry-run"]):
+        capsys.readouterr()
+        main(run)
+        assert shadowed in capsys.readouterr().err
+
+
+def test_no_shadow_is_reported_without_a_user_level_plugin(tmp_path: Path, _home: Path, capsys) -> None:
+    """A user-level manifest that is not ours shadows nothing this install can name."""
+    _plant(_home / ".claude" / CLAUDE.plugin_dir / ".claude-plugin/plugin.json", '{"name": "other"}\n')
+    project = tmp_path / "project"
+    project.mkdir()
+    capsys.readouterr()
+    main(["install", str(project), "--harness=claude"])
+    assert "shadowed" not in capsys.readouterr().err
+
+
+def test_a_user_level_plugin_reports_that_it_shadows_every_projects(_home: Path, capsys) -> None:
+    capsys.readouterr()
+    _user_level_plugin(_home)
+    assert f"{_claude_plugin(_home / '.claude')} is user-level" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("harness, printed", [("claude", True), ("opencode", False)], ids=["claude", "opencode"])
+def test_the_reload_rule_is_printed_after_an_install_that_writes_and_not_when_up_to_date(
+    tmp_path: Path, capsys, harness: str, printed: bool
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    argv = ["install", str(project), f"--harness={harness}"]
+    capsys.readouterr()
+    main(argv)
+    assert (CLAUDE.reload_rule in capsys.readouterr().out) is printed
+    main(argv)
+    out = capsys.readouterr().out
+    assert _UP_TO_DATE in out and CLAUDE.reload_rule not in out
+
+
+# The agents file follows the set: a claude or opencode project install keeps the block current in the
+# user-global agents file where that holds it, and otherwise in the project's AGENTS.md.
+
+_HARNESS_NAMED = {"claude": CLAUDE, "opencode": OPENCODE}
+
+
+def _global_agents_file(home: Path, harness: Harness) -> Path:
+    return home / Path(harness.user_harness_dir).relative_to("~") / harness.agents_file
+
+
+def _dirty() -> tuple[str, ...]:
+    return ("M adjagent/x.py",)
+
+
+@pytest.mark.parametrize("uncommitted", [False, True], ids=["committed", "uncommitted"])
+@pytest.mark.parametrize("name, redirect", [("claude", True), ("opencode", False)], ids=["claude", "opencode"])
+def test_without_a_global_block_a_project_install_keeps_it_in_the_projects_agents_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, redirect: bool, uncommitted: bool
+) -> None:
+    """The global file holds no block, so its text is not touched, and the commit state is not read."""
+    monkeypatch.setattr("adjagent.cli.uncommitted_sources", _dirty if uncommitted else _committed)
+    harness = _HARNESS_NAMED[name]
+    _plant(_global_agents_file(tmp_path / "home", harness), "# my global rules\n")
+    project = tmp_path / "project"
+    project.mkdir()
+    main(["install", str(project), f"--harness={name}"])
+    rendered = render_agents_file(harness, scope=project.name).encode()
+    top = {path: data for path, data in _files(project).items() if "/" not in path}
+    assert top == {"AGENTS.md": rendered, **({"CLAUDE.md": b"@AGENTS.md\n"} if redirect else {})}
+    assert _global_agents_file(tmp_path / "home", harness).read_text(encoding="utf-8") == "# my global rules\n"
+
+
+def test_on_the_fallback_a_claude_redirect_is_left_and_the_block_appended(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    _plant(project / "CLAUDE.md", "@AGENTS.md\n")
+    _plant(project / "AGENTS.md", "# mine\n")
+    main(["install", str(project), "--harness=claude"])
+    assert (project / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "\n".join(["# mine", "", *_block(CLAUDE), ""])
+
+
+def test_on_the_fallback_a_claude_native_file_with_its_own_content_refuses_the_install(tmp_path: Path, capsys) -> None:
+    project = tmp_path / "project"
+    _plant(project / "CLAUDE.md", "# my own rules\n")
+    before = _state(project)
+    with pytest.raises(SystemExit):
+        main(["install", str(project), "--harness=claude"])
+    assert "CLAUDE.md holds its own content" in capsys.readouterr().err
+    assert _state(project) == before
+
+
+def _project_with_a_copy(tmp_path: Path, *, native: str | None, own: str) -> Path:
+    """A project whose AGENTS.md holds `own` and then a stale block, and whose CLAUDE.md, where `native` is
+    given, holds it."""
+    project = tmp_path / "project"
+    _plant(project / "AGENTS.md", f"{own}{_BEGIN}\nold\n{_END}\n")
+    if native is not None:
+        _plant(project / "CLAUDE.md", native)
+    return project
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize("own", ["# mine\n\n", ""], ids=["own-text", "only-the-block"])
+@pytest.mark.parametrize(
+    "name, native",
+    [("claude", "@AGENTS.md\n"), ("claude", "# my own rules\n"), ("opencode", None)],
+    ids=["claude-redirect", "claude-own-content", "opencode"],
+)
+def test_with_a_global_block_the_install_keeps_it_there_and_removes_the_project_copy(
+    tmp_path: Path, capsys, name: str, native: str | None, own: str
+) -> None:
+    """The project's AGENTS.md stays, emptied or not; its native file is neither read nor refused."""
+    harness = _HARNESS_NAMED[name]
+    global_file = _plant(_global_agents_file(tmp_path / "home", harness), f"# my global rules\n{_BEGIN}\nold\n{_END}\n")
+    global_prior = global_file.read_text(encoding="utf-8")
+    project = _project_with_a_copy(tmp_path, native=native, own=own)
+    project_prior = (project / "AGENTS.md").read_text(encoding="utf-8")
+    capsys.readouterr()
+    main(["install", str(project), f"--harness={name}"])
+    out = capsys.readouterr().out
+    assert global_file.read_text(encoding="utf-8") == "\n".join(["# my global rules", *_block(harness), ""])
+    assert (global_file.parent / f"backup.{global_file.name}").read_text(encoding="utf-8") == global_prior
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == own
+    assert (project / "backup.AGENTS.md").read_text(encoding="utf-8") == project_prior
+    assert f"removed the adjagent block from {project / 'AGENTS.md'}" in out
+    assert (None if native is None else (project / "CLAUDE.md").read_text(encoding="utf-8")) == native
+    assert native is not None or not (project / "CLAUDE.md").exists()
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_once_the_global_file_holds_the_block_every_project_install_keeps_it_there(tmp_path: Path, capsys) -> None:
+    """Sticky: a project with no agents file gets none, and a second install is up to date."""
+    global_file = _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
+    for project in (tmp_path / "one", tmp_path / "two"):
+        project.mkdir()
+        main(["install", str(project), "--harness=claude"])
+        assert not (project / "AGENTS.md").exists() and not (project / "CLAUDE.md").exists()
+        assert global_file.read_text(encoding="utf-8") == "\n".join([*_block(CLAUDE), ""])
+        capsys.readouterr()
+        main(["install", str(project), "--harness=claude"])
+        assert _UP_TO_DATE in capsys.readouterr().out
+
+
+def test_the_global_write_under_uncommitted_sources_is_refused_with_nothing_written(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("adjagent.cli.uncommitted_sources", _dirty)
+    _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
+    project = _project_with_a_copy(tmp_path, native="@AGENTS.md\n", own="# mine\n")
+    before = {"home": _state(tmp_path / "home"), "project": _state(project)}
+    with pytest.raises(SystemExit):
+        main(["install", str(project), "--harness=claude"])
+    assert "uncommitted changes" in capsys.readouterr().err
+    assert {"home": _state(tmp_path / "home"), "project": _state(project)} == before
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_a_dry_run_names_the_global_files_whole_and_the_projects_relative(tmp_path: Path, capsys) -> None:
+    global_file = _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
+    project = _project_with_a_copy(tmp_path, native=None, own="# mine\n")
+    argv = ["install", str(project), "--harness=claude"]
+    capsys.readouterr()
+    main([*argv, "--dry-run"])
+    groups = _dry_run_groups(capsys.readouterr().out)
+    assert {str(global_file), "AGENTS.md"} <= groups["changed"]
+    assert {str(global_file.parent / "backup.CLAUDE.md"), "backup.AGENTS.md"} <= groups["created"]
+    assert not (global_file.parent / "backup.CLAUDE.md").exists() and not (project / "backup.AGENTS.md").exists()
+
+
+# A symlink is the file it names: read and written through, the link kept.
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_a_symlinked_global_agents_file_holding_the_block_is_updated_through_the_link(tmp_path: Path) -> None:
+    dotfiles = _plant(tmp_path / "dotfiles" / "CLAUDE.md", f"# my global rules\n{_BEGIN}\nold\n{_END}\n")
+    link = _global_agents_file(tmp_path / "home", CLAUDE)
+    link.parent.mkdir(parents=True)
+    link.symlink_to(dotfiles)
+    project = tmp_path / "project"
+    project.mkdir()
+    main(["install", str(project), "--harness=claude"])
+    assert link.is_symlink() and link.readlink() == dotfiles
+    assert dotfiles.read_text(encoding="utf-8") == "\n".join(["# my global rules", *_block(CLAUDE), ""])
+    assert not (project / "AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-file", "dangling"])
+def test_a_symlinked_project_agents_md_gets_the_block_through_the_link(tmp_path: Path, dangling: bool) -> None:
+    """A dangling link reads as an absent file, and the write creates its target."""
+    target = tmp_path / "shared" / "AGENTS.md"
+    target.parent.mkdir()
+    if not dangling:
+        target.write_text("# mine\n", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").symlink_to(target)
+    main(["install", str(project), "--harness=claude"])
+    assert (project / "AGENTS.md").is_symlink() and (project / "AGENTS.md").readlink() == target
+    expected = (
+        render_agents_file(CLAUDE, scope=project.name) if dangling else "\n".join(["# mine", "", *_block(CLAUDE), ""])
+    )
+    assert target.read_text(encoding="utf-8") == expected
+    assert (project / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+
+
+# Beyond the agents file, a symlink is also what it names: every check, write and removal reads through
+# it, removing one removes the link alone, and a dry run predicts each write made through one.
+
+
+def _linked_claude_project(tmp_path: Path) -> tuple[list[str], Path, Path, Path]:
+    """The argv of a claude project install, the project, its `.claude/` and a directory outside it."""
+    project, root = _claude_project(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    return ["install", str(project), "--harness=claude"], project, root, outside
+
+
+def _link(link: Path, named: Path) -> Path:
+    """`link`, its directory created, naming `named`."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(named)
+    return link
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-stale-render", "dangling"])
+def test_a_symlink_at_a_render_target_is_written_through(tmp_path: Path, capsys, dangling: bool) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "python-coder.md"
+    if not dangling:
+        named.write_text(_NEW_BANNER, encoding="utf-8")
+    link = _link(_claude_plugin(root) / "agents/python-coder.md", named)
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created" if dangling else "changed"]
+    assert link.is_symlink()
+    assert named.read_text(encoding="utf-8") == _rendered(_CLAUDE_RENDER, "agents/python-coder.md")
+
+
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["install", "dry-run"])
+@pytest.mark.parametrize(
+    "relative, named, kb",
+    [
+        (f"{_CLAUDE_PLUGIN_RELPATH}/agents", "missing", []),
+        (f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md", "missing/python-coder.md", []),
+        (f"{_CLAUDE_PLUGIN_RELPATH}/{CLAUDE.mcp.canonical}", "missing/shared.json", ["--with-kb"]),
+        ("Makefile", "missing/Makefile", ["--with-kb"]),
+    ],
+    ids=[
+        "dangling-on-the-way",
+        "dangling-into-a-missing-directory",
+        "mcp-file-into-a-missing-directory",
+        "makefile-into-a-missing-directory",
+    ],
+)
+def test_a_link_nothing_can_be_written_through_is_refused_with_nothing_written(
+    tmp_path: Path, capsys, relative: str, named: str, kb: list[str], dry_run: list[str]
+) -> None:
+    """The copy a dry run reads holds nothing where a link dangles, so the refusal reads the real path, and
+    both runs refuse alike."""
+    argv, project, _, outside = _linked_claude_project(tmp_path)
+    link = _link(project / relative, outside / named)
+    before = (_state(project), _state(outside))
+    with pytest.raises(SystemExit) as exit_info:
+        main([*argv, *kb, *dry_run])
+    assert exit_info.value.code == 2
+    assert f"'{link}'" in capsys.readouterr().err
+    assert (_state(project), _state(outside)) == before
+
+
+def _run_outcome(argv: list[str], capsys, *, planted: Path) -> tuple[object, list[str], dict[str, set[str]]]:
+    """What a run of `argv` does about `planted`: its exit code, the stderr lines naming it, and the
+    paths a dry run prints."""
+    capsys.readouterr()
+    try:
+        main(argv)
+        code: object = 0
+    except SystemExit as exc:
+        code = exc.code
+    printed = capsys.readouterr()
+    return code, [line for line in printed.err.splitlines() if str(planted) in line], _dry_run_groups(printed.out)
+
+
+@pytest.mark.parametrize(
+    "harness_args, planted",
+    [
+        (["--harness=claude"], f"{_CLAUDE_PLUGIN_RELPATH}/agents"),
+        (["--harness=opencode", "--subdir=tools", "--with-kb"], ".opencode"),
+        (["--harness=claude", "--subdir=tools"], ".claude"),
+    ],
+    ids=["render-target", "mcp-write-target", "retired-entry-target"],
+)
+def test_a_dry_run_foresees_a_file_on_the_way(tmp_path: Path, capsys, harness_args: list[str], planted: str) -> None:
+    project = tmp_path / "project"
+    (project / "tools").mkdir(parents=True)
+    path = _plant(project / planted, "mine\n")
+    argv = ["install", str(project), *harness_args]
+    files, directories = _files_through_links(project), _directories_through_links(project)
+    dry_code, dry_lines, groups = _run_outcome([*argv, "--dry-run"], capsys, planted=path)
+    real_code, real_lines, _ = _run_outcome(argv, capsys, planted=path)
+    assert (dry_code, dry_lines) == (real_code, real_lines)
+    assert groups == _changed_since(files, directories, project=project)
+
+
+@pytest.mark.parametrize("relative", [".claude", ".claude/skills"])
+def test_a_linked_harness_directory_or_surface_installs_through_the_link(tmp_path: Path, capsys, relative: str) -> None:
+    """ROOT reached through a link is inside the project as the project spells it."""
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = _link(project / relative, outside)
+    groups = _assert_dry_run_predicts(["install", str(project), "--harness=claude"], project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created"]
+    assert link.is_symlink()
+    assert (project / _CLAUDE_PLUGIN_RELPATH / "agents/python-coder.md").is_file()
+
+
+def test_a_project_named_through_a_linked_parent_installs_with_paths_shown_as_named(tmp_path: Path, capsys) -> None:
+    (tmp_path / "real" / "project").mkdir(parents=True)
+    project = _link(tmp_path / "alias", tmp_path / "real") / "project"
+    groups = _assert_dry_run_predicts(["install", str(project), "--harness=claude"], project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created"]
+
+
+def test_a_linked_directory_on_a_resource_path_is_written_through(tmp_path: Path, capsys) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    hooks = _link(_claude_plugin(root) / "hooks", outside)
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/{_GUARDRAIL}" in groups["created"]
+    assert hooks.is_symlink()
+    assert {"guardrail.pl", "hooks.json"} <= set(_files(outside))
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-file", "dangling"])
+def test_a_symlinked_mcp_settings_file_has_the_entry_written_through(tmp_path: Path, capsys, dangling: bool) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "shared.json"
+    if not dangling:
+        named.write_text('{"shared": true}\n', encoding="utf-8")
+    link = _link(_claude_mcp_file(root), named)
+    _assert_dry_run_predicts([*argv, "--with-kb"], project=project, capsys=capsys)
+    assert link.is_symlink()
+    own = {} if dangling else {"shared": True}
+    assert json.loads(named.read_text(encoding="utf-8")) == {**own, "mcpServers": {"kbase": _built_entry(CLAUDE)}}
+
+
+def test_a_symlinked_settings_file_has_the_retired_entry_removed_through_the_link(tmp_path: Path, capsys) -> None:
+    argv, project, _, outside = _linked_claude_project(tmp_path)
+    named = _plant(outside / "settings.json", json.dumps({"hooks": {"PreToolUse": [_retired_hook_entry(".claude")]}}))
+    link = _link(project / _SETTINGS, named)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert link.is_symlink()
+    assert named.read_text(encoding="utf-8") == '{"hooks": {"PreToolUse": []}}'
+    err = capsys.readouterr().err
+    assert "by hand" not in err
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
+@pytest.mark.parametrize(
+    "relative, removed",
+    [("skills/docdicer/tools", "removed retired package destination"), ("agents/kb_tools", "removed legacy tree")],
+    ids=["retired-package-destination", "legacy-tree"],
+)
+def test_a_symlinked_retired_tree_has_the_link_removed_and_what_it_names_left(
+    tmp_path: Path, capsys, relative: str, removed: str, dangling: bool
+) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "tree"
+    if not dangling:
+        _plant(named / "stale.py")
+    link = _link(root / relative, named)
+    before = _files(outside)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert f"{removed} {link}" in capsys.readouterr().out
+    assert not os.path.lexists(link)
+    assert _files(outside) == before and named.exists() != dangling
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-our-script", "dangling"])
+def test_a_symlinked_retired_guardrail_script_has_the_link_removed_where_it_names_ours(
+    tmp_path: Path, capsys, dangling: bool
+) -> None:
+    """The script goes where the file it names carries the installed header; a dangling link names no
+    such file, so it stands, and nothing is created where it points."""
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "guardrail.pl"
+    if not dangling:
+        shutil.copyfile(PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "claude" / _GUARDRAIL, named)
+    link = _link(root / _GUARDRAIL, named)
+    before = _files(outside)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert (f"removed retired guardrail script {link}" in capsys.readouterr().out) != dangling
+    assert os.path.lexists(link) == dangling and (root / "hooks").exists() == dangling
+    assert _files(outside) == before
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
+def test_a_symlinked_package_destination_stays_a_link_and_holds_the_fresh_package(
+    tmp_path: Path, capsys, dangling: bool
+) -> None:
+    """A linked directory is emptied of what an earlier package left; a dangling link has the directory
+    it names made."""
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "tools"
+    if not dangling:
+        _plant(named / "stale.py")
+    link = _link(root / _DOCDICER_TOOLS, named)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert link.is_symlink()
+    assert (named / "docdicer").is_file() and not (named / "stale.py").exists()
+
+
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["install", "dry-run"])
+def test_a_dangling_package_destination_into_a_missing_directory_is_refused_with_nothing_written(
+    tmp_path: Path, capsys, dry_run: list[str]
+) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    link = _link(root / _DOCDICER_TOOLS, outside / "missing" / "tools")
+    before = (_state(project), _state(outside))
+    with pytest.raises(SystemExit) as exit_info:
+        main([*argv, *dry_run])
+    assert exit_info.value.code == 2
+    assert f"'{link}'" in capsys.readouterr().err
+    assert (_state(project), _state(outside)) == before
+
+
+def test_a_file_at_a_package_destination_is_replaced_by_the_package(tmp_path: Path, capsys) -> None:
+    argv, project, root, _ = _linked_claude_project(tmp_path)
+    tools = _plant(root / _DOCDICER_TOOLS)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert (tools / "docdicer").is_file()
+
+
+def _stale_render_below_a_linked_directory(root: Path, outside: Path) -> tuple[Path, Path]:
+    """`.claude/agents/linked`, naming a directory outside that holds a stale render: the link and that
+    directory."""
+    named = outside / "agents"
+    _plant(named / "gone.md", _NEW_BANNER)
+    return _link(root / "agents/linked", named), named
+
+
+def test_the_prune_follows_a_linked_directory_and_unlinks_it_once_emptied(tmp_path: Path, capsys) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    link, named = _stale_render_below_a_linked_directory(root, outside)
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert ".claude/agents/linked/gone.md" in groups["removed"]
+    assert not os.path.lexists(link)
+    assert named.is_dir() and not any(named.iterdir())
+
+
+def test_the_prune_walk_ends_at_a_link_cycle(tmp_path: Path, capsys) -> None:
+    """Run without the preflight, whose dereferencing copy cannot hold a cycle."""
+    _, project, root, outside = _linked_claude_project(tmp_path)
+    link, named = _stale_render_below_a_linked_directory(root, outside)
+    _link(named / "loop", named)
+    capsys.readouterr()
+    _definition_install(root, project_root=project)
+    assert f"pruned {link / 'gone.md'}" in capsys.readouterr().out
+    assert not (named / "gone.md").exists()
+
+
+def _symlink_creations(source: str) -> list[int]:
+    """The line of each call in `source` that creates a symlink: `symlink_to`, `os.symlink` or a bare
+    `symlink`."""
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in ("symlink_to", "symlink"))
+            or (isinstance(node.func, ast.Name) and node.func.id == "symlink")
+        )
+    )
+
+
+def test_the_symlink_creation_guard_finds_each_spelling() -> None:
+    planted = "import os\nfrom os import symlink\np.symlink_to(q)\nos.symlink(a, b)\nsymlink(a, b)\nos.readlink(a)\n"
+    assert _symlink_creations(planted) == [3, 4, 5]
+
+
+def test_no_module_creates_a_symlink() -> None:
+    """The install never creates a link into live operator configuration, because it creates none."""
+    found = {
+        path.relative_to(PACKAGE_ROOT).as_posix(): lines
+        for path in sorted(PACKAGE_ROOT.rglob("*.py"))
+        if (lines := _symlink_creations(path.read_text(encoding="utf-8")))
+    }
+    assert found == {}

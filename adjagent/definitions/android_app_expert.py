@@ -10,7 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Android app development: Kotlin/Compose, including NDK/JNI integration and Gradle configuration. "
-            "Prefer over generalist-coder for any Android target."
+            f"Prefer over {clauses.ref(name='generalist-coder')} for any Android target."
         ),
         tools=ALL,
         tier="high",

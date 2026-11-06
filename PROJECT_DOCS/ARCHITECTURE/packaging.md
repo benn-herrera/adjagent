@@ -51,6 +51,6 @@ defined in `install.py` alone.
 | `_refuse_root`: ROOT is the repository | refuses | stands down: there is no repository to protect |
 | `_refuse_root`: ROOT is inside a source the install copies from | refuses | refuses: the trees exist in site-packages too |
 | `install_kb_include_line`: no include line for the repository itself | skips that project | stands down: writes the line for any project |
-| `uncommitted_sources`, before the plugin or global agents file | refuses on uncommitted sources; a failed `git status` refuses with `InputError` | returns `()` without running git |
+| `uncommitted_sources`, before an agents-file write into a harness's user directory | refuses on uncommitted sources; a failed `git status` refuses with `InputError` | returns `()` without running git |
 
 Only a missing premise stands a check down: in a checkout nothing changes.

@@ -82,12 +82,14 @@ class OptionalHarnessText(Enum):
 
     RECIPE_RULE = "recipe_rule"
     KBASE_PROJECT_RULE = "kbase_project_rule"
+    RELOAD_RULE = "reload_rule"
 
 
 class AgentsFileText(Enum):
     """A value only the agents file's prose names, bound when it renders."""
 
     SCOPE_NAME = "scope_name"
+    VERSION = "version"
 
 
 class TuningText(Enum):
@@ -114,3 +116,9 @@ def hole(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText | Tun
         TuningText: "tun",
     }[type(name)]
     return f"@!{namespace}-{key(name)}!@"
+
+
+def reference(name: str) -> str:
+    """The placeholder definition text carries where it names the definition `name`: `@!ref-<name>!@`,
+    filled with the harness's reference prefix followed by `name`."""
+    return f"@!ref-{name}!@"

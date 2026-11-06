@@ -15,8 +15,8 @@ use warnings;
 # Scratch trees a command may write into without the edit tools.
 my @scratch = ('.claude-temp', 'test-data/transient');
 
-# A kb install's signal, the kbase skill in this script's own harness directory: never the root or
-# the working directory, which --subdir makes wrong.
+# A kb install's signal, the kbase skill in this script's ROOT, the directory above `hooks/`: never
+# the project root or the working directory, which --subdir makes wrong.
 (my $kb_signal = $0) =~ s{[^/]*/[^/]*\z}{skills/kbase/SKILL.md};
 
 # kbase's records, in <root>/kb-root/.index/.
@@ -159,7 +159,11 @@ sub glob_re {
     elsif ($t eq '{') { $re .= '(?:'; $depth++ }
     elsif ($t eq '}' && $depth) { $re .= ')'; $depth-- }
     elsif ($t eq ',' && $depth) { $re .= '|' }
-    elsif ($t =~ /^\[([!^]?)(.+)\]\z/s) { $re .= '[' . ($1 ? '^' : '') . $2 . ']' }
+    elsif ($t =~ /^\[([!^]?)(.+)\]\z/s) {
+      my ($negated, $set) = ($1, $2);
+      $set =~ s/(?!(?<=.)-(?=.))(\W)/\\$1/gs;
+      $re .= '[' . ($negated ? '^' : '') . $set . ']';
+    }
     else { $re .= quotemeta $t }
   }
   $re .= ')' x $depth;
@@ -183,8 +187,8 @@ sub search_reason {
   return $index_path if under($base, $subject);
   return undef if !under($base, $kb);
   if (defined $filter && $filter ne '') {
-    my $re = glob_re($filter =~ s{.*/}{}sr);
-    return undef if !grep { $_ =~ $re } @kb_records;
+    my $re = eval { glob_re($filter =~ s{.*/}{}sr) };
+    return undef if !defined $re || !grep { $_ =~ $re } @kb_records;
   }
   return $index_search;
 }

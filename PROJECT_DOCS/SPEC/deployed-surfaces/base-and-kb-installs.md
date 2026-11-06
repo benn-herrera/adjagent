@@ -2,20 +2,22 @@
 
 A **base install** — `just install` — delivers every definition this repository produces except the
 kb set: the `kbase` skill — except a mage install, which always includes the kb set. It also
-delivers each package `SHIPPED_PACKAGES` names (Deployed Surfaces, below) to its destination there:
-the docdicer tools package, inside the `docdicer` skill's own directory. A user-level install
-delivers none.
+delivers the docdicer tools package (Deployed Surfaces, below) to its destination there, inside the
+`docdicer` skill's own directory. A user-level install delivers none.
 A **kb install** — `just install-with-kb`, or any install carrying `--with-kb` — adds the kb set —
 the `kbase` skill with every supporting file it lists — together with the
 `kb-tools/` package (the runner snippets, inside the `kbase` skill's own directory), the harness's
-`kbase` MCP server entry in the harness's MCP settings file — the project's own, or, under mage, the
-plugin's at ROOT — and one runner include line in the
-project's own justfile or Makefile, never into this repository's own — except a plugin harness,
-which is not a repo project and writes no runner include line and creates no `Makefile`.
-A user-level kb install (Install destination, above) writes the kb-set definitions and nothing else
-of the kb install: no `kb-tools/` package, no MCP entry, no include line and no runner file.
+`kbase` MCP server entry in the harness's MCP settings file — the project's own under opencode, or,
+under claude and mage, the plugin's `.mcp.json` at ROOT — and one runner include line in the
+project's own justfile or Makefile, never into this repository's own, naming the snippets inside the
+installed set (under claude, `.claude/skills/adjagent/skills/kbase/kb-tools/runner-snippets/`) —
+except a mage plugin, which is not a repo project and writes no runner include line and creates no `Makefile`.
+A user-level kb install (Install destination, above) writes the kb-set definitions and, under claude,
+the plugin's `.mcp.json` in the user-level plugin, and nothing else of the kb install: no `kb-tools/`
+package, no include line and no runner file. No user settings file is touched.
 The choice is sticky per harness directory: an install whose ROOT already
-holds a kb install is a kb install. The signal is a file, never the `kb-tools/` directory
+holds a kb install is a kb install; under claude, so is one whose harness directory holds an earlier
+install's flat `skills/kbase/SKILL.md`, so upgrading does not drop kb. The signal is a file, never the `kb-tools/` directory
 (ARCHITECTURE.md, Install Consumption Model, names it). Exclusion is decided once per definition, on its name,
 and never per rendered file: a base install keeps no kb-set definition it finds — under that type
 the definition is stale, every file of it generated here is removed and named in the report, and a
@@ -24,7 +26,11 @@ standing beside generated references it dropped. A mage install is always a kb i
 exclusion never applies to it. A file under `skills/<name>/` that carries no
 generated banner is its project's own and is never touched. Either type removes each tree an earlier
 version installed under a harness directory, naming each it removed (ARCHITECTURE.md lists them),
-and a run that excluded kb reports the removal of the pre-1.0 kb helper tree. A
+and a run that excluded kb reports the removal of the pre-1.0 kb helper tree. A claude project
+install over the flat layout an earlier version wrote — the set directly under the harness directory
+— also removes the package folders that layout left there, `skills/docdicer/tools/` and
+`skills/kbase/kb-tools/`, naming each, and rebuilds a docdicer `.venv` found at either place; a
+user-level install removes no package folder. A
 kb install replaces `skills/kbase/kb-tools/` whole, so a `kbase` executable and `.asc` an earlier
 version installed there are removed.
 

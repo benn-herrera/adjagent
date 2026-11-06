@@ -218,7 +218,7 @@ assumptions you reviewed against.
 ### Review Output
 
 Findings go to a writer for one fix pass: precise enough to act on without follow-up. Prose rhythm
-and style are `prose-architect`'s, not yours.
+and style are `{clauses.ref(name="prose-architect")}`'s, not yours.
 
 **Documentation Review Summary**: one paragraph. Most critical finding upfront. It states the
 audience mode you reviewed against, and either the first point where that reader, walking the

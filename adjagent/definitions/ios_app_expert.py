@@ -10,7 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "iOS app development: SwiftUI/UIKit and Swift concurrency, including C library integration via SPM "
-            "and the Xcode CLI. Prefer over generalist-coder for any iOS target."
+            f"and the Xcode CLI. Prefer over {clauses.ref(name='generalist-coder')} for any iOS target."
         ),
         tools=ALL,
         tier="high",

@@ -1,20 +1,32 @@
-"""The claude harness."""
+"""The claude harness: the set written as one skills-directory plugin below the harness directory."""
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import PurePosixPath
 
-from adjagent.errors import InputError
 from adjagent.harness import (
+    PLUGIN_MANIFEST,
+    PLUGIN_NAME,
     AgentFields,
+    EntryClaim,
     GuardrailHook,
     Harness,
-    HookClaim,
+    HarnessFile,
     McpSettings,
     McpSite,
+    Replacement,
+    RetiredEntry,
     quoted,
 )
 from adjagent.vocabulary import Tool
+
+# Claude Code registers a freshly written plugin's components only after a restart or `/reload-plugins`.
+# The sentence names the symptom and the remedy alone: the cause is Claude Code's and may change.
+_RELOAD_RULE = (
+    "If the new agents are not available after using `adjagent install`, `/reload-plugins` rescans the agent list."
+)
 
 
 def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
@@ -39,46 +51,49 @@ def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, 
 
 
 _GUARDRAIL_SCRIPT = "hooks/guardrail.pl"
-# The hook command, split around the harness directory it names. Claude Code reads exit 2 as a block,
-# and that is perl's status for a script it cannot open, so the command runs the script only where it
-# stands and otherwise names it on stderr and exits 1, which Claude Code reports without blocking.
-# The interpreter is `perl` on PATH, never an absolute path: the settings file is often committed and
-# shared across machines.
-_GUARDRAIL_COMMAND_HEAD = 's="$CLAUDE_PROJECT_DIR/'
+# The hook command, split around the directory it names the script in. Claude Code reads exit 2 as a
+# block, and that is perl's status for a script it cannot open, so the command runs the script only
+# where it stands and otherwise names it on stderr and exits 1, which Claude Code reports without
+# blocking. The interpreter is `perl` on PATH, never an absolute path: the file registering it is often
+# committed and shared across machines. The report it makes is also the registration's marker and the
+# trace an earlier install's settings entry leaves: no file carries it that this repository did not write.
+_MISSING_SCRIPT_REPORT = "guardrail hook: no readable script at $s"
 _GUARDRAIL_COMMAND_TAIL = (
     f'{_GUARDRAIL_SCRIPT}"; if [ -f "$s" ] && [ -r "$s" ]; then exec perl "$s"; fi; '
-    'echo "guardrail hook: no readable script at $s" >&2; exit 1'
+    f'echo "{_MISSING_SCRIPT_REPORT}" >&2; exit 1'
 )
-# The characters a double-quoted shell word reads as syntax, as a regex class body: a harness directory
-# holding one cannot be named in the command.
+# Claude Code gives a plugin's hook processes the plugin's root, and runs a command with no `args`
+# through a shell, so the path is quoted.
+_PLUGIN_GUARDRAIL_COMMAND = f's="${{CLAUDE_PLUGIN_ROOT}}/{_GUARDRAIL_COMMAND_TAIL}'
+
+
+def _guardrail_registration() -> str:
+    """The plugin's `hooks/hooks.json`: one PreToolUse entry running the guardrail on every Bash and
+    file-tool call."""
+    entry = {
+        "matcher": "Bash|Read|Write|Edit|NotebookEdit|Grep|Glob",
+        "hooks": [{"type": "command", "command": _PLUGIN_GUARDRAIL_COMMAND}],
+    }
+    return json.dumps({"hooks": {"PreToolUse": [entry]}}, indent=2) + "\n"
+
+
+# The command an earlier install registered in the project's settings file, naming the script from
+# `$CLAUDE_PROJECT_DIR` through whatever harness directory it was installed in: one holding a character
+# a double-quoted shell word reads as syntax was refused, so none appears in it.
+_GUARDRAIL_COMMAND_HEAD = 's="$CLAUDE_PROJECT_DIR/'
 _UNQUOTABLE = r'"$`\\'
 _GUARDRAIL_COMMAND = re.compile(
     rf"{re.escape(_GUARDRAIL_COMMAND_HEAD)}(?:[^{_UNQUOTABLE}]+/)?{re.escape(_GUARDRAIL_COMMAND_TAIL)}"
 )
 
 
-def _guardrail_entry(harness_relpath: str) -> dict[str, object]:
-    """The PreToolUse entry running the guardrail on every Bash and file-tool call, named from `$CLAUDE_PROJECT_DIR`.
-    A harness directory holding a character the double-quoted word would read as syntax is refused."""
-    if re.search(f"[{_UNQUOTABLE}]", harness_relpath):
-        raise InputError(
-            f"harness directory '{harness_relpath}' holds a character the guardrail hook command cannot "
-            'quote (", $, ` or \\) — install into a directory without one'
-        )
-    prefix = "" if harness_relpath == "." else f"{harness_relpath}/"
-    command = f"{_GUARDRAIL_COMMAND_HEAD}{prefix}{_GUARDRAIL_COMMAND_TAIL}"
-    return {
-        "matcher": "Bash|Read|Write|Edit|NotebookEdit|Grep|Glob",
-        "hooks": [{"type": "command", "command": command}],
-    }
-
-
-def _guardrail_claim(element: object) -> HookClaim:
-    """What a PreToolUse element holds of the guardrail: a command is ours only when it is exactly the
-    one `_guardrail_entry` writes, for any harness directory."""
+def _guardrail_claim(element: object) -> EntryClaim:
+    """What a PreToolUse element holds of the guardrail an earlier install registered in the project's
+    settings file: a command is ours only when it is exactly the one that install wrote, for any harness
+    directory."""
     commands = element.get("hooks") if isinstance(element, dict) else None
     if not isinstance(commands, list):
-        return HookClaim.NONE
+        return EntryClaim.NONE
     ours = [
         isinstance(hook, dict)
         and isinstance(hook.get("command"), str)
@@ -86,8 +101,17 @@ def _guardrail_claim(element: object) -> HookClaim:
         for hook in commands
     ]
     if not any(ours):
-        return HookClaim.NONE
-    return HookClaim.ALONE if all(ours) else HookClaim.SHARED
+        return EntryClaim.NONE
+    return EntryClaim.ALONE if all(ours) else EntryClaim.SHARED
+
+
+def _kbase_claim(value: object) -> EntryClaim:
+    """Whether the project `.mcp.json`'s `kbase` server is the one an earlier install wrote, read from its
+    command alone, the one field every earlier version wrote alike: the bare `kbase`, or a path to an
+    executable of that name."""
+    command = value.get("command") if isinstance(value, dict) else None
+    ours = isinstance(command, str) and PurePosixPath(command).name == "kbase"
+    return EntryClaim.ALONE if ours else EntryClaim.NONE
 
 
 HARNESS = Harness(
@@ -96,7 +120,11 @@ HARNESS = Harness(
     project_harness_dir=".claude",
     project_temp_dir=".claude-temp",
     user_harness_dir="~/.claude",
-    mcp_tool_prefix="mcp__kbase__",
+    plugin_dir=f"skills/{PLUGIN_NAME}",
+    # a plugin's components register only under the plugin's namespace, its MCP tools included
+    reference_prefix=f"{PLUGIN_NAME}:",
+    mcp_tool_prefix=f"mcp__plugin_{PLUGIN_NAME}_kbase__",
+    reload_rule=_RELOAD_RULE,
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule="",
     tools={
@@ -117,13 +145,30 @@ HARNESS = Harness(
     bare_tier_spec_is_all=False,
     frontmatter=_frontmatter,
     document_frontmatter=(),
-    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.PROJECT, entry=_mcp_entry),
-    # Claude Code reads project hooks from this one path, whatever directory the harness is installed in.
+    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.HARNESS, entry=_mcp_entry),
+    rendered_files=(PLUGIN_MANIFEST,),
     guardrail=GuardrailHook(
         script=_GUARDRAIL_SCRIPT,
-        settings=".claude/settings.json",
-        container=("hooks", "PreToolUse"),
-        entry=_guardrail_entry,
-        claim=_guardrail_claim,
+        registration=HarnessFile(path="hooks/hooks.json", text=_guardrail_registration, marker=_MISSING_SCRIPT_REPORT),
+    ),
+    # What the plugin's own registration and MCP entry replace. Claude Code reads project hooks from the
+    # one settings path, whatever directory the harness was installed in.
+    retired_entries=(
+        RetiredEntry(
+            settings=".claude/settings.json",
+            container=("hooks", "PreToolUse"),
+            member="",
+            claim=_guardrail_claim,
+            replacement=Replacement.GUARDRAIL,
+            trace=_MISSING_SCRIPT_REPORT,
+        ),
+        RetiredEntry(
+            settings=".mcp.json",
+            container=("mcpServers",),
+            member="kbase",
+            claim=_kbase_claim,
+            replacement=Replacement.MCP,
+            trace='"kbase"',
+        ),
     ),
 )

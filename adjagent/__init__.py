@@ -19,7 +19,7 @@ or a family overlay anchor, filled once by `render.filled_body`.
     context.py       Render, and the two map flags' grammar
     definitions/     one module per definition, each defining DEFINITIONS
     render.py        definition to file text, the banner, the writer, and the agents file's text
-    install_target.py where an install lands: its harness, ROOT and project root, from the target
+    install_target.py where an install lands: its harness, harness directory and project root, from the target
     preflight.py     the install run into a scratch copy first: up to date, --dry-run, or the real run
     install.py       the install: renders, the shipped packages' stamped copy, and the prune
     agents_file.py   the agents-file install: the marker span, redirects, and the rolling backup
@@ -42,4 +42,4 @@ The render is deterministic: the text of every file is a function of the
 definition, the harness, the family and the two maps, and of nothing else.
 """
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"

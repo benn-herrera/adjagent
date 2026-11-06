@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--subdir",
         metavar="DIR",
         default=None,
-        help="install into TARGET/DIR, TARGET being the project root; empty installs into TARGET itself",
+        help="the harness directory is TARGET/DIR, TARGET being the project root; empty makes it TARGET itself",
     )
     installing.add_argument("--verbose", "-v", action="store_true", help="report every file written")
     installing.add_argument(
@@ -114,7 +114,7 @@ def _run(args: argparse.Namespace) -> None:
     elif args.verb == "install":
         target = resolve_install_target(args.target, harness=args.harness, subdir=args.subdir)
         preflighted_install(
-            target.root,
+            target.harness_dir,
             _tuned(args, harness=target.harness),
             verbose=args.verbose,
             with_kb=args.with_kb,

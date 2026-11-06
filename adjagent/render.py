@@ -6,11 +6,13 @@ what it filled, and writes the rendered definitions and harness files."""
 from __future__ import annotations
 
 import dataclasses
+import functools
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from adjagent import __version__
 from adjagent.context import DEFAULT_FAMILY, Render, map_spec
 from adjagent.definition import Definition, SkillFile
 from adjagent.definitions import discover
@@ -27,6 +29,7 @@ from adjagent.vocabulary import (
     Tier,
     TuningText,
     hole,
+    reference,
 )
 
 GENERATED_MARK = "!GENERATED! from "
@@ -64,12 +67,13 @@ def definitions(*, include: Callable[[Definition], bool] | None = None) -> tuple
 
 
 def agent_fields(defn: Definition, ctx: Render) -> AgentFields:
-    """Map an agent through ctx.harness: model via ctx.model(defn.tier); tools to spellings (None for
-    ALL); governed as the de-duplicated image of ctx.harness.tools in table order."""
+    """Map an agent through ctx.harness: description filled as `filled_description` fills it; model via
+    ctx.model(defn.tier); tools to spellings (None for ALL); governed as the de-duplicated image of
+    ctx.harness.tools in table order."""
     table = ctx.harness.tools
     return AgentFields(
         name=defn.name,
-        description=defn.description,
+        description=filled_description(defn, ctx),
         model=ctx.model(defn.tier),
         color=defn.color,
         tools=None if defn.tools is ALL else tuple(spelling for tool in defn.tools for spelling in table[tool]),
@@ -114,7 +118,7 @@ def _field_lines(defn: Definition, ctx: Render) -> tuple[str, ...]:
     if defn.kind is Kind.DOCUMENT:
         return ctx.harness.document_frontmatter
     if defn.kind is Kind.SKILL:
-        return (f"name: {defn.name}", f"description: {quoted(cast(str, defn.description))}")
+        return (f"name: {defn.name}", f"description: {quoted(filled_description(defn, ctx))}")
     return ()
 
 
@@ -126,21 +130,31 @@ def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
     return f"---\n{generated_line(module)}\n{tuning_line(ctx, seat=defn.tier)}\n{fields}---\n{gap}"
 
 
+@functools.cache
+def _references(prefix: str) -> dict[str, str]:
+    """The reference hole of every discovered definition, the agents file included, mapped to `prefix`
+    and its name; built once per prefix, so discovery runs once rather than on every fill."""
+    return {reference(named.name): prefix + named.name for _, entries in discover() for named in entries}
+
+
 def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     """`body` with every placeholder filled in one pass: a harness text from ctx.harness, an anchor
     from ctx.overlay for the definition's seat ("" where the family fills none), the step-down model
-    from ctx.step_down_model for every kind, and for the agents file alone its scope name. A
-    paragraph that fills to nothing is dropped with its blank line, so an unfilled anchor or an
-    optional harness text the harness supplies nothing for, standing as its own paragraph, leaves no
-    empty one. A paragraph whose source holds a tuning hole that fills to "" is dropped whole,
+    from ctx.step_down_model for every kind, a reference to any discovered definition, the agents
+    file included, as ctx.harness.reference_prefix and its name, and for the agents file alone its
+    scope name and the package version. A paragraph that fills to nothing is dropped with its blank line, so an unfilled
+    anchor or an optional harness text the harness supplies nothing for, standing as its own
+    paragraph, leaves no empty one. A paragraph whose source holds a tuning hole that fills to "" is dropped whole,
     whatever else it says. A placeholder-shaped span naming no key is refused, naming `where`.
     Filled text is not rescanned."""
     seated = dataclasses.replace(ctx, seat=defn.tier)
     values = {hole(part): ctx.harness.text(part) for part in (*HarnessText, *OptionalHarnessText)}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
     values[hole(TuningText.STEP_DOWN_MODEL)] = ctx.step_down_model
+    values.update(_references(ctx.harness.reference_prefix))
     if defn.kind is Kind.AGENTS_FILE:
         values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope
+        values[hole(AgentsFileText.VERSION)] = __version__
     unfilled_tuning = {hole(part) for part in TuningText if not values[hole(part)]}
 
     def value(match: re.Match[str]) -> str:
@@ -161,6 +175,12 @@ def filled_body(defn: Definition, ctx: Render) -> str:
     """The definition's own body, filled as `filled_text` fills it and named as the definition it belongs
     to."""
     return filled_text(defn.body, defn, ctx, where=f"definition '{defn.name}'")
+
+
+def filled_description(defn: Definition, ctx: Render) -> str:
+    """The definition's description, filled as `filled_text` fills a body and named as the definition's
+    description; only an agent's and a skill's are rendered, and each has one."""
+    return filled_text(cast(str, defn.description), defn, ctx, where=f"definition '{defn.name}' description")
 
 
 def render_definition(defn: Definition, ctx: Render, *, module: str) -> str:
@@ -185,16 +205,23 @@ def harness_renders(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:
     return tuple(sorted((PurePosixPath(file.path), file.text()) for file in ctx.harness.rendered_files))
 
 
+def rendered_definitions(
+    ctx: Render, *, include: Callable[[Definition], bool] | None = None
+) -> tuple[tuple[str, Definition], ...]:
+    """The definitions `render_all` renders, as `definitions` gives them: `include` composed with
+    `ctx.harness.omits`, so a name the harness renders nothing for is dropped whatever the caller's
+    filter says."""
+    return definitions(include=lambda defn: defn.name not in ctx.harness.omits and (include is None or include(defn)))
+
+
 def render_all(
     ctx: Render, *, include: Callable[[Definition], bool] | None = None
 ) -> tuple[tuple[PurePosixPath, str], ...]:
-    """(output path, text) for every file every included definition produces — a definition's own
-    output, then each of its supporting files — and then the files `ctx.harness` renders of its own,
-    sorted by path. `include` is composed with `ctx.harness.omits`, so a name the harness renders
-    nothing for is dropped whatever the caller's filter says."""
-    keep = lambda defn: defn.name not in ctx.harness.omits and (include is None or include(defn))
+    """(output path, text) for every file every definition `rendered_definitions` keeps produces — a
+    definition's own output, then each of its supporting files — and then the files `ctx.harness`
+    renders of its own, sorted by path."""
     rendered: list[tuple[PurePosixPath, str]] = []
-    for module, defn in definitions(include=keep):
+    for module, defn in rendered_definitions(ctx, include=include):
         rendered.append((defn.output_path, render_definition(defn, ctx, module=module)))
         rendered += [
             (defn.file_output_path(file), render_skill_file(defn, file, ctx, module=module)) for file in defn.files
@@ -217,6 +244,17 @@ def write_text_verbatim(path: Path, text: str) -> None:
     """Write `text` to `path` as utf-8 with no newline translation."""
     with path.open("w", encoding="utf-8", newline="") as stream:
         stream.write(text)
+
+
+def appended_paragraph(text: str, paragraph: str) -> str:
+    """`text` unchanged, then `paragraph` after one blank line, ending with a newline."""
+    if not text:
+        return f"{paragraph}\n"
+    if text.endswith("\n\n"):
+        return f"{text}{paragraph}\n"
+    if text.endswith("\n"):
+        return f"{text}\n{paragraph}\n"
+    return f"{text}\n\n{paragraph}\n"
 
 
 def write_renders(out: Path, renders: Iterable[tuple[PurePosixPath, str]]) -> list[Path]:

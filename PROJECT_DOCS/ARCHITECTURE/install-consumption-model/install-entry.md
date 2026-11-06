@@ -4,29 +4,51 @@
 "$@"`, the second adding `--with-kb`; the installed `adjagent install` is the same verb (Packaging). The verb takes TARGET, its first non-flag argument, and
 `adjagent/install_target.py` resolves it, writing nothing: `resolve_install_target` normalises the
 target lexically — made absolute, `..` collapsed, symlinks not followed — and returns the harness,
-ROOT built from that path, and the project root (symlinks followed). The harness and ROOT follow
+the harness directory (`InstallTarget.harness_dir`) and the project root (`InstallTarget.project_root`),
+each built from that lexical path. `install` resolves the project root through symlinks for every use
+but ROOT's path relative to it (`_harness_relpath`, and the "outside the project" refusal), which
+compares ROOT and the project root as spelled, so a `.claude` or `.claude/skills` that is a link to
+elsewhere is the directory it names and not a ROOT outside the project. The harness and harness directory follow
 SPEC.md, Install destination; every directory name is read from the `Harness` values
 (`project_harness_dir`, `user_harness_dir`, and `plugin_parent_dir` for a plugin), and the
 home-directory comparison follows symlinks. A target that is a literal `~` is refused with a hint
-that the shell did not expand it. The resolver does not decide whether the install is user-level:
-`install` does, from `user_dir_harnesses(ROOT)` naming the harness, whatever the route to ROOT, and
-then renders and prunes and skips the packages, resource files, guardrail and kb emissions. `install.py` writes the agents file at ROOT for a plugin whose ROOT is
+that the shell did not expand it. The resolver decides neither ROOT nor whether the install is
+user-level; `cli.py` passes the harness directory to `install`, which computes
+`ROOT = harness_dir / harness.plugin_dir` and decides user-level from `user_dir_harnesses(harness_dir)`
+naming the harness, whatever the route to it, and
+then renders and prunes and skips the packages, resource files, guardrail and the runner include line
+(the kb MCP entry is written at user level where `McpSettings.site` is `HARNESS`, below). Prune, the legacy trees and
+the agents file are all in terms of the harness directory, which holds ROOT. `install.py` writes the agents file in the harness
+directory for a standalone plugin whose harness directory is
 not the project root, and for a user-level install given `--install-global-agents-file`, a flag a
-project install ignores. The verb takes no `kbase` argument: it
+project install ignores. A claude or opencode project install also keeps the block current in one
+place (`agents_file.checked_followed_agents_file`, Agents File): the user-global agents file where
+that holds it, otherwise the project's `AGENTS.md`. Two writes are refused while `adjagent/` has
+uncommitted changes (`agents_file.refuse_uncommitted`): a user-level install's, and a project
+install's write into the user-global agents file. The project's `AGENTS.md` and `CLAUDE.md` redirect
+are not, nor is the plugin below a project. The verb takes no `kbase` argument: it
 writes, copies, verifies and locates no `kbase` executable. It refuses, with nothing written, a
 TARGET that is not an existing directory; a harness it cannot tell, or two harness directories in
-the target, without `--harness`; a ROOT that exists and is not a directory ("is not a
-directory"); a ROOT that is this repository (refused only when running from a clone) or inside a source it copies
+the target, without `--harness`; a harness directory or ROOT that exists and is not a directory
+("is not a directory"); either that is this repository (refused only when running from a clone) or inside a source it copies
 from — a shipped package's, the kb toolchain's, or a harness's resource tree — and, on a project install only, a ROOT
 outside the project root it is given: a user-level install skips that check, so a user directory that
 is a symlink out of home is accepted. The refusals name the normalised path. So does a render or harness-resource target
-holding a file without this repository's banner, or with a symlink or non-directory on its path
-below ROOT; a harness settings file that is not UTF-8 or holds the wrong type, `null` included,
-where the entry goes — the MCP settings file on a kb install, and the guardrail's
-`.claude/settings.json` on a claude install whose probe passes; and, on that install, a harness
-directory the guardrail entry cannot name. Every such check, the agents file's included, runs
+holding a file without this repository's banner, or with a non-directory on its path
+below ROOT (`_blocked_component`, links followed, so a link to a directory passes and a link to a
+file or a dangling one blocks); and a harness settings file the install writes into — the MCP
+settings file on a kb install — that is not UTF-8 or holds the wrong type, `null` included, where
+the entry goes. A dangling link on the way to a render, resource or harness-file target, or at one
+whose named path sits in a missing directory, refuses too (`_dangling_on_path`), read at the real
+path because a dry run's copy holds nothing where a link dangles; so does one on the way to the MCP
+settings file, or at it with the same missing directory. So does a `Makefile` link of that
+kind on a kb install that finds no runner file, since the include line's created `Makefile` would be
+written through it (`_check_runner`, read at the real project path). A file a
+retired entry is removed from is no refusal: removal leaves one it cannot edit alone
+([Guardrail registration](guardrail-registration.md)). Every such check, the agents file's included, runs
 before the first write, and ROOT itself is created after them. The target
 refusal names every failing path at once; a settings or entry refusal names the one it met. A
-settings path that is a symlink or not a regular file is no refusal: the merge reports it and leaves
-it (below).
+settings path that is not a regular file is no refusal: the merge reports it and leaves it (below).
+A link at the settings file is read and written through; a dangling one has the file it names
+created. No module under `adjagent/` creates a symlink; `test_no_module_creates_a_symlink` holds it.
 

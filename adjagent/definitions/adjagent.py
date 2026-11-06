@@ -1,6 +1,7 @@
 """adjagent: the skill that tells a consuming project's session how the agent set adjagent installed
 there is changed, updated and inspected."""
 
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Kind
 
@@ -14,7 +15,7 @@ DEFINITIONS = (
             "the set or the agents file at user level — or when a file carrying "
             "adjagent's generated banner seems to need a change; NOT for the project's own code or documents."
         ),
-        body="""**Changing the set.** Never edit an installed definition or the installed adjagent package: the
+        body=f"""**Changing the set.** Never edit an installed definition or the installed adjagent package: the
 next `adjagent install` overwrites the definitions, and the next update of the package overwrites
 the package, `site-packages/adjagent/` included. A behavior the project wants from its seats goes in
 the project's own CONVENTIONS.md or AGENTS.md, which the seats read and no install writes. A
@@ -27,6 +28,8 @@ or fork adjagent and open a pull request. Otherwise the project uses the set as 
 or the `AGENTS_VER` its justfile or Makefile sets — and install that version into the project's
 environment. Preview with `adjagent install --dry-run`, then run `adjagent install`, each with the
 target and flags the project already installs with.
+
+{clauses.RELOAD_RULE}
 
 **Running adjagent.** Where the project has a runner recipe for the install, run that recipe.
 Otherwise — a user trying adjagent before writing one — install the release tag's

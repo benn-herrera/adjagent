@@ -7,13 +7,11 @@ consumer's own artifacts, such as the runner include line an install writes into
 justfile or Makefile, name that destination directly
 and cannot be asked to notice a source-side rearrangement. Its installed copy is stamped where
 Installed artifacts says: the `!INSTALLED!` banner, not `!GENERATED!`
-— a shipped package is source taken as-is, never a render. `SHIPPED_PACKAGES` is the table of those
-an install delivers by explicit mapping: each row a shipped package and the destination
-under the install ROOT it lands at, stated per row — beside the three definition surfaces, under
-`adj-tools/`, or inside a skill's own directory and so inside the `skills/` surface. It holds one
-row, the **docdicer tools package**, which every project install delivers to `skills/docdicer/tools/`,
-inside the `docdicer` skill's own directory. A user-level install delivers none (Install destination,
-above). The package holds four files:
+— a shipped package is source taken as-is, never a render. Every project install delivers the
+**docdicer tools package** by explicit mapping, to the destination under the install ROOT stated for
+it, `skills/docdicer/tools/`: inside the `docdicer` skill's own directory, and so inside the
+`skills/` surface. A kb install also delivers the kb-tools package (below). A user-level install delivers none (Install destination, above). The
+docdicer tools package holds four files:
 - `docdicer`, a POSIX `sh` script, executable, carrying the `!INSTALLED!` banner below its shebang
 - `.gitignore`, holding `.venv/` and carrying no banner
 - `runner-snippets/docdicer.just` and `runner-snippets/docdicer.mk`, runner fragments for a consumer
@@ -33,21 +31,21 @@ naming the command; the install's exit status and the rest of its writes are una
 that changes nothing (Write Safety) runs nothing. A `.venv` directly under a package destination is
 not install output.
 
-The kb-tools package is a shipped package installed at its own stated destination rather than by
-that table: `skills/kbase/kb-tools/`, inside the `kbase` skill's own directory — a skill carrying its
-tooling in its own directory, as the docdicer package does — holding only the runner
-snippets, and not an importable package either, read by the consumer through the runner include
-line. The snippets run `kbase` from `PATH`. No package is a
-definition: `adj-tools/` is outside the dispatch namespace entirely, and a package under a skill's
-directory is neither its `SKILL.md` nor a supporting file it lists.
+The kb-tools package is a shipped package installed at its own stated destination:
+`skills/kbase/kb-tools/`, inside the `kbase` skill's own directory — a skill carrying its tooling in
+its own directory, as the docdicer package does — holding only the runner snippets, and not an
+importable package either, read by the consumer through the runner include line. The snippets run `kbase` from `PATH`. No package is a definition: a
+package under a skill's directory is neither its `SKILL.md` nor a supporting file it lists.
 
 A harness's shipped files are the fifth class: copied as they stand, never rendered. A harness also
-*renders* files of its own into ROOT — mage's manifest is the one — which are generated, not copied,
-carry no banner, and are replaced whole.
-An install copies the installing harness's set into ROOT — the harness directory itself — except a
-user-level install, which copies no harness file, and save a file conditional on a run at install time (below), so a harness file lands at the path it holds
-below that directory: opencode's sits at `<harness-dir>/plugins/guardrail.ts` today and claude's at
-`<harness-dir>/hooks/guardrail.pl` (mage ships none), beside the surfaces and outside all three.
+*renders* files of its own into ROOT — the plugin manifest `.claude-plugin/plugin.json`, one value
+shared by claude and mage, version included, and under claude the guardrail's `hooks/hooks.json`
+registration (below) — which are generated, not copied, carry no banner, and are replaced whole.
+An install copies the installing harness's set into ROOT — the harness directory under opencode and
+mage, the plugin under claude — except a user-level install, which copies no harness file, and save a
+file conditional on a run at install time (below), so a harness file lands at the path it holds
+below ROOT: opencode's sits at `<harness-dir>/plugins/guardrail.ts` today and claude's at
+`<harness-dir>/skills/adjagent/hooks/guardrail.pl` (mage ships none), beside the surfaces and outside all three.
 Each keeps its bytes and its mode: the install stamps nothing on them. Every such file carries an
 `!INSTALLED! … adjagent` header in its first ten lines — the guardrail files' name this repository
 and forbid edits — as the file's own text, which travels with it. A harness shipping none copies nothing, which
@@ -62,7 +60,7 @@ behind the edit tools, such as in-place `sed`, `perl` or `ruby` edits, redirects
 `mv` onto an existing file, and inline scripts that write, and allows writes into scratch. A
 relative target is judged lexically against the working directory of the call, scratch against the
 project directory, and a heredoc's body is not read as shell. Their `.index/` check is active only
-where the harness directory holds the kbase skill's `SKILL.md`, which they look for on every call,
+where the install's ROOT holds the kbase skill's `SKILL.md`, which they look for on every call,
 so a base install is never refused by it. It refuses a call that reaches into
 `<project>/kb-root/.index/`, whose records kbase's own tools read and change:
 - a shell command with a word naming a path there, existence checks (`stat`, and `test` or `[` with `-e`, `-d` or `-f`) excepted
@@ -74,9 +72,9 @@ so a base install is never refused by it. It refuses a call that reaches into
 
 This check follows symlinks, so a link into `.index/` is refused. Claude's runs at session time and
 needs perl with core `JSON::PP`; an install also registers it as a `PreToolUse` entry for Bash and the
-file tools (Read, Write, Edit, NotebookEdit, Grep, Glob) in the project's `.claude/settings.json`,
-whatever the harness directory is, keeping every other byte of that file (Write Safety, below). The
-entry runs the script only where it stands readable: where it is missing — a project that commits the
-settings file but not the script — a call reports the missing path on stderr and proceeds, and is not
-blocked.
+file tools (Read, Write, Edit, NotebookEdit, Grep, Glob) in the plugin's own `hooks/hooks.json`,
+written beside the script and only where the script's install-time run succeeds; no project settings
+file is written to register it, and one an earlier install registered it in is cleaned (Write Safety,
+below). The entry runs the script only where it stands readable: where it is missing, a call reports
+the missing path on stderr and proceeds, and is not blocked.
 

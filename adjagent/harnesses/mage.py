@@ -1,27 +1,11 @@
-"""The mage harness: claude's vocabulary copied, its own plugin manifest, and no `imgread`."""
+"""The mage harness: claude's vocabulary copied, the plugin manifest, and no `imgread`."""
 
 from __future__ import annotations
 
-import json
 import re
 
-from adjagent import __version__
-from adjagent.harness import AgentFields, Harness, HarnessFile, McpSettings, McpSite, quoted
+from adjagent.harness import PLUGIN_MANIFEST, PLUGIN_NAME, AgentFields, Harness, McpSettings, McpSite, quoted
 from adjagent.vocabulary import Tool
-
-_PLUGIN_NAME = "adjagent"
-_PLUGIN_DESCRIPTION = "Adjagent skills, agents, and MCP tools"
-
-
-def _plugin_json() -> str:
-    """The plugin manifest's whole text: name, version and description, with `json.dumps`'s default
-    separators, whose space after each colon the marker is a substring of."""
-    return (
-        json.dumps({"name": _PLUGIN_NAME, "version": __version__, "description": _PLUGIN_DESCRIPTION}, indent=2) + "\n"
-    )
-
-
-FILES = (HarnessFile(path=".claude-plugin/plugin.json", text=_plugin_json, marker=f'"name": "{_PLUGIN_NAME}"'),)
 
 
 def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
@@ -63,6 +47,8 @@ HARNESS = Harness(
     # the harness's own directory: CLAUDE.md sits beside .mcp.json, at the plugin's root
     user_harness_dir=".",
     plugin_parent_dir="Mage/Skills",
+    # mage namespaces a plugin's agents, commands and skills as Claude Code does
+    reference_prefix=f"{PLUGIN_NAME}:",
     mcp_tool_prefix="mcp_kbase_",
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule=_KBASE_PROJECT_RULE,
@@ -86,6 +72,6 @@ HARNESS = Harness(
     document_frontmatter=(),
     mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.HARNESS, entry=_mcp_entry),
     guardrail=None,
-    rendered_files=FILES,
+    rendered_files=(PLUGIN_MANIFEST,),
     omits=frozenset({"imgread", "adjagent"}),
 )

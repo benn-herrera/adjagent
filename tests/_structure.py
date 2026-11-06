@@ -4,8 +4,8 @@ package, and proves each rule on a fixture.
 
 A definition module holds imports, string constants and `DEFINITIONS`. Its constants are string
 literals or f-strings over its own constants. Its only calls are `Definition(...)` as a
-`DEFINITIONS` element, `SkillFile(...)` as a `files=` element, and, inside a `body=` value or a
-`SkillFile` body, `clauses.<name>(...)` and `<constant>.format(...)` on one of its string literals,
+`DEFINITIONS` element, `SkillFile(...)` as a `files=` element, and, inside a `body=` or
+`description=` value or a `SkillFile` body, `clauses.<name>(...)` and `<constant>.format(...)` on one of its string literals,
 every argument a string literal or a constant. The clauses module holds string constants and text
 functions: at most three keyword-only parameters, one returned string over the parameters and its
 constants, and no call.
@@ -24,10 +24,10 @@ CLAUSES = "clauses"
 ASSIGNMENT_RULE = "a module-level assignment is a string literal or an f-string over the module's constant names"
 CALL_RULE = (
     "a definition module calls only Definition(...) in DEFINITIONS, SkillFile(...) in a files= value, and "
-    "clauses.<name>(...) or .format(...) on a string literal inside a body= value"
+    "clauses.<name>(...) or .format(...) on a string literal inside a body= or description= value"
 )
 ARGUMENT_RULE = "an argument to a text function or a .format is a string literal or a module-level constant"
-BODY_RULE = "a body= expression is a module constant, a clauses.<name>, or a permitted call"
+BODY_RULE = "a body= or description= expression is a module constant, a clauses.<name>, or a permitted call"
 DEFINITION_CALL_RULE = "a Definition(...) in DEFINITIONS takes keyword arguments only"
 FILES_RULE = "files= is a tuple of SkillFile(path=<string literal>, body=<body>) calls"
 FUNCTION_RULE = (
@@ -264,8 +264,9 @@ def _is_text_function(node: ast.FunctionDef, constants: dict[str, ast.expr]) -> 
 
 
 def _definitions_violations(node: ast.stmt, constants: dict[str, ast.expr]) -> list[tuple[int, str]]:
-    """DEFINITIONS is a non-empty tuple of Definition(...) calls; a call anywhere in it but in a body=
-    value or in a files= element is a violation, and in those only the permitted calls and names stand."""
+    """DEFINITIONS is a non-empty tuple of Definition(...) calls; a call anywhere in it but in a body= or
+    description= value or in a files= element is a violation, and in those only the permitted calls and
+    names stand."""
     value = node.value if isinstance(node, ast.Assign) else None
     if not isinstance(value, ast.Tuple) or not value.elts:
         return [(node.lineno, DEFINITION_TOP_RULE)]
@@ -280,7 +281,7 @@ def _definitions_violations(node: ast.stmt, constants: dict[str, ast.expr]) -> l
             found.append((element.lineno, DEFINITION_CALL_RULE))
             continue
         for keyword in element.keywords:
-            if keyword.arg == "body":
+            if keyword.arg in ("body", "description"):
                 found += _body_violations(keyword.value, constants)
             elif keyword.arg == "files":
                 found += _files_violations(keyword.value, constants)

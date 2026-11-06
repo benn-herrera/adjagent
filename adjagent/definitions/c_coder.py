@@ -8,7 +8,10 @@ DEFINITIONS = (
     Definition(
         name="c-coder",
         kind=Kind.AGENT,
-        description=("C implementation specialist. Prefer over generalist-coder for userspace C work of any kind."),
+        description=(
+            "C implementation specialist. Prefer over "
+            f"{clauses.ref(name='generalist-coder')} for userspace C work of any kind."
+        ),
         tools=ALL,
         tier="high",
         color="#A8B9CC",

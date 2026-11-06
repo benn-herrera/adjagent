@@ -9,7 +9,8 @@ DEFINITIONS = (
         name="rust-coder",
         kind=Kind.AGENT,
         description=(
-            "Rust implementation specialist. Prefer over generalist-coder for userspace Rust work of any kind."
+            f"Rust implementation specialist. Prefer over {clauses.ref(name='generalist-coder')} for userspace "
+            "Rust work of any kind."
         ),
         tools=ALL,
         tier="high",

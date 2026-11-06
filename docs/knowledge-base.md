@@ -7,7 +7,7 @@ per-project facts live in the consuming project's `kb-root/AGENTS.md`, not in th
 set is **generated** from its definition module.
 
 A base install omits it. `adjagent install --with-kb` (`just install-with-kb` in a clone) delivers it.
-Under mage it is always delivered; a plain mage install without a kbase source refuses instead.
+Under mage it is always delivered.
 
 ## Requirements
 
@@ -60,29 +60,34 @@ KB you have been working in and you lose the work; continue an interrupted one a
 
 The kb set drives **kbase**, a Go binary, not a Python package. You install it yourself and the
 install does not touch it. What the install delivers is the two runner fragments, to
-`.claude/skills/kbase/kb-tools/runner-snippets/` by default
+`.claude/skills/adjagent/skills/kbase/kb-tools/runner-snippets/` by default, inside the claude plugin
 (`.opencode/skills/kbase/kb-tools/runner-snippets/` under opencode;
 `skills/kbase/kb-tools/runner-snippets/` at the plugin root under mage), inside the skill's own
 directory; they run `kbase` from `PATH`. kbase's own documentation is its repository,
 [benn-herrera/kbase](https://github.com/benn-herrera/kbase); its README's section "Using kbase from
 an agent harness (MCP)" is the wiring guide. The same install:
 
-1. Registers a `kbase` MCP server in the harness's own settings file: `.mcp.json` under Claude Code
-   and at the plugin root under mage; under opencode the first of `.opencode/opencode.json`,
+1. Registers a `kbase` MCP server in the harness's own settings file: the plugin's `.mcp.json` under
+   Claude Code (`.claude/skills/adjagent/.mcp.json`, or in the user-level plugin for a user-level kb
+   install) and at the plugin root under mage; under opencode the first of `.opencode/opencode.json`,
    `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. The entry's command is
    the bare `kbase` from `PATH`, run as `kbase mcp` (`kbase mcp --project-dir-required` under mage); it
    names no KB path. Each of its tools is offered under the harness's own prefix: kbase's `query` tool
-   is `mcp__kbase__query` under Claude Code and `kbase_query` under opencode. A settings file carrying
-   JSONC comments, or a settings path that is a symlink or not a regular file, is reported with the
-   entry printed for you to merge by hand.
+   is `mcp__plugin_adjagent_kbase__query` under Claude Code and `kbase_query` under opencode. A settings file carrying
+   JSONC comments, or a settings path that is not a regular file, is reported with the
+   entry printed for you to merge by hand. A project install under Claude Code also removes the
+   `kbase` entry an earlier version wrote to the project's `.mcp.json`, keeping every other byte
+   ([Guardrail](guardrail.md) lists what is left for you to remove by hand).
 2. Appends one include line to the project's justfile or Makefile, creating a `Makefile` where there
-   is neither: `import? '<harness-dir>/skills/kbase/kb-tools/runner-snippets/kb.just'` (just 1.33 or
+   is neither: `import? '<ROOT>/skills/kbase/kb-tools/runner-snippets/kb.just'`, `<ROOT>` being
+   `.claude/skills/adjagent` under claude and the harness directory otherwise (just 1.33 or
    later) or the `-include` form naming `kb.mk`. Both are non-fatal, so a consumer's runner keeps
    working if the tree is absent, and `just`/`make` then carry `kb-verify`, `kb-update-format` and
    `kb-stats`. Under mage this step does not run: no include line and no `Makefile`, because a plugin
    is not a repo project.
 
-Add `.mcp.json` to the project's `.gitignore` if you install the kb set.
+The entry names no machine-specific path. Under claude it lives inside `.claude/`, which the
+[README](../README.md#quick-start-guide) already has you ignore.
 
 The route is MCP-only for every verb, scoring among them: the `score` tool starts its run detached and
 answers once it has started; the session follows the run with `status` and `cancel`, and runs the
@@ -109,5 +114,5 @@ earlier version installed, naming each. A plain `adjagent install` into a direct
 install writes nothing of the kb set (no `skills/kbase/` tree, no kb-tools tree, no MCP entry and no
 include line) and removes each file of one it finds as stale.
 
-While the harness directory holds the kbase skill's `SKILL.md`, the guardrail also keeps sessions out
+While the install holds the kbase skill's `SKILL.md` (inside the plugin under claude), the guardrail also keeps sessions out
 of `kb-root/.index/` ([Guardrail](guardrail.md)).

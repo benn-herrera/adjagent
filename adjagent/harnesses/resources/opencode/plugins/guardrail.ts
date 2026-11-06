@@ -141,7 +141,7 @@ function globRegExp(glob: string): RegExp {
       re += ")"
       depth--
     } else if (t === "," && depth) re += "|"
-    else if (range) re += `[${range[1] ? "^" : ""}${range[2]}]`
+    else if (range) re += `[${range[1] ? "^" : ""}${range[2].replace(/(?!(?<=.)-(?=.))\W/gs, "\\$&")}]`
     else re += t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   }
   return new RegExp(`^(?:${re}${")".repeat(depth)})$`, "s")
@@ -160,7 +160,12 @@ function searchReason(base: string, filter: string | undefined, kb: string, subj
   if (under(base, subject)) return indexPath
   if (!under(base, kb)) return null
   if (filter) {
-    const re = globRegExp(filter.replace(/^.*\//s, ""))
+    let re: RegExp
+    try {
+      re = globRegExp(filter.replace(/^.*\//s, ""))
+    } catch {
+      return null
+    }
     if (!kbRecords.some((name) => re.test(name))) return null
   }
   return indexSearch
