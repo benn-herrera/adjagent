@@ -35,6 +35,63 @@ no second step. For claude and opencode, `adjagent install ~ --harness=NAME
 --install-global-agents-file` installs the agents file into the user-global directory as part of a
 user-level install, with the same refusals.
 
+## Where a project install puts it
+
+`adjagent install` into a claude or opencode project keeps the block in exactly one place. The block
+first reaches your global file by `install-agents-file` or `--install-global-agents-file` (above);
+a project install never puts it there first.
+
+- Your global agents file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`) already holds the
+  block: the install keeps it current there and removes any copy from the project's `AGENTS.md`. It
+  removes only the block, backs the file up and keeps the file even if it is left empty, and says
+  what it removed.
+- It holds none: the install keeps the block in the project's `AGENTS.md`, creating the file if
+  absent. Under claude it also creates `CLAUDE.md` as the one-line `@AGENTS.md` redirect where absent,
+  and refuses, with nothing written, a `CLAUDE.md` holding anything else. With the block in your global
+  file the project's `CLAUDE.md` is never read.
+
+Run from a clone while `adjagent/` has uncommitted changes, the write into your global file is
+refused; the project's `AGENTS.md` and redirect are not.
+
+Each block's begin marker line carries the adjagent version that last changed its content. An install
+whose block content is identical writes nothing, whatever the versions. An install older than the
+version in the file leaves the block and prints "not downgraded" with both versions. A block with no
+version, or one that is not a release number, is rewritten.
+
+### A project with several contributors
+
+Symptom: a tracked `AGENTS.md` flips between contributors. Whether the block sits in the project file
+depends on whether each contributor's global agents file holds it, so one contributor's install adds
+the block and another's removes it.
+
+Remedy: each contributor runs this in their own clone, so their copy may differ without showing as a
+change:
+
+```sh
+git update-index --skip-worktree AGENTS.md
+```
+
+The flag lives in the clone's index, so it is not shared; every contributor sets it themselves.
+
+Limit: git avoids touching a file with the flag set, so a pull that brings an upstream change to
+`AGENTS.md` stops with "Your local changes to the following files would be overwritten by merge".
+Clear the flag, merge, then set it again:
+
+```sh
+git update-index --no-skip-worktree AGENTS.md
+git pull
+git update-index --skip-worktree AGENTS.md
+```
+
+With the flag cleared, git sees the install's difference as a local change to `AGENTS.md`: commit it
+or set it aside before the pull, as for any local change.
+
+### Symlinks
+
+A symlink on any of these paths (your global agents file, a project's `AGENTS.md`, `CLAUDE.md`, or
+the backup) is the file it names. The install reads and writes through it and keeps the link; where
+the link dangles, it creates the file it names.
+
 ## What it replaces
 
 The install replaces only the block between the `adjagent` marker lines and keeps everything outside

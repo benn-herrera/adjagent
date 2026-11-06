@@ -27,7 +27,16 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from adjagent.agents_file import AgentsFileWrite, checked_agents_file, refuse_uncommitted, write_agents_file
+from adjagent.agents_file import (
+    AgentsFileWrite,
+    FollowedAgentsFile,
+    checked_agents_file,
+    checked_followed_agents_file,
+    refuse_uncommitted,
+    user_dir,
+    write_agents_file,
+    write_followed_agents_file,
+)
 from adjagent.context import Render, harnesses
 from adjagent.errors import InputError
 from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite, Replacement, RetiredEntry
@@ -1131,6 +1140,12 @@ def _installs_agents_file(
     return plugin_below_project or (user_level and global_agents_file)
 
 
+def _keeps_the_block_current(harness: Harness, *, user_level: bool) -> bool:
+    """Whether an install keeps the agents-file block current in the one place it lives: every project
+    install of a harness that is not a standalone plugin, whose agents file is its plugin's."""
+    return not user_level and not harness.is_standalone_plugin
+
+
 def _standing_docdicer_venvs(root: Path, *, harness_dir: Path, user_level: bool) -> list[Path]:
     """The docdicer tools' `.venv` directories a project install finds standing, removes with their
     package destination, and then has rebuilt at ROOT's: one at ROOT's destination, and one at the
@@ -1174,6 +1189,7 @@ def install(
     global_agents_file: bool = False,
     real_harness_dir: Path | None = None,
     real_project: Path | None = None,
+    global_dir: Path | None = None,
 ) -> None:
     """Install into ROOT, `harness_dir / ctx.harness.plugin_dir`: render every included definition and
     every file the harness renders of its own into ROOT, replace each package destination whole — a
@@ -1197,15 +1213,19 @@ def install(
     replaces; when it fails, none of that happens, the install goes on, and the report names why and
     what an earlier install left in place. Each retired entry the `kbase` MCP entry replaces is removed
     on a project install that includes kb. A standalone plugin installed below its project root also
-    has its agents file installed in its harness directory, whatever the sources' commit state. A
-    user-level install — the harness directory is the harness's user harness directory, decided here
-    from it and the harness whatever route reached it — renders the definitions, prunes, removes the
-    legacy trees and, on a kb install under a harness whose MCP settings file is the plugin's, writes
+    has its agents file installed in its harness directory, whatever the sources' commit state. Every
+    other project install keeps the agents-file block current in one place, as
+    `agents_file.checked_followed_agents_file` decides: in the user-global agents file under
+    `global_dir` — the harness's user harness directory, or a scratch copy of it — where that file
+    holds the block, refused while `uncommitted` names a change, and otherwise in the project's
+    AGENTS.md. A user-level install — the harness directory is the harness's user harness directory,
+    decided here from it and the harness whatever route reached it — renders the definitions, prunes,
+    removes the legacy trees and, on a kb install under a harness whose MCP settings file is the plugin's, writes
     that entry; it writes nothing else: no package, resource file, guardrail probe or registration,
     project MCP entry, retired-entry removal or runner line. With `global_agents_file` it also installs
     the agents file in the harness directory, refused while `uncommitted` names a change, a flag a
-    project install ignores; `uncommitted` is called only for such an install. ROOT may be absent, and
-    is created only once every check has passed. A file at a render, harness-file or resource target
+    project install ignores; `uncommitted` is called only for such an install and for a write into the
+    user-global agents file. ROOT may be absent, and is created only once every check has passed. A file at a render, harness-file or resource target
     that does not carry what that class of file states as its origin — this repository's generated
     banner or installed header, or the marker a harness-rendered file states about itself — or a
     symlink or non-directory between the harness directory and such a target, refuses the install;
@@ -1249,7 +1269,7 @@ def install(
     # render, the guardrail probe that decides whether its script is a resource target, each render,
     # harness-file and resource target the install would overwrite and the paths below the harness
     # directory it would write through, an install including kb's runner file and MCP settings file,
-    # and a standalone plugin's agents file. ROOT itself is created only after all of them.
+    # and the agents file's. ROOT itself is created only after all of them.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
     package_files = [] if user_level else package_copies(root, kb_included=kb_included)
     resource_files = [] if user_level else harness_resource_copies(root, harness=ctx.harness.name)
@@ -1304,6 +1324,15 @@ def install(
         if user_level:
             refuse_uncommitted(uncommitted())
         agents_file = checked_agents_file(harness_dir, ctx.harness, real_directory=real_harness_dir)
+    followed: FollowedAgentsFile | None = None
+    if _keeps_the_block_current(ctx.harness, user_level=user_level):
+        followed = checked_followed_agents_file(
+            project,
+            ctx.harness,
+            global_dir=user_dir(ctx.harness) if global_dir is None else global_dir,
+            uncommitted=uncommitted,
+            real_project=real_project,
+        )
     # Read before the destination is replaced, which removes the venv with the rest of the package.
     rebuild_docdicer_venv = bool(_standing_docdicer_venvs(root, harness_dir=harness_dir, user_level=user_level))
 
@@ -1324,6 +1353,8 @@ def install(
     written = write_renders(root, renders)
     if agents_file is not None:
         write_agents_file(agents_file)
+    if followed is not None:
+        write_followed_agents_file(followed)
 
     # Removed before the prune, so a skill directory the prune then empties goes with its last file. One
     # reached through a symlink is not this project's alone, so it is named and left.
@@ -1390,16 +1421,17 @@ def _install_managed_paths(
     global_agents_file: bool,
 ) -> list[tuple[Path, list[str]]]:
     """(base, paths relative to it) for everything an install into `harness_dir` may read or write: the
-    project root, the harness directory and ROOT, in that order, ROOT keeping its position below the
-    harness directory. What it writes by, never a listing of either directory, which in a user harness
-    directory holds the operator's own trees. Under the harness directory, the surfaces the prune walks,
+    project root, the harness directory, ROOT and the harness's user harness directory, in that order,
+    ROOT keeping its position below the harness directory. What it writes by, never a listing of either
+    directory, which in a user harness directory holds the operator's own trees. Under the harness directory, the surfaces the prune walks,
     each legacy tree, every package destination an install straight into it wrote, and the agents
     file's paths where the run writes one, and the guardrail script such an install left; under ROOT,
     the surfaces, every package destination, the harness's resource targets, rendered files and
     guardrail registration, and the MCP settings candidates where the harness keeps them there and the
     run may write them; under the project root, on a project install, the runner files, the MCP
     settings candidates where the harness keeps them there, and each settings file a retired entry is
-    removed from."""
+    removed from; and, where a project install keeps the agents-file block current, the paths that
+    keeping reads or writes, each under the project root or the user harness directory it lies in."""
     root = harness_dir / harness.plugin_dir
     destinations = [destination for _, destination in _packages(kb_included=True)]
     under_harness_dir = [*SURFACES, *LEGACY_TREES, *destinations]
@@ -1425,9 +1457,22 @@ def _install_managed_paths(
         harness_dir, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
     ):
         write = checked_agents_file(harness_dir, harness)
-        agents_paths = (write.path, write.destination, write.backup, write.native)
-        under_harness_dir += [path.relative_to(harness_dir).as_posix() for path in agents_paths if path is not None]
-    return [(project, under_project), (harness_dir, under_harness_dir), (root, under_root)]
+        under_harness_dir += [path.relative_to(harness_dir).as_posix() for path in write.paths]
+    global_dir = user_dir(harness)
+    under_global_dir: list[str] = []
+    if _keeps_the_block_current(harness, user_level=user_level):
+        followed = checked_followed_agents_file(project, harness, global_dir=global_dir, uncommitted=lambda: ())
+        for path in followed.paths:
+            if path.is_relative_to(project):
+                under_project.append(path.relative_to(project).as_posix())
+            else:
+                under_global_dir.append(path.relative_to(global_dir).as_posix())
+    return [
+        (project, under_project),
+        (harness_dir, under_harness_dir),
+        (root, under_root),
+        (global_dir, under_global_dir),
+    ]
 
 
 def preflighted_install(
@@ -1486,6 +1531,7 @@ def preflighted_install(
             global_agents_file=global_agents_file,
             real_harness_dir=harness_dir,
             real_project=project,
+            global_dir=bases[3],
         ),
         dry_run=dry_run,
         target=harness_dir,

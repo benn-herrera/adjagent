@@ -70,7 +70,8 @@ older install's copy (D-6).
 9. **Write Safety holds for every new edit.** A removal keeps every byte outside the removed slot.
    It reports, prints the entry and leaves the file untouched when the file is JSONC, ambiguous
    (more than one claimed element, or ours sharing an element with another command), or an
-   obstacle (`_settings_obstacle`). The pre-write checks run before the first write.
+   obstacle (`_settings_obstacle`: a non-directory on the way, or a non-regular file; never a
+   symlink, per D-11). The pre-write checks run before the first write.
 10. **The agents file is not in the plugin.** Claude Code does not load a `CLAUDE.md` at a plugin
     root (`claude plugin validate` warns about one). The agents file is never written under ROOT.
     Under claude and opencode, a project install (P3a, D-10) writes the block to exactly one place:
@@ -95,7 +96,7 @@ older install's copy (D-6).
 | `harnesses/mage.py` | calls the shared manifest builder (manifest bytes unchanged); `reference_prefix` from `harness.PLUGIN_NAME` (R7) | change any other value |
 | `install_target.py` | resolves the **harness directory**, renaming the `InstallTarget.root` field to `harness_dir`; `--subdir` names the harness directory, as it does today | append `plugin_dir`; `install` does that |
 | `install.py` | `install(harness_dir, …)` with `ROOT = harness_dir / plugin_dir`; user-level, agents file and sticky signal on the harness directory; registration written only when the probe passes; `prune` walks the harness directory's surfaces; retired package destinations and the retired resource removed (D-6); retired settings entries removed through a removal splice; include-line rule (D-5); shadow report (D-8); the MCP write decided apart from the runner line (an MCP site at ROOT writes on a user-level kb install too; the runner line stays project-only); the reload sentence printed after a run that wrote under ROOT; `_install_managed_paths` covers all of it | hold a Claude path or command shape |
-| `preflight.py` | none: it is generic over the bases it is given | — |
+| `preflight.py` | P3b: the scratch copy follows links as the install does, and the comparison walks through linked directories (D-11) | create a symlink |
 | `cli.py` | passes `target.harness_dir` | — |
 | `devtools/scripts/_render-slot.sh`, `check-wheel.sh` | export `HOME` to a fresh scratch home, removed on exit (P1, D-1.11) | read the real home |
 | `devtools/scripts/_render-slot.sh`, `render.sh` | comments on the plugin path: a claude slot holds the plugin at `<slot>/skills/adjagent/` (P2) | change the flags |
@@ -273,6 +274,9 @@ refuses.
     project's `AGENTS.md` holds a current block. Re-installing identical content writes nothing,
     whatever the version. Per D-1.11, no test, render or `check-wheel` run reads or changes the
     real `~/.claude` or `~/.config/opencode`.
+11. No install refuses, skips or reports a path for being a symlink (D-11). Writes land in what
+    the link names. Removals unlink the link and leave what it names byte-identical. A dry run
+    predicts every write made through a link. No module under `adjagent/` creates a symlink.
 
 ## D-10 The agents file follows the set (P3a)
 
@@ -330,3 +334,27 @@ lives in its plugin. A user-level install is unchanged: it writes the agents fil
 - Isolation follows D-1.11. A render slot's scratch `HOME` holds no global file, so each claude
   or opencode slot gains a project `AGENTS.md`, and a claude slot also gains `CLAUDE.md` holding
   only `@AGENTS.md`. Those files are the visible change of the project-fallback path.
+
+## D-11 A symlink is what it names (P3b; plan R8)
+
+- **Checks, writes and edits** read and write through a link, at a target or on the way to one:
+  - render, resource and harness-file targets;
+  - package destinations;
+  - MCP and project settings files, and the retired-entry removal;
+  - the agents-file paths (P3a).
+
+  A dangling link at a write target is an absent file at the place it names, so the write creates
+  that file and any missing parents.
+- **Removals unlink the link.** Prune, retired package destinations, legacy trees and the retired
+  guardrail script never delete what a link names. That includes an emptied directory reached
+  through a link.
+- **What stays refused** is a non-directory where a directory is needed: a regular file, a link
+  to one, or a dangling link on the way to a target. So is a foreign file, read through any link
+  at the target, for its content and not its link.
+- **The preview matches the install.** The preflight copy dereferences every managed path, and
+  both comparison walks follow linked directories, so a dry run predicts the writes the install
+  makes through a link.
+- **No link is created.** No module under `adjagent/` calls `symlink_to` or `os.symlink`. A test
+  holds this. The repository's own files are never linked into live operator configuration.
+- **Out of scope:** the guardrail scripts' link-following resolves paths for `.index/`; it does
+  not vet them.

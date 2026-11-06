@@ -11,7 +11,7 @@ DEFINITIONS = (
         kind=Kind.AGENTS_FILE,
         body=f"""# @!agf-scope-name!@ info and directives
 
- <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->
+ <!-- vvv-adjagent @!agf-version!@ do not edit at or between marker lines. adjagent-vvv -->
 \x20
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —

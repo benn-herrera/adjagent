@@ -55,6 +55,8 @@ from adjagent.render import definitions, filled_body, render_agents_file, render
 from adjagent.vocabulary import Kind, reference
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
+"""The begin marker line an earlier, unstamped revision wrote."""
+_STAMPED_BEGIN = f" <!-- vvv-adjagent {__version__} do not edit at or between marker lines. adjagent-vvv -->"
 _END = " <!-- ^^^-adjagent do not edit at or between marker lines. adjagent-^^^ -->"
 
 
@@ -79,7 +81,7 @@ def test_the_fresh_render_holds_the_title_and_one_marker_span() -> None:
     user_dir = Path(CLAUDE.user_harness_dir).expanduser()
     text = render_agents_file(CLAUDE, scope=scope_name(CLAUDE, user_dir))
     lines, begin, end = marker_span(text, where="render")
-    assert (lines[0], lines[begin], lines[end]) == ("# Global info and directives", _BEGIN, _END)
+    assert (lines[0], lines[begin], lines[end]) == ("# Global info and directives", _STAMPED_BEGIN, _END)
     assert text.endswith(_END + "\n")
 
 
@@ -154,15 +156,50 @@ def test_a_file_without_marker_lines_gets_the_block_appended(
     assert target.read_bytes() == expected
 
 
-def _symlink_destination(tmp_path: Path) -> None:
-    (tmp_path / "real.md").write_text(f"{_BEGIN}\n{_END}\n", encoding="utf-8")
-    (tmp_path / "AGENTS.md").symlink_to("real.md")
+def _stamped(stamp: str, *, content: list[str]) -> str:
+    """A file holding the rendered block with its begin line stamped `stamp` in place of this version
+    and `content` between the marker lines."""
+    begin, *_, end = _block(OPENCODE)
+    return "\n".join(["mine", begin.replace(__version__, stamp), *content, end, ""])
 
 
-def _symlink_backup(tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").write_text(f"{_BEGIN}\n{_END}\n", encoding="utf-8")
-    (tmp_path / "elsewhere.md").write_text("x", encoding="utf-8")
-    (tmp_path / "backup.AGENTS.md").symlink_to("elsewhere.md")
+_CURRENT = _block(OPENCODE)[1:-1]
+
+
+@pytest.mark.parametrize(
+    "stamp, content, rewritten",
+    [
+        ("0.0.1", _CURRENT, False),
+        ("99.0.0", _CURRENT, False),
+        ("0.0.1", ["old"], True),
+        (__version__, ["old"], True),
+        ("99.0.0", ["old"], False),
+    ],
+    ids=["identical-older", "identical-newer", "older", "same", "newer"],
+)
+def test_the_stamp_decides_a_differing_block_and_identical_content_is_never_rewritten(
+    tmp_path: Path, capsys, stamp: str, content: list[str], rewritten: bool
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    prior = _stamped(stamp, content=content)
+    target.write_text(prior, encoding="utf-8")
+    _install(tmp_path)
+    captured = capsys.readouterr()
+    if rewritten:
+        assert target.read_text(encoding="utf-8") == "\n".join(["mine", *_block(OPENCODE), ""])
+        assert (tmp_path / "backup.AGENTS.md").read_text(encoding="utf-8") == prior
+    else:
+        assert _files(tmp_path) == {"AGENTS.md": prior.encode()}
+    downgrade = stamp == "99.0.0" and content != _CURRENT
+    assert ("not downgraded" in captured.err and f"99.0.0, newer than this {__version__}" in captured.err) is downgrade
+
+
+def test_an_unstamped_block_is_rewritten_and_stamped(tmp_path: Path) -> None:
+    """The not-a-release row is the planted `version[abc1234]` fence above."""
+    target = tmp_path / "AGENTS.md"
+    target.write_text(f"{_BEGIN}\nold\n{_END}\n", encoding="utf-8")
+    _install(tmp_path)
+    assert target.read_text(encoding="utf-8") == "\n".join([*_block(OPENCODE), ""])
 
 
 def _non_utf8(tmp_path: Path) -> None:
@@ -182,8 +219,6 @@ def _redirect_outside(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "plant, directory, message",
     [
-        (_symlink_destination, ".", "AGENTS.md is a symlink or not a regular file"),
-        (_symlink_backup, ".", "backup.AGENTS.md is a symlink or not a regular file"),
         (_non_utf8, ".", "AGENTS.md is not UTF-8 text"),
         (_redirect_chain, ".", "which is itself a redirect"),
         (_redirect_outside, "inner", "which is outside"),
@@ -2598,3 +2633,172 @@ def test_the_reload_rule_is_printed_after_an_install_that_writes_and_not_when_up
     main(argv)
     out = capsys.readouterr().out
     assert _UP_TO_DATE in out and CLAUDE.reload_rule not in out
+
+
+# The agents file follows the set: a claude or opencode project install keeps the block current in the
+# user-global agents file where that holds it, and otherwise in the project's AGENTS.md.
+
+_HARNESS_NAMED = {"claude": CLAUDE, "opencode": OPENCODE}
+
+
+def _global_agents_file(home: Path, harness: Harness) -> Path:
+    return home / Path(harness.user_harness_dir).relative_to("~") / harness.agents_file
+
+
+def _dirty() -> tuple[str, ...]:
+    return ("M adjagent/x.py",)
+
+
+@pytest.mark.parametrize("uncommitted", [False, True], ids=["committed", "uncommitted"])
+@pytest.mark.parametrize("name, redirect", [("claude", True), ("opencode", False)], ids=["claude", "opencode"])
+def test_without_a_global_block_a_project_install_keeps_it_in_the_projects_agents_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, redirect: bool, uncommitted: bool
+) -> None:
+    """The global file holds no block, so its text is not touched, and the commit state is not read."""
+    monkeypatch.setattr("adjagent.cli.uncommitted_sources", _dirty if uncommitted else _committed)
+    harness = _HARNESS_NAMED[name]
+    _plant(_global_agents_file(tmp_path / "home", harness), "# my global rules\n")
+    project = tmp_path / "project"
+    project.mkdir()
+    main(["install", str(project), f"--harness={name}"])
+    rendered = render_agents_file(harness, scope=project.name).encode()
+    top = {path: data for path, data in _files(project).items() if "/" not in path}
+    assert top == {"AGENTS.md": rendered, **({"CLAUDE.md": b"@AGENTS.md\n"} if redirect else {})}
+    assert _global_agents_file(tmp_path / "home", harness).read_text(encoding="utf-8") == "# my global rules\n"
+
+
+def test_on_the_fallback_a_claude_redirect_is_left_and_the_block_appended(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    _plant(project / "CLAUDE.md", "@AGENTS.md\n")
+    _plant(project / "AGENTS.md", "# mine\n")
+    main(["install", str(project), "--harness=claude"])
+    assert (project / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "\n".join(["# mine", "", *_block(CLAUDE), ""])
+
+
+def test_on_the_fallback_a_claude_native_file_with_its_own_content_refuses_the_install(
+    tmp_path: Path, capsys
+) -> None:
+    project = tmp_path / "project"
+    _plant(project / "CLAUDE.md", "# my own rules\n")
+    before = _state(project)
+    with pytest.raises(SystemExit):
+        main(["install", str(project), "--harness=claude"])
+    assert "CLAUDE.md holds its own content" in capsys.readouterr().err
+    assert _state(project) == before
+
+
+def _project_with_a_copy(tmp_path: Path, *, native: str | None, own: str) -> Path:
+    """A project whose AGENTS.md holds `own` and then a stale block, and whose CLAUDE.md, where `native` is
+    given, holds it."""
+    project = tmp_path / "project"
+    _plant(project / "AGENTS.md", f"{own}{_BEGIN}\nold\n{_END}\n")
+    if native is not None:
+        _plant(project / "CLAUDE.md", native)
+    return project
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize("own", ["# mine\n\n", ""], ids=["own-text", "only-the-block"])
+@pytest.mark.parametrize(
+    "name, native",
+    [("claude", "@AGENTS.md\n"), ("claude", "# my own rules\n"), ("opencode", None)],
+    ids=["claude-redirect", "claude-own-content", "opencode"],
+)
+def test_with_a_global_block_the_install_keeps_it_there_and_removes_the_project_copy(
+    tmp_path: Path, capsys, name: str, native: str | None, own: str
+) -> None:
+    """The project's AGENTS.md stays, emptied or not; its native file is neither read nor refused."""
+    harness = _HARNESS_NAMED[name]
+    global_file = _plant(_global_agents_file(tmp_path / "home", harness), f"# my global rules\n{_BEGIN}\nold\n{_END}\n")
+    global_prior = global_file.read_text(encoding="utf-8")
+    project = _project_with_a_copy(tmp_path, native=native, own=own)
+    project_prior = (project / "AGENTS.md").read_text(encoding="utf-8")
+    capsys.readouterr()
+    main(["install", str(project), f"--harness={name}"])
+    out = capsys.readouterr().out
+    assert global_file.read_text(encoding="utf-8") == "\n".join(["# my global rules", *_block(harness), ""])
+    assert (global_file.parent / f"backup.{global_file.name}").read_text(encoding="utf-8") == global_prior
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == own
+    assert (project / "backup.AGENTS.md").read_text(encoding="utf-8") == project_prior
+    assert f"removed the adjagent block from {project / 'AGENTS.md'}" in out
+    assert (None if native is None else (project / "CLAUDE.md").read_text(encoding="utf-8")) == native
+    assert native is not None or not (project / "CLAUDE.md").exists()
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_once_the_global_file_holds_the_block_every_project_install_keeps_it_there(
+    tmp_path: Path, capsys
+) -> None:
+    """Sticky: a project with no agents file gets none, and a second install is up to date."""
+    global_file = _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
+    for project in (tmp_path / "one", tmp_path / "two"):
+        project.mkdir()
+        main(["install", str(project), "--harness=claude"])
+        assert not (project / "AGENTS.md").exists() and not (project / "CLAUDE.md").exists()
+        assert global_file.read_text(encoding="utf-8") == "\n".join([*_block(CLAUDE), ""])
+        capsys.readouterr()
+        main(["install", str(project), "--harness=claude"])
+        assert _UP_TO_DATE in capsys.readouterr().out
+
+
+def test_the_global_write_under_uncommitted_sources_is_refused_with_nothing_written(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("adjagent.cli.uncommitted_sources", _dirty)
+    _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
+    project = _project_with_a_copy(tmp_path, native="@AGENTS.md\n", own="# mine\n")
+    before = {"home": _state(tmp_path / "home"), "project": _state(project)}
+    with pytest.raises(SystemExit):
+        main(["install", str(project), "--harness=claude"])
+    assert "uncommitted changes" in capsys.readouterr().err
+    assert {"home": _state(tmp_path / "home"), "project": _state(project)} == before
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_a_dry_run_names_the_global_files_whole_and_the_projects_relative(tmp_path: Path, capsys) -> None:
+    global_file = _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
+    project = _project_with_a_copy(tmp_path, native=None, own="# mine\n")
+    argv = ["install", str(project), "--harness=claude"]
+    capsys.readouterr()
+    main([*argv, "--dry-run"])
+    groups = _dry_run_groups(capsys.readouterr().out)
+    assert {str(global_file), "AGENTS.md"} <= groups["changed"]
+    assert {str(global_file.parent / "backup.CLAUDE.md"), "backup.AGENTS.md"} <= groups["created"]
+    assert not (global_file.parent / "backup.CLAUDE.md").exists() and not (project / "backup.AGENTS.md").exists()
+
+
+# A symlink is the file it names: read and written through, the link kept.
+
+
+@pytest.mark.usefixtures("_no_uncommitted")
+def test_a_symlinked_global_agents_file_holding_the_block_is_updated_through_the_link(tmp_path: Path) -> None:
+    dotfiles = _plant(tmp_path / "dotfiles" / "CLAUDE.md", f"# my global rules\n{_BEGIN}\nold\n{_END}\n")
+    link = _global_agents_file(tmp_path / "home", CLAUDE)
+    link.parent.mkdir(parents=True)
+    link.symlink_to(dotfiles)
+    project = tmp_path / "project"
+    project.mkdir()
+    main(["install", str(project), "--harness=claude"])
+    assert link.is_symlink() and link.readlink() == dotfiles
+    assert dotfiles.read_text(encoding="utf-8") == "\n".join(["# my global rules", *_block(CLAUDE), ""])
+    assert not (project / "AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-file", "dangling"])
+def test_a_symlinked_project_agents_md_gets_the_block_through_the_link(tmp_path: Path, dangling: bool) -> None:
+    """A dangling link reads as an absent file, and the write creates its target."""
+    target = tmp_path / "shared" / "AGENTS.md"
+    target.parent.mkdir()
+    if not dangling:
+        target.write_text("# mine\n", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").symlink_to(target)
+    main(["install", str(project), "--harness=claude"])
+    assert (project / "AGENTS.md").is_symlink() and (project / "AGENTS.md").readlink() == target
+    expected = render_agents_file(CLAUDE, scope=project.name) if dangling else "\n".join(
+        ["# mine", "", *_block(CLAUDE), ""]
+    )
+    assert target.read_text(encoding="utf-8") == expected
+    assert (project / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"

@@ -89,6 +89,7 @@ class AgentsFileText(Enum):
     """A value only the agents file's prose names, bound when it renders."""
 
     SCOPE_NAME = "scope_name"
+    VERSION = "version"
 
 
 class TuningText(Enum):

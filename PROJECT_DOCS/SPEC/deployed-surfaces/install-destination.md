@@ -38,7 +38,8 @@ shipped harness file, no guardrail probe or registration, no removal of an earli
 the docdicer tools package) and so no `--install` re-run, no runner include line and no runner file.
 `--install-global-agents-file` is its one opt-in: it also installs the harness agents file in the
 harness directory (Harness Agents File, below). On a project install the flag is ignored, with no
-error and no write.
+error and no write of its own: a claude or opencode project install writes the agents file as Harness
+Agents File specifies.
 
 A user-level claude plugin and a project's one share a name, and Claude Code loads the user-level one
 alone. A claude install reports this on stderr and never refuses over it: a user-level install says

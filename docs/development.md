@@ -40,8 +40,12 @@ Other targets:
   root instead, `rendered/<slug>/CLAUDE.md` beside `.mcp.json`, with no `harness/` directory and no
   `Makefile`: the slot is installed with `--subdir=`, so the plugin's root is the slot itself. Under
   claude the slot is the harness directory and holds the plugin at `<slot>/skills/adjagent/`, with
-  `.claude-plugin/plugin.json` and `.mcp.json` inside it and no `agents/` at the slot root. A slug
-  starting with `reference` is refused.
+  `.claude-plugin/plugin.json` and `.mcp.json` inside it and no `agents/` at the slot root. A claude
+  or opencode slot also holds the project's `AGENTS.md` and, under claude, the `CLAUDE.md` redirect
+  (`@AGENTS.md`). A slug starting with `reference` is refused.
+- A slot renders under a scratch `HOME` that is empty and removed afterward, so the install finds no
+  user-global agents file and writes the block into the slot's `AGENTS.md`, never into the real
+  `~/.claude` or `~/.config/opencode`. `just check-wheel` runs under a scratch home the same way.
 - `just render-diff [a] [b]` compares two slots (reference-claude against latest by default) by text, with
   each file's banner replaced by one constant line, and reports differences without failing on them.
 - `just retake-reference` re-takes the baseline slots `render-diff` compares against. Run it only

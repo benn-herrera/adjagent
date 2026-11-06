@@ -18,9 +18,12 @@ then renders and prunes and skips the packages, resource files, guardrail and th
 the agents file are all in terms of the harness directory, which holds ROOT. `install.py` writes the agents file in the harness
 directory for a standalone plugin whose harness directory is
 not the project root, and for a user-level install given `--install-global-agents-file`, a flag a
-project install ignores. Only the second is refused while `adjagent/` has uncommitted changes
-(`agents_file.refuse_uncommitted`, called only when the install is user-level): no project install is,
-the plugin below a project included. The verb takes no `kbase` argument: it
+project install ignores. A claude or opencode project install also keeps the block current in one
+place (`agents_file.checked_followed_agents_file`, Agents File): the user-global agents file where
+that holds it, otherwise the project's `AGENTS.md`. Two writes are refused while `adjagent/` has
+uncommitted changes (`agents_file.refuse_uncommitted`): a user-level install's, and a project
+install's write into the user-global agents file. The project's `AGENTS.md` and `CLAUDE.md` redirect
+are not, nor is the plugin below a project. The verb takes no `kbase` argument: it
 writes, copies, verifies and locates no `kbase` executable. It refuses, with nothing written, a
 TARGET that is not an existing directory; a harness it cannot tell, or two harness directories in
 the target, without `--harness`; a harness directory or ROOT that exists and is not a directory

@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from adjagent import __version__
 from adjagent.context import DEFAULT_FAMILY, Render, map_spec
 from adjagent.definition import Definition, SkillFile
 from adjagent.definitions import discover
@@ -133,7 +134,7 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     from ctx.overlay for the definition's seat ("" where the family fills none), the step-down model
     from ctx.step_down_model for every kind, a reference to any discovered definition, the agents
     file included, as ctx.harness.reference_prefix and its name, and for the agents file alone its
-    scope name. A paragraph that fills to nothing is dropped with its blank line, so an unfilled
+    scope name and the package version. A paragraph that fills to nothing is dropped with its blank line, so an unfilled
     anchor or an optional harness text the harness supplies nothing for, standing as its own
     paragraph, leaves no empty one. A paragraph whose source holds a tuning hole that fills to "" is dropped whole,
     whatever else it says. A placeholder-shaped span naming no key is refused, naming `where`.
@@ -151,6 +152,7 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     )
     if defn.kind is Kind.AGENTS_FILE:
         values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope
+        values[hole(AgentsFileText.VERSION)] = __version__
     unfilled_tuning = {hole(part) for part in TuningText if not values[hole(part)]}
 
     def value(match: re.Match[str]) -> str:

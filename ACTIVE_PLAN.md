@@ -14,7 +14,8 @@ line number cited below was re-taken at `3d36ff6`.
 | P1 | Reference holes and every cross-reference converted | expert | shipped | python-coder, then tech-writer | done (P1 checkpoint commit) |
 | P2 | Install root inside the plugin directory | expert | shipped | python-coder, then tech-writer | done (P2 checkpoint commit) |
 | P3 | Guardrail registration in the plugin; retired settings entries removed | expert | shipped | python-coder, then tech-writer | done (P3 checkpoint commit) |
-| P3a | The agents file follows the set | expert | shipped | python-coder, then tech-writer | not started |
+| P3a | The agents file follows the set | expert | shipped | python-coder, then tech-writer | done (P3a checkpoint commit) |
+| P3b | A symlink is what it names (R8) | expert | shipped | python-coder, then tech-writer | drafted; plan review pending |
 | P4 | Pre-release testing | user-run, with agent-run parts | throwaway | scratch | not started |
 | P5 | Post-plan review, revision, burndown | review | — | reviewers | not started |
 
@@ -88,6 +89,14 @@ on the agent's own model. No package is mechanical, so none runs on the step-dow
   - A mage plugin agent is invoked as `adjagent:<name>`, and a command as `/adjagent:<cmd>`.
   - Mage's `reference_prefix` is `adjagent:`, from the same plugin-name constant as claude's.
   - Landed in P2.
+- **R8. A symlink is the file or directory it names.** The install reads and writes through it,
+  and never refuses, skips or reports a path because it is a symlink.
+  - Removing a path that is a symlink, dangling or not, removes the link itself, never what it
+    names.
+  - A non-directory where a directory is needed stays refused. A dangling link counts as a
+    non-directory there, and as an absent file at a write target.
+  - The install never creates a symlink into live operator configuration.
+  - Agents-file paths are covered in P3a; everything else in P3b.
 
 ## Planning-time actions
 
@@ -654,6 +663,180 @@ the project `AGENTS.md`, which the uncommitted refusal (R6, landed in P1) does n
 
 **After P3a is accepted:** `just retake-reference`
 (`CONVENTIONS/planning-and-execution/reference-retakes-follow-acceptance.md`).
+
+---
+
+## P3b: A symlink is what it names (expert; shipped)
+
+**Outcome.** R8 and D-11, outside the agents-file paths, which P3a already covers. Every
+install-side check, write, removal and preflight copy treats a symlink as the file or directory it
+names. No path is refused, skipped or reported for being a symlink. The guardrail scripts'
+symlink-following is untouched: it resolves paths, it does not vet them (`guardrail.pl`,
+`guardrail.ts`).
+
+**Line numbers.** The lines below are at `be18345`, and P3a's commit moves `install.py`.
+- At dispatch the brief re-runs each command below on P3a's commit and states the new answers.
+- The symbol names are authoritative.
+- `git diff --stat be18345 -- adjagent/preflight.py` printed nothing while P3a was in the working
+  tree, so `preflight.py` lines hold.
+
+**Scope: code.**
+- `adjagent/install.py`:
+  - `_blocked_component` (298-306): a component blocks only where it exists and is not a
+    directory, links followed: `os.path.lexists(c) and not c.is_dir()`. A link to a directory
+    passes; a link to a file, or a dangling link, blocks as a non-directory. The symlink clause
+    goes, and the docstring with it.
+  - `_foreign_on_path` (309-317): `target` passes when it does not exist with links followed
+    (absent, or a dangling link), or is a file, links followed, that `ours` accepts read through.
+    The `target.is_symlink()` clause goes.
+  - `_refuse_foreign_targets` (321-346): the message drops "a symlink or".
+  - A write through a dangling link creates the named file, and any missing parent directories of
+    it, as an absent target's write does. `write_renders` (`render.py`), the package copy and the
+    resource copy need no other change: `open` and `copyfile` write through a link.
+  - Package destinations (the `shutil.rmtree(root / destination, ignore_errors=True)` loop, 1311-1312):
+    - A destination that is a link to a directory has that directory's contents removed, and the
+      link stays. The copy then writes through it.
+    - A dangling link is written through: the named directory is created.
+    - Today `rmtree` on a link raises, and `ignore_errors=True` hides it. The old contents would
+      survive beside the new copy.
+    - `_docdicer_venv_to_rebuild`'s `.venv` test already follows links.
+  - Retired package destinations (1330-1338, P2's flat-layout removal):
+    - A destination that is a symlink, dangling or not, has **the link** unlinked, reported as
+      removed. The directory it names is never touched.
+    - Otherwise it is removed with `rmtree` as today.
+    - The `_blocked_component … or is_symlink` report and its comment go.
+  - `LEGACY_TREES` loop (1339-1345): the same rule. A link is unlinked; otherwise `rmtree`.
+  - `_remove_retired_script` (958-971): the `is_symlink()` skip goes.
+    - A link whose named file carries the installed header has the link unlinked.
+    - A regular file is removed as today.
+    - The parent-directory cleanup follows the prune's link rule below.
+  - `prune` (348-382):
+    - The `not path.is_symlink()` clause goes. A stale entry is judged by what it names (`_is_ours`
+      reads through), and when it is a link, the link is unlinked.
+    - The walk follows symlinked directories below a surface (`os.walk(..., followlinks=True)`),
+      skipping a directory whose resolved path it has already visited, so a link cycle ends.
+    - The empty-directory cleanup removes the link where the emptied directory was reached
+      through one.
+  - `_settings_obstacle` (710-722): the two symlink clauses go. It names only a non-directory on
+    the way (`_blocked_component`) and a target that exists, links followed, and is not a regular
+    file. Its docstring changes, and so do those of `_settings_to_read`, `_check_settings`,
+    `mcp_merge`, `_remove_retired_entry` and `_earlier_guardrail`. Those callers then:
+    - read and splice through a symlinked MCP or settings file;
+    - create the named file through a dangling one;
+    - remove a retired entry through a link. The comment above `_names_text` at 906-907 ("a
+      symlink read through and never written") goes.
+  - The `install` docstring (`def install` at 1165): every symlink clause goes; the non-directory clauses stay.
+  - `_mcp_settings_file` (702-707): unchanged. `os.path.lexists` already picks a dangling
+    alternative, which is now written through.
+  - `_refuse_root` (239-251): unchanged. A ROOT that exists and is not a directory, links followed,
+    stays refused.
+- `adjagent/preflight.py`:
+  - `_copy_managed` (74-120):
+    - A managed path is copied as what it names: a directory with `_copy_tree`, a file with
+      `copy2`, a dangling link as nothing.
+    - The `links` list, the second pass, the `scratch / "links"` stand-ins and the
+      `copy.symlink_to` call go.
+    - Docstring updated.
+  - `_tree_files` (123-129): `os.walk(base, followlinks=True)`, the same cycle guard, so both
+    sides list what the install reads through.
+  - `preflight` and `run_preflighted` docstrings: the "what the copy does not predict" caveat
+    keeps only the non-directory case.
+- **No code creates a symlink.** Command: `git grep -n 'symlink_to\|os\.symlink' -- adjagent`.
+  Answer at `be18345`: `adjagent/preflight.py:120` alone. It is gone after this package.
+
+**Tests** (`tests/test_adjagent_install.py`, lines at `be18345`).
+- Rewrite each case that pins a refusal, skip or report for a symlink, to the R8 outcome:
+  - `test_prune_leaves_a_symlink_standing` (795): a link to a stale generated file is unlinked,
+    and the named file is intact.
+  - `test_a_symlink_or_directory_at_a_render_target_is_refused_with_nothing_written` (1641):
+    - the `symlink` case: a link to rendered output is written through. The named file is updated
+      and the link stays.
+    - the `directory` case stays refused.
+  - `test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written` (2062):
+    - the `symlink-on-a-resource-path` case (`_plant_directory_link`) is written through.
+    - the `file-on-a-render-path` case stays refused.
+  - `test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_standing` (2098):
+    - `mcp-symlink`: the entry is spliced into the named file.
+    - `mcp-dangling-symlink`: the named file is created holding the entry.
+    - `mcp-directory` and `mcp-parent-file` stay as they are.
+  - `test_settings_the_removal_cannot_edit_are_never_refused_and_reported_only_where_they_name_our_command`
+    (1853), its `symlink` kind: the retired entry is removed through the link, and nothing is
+    reported.
+  - `test_a_symlinked_settings_file_the_install_leaves_alone_is_up_to_date` (2404): renamed to the
+    R8 outcome.
+    - The dry run predicts the change through the link.
+    - An install followed by a second run reports up to date.
+    - The dangling case predicts and creates the named file.
+  - `test_a_dry_run_through_a_symlinked_skill_directory_writes_nowhere` (2368): still writes
+    nowhere. Its predicted paths now include what the install writes through the link.
+- Add:
+  - a retired package destination, a legacy tree and the retired guardrail script, each as a link
+    and as a dangling link: the link is unlinked and reported, and what it names is byte-identical;
+  - a package destination that links to a directory: its stale contents are gone, the new package
+    is in it, and the link stays;
+  - the prune following a symlinked directory below a surface, with a link cycle ending;
+  - for each symlink case above, `_assert_dry_run_predicts` agrees with the install (D-9.8);
+  - a guard that no module under `adjagent/` calls `symlink_to` or `os.symlink`.
+- Unchanged:
+  - `tests/test_install_target.py:223`
+    (`test_a_user_directory_symlinked_out_of_home_installs_through_the_link`);
+  - `tests/test_guardrail.py`;
+  - the agents-file symlink cases (157-165, 185-186), which are P3a's.
+
+**Scope: docs (tech-writer, same checkpoint).** The source is the command
+`git grep -n -i symlink -- PROJECT_DOCS docs README.md`. Its answer at `be18345`, line by line:
+- **Change** (state R8, or drop the symlink clause, keeping any non-directory clause):
+  - SPEC `write-safety.md`:
+    - lines 7-8, 16, 29, 42-43, 48 and 71;
+    - and a new sentence stating R8: a symlink is the file or directory it names; removing a
+      symlink removes the link; the install never creates a symlink into live operator
+      configuration.
+  - SPEC `harness-agents-file.md:42-44`: keep only that neither direction is a symlink, in its
+    original sense (the repository's copy is never linked into live configuration). The refusal
+    of a symlink in place of the file or its backup goes; P3a may already have made this edit, so
+    verify.
+  - ARCHITECTURE `install-consumption-model/guardrail-registration.md` 30, 47 and 53.
+  - ARCHITECTURE `install-consumption-model/install-entry.md` 31 and 38.
+  - ARCHITECTURE `install-consumption-model/renders-and-copies.md` 15, 32, 52-54, 88-92, 106 and
+    117-122. The preflight bullets describe the dereferencing copy and the link-following walk.
+  - `docs/guardrail.md:45`; `docs/install-reference.md` 148-149 and 159; `docs/knowledge-base.md:77`.
+- **Stay** (resolution, not refusal):
+  - ARCHITECTURE `install-entry.md` 6, 8, 11 and 30;
+  - SPEC `install-destination.md` 25 and 85;
+  - `guardrail-hook.md:45`, `shipped-files.md:77` and `docs/guardrail.md:17` (the guardrail's own
+    link-following).
+
+**Facts.**
+- The refusal sites. Command:
+  `git grep -n -i -E 'symlink|is_symlink|lexists|_blocked_component|_settings_obstacle|islink' be18345 -- adjagent`.
+  Answer, outside the guardrail resources:
+  - `agents_file.py:71-72` (P3a's);
+  - `install.py` 243, 298-317, 329, 343, 374, 707, 710-727, 734, 774, 779, 871, 896-906, 961-963,
+    1211-1214, 1241, 1329-1335, 1452-1454;
+  - `install_target.py` 10, 30, 133 (resolution, unchanged);
+  - `preflight.py` 46, 63-69, 78-120, 133-134.
+- Callers of the changed helpers, all in `install.py`.
+  Command: `git grep -n -e <name> be18345 -- adjagent`.
+  - `_blocked_component`: 298, 311, 313, 715, 963, 1333.
+  - `_settings_obstacle`: 710, 726-727, 734, 774, 779, 896, 903.
+  - `_settings_to_read`: 725, 735, 947.
+  - `_foreign_on_path`: 309, 329, 338.
+- `rmtree` sites. Command: `git grep -n rmtree be18345 -- adjagent`. Answer: `install.py` 1312,
+  1337 and 1342, and `preflight.py:103`.
+  - `shutil.rmtree` refuses a symlink: "Cannot call rmtree on a symbolic link" (Python docs,
+    `shutil.rmtree`).
+  - So each `install.py` site needs the R8 link rule. `preflight.py:103` goes with the link pass.
+- No signature changes. Every changed helper keeps its parameters, so no referencing file beyond
+  those above is touched.
+
+**Done-line.**
+1. `just test`.
+2. `just render p3b-claude`; `just render p3b-mage --harness=mage`;
+   `just render p3b-opencode --harness=opencode --model-tier-map=all=inherit`.
+3. `just render-diff p3a-<h> p3b-<h>` for each harness reports no differing file. R8 changes no
+   render.
+4. `git grep -n 'symlink_to\|os\.symlink' -- adjagent` prints nothing.
+5. `just sweep-python`, its list read.
 
 ---
 

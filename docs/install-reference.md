@@ -70,7 +70,9 @@ with `--with-kb`, the user-level plugin's own `.mcp.json`, and no user settings 
 kb-tools, no include line. The docdicer skill is
 installed without its script, and says so when asked to run it. Add `--install-global-agents-file`
 to install the harness agents file in `~/.claude` too, beside the plugin
-([Agents file](agents-file.md)); on a project install the flag is ignored.
+([Agents file](agents-file.md)); on a project install the flag is ignored. A claude or opencode
+project install keeps the agents-file block current in one place, your global agents file where it
+holds the block and otherwise the project's `AGENTS.md` ([Agents file](agents-file.md#where-a-project-install-puts-it)).
 
 ### A user-level plugin shadows the project's
 

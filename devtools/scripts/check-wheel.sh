@@ -56,12 +56,13 @@ script_help="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --help)"
 module_help="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -m adjagent --help)"
 [[ "${script_help}" == "${module_help}" ]] || fail "adjagent --help differs from python -m adjagent --help"
 
-for project in from-wheel from-checkout; do
-  mkdir -p "${project}/.claude"
-  : > "${project}/justfile"
+# Each project is named `project`: its AGENTS.md is titled with the project directory's name.
+for side in from-wheel from-checkout; do
+  mkdir -p "${side}/project/.claude"
+  : > "${side}/project/justfile"
 done
-from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${scratch}/from-wheel" --with-kb > /dev/null
-PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${scratch}/from-checkout" --with-kb > /dev/null
+from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${scratch}/from-wheel/project" --with-kb > /dev/null
+PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${scratch}/from-checkout/project" --with-kb > /dev/null
 diff -r from-wheel from-checkout || fail "the wheel's install differs from the checkout's"
 
 mkdir plugins
