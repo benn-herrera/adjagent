@@ -2320,6 +2320,25 @@ def test_a_dry_run_on_a_user_directory_predicts_the_install(
     assert ".claude/CLAUDE.md" in groups["changed"] and ".claude/backup.CLAUDE.md" in groups["created"]
 
 
+@pytest.mark.usefixtures("_no_uncommitted")
+@pytest.mark.parametrize(
+    ("harness", "writes_mcp"),
+    [(CLAUDE, True), (OPENCODE, False)],
+    ids=["claude", "opencode"],
+)
+def test_a_dry_run_of_a_user_level_kb_install_predicts_the_install(
+    tmp_path: Path, capsys, harness: Harness, writes_mcp: bool
+) -> None:
+    """The kbase MCP entry goes in at user level only where the harness keeps its settings file at ROOT,
+    and no retired entry is removed there."""
+    home = tmp_path / "home"
+    harness.user_dir.mkdir(parents=True)
+    argv = ["install", str(home), f"--harness={harness.name}", "--with-kb", "--install-global-agents-file"]
+    groups = _assert_dry_run_predicts(argv, project=home, capsys=capsys)
+    mcp_name = PurePosixPath(harness.mcp.canonical).name
+    assert any(PurePosixPath(path).name == mcp_name for path in groups["created"]) is writes_mcp
+
+
 def test_a_dry_run_after_a_family_change_lists_the_renders_as_changed(tmp_path: Path, capsys) -> None:
     project = tmp_path / "project"
     project.mkdir()

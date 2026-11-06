@@ -10,7 +10,7 @@ is named by its bold title as well, since numbers shift only when Q5 renumbers.
 | Q1 | Guardrail scripts and tests: items 10, 13, 23, 24, 25; checks: items 30, 32 | mechanical | shipped | python-coder (sonnet) | done (4a22f36) |
 | Q2 | Docs: items 14, 16, 17 (report only), 20 | mechanical | shipped | tech-writer (sonnet) | done (29efff5); item 17 ruled: every Must-see bullet stays |
 | Q3 | Definition text: item 21 | mechanical | shipped | prompt-engineer (sonnet) | done |
-| Q5 | One home for the decisions `install` and `_install_managed_paths` both make: item 5 | expert | shipped | python-coder (opus) | not started |
+| Q5 | One home for the decisions `install` and `_install_managed_paths` both make: item 5 | expert | shipped | python-coder (opus) | done |
 | — | Plan review | — | — | prompt-engineer, architect | done |
 | Q4 | Post-plan review | review | — | python-coder, tech-writer, prompt-engineer | not started |
 

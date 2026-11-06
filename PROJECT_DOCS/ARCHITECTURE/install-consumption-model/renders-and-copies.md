@@ -93,9 +93,9 @@ the install. No version marker or stamp file takes part.
   harness's resource targets, rendered files and guardrail registration, and the MCP settings
   candidates where `McpSettings.site` is `HARNESS` and the run may write them. Under the harness
   directory, on a project install: the flat layout's guardrail script path. Under the project root,
-  on a project install: the justfile and Makefile names, each settings file a retired entry is
-  removed from, and the MCP settings candidates (`Harness.mcp.canonical` and `.alternatives`) where
-  `McpSettings.site` is `PROJECT`.
+  on a project install: the justfile and Makefile names unless the harness is a standalone plugin,
+  each settings file a retired entry is removed from, and the MCP settings candidates
+  (`Harness.mcp.canonical` and `.alternatives`) where `McpSettings.site` is `PROJECT`.
 - **The copy** (`preflight.preflight`) lives in a `tempfile.TemporaryDirectory`, each managed path at
   its position below its base. Every symlink is dereferenced (`copy2`, `copytree(symlinks=False)`): a
   managed path is copied as what it names, a dangling link as nothing, so the copy holds no link and

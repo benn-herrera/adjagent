@@ -1209,6 +1209,36 @@ def _keeps_the_block_current(harness: Harness, *, user_level: bool) -> bool:
     return not user_level and not harness.is_standalone_plugin
 
 
+def _guardrail_in_play(harness: Harness, *, user_level: bool) -> GuardrailHook | None:
+    """The guardrail hook an install delivers, before the probe decides whether it registers: the
+    harness's own on a project install, none on a user-level one."""
+    return None if user_level else harness.guardrail
+
+
+def _mcp_settings_base(harness: Harness, *, project: Path, root: Path) -> Path:
+    """The base the MCP settings file lives at and resolves its paths against: ROOT for a harness that
+    keeps its file there, the project root for every other."""
+    return project if harness.mcp.site is McpSite.PROJECT else root
+
+
+def _may_write_mcp_settings(harness: Harness, *, user_level: bool) -> bool:
+    """Whether an install with the kb set writes the kbase MCP entry: every project install, and a
+    user-level one where the harness keeps its settings file at ROOT."""
+    return not user_level or harness.mcp.site is McpSite.HARNESS
+
+
+def _may_write_include_line(harness: Harness, *, user_level: bool) -> bool:
+    """Whether an install with the kb set writes the KB include line in the project's runner file: a
+    project install, unless the harness is a standalone plugin. A standalone plugin is not a repo
+    project, so it has no consumer runner file and none is created."""
+    return not user_level and not harness.is_standalone_plugin
+
+
+def _retirable_entries(harness: Harness, *, user_level: bool) -> tuple[RetiredEntry, ...]:
+    """The entries earlier installs registered that a project install may remove; none at user level."""
+    return () if user_level else harness.retired_entries
+
+
 def _standing_docdicer_venvs(root: Path, *, harness_dir: Path, user_level: bool) -> list[Path]:
     """The docdicer tools' `.venv` directories a project install finds standing, removes with their
     package destination, and then has rebuilt at ROOT's: one at ROOT's destination, and one at the
@@ -1289,9 +1319,7 @@ def install(
     _refuse_root(root)
     project = harness_dir.resolve() if project_root is None else Path(project_root).resolve()
     lexical_project = _lexical(harness_dir if project_root is None else Path(project_root))
-    # The settings file's own base: a harness that keeps its file at ROOT resolves its paths against
-    # ROOT, every other against the project root.
-    mcp_base = project if ctx.harness.mcp.site is McpSite.PROJECT else root
+    mcp_base = _mcp_settings_base(ctx.harness, project=project, root=root)
     user_level = ctx.harness.name in user_dir_harnesses(harness_dir if real_harness_dir is None else real_harness_dir)
     # A user-level harness directory need not sit under its project root — a user directory may be a
     # symlink out of home — and nothing a user-level install writes spells its path from there.
@@ -1310,9 +1338,9 @@ def install(
     destinations = [] if user_level else _packages(kb_included=kb_included)
     package_files = [] if user_level else package_copies(root, kb_included=kb_included)
     resource_files = [] if user_level else harness_resource_copies(root, harness=ctx.harness.name)
-    guardrail = None if user_level else ctx.harness.guardrail
-    writes_mcp = kb_included and (not user_level or ctx.harness.mcp.site is McpSite.HARNESS)
-    writes_include_line = kb_included and not user_level and not ctx.harness.is_standalone_plugin
+    guardrail = _guardrail_in_play(ctx.harness, user_level=user_level)
+    writes_mcp = kb_included and _may_write_mcp_settings(ctx.harness, user_level=user_level)
+    writes_include_line = kb_included and _may_write_include_line(ctx.harness, user_level=user_level)
     retired_destinations = (
         []
         if user_level or not ctx.harness.plugin_dir
@@ -1331,7 +1359,9 @@ def install(
     registers_guardrail = guardrail is not None and guardrail_skipped is None
     # An entry an earlier install registered goes only on an install that writes what replaces it.
     replaced = {Replacement.GUARDRAIL: registers_guardrail, Replacement.MCP: writes_mcp}
-    retiring = [] if user_level else [entry for entry in ctx.harness.retired_entries if replaced[entry.replacement]]
+    retiring = [
+        entry for entry in _retirable_entries(ctx.harness, user_level=user_level) if replaced[entry.replacement]
+    ]
     # The harness's own rendered files are a class of their own at the refusal: their ownership is the
     # marker each states, not a banner a JSON file has no way to carry.
     harness_markers = {PurePosixPath(file.path): file.marker for file in harness_files}
@@ -1359,7 +1389,7 @@ def install(
         # Read at the real path: the copy a dry run installs into holds nothing where a link dangles.
         real_root = (harness_dir if real_harness_dir is None else real_harness_dir) / ctx.harness.plugin_dir
         real_project_root = project if real_project is None else real_project
-        real_mcp_base = real_project_root if ctx.harness.mcp.site is McpSite.PROJECT else real_root
+        real_mcp_base = _mcp_settings_base(ctx.harness, project=real_project_root, root=real_root)
         dangling = _dangling_on_path(_mcp_settings_file(real_mcp_base, harness=ctx.harness), base=real_mcp_base)
         if dangling is not None:
             raise InputError(f"install would write the kbase MCP entry through '{dangling}', which names nothing")
@@ -1427,8 +1457,6 @@ def install(
             print(f"wrote {path}")
     if writes_mcp:
         mcp_merge(mcp_base, harness=ctx.harness, command=KBASE_NAME)
-    # A standalone plugin is not a repo project, so it has no consumer runner file to include the
-    # snippets in and none is created.
     if writes_include_line:
         install_kb_include_line(project, harness_relpath=harness_relpath, real_project=real_project)
     for entry in retiring:
@@ -1467,16 +1495,10 @@ def _install_managed_paths(
 ) -> list[tuple[Path, list[str]]]:
     """(base, paths relative to it) for everything an install into `harness_dir` may read or write: the
     project root as spelled, the harness directory, ROOT and the harness's user harness directory, in
-    that order, ROOT keeping its position below the harness directory. What it writes by, never a listing of either
-    directory, which in a user harness directory holds the operator's own trees. Under the harness directory, the surfaces the prune walks,
-    each legacy tree, every package destination an install straight into it wrote, and the agents
-    file's paths where the run writes one, and the guardrail script such an install left; under ROOT,
-    the surfaces, every package destination, the harness's resource targets, rendered files and
-    guardrail registration, and the MCP settings candidates where the harness keeps them there and the
-    run may write them; under the project root, on a project install, the runner files, the MCP
-    settings candidates where the harness keeps them there, and each settings file a retired entry is
-    removed from; and, where a project install keeps the agents-file block current, the paths that
-    keeping reads or writes, each under the project root or the user harness directory it lies in."""
+    that order, ROOT keeping its position below the harness directory. Named from what the install
+    writes by, never a listing of a directory, which in a user harness directory holds the operator's
+    own trees. Each decision the install takes on what only its run knows — the kb set, the guardrail
+    probe — is taken here as though it went the way that writes more."""
     root = harness_dir / harness.plugin_dir
     destinations = [destination for _, destination in _packages(kb_included=True)]
     under_harness_dir = [*SURFACES, *LEGACY_TREES, *destinations]
@@ -1486,18 +1508,20 @@ def _install_managed_paths(
         *(target.relative_to(root).as_posix() for _, target in harness_resource_copies(root, harness=harness.name)),
         *(file.path for file in harness.rendered_files),
     ]
-    if harness.guardrail is not None and not user_level:
-        under_harness_dir.append(harness.guardrail.script)
-        under_root.append(harness.guardrail.registration.path)
+    guardrail = _guardrail_in_play(harness, user_level=user_level)
+    if guardrail is not None:
+        under_harness_dir.append(guardrail.script)
+        under_root.append(guardrail.registration.path)
     under_project: list[str] = []
-    mcp_paths = [harness.mcp.canonical, *harness.mcp.alternatives]
-    if harness.mcp.site is McpSite.HARNESS:
-        under_root += mcp_paths
-    elif not user_level:
-        under_project += mcp_paths
-    if not user_level:
+    if _may_write_mcp_settings(harness, user_level=user_level):
+        mcp_paths = [harness.mcp.canonical, *harness.mcp.alternatives]
+        if _mcp_settings_base(harness, project=lexical_project, root=root) == root:
+            under_root += mcp_paths
+        else:
+            under_project += mcp_paths
+    if _may_write_include_line(harness, user_level=user_level):
         under_project += [*_JUSTFILE_NAMES, *_MAKEFILE_NAMES]
-        under_project += [entry.settings for entry in harness.retired_entries]
+    under_project += [entry.settings for entry in _retirable_entries(harness, user_level=user_level)]
     if _installs_agents_file(
         harness_dir,
         harness,
