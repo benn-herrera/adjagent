@@ -17,7 +17,7 @@ gives a plugin's hook processes `CLAUDE_PLUGIN_ROOT`, so the command names no ha
 needs no quoting refusal. The guard exists because perl exits 2 for a script it
 cannot open, which Claude Code reads as a block: a plugin that loses its `hooks/` directory would
 have every call the matcher names blocked. The interpreter is `perl` on `PATH`, never an absolute
-path, because the plugin is often committed and read on other machines. Earlier installs registered
+path, because the plugin may be committed or shared and read on other machines. Earlier installs registered
 the same program in the project's `.claude/settings.json`, naming the script from
 `$CLAUDE_PROJECT_DIR`; the harness's retired entries ([Guardrail registration](guardrail-registration.md))
 recognise that command, which the install now removes.
@@ -36,11 +36,12 @@ word, it is `path_of`. File-tool arguments go through `path_of` alone. The redir
 heredoc bodies, which are not shell; a redirect on the heredoc's own command line is still seen, and
 the inline-script write check still reads the body.
 
-The `.index/` check runs only when `<harness-dir>/skills/kbase/SKILL.md` exists, tested on every
-call. Each script finds its harness directory from its own path, never from the root or the working
+The `.index/` check runs only when the kb signal, the `kbase` skill's `SKILL.md`, exists, tested on
+every call. Each script finds the signal from its own path, never from the root or the working
 directory, which `--subdir` would make wrong: `guardrail.pl` from `$0`, which is
-`<harness-dir>/hooks/guardrail.pl`, and `guardrail.ts` from `import.meta.url`, which is
-`<harness-dir>/plugins/guardrail.ts`. Its resolution differs from the mutation check's: a path
+`<ROOT>/hooks/guardrail.pl`, so its signal is `<ROOT>/skills/kbase/SKILL.md`; and `guardrail.ts` from
+`import.meta.url`, which is `<harness-dir>/plugins/guardrail.ts`, so its signal is
+`<harness-dir>/skills/kbase/SKILL.md`. Its resolution differs from the mutation check's: a path
 collapses `..` lexically against the call's working directory, else the root (opencode's file tools:
 the root), then follows symlinks through the longest prefix that exists, so a link into `.index/` is
 caught. The root's own `kb-root/` and `kb-root/.index/` take the same step, so both sides of a

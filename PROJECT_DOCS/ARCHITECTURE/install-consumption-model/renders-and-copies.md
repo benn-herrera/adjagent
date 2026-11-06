@@ -59,10 +59,14 @@ the install. No component between ROOT and any render or resource target may be 
 links followed (`_blocked_component`); one that is refuses the install in the same refusal, and
 components at or above ROOT are not examined. So does a dangling link on the way to a target, or at
 one whose named path sits in a missing directory (`_dangling_on_path`); a dangling link at a target
-otherwise is written through. Package destinations are exempt from these checks:
-this repository owns those entire and replaces them whole. `_clear_package_destination` empties a
-destination that is a link to a directory and leaves the link, and makes the directory a dangling
-link names; the copy then writes through it. The resource
+otherwise is written through. Package destinations are exempt from the banner and
+marker checks: this repository owns those entire and replaces them whole. They are not exempt from the
+dangling-link rule: a link at a destination, or on the way to it, whose named path sits in a missing
+directory joins the one refusal, because nothing could be made through it. `_clear_package_destination`
+empties a destination that is a link to a directory and leaves the link, and makes the one directory
+a dangling link names, whose parent the check has shown to stand (`mkdir` without `parents`); the copy
+then writes through it. A destination that is a directory goes with `rmtree`, and any other file there
+is unlinked. No error is swallowed: an `OSError` from the clear propagates. The resource
 files join the same `copies` list as the packages', so the prune's `keep` holds them and the report
 counts them: a harness file never reads as a stale render, and the report line says `copied files`
 for the lot. The copy is one-way, not a mirror — `prune` owns the three rendered surfaces and nothing
@@ -120,13 +124,12 @@ the install. No version marker or stamp file takes part.
   project install finds a docdicer `tools/.venv`, that the install would replace it and run
   `tools/docdicer --install`, which needs the network — then the captured reports, and a return.
   Otherwise the real install runs as `install` always has.
-- **Dangling links.** The copy holds nothing where a link dangles, so the copy cannot show the
-  refusal for one. `_refuse_foreign_targets` and the MCP settings check therefore read each target's
-  counterpart at the real path (`real_harness_dir`, `real_project`) with `_dangling_on_path`, and the
-  dry run reports that refusal as the install does.
-- **What the copy does not predict.** A regular file where a directory on the way to an MCP settings
-  file should be (`.opencode` as a file): the install reports that it is not a directory and leaves
-  it, while the dry run predicts the settings file created.
+- **Dangling links and obstacles.** The copy holds nothing where a link dangles, so the copy cannot
+  show the refusal for one. `_refuse_foreign_targets` and the MCP settings check therefore read each
+  target's counterpart at the real path (`real_harness_dir`, `real_project`) with `_dangling_on_path`,
+  and the dry run reports that refusal as the install does. A regular file where a directory on the
+  way to a managed path should be (`.opencode` as a file) is copied in the directory's place
+  (`_copy_managed`), so the scratch install meets the obstacle the real one does.
 
 **The tool re-run.** `install` takes `tool_install`, a keyword-only callable from a script path to
 `None` on success or a one-line failure description, shaped like `uncommitted`. On a project install,

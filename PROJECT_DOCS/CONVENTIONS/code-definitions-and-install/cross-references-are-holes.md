@@ -5,7 +5,8 @@ spells the reference hole `@!ref-python-coder!@`. The renderer fills it with the
 `reference_prefix` and the name (Composition Model, Holes), so one source names an agent, command or
 skill the way each harness addresses it. Write the call inside the body's or description's f-string,
 as any clause is composed; a description that holds one is an f-string.
-- **An overlay cannot carry one.** Filled text is never rescanned (Composed text is never rescanned).
+- **An overlay cannot carry one.** Filled text is never rescanned (Composed text is never rescanned),
+  so an overlay names no definition at all.
 - **A role noun stays bare.** "Hand that to the architect" names a role, not a definition.
 - **A program stays bare.** `adjagent`, `docdicer` and `kbase` name an executable, a tool or a CLI
   when written as one ("every other `adjagent` command"). Written as the definition (the `docdicer`

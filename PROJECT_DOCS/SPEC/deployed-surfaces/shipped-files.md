@@ -9,8 +9,8 @@ and cannot be asked to notice a source-side rearrangement. Its installed copy is
 Installed artifacts says: the `!INSTALLED!` banner, not `!GENERATED!`
 — a shipped package is source taken as-is, never a render. `SHIPPED_PACKAGES` is the table of those
 an install delivers by explicit mapping: each row a shipped package and the destination
-under the install ROOT it lands at, stated per row — beside the three definition surfaces, under
-`adj-tools/`, or inside a skill's own directory and so inside the `skills/` surface. It holds one
+under the install ROOT it lands at, stated per row — inside a skill's own directory and so inside
+the `skills/` surface. It holds one
 row, the **docdicer tools package**, which every project install delivers to `skills/docdicer/tools/`,
 inside the `docdicer` skill's own directory. A user-level install delivers none (Install destination,
 above). The package holds four files:
@@ -38,7 +38,7 @@ that table: `skills/kbase/kb-tools/`, inside the `kbase` skill's own directory �
 tooling in its own directory, as the docdicer package does — holding only the runner
 snippets, and not an importable package either, read by the consumer through the runner include
 line. The snippets run `kbase` from `PATH`. No package is a
-definition: `adj-tools/` is outside the dispatch namespace entirely, and a package under a skill's
+definition: a package under a skill's
 directory is neither its `SKILL.md` nor a supporting file it lists.
 
 A harness's shipped files are the fifth class: copied as they stand, never rendered. A harness also

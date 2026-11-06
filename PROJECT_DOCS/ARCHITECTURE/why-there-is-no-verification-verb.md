@@ -18,8 +18,9 @@ where `perl` passes the probe on that machine, so a `render-diff` against a refe
 elsewhere can show it. Those four slots (`reference-claude`, `reference-mage`, `reference-opencode`,
 and `reference-gemma`, the gemma-4 family, which fills the overlay anchors) are the baseline, written
 only by `just retake-reference`, so a `render-diff` after a change reports that change and nothing the
-baseline already held. The claude and mage manifests carry `__version__`, so after a bump those two
-slots each show that one line (CONVENTIONS.md, Version has one home).
+baseline already held. The claude and mage manifests and every slot's agents-file begin marker carry `__version__`, so after
+a bump the claude and mage slots each show the manifest line and the marker line, and the other
+slots the marker line alone (CONVENTIONS.md, Version has one home).
 
 `tests/test_adjagent.py` holds the package's properties: each kind's frontmatter against literal
 lines, a skill's directory — its two fields and a comment-bannered reference — against literal

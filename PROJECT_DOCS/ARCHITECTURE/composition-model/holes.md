@@ -9,7 +9,7 @@ the server serves many) and `reload_rule` (what to do when an install's agents a
 its own paragraph of the `adjagent` skill), which a harness supplies as text or as the empty string,
 an empty one dropping the paragraph it stands in — and
 `@!fam-<anchor>!@` for the family overlay anchors a definition exposes (`gap-aversion`,
-`ask-vs-stipulate`). The agents file alone also carries `@!agf-<key>!@` for its scope name. A body of
+`ask-vs-stipulate`). The agents file alone also carries `@!agf-<key>!@` for its scope name and the package version. A body of
 any kind may carry `@!tun-<key>!@` for a tuning value, one computed from the render's tier map and
 harness rather than supplied by either: `TuningText`'s one member, `step_down_model`, which is
 `Render.step_down_model` (Harnesses and Families). A body or description may carry
@@ -17,7 +17,11 @@ harness rather than supplied by either: `TuningText`'s one member, `step_down_mo
 `clauses.ref(name=…)`, for a reference to another definition. Its closed set is the name of every
 discovered definition, the agents file's text included, each filled with `Harness.reference_prefix`
 followed by the name; the prefix is `adjagent:` under claude and mage and `""` under opencode, so a
-reference renders as `adjagent:<name>` or as the bare name. No prose in the repository contains `@!`.
+reference renders as `adjagent:<name>` or as the bare name. The map is built once per prefix
+(`render._references`), not on every fill. The closed set is every discovered name, so the renderer
+does not refuse a reference to a definition the install omits (mage's `omits`, a base install's
+excluded kb set); a test reads every included definition's source under each harness, base and kb,
+and holds each reference to a definition that install ships. No prose in the repository contains `@!`.
 
 `render.filled_text` fills a body in one pass over its paragraphs and does not rescan what it
 filled, so a family's overlay text or a harness string cannot introduce a further hole;

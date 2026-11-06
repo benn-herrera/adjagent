@@ -27,7 +27,7 @@ file's text is identical to what the destination holds, `write_agents_file` writ
 backup is made.
 
 **Placement.** `checked_followed_agents_file` takes the user-global agents file in `global_dir`,
-`user_dir(harness)` (`Path(harness.user_harness_dir).expanduser()`, so `HOME` decides), unless the
+`harness.user_dir` (`Path(user_harness_dir).expanduser()`, so `HOME` decides), unless the
 caller passes a scratch copy. Where that file, or the file a redirect there names, holds any marker
 line, the block is kept current there and `_checked_project_copy_removal` plans the removal of the
 span from the project's `AGENTS.md` (a redirect there followed): every other byte kept, rolling

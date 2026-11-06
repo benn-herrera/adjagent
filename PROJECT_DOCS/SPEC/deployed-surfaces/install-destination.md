@@ -26,14 +26,14 @@ user directory. The project root is resolved through symlinks.
 
 The install's **ROOT** is where it writes the set. Under opencode and mage it is the harness
 directory. Under claude it is the plugin inside it, `<harness-dir>/skills/adjagent/`: the set is one
-Claude Code plugin named `adjagent`, so its agents and commands are invoked as `adjagent:<name>`, in
+Claude Code plugin named `adjagent`, so its agents, commands and skills are invoked as `adjagent:<name>`, in
 a project and at user level alike. ROOT may be absent and is created once every check has passed;
 one that exists and is not a directory is refused, "is not a directory".
 
 An install is **user-level** when its harness directory is the installing harness's
 `user-harness-dir`, however the target reached it. A user-level install renders the definitions its
 type carries and the files its harness renders of its own (the plugin manifest), prunes and removes
-the legacy trees as any install does, and writes nothing else but the kb set's MCP entry (below): no
+the legacy trees as any install does, and writes nothing else but the kb set's MCP entry ([Base and kb installs](base-and-kb-installs.md)): no
 shipped harness file, no guardrail probe or registration, no removal of an earlier install's project settings entries, no shipped package (neither `kb-tools/` nor
 the docdicer tools package) and so no `--install` re-run, no runner include line and no runner file.
 `--install-global-agents-file` is its one opt-in: it also installs the harness agents file in the

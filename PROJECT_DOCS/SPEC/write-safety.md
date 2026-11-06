@@ -30,14 +30,18 @@ file a harness ships is replaced whole on each install when the file already at 
 `!INSTALLED! … adjagent` in its first ten lines; any other file there refuses the install the same
 way. It is not removed by prune: the copy is one-way and no mirror, so a file this repository
 stops shipping stays in the consuming project until that project removes it, outside the reach of
-every prune. The one removal is of a file at a path a retired layout used: a claude project
+every prune. A
+harness-rendered file takes the first two rules: replaced whole on each install where it holds the
+marker it states, and not removed, since prune walks the three surfaces only. An install's report
+names each path it pruned; where the consuming project tracks the installed set, its git is the
+record of what an install changed.
+
+One removal is of a file at a path a retired layout used: a claude project
 install removes `<harness-dir>/hooks/guardrail.pl`, the flat layout's guardrail script, when it
 carries `!INSTALLED! … adjagent` in its first ten lines and the same install writes the plugin's
 replacement, that is, when the guardrail's install-time run succeeds; the directory goes with it
 if that leaves it empty. A link at that path to a file carrying that header has the link removed;
-one that names nothing removes nothing. A
-harness-rendered file takes the first two rules: replaced whole on each install where it holds the
-marker it states, and not removed, since prune walks the three surfaces only.
+one that names nothing removes nothing.
 A claude project install also removes, from two files the project owns, the entries an earlier
 version registered there: the guardrail hook's element of `.claude/settings.json`, when the
 guardrail is registered in the plugin by the same install, and, on a kb install, the `kbase` member
@@ -58,10 +62,10 @@ inside ROOT, and, being written into, is held to this instead: left alone where 
 non-regular file stands in the way, refused where it is not UTF-8 or nests a non-object, `null` included, where the entry goes,
 or where a dangling link stands on the way to it, or at it with the directory of the path it names absent. A
 user-level install removes none of these entries, since it never wrote them. A hook skipped for a
-failed install-time run removes nothing and leaves any script, registration or entry an earlier
-install wrote where it stands, and the report names those that are the install's own. An install's report names each
-path it pruned; where the consuming project tracks the installed set, its git is the record of what an
-install changed.
+failed install-time run removes neither the guardrail entry nor the flat script, and leaves any
+script, registration or entry an earlier install wrote where it stands; the report names those that
+are the install's own. The `kbase` member is removed whenever the install writes the kb MCP entry,
+whatever became of the hook.
 
 An install that would change nothing reports the target up to date, exits 0 and touches nothing: no
 file written, no mode or modification time changed, no package destination replaced, no
@@ -73,7 +77,8 @@ alone never makes an install proceed. No version marker or stamp file decides th
 
 `--dry-run` runs the same judgment and writes nothing, in the target or elsewhere that outlives the
 run. It prints what the install would change, grouped as created, changed and removed, each path
-relative to the project root, and exits 0; where nothing would change it says the target is up to
+relative to the project root, or absolute for a file outside it, such as the global agents file, and
+exits 0; where nothing would change it says the target is up to
 date. Where the install would replace a docdicer `tools/.venv`, the dry run also says so and that
 the install would rebuild it with `--install`, which needs the network. Every path it prints and
 every refusal it reports names the real target. What the install would leave alone or skip, with the

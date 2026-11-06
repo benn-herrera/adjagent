@@ -4,8 +4,9 @@
   `GUARDRAIL_INTERPRETER` and no `CLAUDE_PROJECT_DIR`, on one allowed Bash call, and requires exit
   0 within `GUARDRAIL_PROBE_SECONDS`. A missing interpreter, a missing module, a broken script and
   a hang all fail it. A failed probe never refuses the install. It drops the script and the
-  registration from the files written, skips the retired-entry removal and the flat script's
-  removal, and reports one line naming the exit status and first stderr line, the timeout, or the
+  registration from the files written, skips the guardrail's retired-entry removal and the flat
+  script's removal (the `kbase` member is removed whenever the install writes the kb MCP entry,
+  whatever the probe said), and reports one line naming the exit status and first stderr line, the timeout, or the
   `OSError`. What an earlier install left stays, and the line names it: the script under ROOT, and
   under the harness directory where the flat layout put one, when it carries the installed header;
   the registration when it carries its marker; and a project settings file holding an item a
@@ -25,13 +26,15 @@
   `_kbase_claim` from its command alone (the bare `kbase`, or a path ending in it), is removed on a
   project install that writes the kb MCP entry. A user-level install removes none: it never wrote
   either.
-- **Removal**, which `_remove_retired_entry` runs behind `_settings_obstacle` and
-  `_editable_settings`, and which never refuses the install. `_settings_obstacle` names a
+- **Removal**, which `_remove_retired_entry` runs on what `_retired_items` returns, and which never
+  refuses the install. `_retired_items` is the one reader that decides whether a file holds an
+  entry; the removal and the report of what a skipped hook left (`_earlier_guardrail`) both call
+  it, so the two classify a file alike. It reads behind `_settings_obstacle`, which names a
   non-directory below the project on the way to the path, and anything but a regular file at it,
   links followed; a link is read and edited through, and a dangling one names no file, so there is
-  nothing to remove.
-  `_editable_settings` yields the text only of UTF-8 plain JSON whose container path holds the types
-  it needs; an unreadable or non-UTF-8 file, one that is not a JSON object, and one with a
+  nothing to remove. It returns the file's text and the items a `claim` (an `EntryClaim`: none,
+  alone or shared) reads, only for UTF-8 plain JSON whose container path holds the types it
+  needs; an unreadable or non-UTF-8 file, one that is not a JSON object, and one with a
   wrong-typed key on the path (`null` included) yield nothing. Each is left untouched, so removal
   never raises after the first write. An absent file, or one holding
   no item a `claim` accepts, is left with nothing said. Exactly one item the `claim` reads as ours
@@ -43,7 +46,7 @@
   substring counts, so a project's own hook running another `guardrail.pl` is not ours. More than
   one such item, or one holding our command beside others, is reported with each printed for a hand
   removal and the file left untouched, because removing it whole would delete the project's own
-  hook. A file `_editable_settings` yields nothing for (comments included), one the scanner cannot
+  hook. A file `_retired_items` yields nothing for (comments included), one the scanner cannot
   delimit with certainty, and a path `_settings_obstacle` names are left untouched, and reported as
   a stranded entry only where the text found there, read as UTF-8 and with
   undecodable bytes replaced (`_names_text`), contains the `trace`: the missing-script report for the

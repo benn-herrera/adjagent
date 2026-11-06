@@ -4,8 +4,11 @@
 "$@"`, the second adding `--with-kb`; the installed `adjagent install` is the same verb (Packaging). The verb takes TARGET, its first non-flag argument, and
 `adjagent/install_target.py` resolves it, writing nothing: `resolve_install_target` normalises the
 target lexically — made absolute, `..` collapsed, symlinks not followed — and returns the harness,
-the harness directory built from that path (`InstallTarget.harness_dir`), and the project root
-(symlinks followed). The harness and harness directory follow
+the harness directory (`InstallTarget.harness_dir`) and the project root (`InstallTarget.project_root`),
+each built from that lexical path. `install` resolves the project root through symlinks for every use
+but ROOT's path relative to it (`_harness_relpath`, and the "outside the project" refusal), which
+compares ROOT and the project root as spelled, so a `.claude` or `.claude/skills` that is a link to
+elsewhere is the directory it names and not a ROOT outside the project. The harness and harness directory follow
 SPEC.md, Install destination; every directory name is read from the `Harness` values
 (`project_harness_dir`, `user_harness_dir`, and `plugin_parent_dir` for a plugin), and the
 home-directory comparison follows symlinks. A target that is a literal `~` is refused with a hint
@@ -38,7 +41,9 @@ settings file on a kb install — that is not UTF-8 or holds the wrong type, `nu
 the entry goes. A dangling link on the way to a render, resource or harness-file target, or at one
 whose named path sits in a missing directory, refuses too (`_dangling_on_path`), read at the real
 path because a dry run's copy holds nothing where a link dangles; so does one on the way to the MCP
-settings file, or at it with the same missing directory. A file a
+settings file, or at it with the same missing directory. So does a `Makefile` link of that
+kind on a kb install that finds no runner file, since the include line's created `Makefile` would be
+written through it (`_check_runner`, read at the real project path). A file a
 retired entry is removed from is no refusal: removal leaves one it cannot edit alone
 ([Guardrail registration](guardrail-registration.md)). Every such check, the agents file's included, runs
 before the first write, and ROOT itself is created after them. The target

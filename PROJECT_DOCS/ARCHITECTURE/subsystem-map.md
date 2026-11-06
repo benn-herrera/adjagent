@@ -64,10 +64,10 @@ function in `adjagent/clauses.py`, and an overlay anchor is spelled `fam-<key>`.
   `adjagent install`, `--dry-run` and `adjagent --version` and the runner's `AGENTS_VER`. It also
   states how to run adjagent: the project's runner recipe where there is one, else the release tag
   installed into a venv and that venv's `adjagent`. Under claude a paragraph of its own, the
-`reload_rule` hole (Composition Model, Holes), says to run `/reload-plugins` when the agents an
-install wrote are not offered; the paragraph drops where the harness supplies none. Because mage omits
-the skill and opencode supplies no rule, only claude renders it. The docdicer version the script installs is written once, as `VERSION` in
-  `adjagent/docdicer-tools/docdicer`.
+  `reload_rule` hole (Composition Model, Holes), says to run `/reload-plugins` when the agents an
+  install wrote are not offered; the paragraph drops where the harness supplies none. Because mage
+  omits the skill and opencode supplies no rule, only claude renders it. The docdicer version the
+  script installs is written once, as `VERSION` in `adjagent/docdicer-tools/docdicer`.
 - **Process skill** — `dev-process` (`definitions/dev_process.py`): one `SKILL.md` and four
   references (`references/new-project.md`, `project-setup.md`, `adopting.md`, `release.md`), carried
   as `SkillFile`s, in the default set under every harness, mage included. It states one development
@@ -81,6 +81,6 @@ the skill and opencode supplies no rule, only claude renders it. The docdicer ve
   agents file and this skill are installed separately, so the pointer can name a skill the install
   has not written.
 - **Install machinery** — the one entry not rendered from a definition: `install.py` renders, copies
-  and prunes; `preflight.py` runs that install into a scratch copy and compares (Install
+  and prunes, edits the project's settings files, and writes the runner include line; `preflight.py` runs that install into a scratch copy and compares (Install
   Consumption Model, Renders and copies); `agents_file.py` does the same for the agents file
   (Agents File).

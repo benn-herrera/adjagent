@@ -48,7 +48,7 @@ update compares the block with the marker lines excluded. Identical content writ
 the stamp, and the stamp stays. Differing content is rewritten and stamped with the installing
 version, unless the existing stamp is a later release than the installing one: then the block is left
 and the install reports "not downgraded" with both versions. A block with no stamp, or one that is not
-a release version, is rewritten. A change that would alter only the marker lines is never made.
+a release version, is rewritten when its content differs. A change that would alter only the marker lines is never made.
 
 Edits made inside the block are not preserved. A write that changes the file keeps one rolling
 backup of the prior content beside it; identical output writes nothing, so installing twice changes

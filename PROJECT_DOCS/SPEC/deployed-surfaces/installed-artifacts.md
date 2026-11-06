@@ -27,7 +27,7 @@ A definition body names no installed path below the harness directory, because w
 differs by harness (under claude, inside the plugin `<harness-dir>/skills/adjagent/`). A script
 inside a skill's own directory is named relative to that directory (`tools/docdicer`). The project's
 scratch directory is named as the harness names it. Where a definition names another definition,
-claude and mage render it with the plugin's namespace — `adjagent:<name>` for an agent or a command
+claude and mage render it with the plugin's namespace — `adjagent:<name>` for an agent, a command or a skill
 — and opencode renders the bare name; claude's `kbase` MCP tools are offered as
 `mcp__plugin_adjagent_kbase__<tool>`. A project's agents file is named
 `AGENTS.md` under claude and opencode, whose user directory is a separate scope; where the

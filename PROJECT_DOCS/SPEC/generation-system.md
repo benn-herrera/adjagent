@@ -42,7 +42,7 @@ properties, independent of how they are implemented (see ARCHITECTURE.md):
   neither its own tier map nor the effective one — is refused before anything is rendered.
 
 A definition's reference to another definition renders with the installing harness's name for it:
-under claude and mage the plugin's namespace, `adjagent:<name>` for an agent or a command, and the
+under claude and mage the plugin's namespace, `adjagent:<name>` for an agent, a command or a skill, and the
 bare name under opencode. A render under a harness differs from the same render without that prefix
 at reference sites alone.
 
