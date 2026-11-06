@@ -53,7 +53,14 @@ from adjagent.install import (
     uncommitted_sources,
 )
 from adjagent.loading import load
-from adjagent.render import definitions, filled_body, render_agents_file, render_all, render_definition
+from adjagent.render import (
+    definitions,
+    filled_body,
+    render_agents_file,
+    render_all,
+    render_definition,
+    rendered_definitions,
+)
 from adjagent.vocabulary import Kind, reference
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
@@ -538,19 +545,30 @@ def test_every_harness_omits_a_name_the_package_discovers() -> None:
     assert unknown == []
 
 
+@pytest.mark.parametrize("with_kb", [False, True], ids=["base", "kb"])
 @pytest.mark.parametrize("name", sorted(load("adjagent.harnesses", "HARNESS")))
-def test_every_skill_the_agents_file_cites_ships_in_the_harness_default_install(name: str) -> None:
-    """The agents file points at skills through reference holes; a name a default install does not ship
-    points at nothing. A plugin always takes the kb set; any other harness's default install leaves it
-    out."""
+def test_every_reference_names_a_definition_the_same_install_ships(name: str, with_kb: bool) -> None:
+    """A reference hole fills for any discovered name, so one naming a definition the install omits
+    renders pointing at nothing. Every reference in the source text — body, description and supporting
+    files — of each definition a default install renders, and of the agents file, names a definition
+    rendered beside it. A plugin always takes the kb set."""
     ctx = build_render(harness=name, family="claude", tier_spec=None, alias_spec=None)
+    kb_included = with_kb or ctx.harness.is_standalone_plugin
+    shipped = [
+        defn for _, defn in rendered_definitions(ctx, include=lambda defn: kb_included or not excluded(defn.name))
+    ]
     every = [defn for _, entries in discover() for defn in entries]
     [agents_file] = [defn for defn in every if defn.kind is Kind.AGENTS_FILE]
-    cited = {defn.name for defn in every if defn.kind is Kind.SKILL and reference(defn.name) in agents_file.body}
-    assert cited, "the agents file references no skill, so the check below would pass vacuously"
-    renders = render_all(ctx, include=lambda defn: ctx.harness.is_standalone_plugin or not excluded(defn.name))
-    shipped = {path.parts[1] for path, _ in renders if path.parts[0] == "skills" and path.name == "SKILL.md"}
-    assert cited <= shipped, sorted(cited - shipped)
+    citations = {
+        (citing.name, cited.name)
+        for citing in (*shipped, agents_file)
+        for text in (citing.body, citing.description or "", *(file.body for file in citing.files))
+        for cited in every
+        if reference(cited.name) in text
+    }
+    assert citations, "no definition references another, so the check below would pass vacuously"
+    shipped_names = {defn.name for defn in shipped}
+    assert sorted(pair for pair in citations if pair[1] not in shipped_names) == []
 
 
 @pytest.mark.parametrize(

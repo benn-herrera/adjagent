@@ -6,6 +6,7 @@ what it filled, and writes the rendered definitions and harness files."""
 from __future__ import annotations
 
 import dataclasses
+import functools
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
@@ -129,6 +130,13 @@ def _frontmatter(defn: Definition, ctx: Render, *, module: str) -> str:
     return f"---\n{generated_line(module)}\n{tuning_line(ctx, seat=defn.tier)}\n{fields}---\n{gap}"
 
 
+@functools.cache
+def _references(prefix: str) -> dict[str, str]:
+    """The reference hole of every discovered definition, the agents file included, mapped to `prefix`
+    and its name; built once per prefix, so discovery runs once rather than on every fill."""
+    return {reference(named.name): prefix + named.name for _, entries in discover() for named in entries}
+
+
 def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     """`body` with every placeholder filled in one pass: a harness text from ctx.harness, an anchor
     from ctx.overlay for the definition's seat ("" where the family fills none), the step-down model
@@ -143,13 +151,7 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     values = {hole(part): ctx.harness.text(part) for part in (*HarnessText, *OptionalHarnessText)}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
     values[hole(TuningText.STEP_DOWN_MODEL)] = ctx.step_down_model
-    values.update(
-        {
-            reference(named.name): ctx.harness.reference_prefix + named.name
-            for _, entries in discover()
-            for named in entries
-        }
-    )
+    values.update(_references(ctx.harness.reference_prefix))
     if defn.kind is Kind.AGENTS_FILE:
         values[hole(AgentsFileText.SCOPE_NAME)] = ctx.scope
         values[hole(AgentsFileText.VERSION)] = __version__
@@ -203,16 +205,23 @@ def harness_renders(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:
     return tuple(sorted((PurePosixPath(file.path), file.text()) for file in ctx.harness.rendered_files))
 
 
+def rendered_definitions(
+    ctx: Render, *, include: Callable[[Definition], bool] | None = None
+) -> tuple[tuple[str, Definition], ...]:
+    """The definitions `render_all` renders, as `definitions` gives them: `include` composed with
+    `ctx.harness.omits`, so a name the harness renders nothing for is dropped whatever the caller's
+    filter says."""
+    return definitions(include=lambda defn: defn.name not in ctx.harness.omits and (include is None or include(defn)))
+
+
 def render_all(
     ctx: Render, *, include: Callable[[Definition], bool] | None = None
 ) -> tuple[tuple[PurePosixPath, str], ...]:
-    """(output path, text) for every file every included definition produces — a definition's own
-    output, then each of its supporting files — and then the files `ctx.harness` renders of its own,
-    sorted by path. `include` is composed with `ctx.harness.omits`, so a name the harness renders
-    nothing for is dropped whatever the caller's filter says."""
-    keep = lambda defn: defn.name not in ctx.harness.omits and (include is None or include(defn))
+    """(output path, text) for every file every definition `rendered_definitions` keeps produces — a
+    definition's own output, then each of its supporting files — and then the files `ctx.harness`
+    renders of its own, sorted by path."""
     rendered: list[tuple[PurePosixPath, str]] = []
-    for module, defn in definitions(include=keep):
+    for module, defn in rendered_definitions(ctx, include=include):
         rendered.append((defn.output_path, render_definition(defn, ctx, module=module)))
         rendered += [
             (defn.file_output_path(file), render_skill_file(defn, file, ctx, module=module)) for file in defn.files
