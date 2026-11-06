@@ -74,7 +74,7 @@ an agent harness (MCP)" is the wiring guide. The same install:
    the bare `kbase` from `PATH`, run as `kbase mcp` (`kbase mcp --project-dir-required` under mage); it
    names no KB path. Each of its tools is offered under the harness's own prefix: kbase's `query` tool
    is `mcp__plugin_adjagent_kbase__query` under Claude Code and `kbase_query` under opencode. A settings file carrying
-   JSONC comments, or a settings path that is a symlink or not a regular file, is reported with the
+   JSONC comments, or a settings path that is not a regular file, is reported with the
    entry printed for you to merge by hand. A project install under Claude Code also removes the
    `kbase` entry an earlier version wrote to the project's `.mcp.json`, keeping every other byte
    ([Guardrail](guardrail.md) lists what is left for you to remove by hand).

@@ -147,10 +147,10 @@ guardrail hook it skips, is printed on stderr with the reason. That happens on a
 a dry run as on a changing one.
 
 `adjagent install-agents-file` takes `--dry-run` too ([Agents file](agents-file.md)). Printed paths
-and refusals name the real target, never the scratch copy. A symlinked surface or package
-destination is refused on a dry run as on an install. A symlink or non-directory on the path to a
-target, such as the directory above a settings file, is judged by the install itself; a dry run may
-not foresee it.
+and refusals name the real target, never the scratch copy. A dry run foresees the refusals an
+install makes for a dangling symlink ([Refusals](#refusals)). It does not foresee one case: where a
+regular file stands in place of the directory an MCP settings file goes in (`.opencode` as a file),
+the dry run shows the settings file created, but the install reports the obstacle and leaves it.
 
 ## Refusals
 
@@ -158,9 +158,12 @@ An install refuses, writing nothing, to:
 
 - overwrite a file at one of its paths that carries no banner of this project's, such as your own
   `agents/python-coder.md`;
-- write below a symlink or a non-directory on the way to one of its targets.
+- write below a non-directory on the way to one of its targets, or through a dangling symlink on the
+  way to one, or at one whose named path sits in a directory that does not exist.
 
-The refusal names each such path; move or remove them and install again. A harness MCP settings file
+The refusal names each such path; move or remove them and install again. A symlink anywhere else
+is the file or directory it names: the install writes through it, and a dangling one at a target has
+what it names created. Removing a symlink removes the link, never what it names. A harness MCP settings file
 the install writes into that is not UTF-8, or has the wrong shape where the entry goes (`null`
 included), refuses the install the same way. Cleaning an earlier install's entries out of a
 settings file never refuses ([Guardrail](guardrail.md)). A target that is a literal `~` is refused with

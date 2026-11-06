@@ -304,25 +304,38 @@ def _is_our_harness_file(path: Path, *, marker: str) -> bool:
     return marker in text
 
 
+def _components(target: Path, *, base: Path) -> list[Path]:
+    """Each path strictly between `base` and `target`, outermost first."""
+    return [base / parent for parent in reversed(tuple(target.relative_to(base).parents)[:-1])]
+
+
 def _blocked_component(target: Path, *, base: Path) -> Path | None:
-    """The outermost path strictly between `base` and `target` that exists as a symlink or as anything
-    but a directory — a write below it would land elsewhere or fail — or None. `base` and everything
+    """The outermost path strictly between `base` and `target` that exists but is not a directory, links
+    followed — a write below it would fail, a dangling link included — or None. `base` and everything
     above it are not examined."""
-    for parent in reversed(tuple(target.relative_to(base).parents)[:-1]):
-        component = base / parent
-        if os.path.lexists(component) and (component.is_symlink() or not component.is_dir()):
-            return component
-    return None
+    return next((c for c in _components(target, base=base) if os.path.lexists(c) and not c.is_dir()), None)
 
 
 def _foreign_on_path(target: Path, *, root: Path, ours: Callable[[Path], bool]) -> Path | None:
     """The path that keeps the install from writing `target` as a file it owns, or None: a component
-    `_blocked_component` names below `root`, else `target` itself unless it is absent — a dangling
-    symlink counts as something — or a regular file, not a symlink, that `ours` accepts."""
+    `_blocked_component` names below `root`, else `target` itself unless, links followed, it does not
+    exist or is a regular file that `ours` accepts."""
     blocked = _blocked_component(target, base=root)
     if blocked is not None:
         return blocked
-    if os.path.lexists(target) and (target.is_symlink() or not target.is_file() or not ours(target)):
+    if target.exists() and (not target.is_file() or not ours(target)):
+        return target
+    return None
+
+
+def _dangling_on_path(target: Path, *, base: Path) -> Path | None:
+    """The outermost link from below `base` to `target` that nothing can be written through, or None: a
+    dangling link on the way, or `target` itself dangling where the directory its named path sits in
+    does not exist. `base` and everything above it are not examined."""
+    dangling = next((c for c in _components(target, base=base) if c.is_symlink() and not c.exists()), None)
+    if dangling is not None:
+        return dangling
+    if target.is_symlink() and not target.exists() and not target.resolve().parent.is_dir():
         return target
     return None
 
@@ -330,26 +343,34 @@ def _foreign_on_path(target: Path, *, root: Path, ours: Callable[[Path], bool]) 
 def _refuse_foreign_targets(
     root: Path,
     *,
+    real_root: Path,
     render_targets: Iterable[Path],
     resource_targets: Iterable[Path],
     harness_targets: Iterable[tuple[Path, str]],
 ) -> None:
     """Refuse an install that would overwrite a file it did not write, or write below a path under
-    `root` that is a symlink or not a directory. A target passes as `_foreign_on_path` reads it, judged
-    by the claim its class makes of it: a render by its generated banner, a resource by its installed
-    header, a harness-rendered file — `(path, marker)` — by the marker that file states about itself.
-    Every failing path is named once in the one refusal, so the operator clears them in one pass."""
+    `root` that is not a directory. A target passes as `_foreign_on_path` reads it, judged by the claim
+    its class makes of it: a render by its generated banner, a resource by its installed header, a
+    harness-rendered file — `(path, marker)` — by the marker that file states about itself. Each target's
+    counterpart under `real_root`, the directory `root` is or is a scratch copy of, is also read for a
+    link `_dangling_on_path` names: a copy holds nothing where a link dangles, so only the real path
+    shows it. Every failing path is named once in the one refusal, so the operator clears them in one
+    pass."""
     claims = [
         *((target, _is_ours) for target in render_targets),
         *((target, _is_our_resource) for target in resource_targets),
         *((target, partial(_is_our_harness_file, marker=marker)) for target, marker in harness_targets),
     ]
-    failing = (_foreign_on_path(target, root=root, ours=ours) for target, ours in claims)
+    failing = (
+        _dangling_on_path(real_root / target.relative_to(root), base=real_root)
+        or _foreign_on_path(target, root=root, ours=ours)
+        for target, ours in claims
+    )
     foreign = list(dict.fromkeys(path for path in failing if path is not None))
     if foreign:
         named = ", ".join(f"'{target}'" for target in foreign)
         raise InputError(
-            f"install would overwrite files it did not write, or write below a symlink or a non-directory: "
+            f"install would overwrite files it did not write, or write below a non-directory: "
             f"{named} — move or remove each, then re-install"
         )
 
@@ -373,25 +394,50 @@ def prune(harness_dir: Path, *, keep: set[Path]) -> list[Path]:
     A harness-rendered file such as the plugin manifest, and the harness's own settings file where it
     lives at ROOT, carry no generated banner, so wherever they sit they are neither pruned nor read as a
     stale render. The manifest is rendered on every install that emits it, and the settings file is
-    only ever spliced, so neither has a stale form to remove."""
+    only ever spliced, so neither has a stale form to remove.
+
+    A link is what it names: the walk enters a linked directory, and an entry is judged by the file it
+    names, so one naming a file in `keep` is kept. A stale entry that is a link has the link removed, and
+    so does an emptied directory reached through one."""
+    kept = {path.resolve() for path in keep}
     stale = [
         path
         for surface in SURFACES
-        for path in sorted((harness_dir / surface).rglob("*"))
-        if path not in keep
-        and path.is_file()
-        and not path.is_symlink()
-        and _shipped(path.relative_to(harness_dir))
-        and _is_ours(path)
+        for path in _files_below(harness_dir / surface)
+        if path.resolve() not in kept and path.is_file() and _shipped(path.relative_to(harness_dir)) and _is_ours(path)
     ]
     for path in stale:
         path.unlink()
     for path in stale:
         parent = path.parent
         while parent.parent != harness_dir and parent.is_dir() and not any(parent.iterdir()):
-            parent.rmdir()
+            _remove_entry(parent, remove=Path.rmdir)
             parent = parent.parent
     return stale
+
+
+def _files_below(top: Path) -> list[Path]:
+    """Every non-directory below `top`, sorted, links followed: a directory whose resolved path the walk
+    has already entered is not entered again, so a link cycle ends."""
+    found: list[Path] = []
+    entered: set[str] = set()
+    for directory, subdirs, names in os.walk(top, followlinks=True):
+        resolved = os.path.realpath(directory)
+        if resolved in entered:
+            subdirs.clear()
+            continue
+        entered.add(resolved)
+        subdirs.sort()
+        found.extend(Path(directory, name) for name in names)
+    return sorted(found)
+
+
+def _remove_entry(path: Path, *, remove: Callable[[Path], None]) -> None:
+    """Remove `path` with `remove`, or, where it is a link, dangling or not, the link alone."""
+    if path.is_symlink():
+        path.unlink()
+    else:
+        remove(path)
 
 
 _JSON_TYPE_NAMES = {dict: "an object", list: "an array"}
@@ -718,15 +764,12 @@ def _mcp_settings_file(base: Path, *, harness: Harness) -> Path:
 
 def _settings_obstacle(target: Path, *, base: Path) -> str | None:
     """Why the settings file at `target` cannot be created or edited in place, naming the path that
-    stands in the way; None where `target` is a regular file or absent. A symlink at it or on its path
-    below `base`, dangling or not, is never written through — what it reaches is not this project's
-    alone — and a non-directory on that path, or anything but a regular file at it, cannot hold it."""
+    stands in the way; None where `target`, links followed, is a regular file or does not exist. A
+    non-directory on its path below `base`, or anything but a regular file at it, cannot hold it."""
     blocked = _blocked_component(target, base=base)
     if blocked is not None:
-        return f"{blocked} is {'a symlink' if blocked.is_symlink() else 'not a directory'}"
-    if target.is_symlink():
-        return f"{target} is a symlink"
-    if os.path.lexists(target) and not target.is_file():
+        return f"{blocked} is not a directory"
+    if target.exists() and not target.is_file():
         return f"{target} is not a regular file"
     return None
 
@@ -774,7 +817,8 @@ def mcp_merge(base: Path, *, harness: Harness, command: str) -> None:
     alternative, else the canonical path — created when no file the contract names exists. `base` is
     the project root for a harness whose settings file is the project's own, and ROOT for one whose
     file is the plugin's. The entry names `command` as given and lands at the contract's container
-    path.
+    path. A link at the file is read and written through, and a dangling one has the file it names
+    created.
 
     An existing file is edited, never reserialized: the entry's own slot is spliced into the text as it
     stands, so every other byte — other entries, key order, indentation, line endings, number and
@@ -898,22 +942,22 @@ def _remove_retired_entry(project: Path, *, entry: RetiredEntry) -> None:
 
     The file is the project's own and is edited, never reserialized: the one item `entry.claim` reads as
     holding the entry alone is cut out as `_without_item` cuts it, and every other byte — the project's
-    own entries included — comes back as it was found. An absent file, or one holding no such item, is
-    left with nothing said. More than one such item, or one holding the entry beside a command of the
-    project's own, is reported with each printed and the file left untouched: removing it whole would
-    delete the project's command. So is one the removal cannot make with certainty. A file
-    `_editable_settings` cannot read, and a path `_settings_obstacle` names, are left untouched, and
-    reported only where the text found there holds `entry.trace`. Nothing here refuses the install."""
+    own entries included — comes back as it was found. A link is read and written through. An absent
+    file — a dangling link names none — or one holding no such item, is left with nothing said. More
+    than one such item, or one holding the entry beside a command of the project's own, is reported with
+    each printed and the file left untouched: removing it whole would delete the project's command. So
+    is one the removal cannot make with certainty. A file `_editable_settings` cannot read, and a path
+    `_settings_obstacle` names, are left untouched, and reported only where the text found there holds
+    `entry.trace`. Nothing here refuses the install."""
     target = project / entry.settings
-    if not os.path.lexists(target):
+    if not target.exists():
         return
     slot = _retired_slot(entry)
     unread = f"it names an earlier install's {slot}: remove that by hand"
     obstacle = _settings_obstacle(target, base=project)
     plain = None if obstacle is not None else _editable_settings(target, entry=entry)
     if plain is None:
-        # Searched as text, a symlink read through and never written: only a file naming the entry may
-        # strand it.
+        # Searched as text: only a file naming the entry may strand it.
         if _names_text(target, entry.trace):
             why = obstacle or f"{target} is not a JSON object the removal can edit"
             _report_left_alone(f"{target} not edited: {why} — left untouched; {unread}")
@@ -966,17 +1010,18 @@ def _earlier_guardrail(
 
 def _remove_retired_script(harness_dir: Path, *, script: str) -> None:
     """Remove the guardrail script a layout writing straight into the harness directory left at `script`
-    below it, where it carries the installed header and stands as a regular file reached through no
-    symlink, then its directory where that leaves it empty."""
+    below it, where the file it names carries the installed header — a link has the link alone removed —
+    then its directory where that leaves it empty, the link alone where that directory is reached
+    through one."""
     path = harness_dir / script
-    if _blocked_component(path, base=harness_dir) is not None or path.is_symlink() or not path.is_file():
+    if _blocked_component(path, base=harness_dir) is not None or not path.is_file():
         return
     if not _is_our_resource(path):
         return
     path.unlink()
     print(f"removed retired guardrail script {path}")
     if path.parent != harness_dir and not any(path.parent.iterdir()):
-        path.parent.rmdir()
+        _remove_entry(path.parent, remove=Path.rmdir)
 
 
 def _runner_file(project: Path) -> tuple[str, Path] | None:
@@ -1157,6 +1202,18 @@ def _standing_docdicer_venvs(root: Path, *, harness_dir: Path, user_level: bool)
     return [venv for venv in venvs if venv.is_dir()]
 
 
+def _clear_package_destination(destination: Path) -> None:
+    """Leave nothing at `destination` for the package copy to sit beside: a directory is removed whole.
+    A link stays and is copied through — the directory it names emptied, or made where it dangles."""
+    if not destination.is_symlink():
+        shutil.rmtree(destination, ignore_errors=True)
+    elif destination.is_dir():
+        for entry in destination.iterdir():
+            _remove_entry(entry, remove=shutil.rmtree if entry.is_dir() else Path.unlink)
+    else:
+        destination.resolve().mkdir(parents=True, exist_ok=True)
+
+
 def _report_shadowing(root: Path, *, harness: Harness, user_level: bool) -> None:
     """Report a plugin the harness loads in place of another of the same name, for a harness that writes
     its set below its harness directory: a user-level install always shadows every project's; a project
@@ -1228,11 +1285,11 @@ def install(
     user-global agents file. ROOT may be absent, and is created only once every check has passed. A file at a render, harness-file or resource target
     that does not carry what that class of file states as its origin — this repository's generated
     banner or installed header, or the marker a harness-rendered file states about itself — or a
-    symlink or non-directory between the harness directory and such a target, refuses the install;
-    package destinations are replaced whole unchecked. A refusal of the harness directory or ROOT, of
-    the render, of a target it would overwrite, of the runner file or of the MCP settings file writes
-    nothing; a settings path that is a symlink or not a regular file is reported and left alone, and the
-    removal of a retired entry never refuses.
+    non-directory between the harness directory and such a target, refuses the install; package
+    destinations are replaced whole unchecked. A refusal of the harness directory or ROOT, of the
+    render, of a target it would overwrite, of the runner file or of the MCP settings file writes
+    nothing; a settings path that is not a regular file is reported and left alone, and the removal of a
+    retired entry never refuses.
 
     Where a project install finds the docdicer tools' `.venv` before its first write, under ROOT or
     under the harness directory, it afterwards calls `tool_install` with the installed docdicer script,
@@ -1300,6 +1357,7 @@ def install(
     harness_markers = {PurePosixPath(file.path): file.marker for file in harness_files}
     _refuse_foreign_targets(
         harness_dir,
+        real_root=harness_dir if real_harness_dir is None else real_harness_dir,
         render_targets=[root.joinpath(*relative.parts) for relative, _ in renders if relative not in harness_markers],
         resource_targets=[target for _, target in resource_files],
         harness_targets=[
@@ -1317,6 +1375,13 @@ def install(
         _, mcp_container = ctx.harness.mcp.entry(command=KBASE_NAME)
         mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
         _check_settings(mcp_target, base=mcp_base, container=mcp_container, leaf=object)
+        # Read at the real path: the copy a dry run installs into holds nothing where a link dangles.
+        real_root = (harness_dir if real_harness_dir is None else real_harness_dir) / ctx.harness.plugin_dir
+        real_project_root = project if real_project is None else real_project
+        real_mcp_base = real_project_root if ctx.harness.mcp.site is McpSite.PROJECT else real_root
+        dangling = _dangling_on_path(_mcp_settings_file(real_mcp_base, harness=ctx.harness), base=real_mcp_base)
+        if dangling is not None:
+            raise InputError(f"install would write the kbase MCP entry through '{dangling}', which names nothing")
     agents_file: AgentsFileWrite | None = None
     if _installs_agents_file(
         harness_dir, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
@@ -1338,7 +1403,7 @@ def install(
 
     root.mkdir(parents=True, exist_ok=True)
     for _, destination in [] if user_level else _packages(kb_included=kb_included):
-        shutil.rmtree(root / destination, ignore_errors=True)
+        _clear_package_destination(root / destination)
     for source, target in package_files:
         data = source.read_bytes()
         if source.suffix in STAMPED_SUFFIXES or source.name in STAMPED_NAMES:
@@ -1356,21 +1421,15 @@ def install(
     if followed is not None:
         write_followed_agents_file(followed)
 
-    # Removed before the prune, so a skill directory the prune then empties goes with its last file. One
-    # reached through a symlink is not this project's alone, so it is named and left.
+    # Removed before the prune, so a skill directory the prune then empties goes with its last file.
     for retired in retired_destinations:
-        if not retired.is_dir():
-            continue
-        blocked = _blocked_component(retired, base=harness_dir) or (retired if retired.is_symlink() else None)
-        if blocked is not None:
-            _report_left_alone(f"retired package destination {retired} left in place: {blocked} is a symlink")
-            continue
-        shutil.rmtree(retired)
-        print(f"removed retired package destination {retired}")
+        if retired.is_symlink() or retired.is_dir():
+            _remove_entry(retired, remove=shutil.rmtree)
+            print(f"removed retired package destination {retired}")
     for relative in LEGACY_TREES:
         legacy = harness_dir / relative
-        if legacy.is_dir():
-            shutil.rmtree(legacy)
+        if legacy.is_symlink() or legacy.is_dir():
+            _remove_entry(legacy, remove=shutil.rmtree)
             print(f"removed legacy tree {legacy}")
             if relative == LEGACY_KB_TOOLS and not kb_included:
                 print(LEGACY_KB_TOOLS_MESSAGE)
@@ -1494,9 +1553,7 @@ def preflighted_install(
     removed is printed relative to the project root, followed by the docdicer `.venv` rebuild the
     install would also make, and nothing is written. Otherwise the install runs exactly as `install`
     does. The copy holds no `.venv`, so only that real install can reach `tool_install`. Every printed
-    path and refusal names the real target; a refusal the real install raises for a symlink below the
-    harness directory that is not itself a managed path is not foreseen by the copy, which dereferences
-    such symlinks, and the install itself still raises it."""
+    path and refusal names the real target."""
     root = harness_dir / ctx.harness.plugin_dir
     _refuse_root(harness_dir)
     _refuse_root(root)

@@ -42,8 +42,8 @@ Earlier versions registered the hook in your project's `.claude/settings.json` a
 - An entry sharing an element with a command of yours, or more than one of our entries, is printed
   and left for you to remove by hand.
 - A settings file that is not strict JSON (comments, for one), is not UTF-8, has a `hooks`,
-  `PreToolUse` or `mcpServers` of the wrong shape (`null` included), is a symlink or sits behind
-  one, or is not a regular file is left untouched, and the cleanup never refuses the install. If it
+  `PreToolUse` or `mcpServers` of the wrong shape (`null` included), sits behind a non-directory,
+  or is not a regular file is left untouched, and the cleanup never refuses the install. If it
   still holds our old hook command or `kbase` entry, the install says so, and you remove the entry
   by hand.
 

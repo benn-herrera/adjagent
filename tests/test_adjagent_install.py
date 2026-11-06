@@ -11,10 +11,12 @@ The package is imported from the repository root, which `just test` puts on PYTH
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import cast
@@ -827,9 +829,8 @@ def test_a_banner_naming_a_foreign_module_is_not_ours(tmp_path: Path) -> None:
     assert mine.read_text(encoding="utf-8") == text
 
 
-def test_prune_leaves_a_symlink_standing(tmp_path: Path) -> None:
-    """Prune removes regular files only: a symlink under a surface is the consumer's, whatever it
-    points at."""
+def test_prune_unlinks_a_symlink_to_a_stale_render_and_leaves_the_file_it_names(tmp_path: Path) -> None:
+    """The link is judged by the file it names, which is a stale render; removing it removes the link."""
     root = tmp_path / ".claude"
     (root / "agents").mkdir(parents=True)
     target = tmp_path / "outside.md"
@@ -837,7 +838,7 @@ def test_prune_leaves_a_symlink_standing(tmp_path: Path) -> None:
     link = root / "agents/link.md"
     link.symlink_to(target)
     _definition_install(root, project_root=tmp_path)
-    assert link.is_symlink()
+    assert not os.path.lexists(link)
     assert target.read_text(encoding="utf-8") == _NEW_BANNER
 
 
@@ -1660,24 +1661,11 @@ def test_a_hand_written_file_at_a_render_target_is_refused_with_nothing_written(
     assert _files(tmp_path) == before
 
 
-def _symlink_to_rendered_output(target: Path) -> None:
-    """A symlink whose referent carries the banner: the link itself is what fails."""
-    referent = target.parent.parent / "referent.md"
-    referent.write_text(_rendered(_CLAUDE_RENDER, "agents/python-coder.md"), encoding="utf-8")
-    target.symlink_to(referent)
-
-
-def _directory(target: Path) -> None:
-    target.mkdir()
-    (target / "inside.md").write_text("mine\n", encoding="utf-8")
-
-
-@pytest.mark.parametrize("plant", [_symlink_to_rendered_output, _directory], ids=["symlink", "directory"])
-def test_a_symlink_or_directory_at_a_render_target_is_refused_with_nothing_written(tmp_path: Path, plant) -> None:
+def test_a_directory_at_a_render_target_is_refused_with_nothing_written(tmp_path: Path) -> None:
     root = tmp_path / ".claude"
     target = _claude_plugin(root) / "agents/python-coder.md"
-    target.parent.mkdir(parents=True)
-    plant(target)
+    target.mkdir(parents=True)
+    (target / "inside.md").write_text("mine\n", encoding="utf-8")
     before = _files(tmp_path)
     with pytest.raises(InputError, match=re.escape(f"'{target}'")):
         _definition_install(root, project_root=tmp_path)
@@ -1874,12 +1862,11 @@ def test_settings_naming_our_command_ambiguously_are_reported_and_left_untouched
 
 
 # How each settings file the removal cannot edit holds a PreToolUse element: strict JSON or not, decodable
-# or not, the container wrong-typed, or reached through a symlink.
+# or not, or the container wrong-typed.
 _UNEDITABLE_SETTINGS = {
     "unparsed": lambda hook: _unparsed_settings(hook).encode(),
     "non-utf8": lambda hook: b"\xff\xfe" + json.dumps({"hooks": {"PreToolUse": [hook]}}).encode() + b"\n",
     "non-object-hooks": lambda hook: json.dumps({"hooks": [hook]}).encode() + b"\n",
-    "symlink": lambda hook: json.dumps({"hooks": {"PreToolUse": [hook]}}).encode() + b"\n",
 }
 
 
@@ -1889,21 +1876,13 @@ def test_settings_the_removal_cannot_edit_are_never_refused_and_reported_only_wh
     tmp_path: Path, capsys, names_ours: bool, kind: str
 ) -> None:
     """The install completes and the file is not edited. Only a file whose text holds the command an
-    earlier install wrote may strand that entry, so only it is reported; a symlink is read through."""
-    project, outside = tmp_path / "project", tmp_path / "outside"
-    outside.mkdir()
+    earlier install wrote may strand that entry, so only it is reported."""
+    project = tmp_path / "project"
     project.mkdir()
     seed = _UNEDITABLE_SETTINGS[kind](_retired_hook_entry(".claude") if names_ours else json.loads(_SED_HOOK))
-    if kind == "symlink":
-        settings = outside / "settings.json"
-        settings.write_bytes(seed)
-        root = _claude_root(project)
-        (project / _SETTINGS).symlink_to(settings)
-        reason = f"{project / _SETTINGS} is a symlink"
-    else:
-        root = _claude_root(project, seed)
-        settings = project / _SETTINGS
-        reason = f"{settings} is not a JSON object the removal can edit"
+    root = _claude_root(project, seed)
+    settings = project / _SETTINGS
+    reason = f"{settings} is not a JSON object the removal can edit"
     capsys.readouterr()
     _definition_install(root, project_root=project)
     assert (_claude_plugin(root) / _REGISTRATION).is_file()
@@ -2066,42 +2045,18 @@ def _plant_directory(path: Path, outside: Path) -> None:
     (path / "inside.json").write_text("{}\n", encoding="utf-8")
 
 
-def _plant_link(path: Path, outside: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(outside / "shared.json")
-
-
-def _plant_dangling_link(path: Path, outside: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(outside / "missing.json")
-
-
-def _plant_directory_link(path: Path, outside: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(outside, target_is_directory=True)
-
-
 def _standing(path: Path) -> object:
-    """What stands at `path`, compared without following it: a link's target text, a directory's files,
-    a file's bytes."""
-    if path.is_symlink():
-        return str(path.readlink())
+    """What stands at `path`: a directory's files, a file's bytes."""
     return _files(path) if path.is_dir() else path.read_bytes()
 
 
-@pytest.mark.parametrize(
-    "planted, plant",
-    [(f"{_CLAUDE_PLUGIN_RELPATH}/agents", _plant_file), (f"{_CLAUDE_PLUGIN_RELPATH}/hooks", _plant_directory_link)],
-    ids=["file-on-a-render-path", "symlink-on-a-resource-path"],
-)
-def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
-    tmp_path: Path, planted: str, plant
-) -> None:
+def test_a_file_on_a_render_targets_path_is_refused_with_nothing_written(tmp_path: Path) -> None:
+    planted = f"{_CLAUDE_PLUGIN_RELPATH}/agents"
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     project.mkdir()
     root = _claude_root(project)
-    plant(project / planted, outside)
+    _plant_file(project / planted, outside)
     before = _files(tmp_path)
     with pytest.raises(InputError, match=re.escape(f"'{project / planted}'")):
         _definition_install(root, project_root=project)
@@ -2119,23 +2074,18 @@ def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
             _plant_directory,
             "is not a regular file",
         ),
-        (_CLAUDE_RENDER, True, ".claude", f"{_CLAUDE_PLUGIN_RELPATH}/.mcp.json", _plant_link, "is a symlink"),
-        (_CLAUDE_RENDER, True, ".claude", f"{_CLAUDE_PLUGIN_RELPATH}/.mcp.json", _plant_dangling_link, "is a symlink"),
         (_OPENCODE_RENDER, True, "tools", ".opencode", _plant_file, "is not a directory"),
     ],
     ids=[
         "mcp-directory",
-        "mcp-symlink",
-        "mcp-dangling-symlink",
         "mcp-parent-file",
     ],
 )
 def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_standing(
     tmp_path: Path, capsys, ctx: Render, kb: bool, subdir: str, planted: str, plant, reason: str
 ) -> None:
-    """The install completes; the merge writes nothing there or through it — a symlink's target,
-    dangling or not, outside the project included — and names the path with the entry to merge by
-    hand."""
+    """The install completes; the merge writes nothing there and names the path with the entry to merge
+    by hand."""
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     (outside / "shared.json").write_text('{"shared": true}\n', encoding="utf-8")
@@ -2175,6 +2125,17 @@ def _state(base: Path) -> dict[str, tuple[bytes, int, int]]:
     return state
 
 
+def _files_through_links(root: Path) -> dict[str, bytes]:
+    """Every file below `root`, links followed as the install follows them, with the bytes it names."""
+    found = {}
+    for directory, _, names in os.walk(root, followlinks=True):
+        for name in names:
+            path = Path(directory, name)
+            if path.is_file():
+                found[path.relative_to(root).as_posix()] = path.read_bytes()
+    return found
+
+
 def _dry_run_groups(out: str) -> dict[str, set[str]]:
     """The paths a dry run printed under each of its `created`, `changed` and `removed` headings."""
     groups: dict[str, set[str]] = {}
@@ -2197,14 +2158,15 @@ def _no_uncommitted(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _assert_dry_run_predicts(argv: list[str], *, project: Path, capsys) -> dict[str, set[str]]:
     """Run `argv` with `--dry-run`, then for real: the dry run touches nothing under `project`, and the
-    paths it prints are exactly those the real run then creates, changes and removes. Its groups."""
-    files, state = _files(project), _state(project)
+    paths it prints are exactly those the real run then creates, changes and removes, each link read as
+    what it names. Its groups."""
+    files, state = _files_through_links(project), _state(project)
     capsys.readouterr()
     main([*argv, "--dry-run"])
     groups = _dry_run_groups(capsys.readouterr().out)
     assert _state(project) == state
     main(argv)
-    after = _files(project)
+    after = _files_through_links(project)
     actual = {
         "created": set(after) - set(files),
         "changed": {path for path in set(after) & set(files) if after[path] != files[path]},
@@ -2436,10 +2398,11 @@ def test_a_settings_file_left_alone_is_reported_on_an_up_to_date_target(
 
 
 @pytest.mark.parametrize("linked", ["{}\n", None], ids=["link-outside-the-project", "dangling-link"])
-def test_a_symlinked_settings_file_the_install_leaves_alone_is_up_to_date(
+def test_a_symlinked_settings_file_holding_no_retired_entry_is_up_to_date(
     tmp_path: Path, capsys, linked: str | None
 ) -> None:
-    """The copy keeps the link a link, so the run into it leaves the file alone as the real install does."""
+    """A claude install writes the settings file only to remove a retired entry: a link to a file holding
+    none has nothing to remove, and a dangling one has no file to remove it from, so nothing is created."""
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     project.mkdir()
@@ -2676,9 +2639,7 @@ def test_on_the_fallback_a_claude_redirect_is_left_and_the_block_appended(tmp_pa
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "\n".join(["# mine", "", *_block(CLAUDE), ""])
 
 
-def test_on_the_fallback_a_claude_native_file_with_its_own_content_refuses_the_install(
-    tmp_path: Path, capsys
-) -> None:
+def test_on_the_fallback_a_claude_native_file_with_its_own_content_refuses_the_install(tmp_path: Path, capsys) -> None:
     project = tmp_path / "project"
     _plant(project / "CLAUDE.md", "# my own rules\n")
     before = _state(project)
@@ -2727,9 +2688,7 @@ def test_with_a_global_block_the_install_keeps_it_there_and_removes_the_project_
 
 
 @pytest.mark.usefixtures("_no_uncommitted")
-def test_once_the_global_file_holds_the_block_every_project_install_keeps_it_there(
-    tmp_path: Path, capsys
-) -> None:
+def test_once_the_global_file_holds_the_block_every_project_install_keeps_it_there(tmp_path: Path, capsys) -> None:
     """Sticky: a project with no agents file gets none, and a second install is up to date."""
     global_file = _plant(_global_agents_file(tmp_path / "home", CLAUDE), f"{_BEGIN}\nold\n{_END}\n")
     for project in (tmp_path / "one", tmp_path / "two"):
@@ -2797,8 +2756,252 @@ def test_a_symlinked_project_agents_md_gets_the_block_through_the_link(tmp_path:
     (project / "AGENTS.md").symlink_to(target)
     main(["install", str(project), "--harness=claude"])
     assert (project / "AGENTS.md").is_symlink() and (project / "AGENTS.md").readlink() == target
-    expected = render_agents_file(CLAUDE, scope=project.name) if dangling else "\n".join(
-        ["# mine", "", *_block(CLAUDE), ""]
+    expected = (
+        render_agents_file(CLAUDE, scope=project.name) if dangling else "\n".join(["# mine", "", *_block(CLAUDE), ""])
     )
     assert target.read_text(encoding="utf-8") == expected
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+
+
+# Beyond the agents file, a symlink is also what it names: every check, write and removal reads through
+# it, removing one removes the link alone, and a dry run predicts each write made through one.
+
+
+def _linked_claude_project(tmp_path: Path) -> tuple[list[str], Path, Path, Path]:
+    """The argv of a claude project install, the project, its `.claude/` and a directory outside it."""
+    project, root = _claude_project(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    return ["install", str(project), "--harness=claude"], project, root, outside
+
+
+def _link(link: Path, named: Path) -> Path:
+    """`link`, its directory created, naming `named`."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(named)
+    return link
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-stale-render", "dangling"])
+def test_a_symlink_at_a_render_target_is_written_through(tmp_path: Path, capsys, dangling: bool) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "python-coder.md"
+    if not dangling:
+        named.write_text(_NEW_BANNER, encoding="utf-8")
+    link = _link(_claude_plugin(root) / "agents/python-coder.md", named)
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created" if dangling else "changed"]
+    assert link.is_symlink()
+    assert named.read_text(encoding="utf-8") == _rendered(_CLAUDE_RENDER, "agents/python-coder.md")
+
+
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["install", "dry-run"])
+@pytest.mark.parametrize(
+    "relative, named, kb",
+    [
+        ("agents", "missing", []),
+        ("agents/python-coder.md", "missing/python-coder.md", []),
+        (CLAUDE.mcp.canonical, "missing/shared.json", ["--with-kb"]),
+    ],
+    ids=["dangling-on-the-way", "dangling-into-a-missing-directory", "mcp-file-into-a-missing-directory"],
+)
+def test_a_link_nothing_can_be_written_through_is_refused_with_nothing_written(
+    tmp_path: Path, capsys, relative: str, named: str, kb: list[str], dry_run: list[str]
+) -> None:
+    """The copy a dry run reads holds nothing where a link dangles, so the refusal reads the real path, and
+    both runs refuse alike."""
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    link = _link(_claude_plugin(root) / relative, outside / named)
+    before = (_state(project), _state(outside))
+    with pytest.raises(SystemExit) as exit_info:
+        main([*argv, *kb, *dry_run])
+    assert exit_info.value.code == 2
+    assert f"'{link}'" in capsys.readouterr().err
+    assert (_state(project), _state(outside)) == before
+
+
+def _run_outcome(argv: list[str], capsys, *, planted: Path) -> tuple[object, list[str], dict[str, set[str]]]:
+    """What a run of `argv` does about `planted`: its exit code, the stderr lines naming it, and the
+    paths a dry run prints."""
+    capsys.readouterr()
+    try:
+        main(argv)
+        code: object = 0
+    except SystemExit as exc:
+        code = exc.code
+    printed = capsys.readouterr()
+    return code, [line for line in printed.err.splitlines() if str(planted) in line], _dry_run_groups(printed.out)
+
+
+@pytest.mark.parametrize(
+    "harness_args, planted, foreseen",
+    [
+        (["--harness=claude"], f"{_CLAUDE_PLUGIN_RELPATH}/agents", True),
+        (["--harness=opencode", "--subdir=tools", "--with-kb"], ".opencode", False),
+        (["--harness=claude", "--subdir=tools"], ".claude", True),
+    ],
+    ids=["render-target", "mcp-write-target", "retired-entry-target"],
+)
+def test_a_dry_run_foresees_a_file_on_the_way_except_to_the_mcp_settings_file(
+    tmp_path: Path, capsys, harness_args: list[str], planted: str, foreseen: bool
+) -> None:
+    """Today's behaviour, pinned. The render refusal and the retired entry's silence are foreseen. The copy
+    holds nothing below a managed path whose directory is a file, so the dry run predicts the MCP file
+    created, where the real install reports the file in the way and writes nothing there."""
+    project = tmp_path / "project"
+    (project / "tools").mkdir(parents=True)
+    path = _plant(project / planted, "mine\n")
+    argv = ["install", str(project), *harness_args]
+    dry_code, dry_lines, groups = _run_outcome([*argv, "--dry-run"], capsys, planted=path)
+    real_code, real_lines, _ = _run_outcome(argv, capsys, planted=path)
+    assert dry_code == real_code
+    if foreseen:
+        assert dry_lines == real_lines
+    else:
+        assert dry_lines == [] and [f"{path} is not a directory" in line for line in real_lines] == [True]
+        assert f"{planted}/opencode.jsonc" in groups["created"]
+
+
+def test_a_linked_directory_on_a_resource_path_is_written_through(tmp_path: Path, capsys) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    hooks = _link(_claude_plugin(root) / "hooks", outside)
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert f"{_CLAUDE_PLUGIN_RELPATH}/{_GUARDRAIL}" in groups["created"]
+    assert hooks.is_symlink()
+    assert {"guardrail.pl", "hooks.json"} <= set(_files(outside))
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-file", "dangling"])
+def test_a_symlinked_mcp_settings_file_has_the_entry_written_through(tmp_path: Path, capsys, dangling: bool) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "shared.json"
+    if not dangling:
+        named.write_text('{"shared": true}\n', encoding="utf-8")
+    link = _link(_claude_mcp_file(root), named)
+    _assert_dry_run_predicts([*argv, "--with-kb"], project=project, capsys=capsys)
+    assert link.is_symlink()
+    own = {} if dangling else {"shared": True}
+    assert json.loads(named.read_text(encoding="utf-8")) == {**own, "mcpServers": {"kbase": _built_entry(CLAUDE)}}
+
+
+def test_a_symlinked_settings_file_has_the_retired_entry_removed_through_the_link(tmp_path: Path, capsys) -> None:
+    argv, project, _, outside = _linked_claude_project(tmp_path)
+    named = _plant(outside / "settings.json", json.dumps({"hooks": {"PreToolUse": [_retired_hook_entry(".claude")]}}))
+    link = _link(project / _SETTINGS, named)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert link.is_symlink()
+    assert named.read_text(encoding="utf-8") == '{"hooks": {"PreToolUse": []}}'
+    err = capsys.readouterr().err
+    assert _UNREAD not in err and _REMOVE_BY_HAND not in err
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
+@pytest.mark.parametrize(
+    "relative, removed",
+    [("skills/docdicer/tools", "removed retired package destination"), ("agents/kb_tools", "removed legacy tree")],
+    ids=["retired-package-destination", "legacy-tree"],
+)
+def test_a_symlinked_retired_tree_has_the_link_removed_and_what_it_names_left(
+    tmp_path: Path, capsys, relative: str, removed: str, dangling: bool
+) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "tree"
+    if not dangling:
+        _plant(named / "stale.py")
+    link = _link(root / relative, named)
+    before = _files(outside)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert f"{removed} {link}" in capsys.readouterr().out
+    assert not os.path.lexists(link)
+    assert _files(outside) == before and named.exists() != dangling
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-our-script", "dangling"])
+def test_a_symlinked_retired_guardrail_script_has_the_link_removed_where_it_names_ours(
+    tmp_path: Path, capsys, dangling: bool
+) -> None:
+    """The script goes where the file it names carries the installed header; a dangling link names no
+    such file, so it stands, and nothing is created where it points."""
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "guardrail.pl"
+    if not dangling:
+        shutil.copyfile(PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "claude" / _GUARDRAIL, named)
+    link = _link(root / _GUARDRAIL, named)
+    before = _files(outside)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert (f"removed retired guardrail script {link}" in capsys.readouterr().out) != dangling
+    assert os.path.lexists(link) == dangling and (root / "hooks").exists() == dangling
+    assert _files(outside) == before
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
+def test_a_symlinked_package_destination_stays_a_link_and_holds_the_fresh_package(
+    tmp_path: Path, capsys, dangling: bool
+) -> None:
+    """A linked directory is emptied of what an earlier package left; a dangling link has the directory
+    it names made."""
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    named = outside / "tools"
+    if not dangling:
+        _plant(named / "stale.py")
+    link = _link(root / _DOCDICER_TOOLS, named)
+    _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert link.is_symlink()
+    assert (named / "docdicer").is_file() and not (named / "stale.py").exists()
+
+
+def _stale_render_below_a_linked_directory(root: Path, outside: Path) -> tuple[Path, Path]:
+    """`.claude/agents/linked`, naming a directory outside that holds a stale render: the link and that
+    directory."""
+    named = outside / "agents"
+    _plant(named / "gone.md", _NEW_BANNER)
+    return _link(root / "agents/linked", named), named
+
+
+def test_the_prune_follows_a_linked_directory_and_unlinks_it_once_emptied(tmp_path: Path, capsys) -> None:
+    argv, project, root, outside = _linked_claude_project(tmp_path)
+    link, named = _stale_render_below_a_linked_directory(root, outside)
+    groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
+    assert ".claude/agents/linked/gone.md" in groups["removed"]
+    assert not os.path.lexists(link)
+    assert named.is_dir() and not any(named.iterdir())
+
+
+def test_the_prune_walk_ends_at_a_link_cycle(tmp_path: Path, capsys) -> None:
+    """Run without the preflight, whose dereferencing copy cannot hold a cycle."""
+    _, project, root, outside = _linked_claude_project(tmp_path)
+    link, named = _stale_render_below_a_linked_directory(root, outside)
+    _link(named / "loop", named)
+    capsys.readouterr()
+    _definition_install(root, project_root=project)
+    assert f"pruned {link / 'gone.md'}" in capsys.readouterr().out
+    assert not (named / "gone.md").exists()
+
+
+def _symlink_creations(source: str) -> list[int]:
+    """The line of each call in `source` that creates a symlink: `symlink_to`, `os.symlink` or a bare
+    `symlink`."""
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in ("symlink_to", "symlink"))
+            or (isinstance(node.func, ast.Name) and node.func.id == "symlink")
+        )
+    )
+
+
+def test_the_symlink_creation_guard_finds_each_spelling() -> None:
+    planted = "import os\nfrom os import symlink\np.symlink_to(q)\nos.symlink(a, b)\nsymlink(a, b)\nos.readlink(a)\n"
+    assert _symlink_creations(planted) == [3, 4, 5]
+
+
+def test_no_module_creates_a_symlink() -> None:
+    """The install never creates a link into live operator configuration, because it creates none."""
+    found = {
+        path.relative_to(PACKAGE_ROOT).as_posix(): lines
+        for path in sorted(PACKAGE_ROOT.rglob("*.py"))
+        if (lines := _symlink_creations(path.read_text(encoding="utf-8")))
+    }
+    assert found == {}

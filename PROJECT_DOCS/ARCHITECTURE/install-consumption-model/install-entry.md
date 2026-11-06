@@ -31,13 +31,19 @@ the target, without `--harness`; a harness directory or ROOT that exists and is 
 from — a shipped package's, the kb toolchain's, or a harness's resource tree — and, on a project install only, a ROOT
 outside the project root it is given: a user-level install skips that check, so a user directory that
 is a symlink out of home is accepted. The refusals name the normalised path. So does a render or harness-resource target
-holding a file without this repository's banner, or with a symlink or non-directory on its path
-below ROOT; and a harness settings file the install writes into — the MCP settings file on a kb
-install — that is not UTF-8 or holds the wrong type, `null` included, where the entry goes. A file a
+holding a file without this repository's banner, or with a non-directory on its path
+below ROOT (`_blocked_component`, links followed, so a link to a directory passes and a link to a
+file or a dangling one blocks); and a harness settings file the install writes into — the MCP
+settings file on a kb install — that is not UTF-8 or holds the wrong type, `null` included, where
+the entry goes. A dangling link on the way to a render, resource or harness-file target, or at one
+whose named path sits in a missing directory, refuses too (`_dangling_on_path`), read at the real
+path because a dry run's copy holds nothing where a link dangles; so does one on the way to the MCP
+settings file, or at it with the same missing directory. A file a
 retired entry is removed from is no refusal: removal leaves one it cannot edit alone
 ([Guardrail registration](guardrail-registration.md)). Every such check, the agents file's included, runs
 before the first write, and ROOT itself is created after them. The target
 refusal names every failing path at once; a settings or entry refusal names the one it met. A
-settings path that is a symlink or not a regular file is no refusal: the merge reports it and leaves
-it (below).
+settings path that is not a regular file is no refusal: the merge reports it and leaves it (below).
+A link at the settings file is read and written through; a dangling one has the file it names
+created. No module under `adjagent/` creates a symlink; `test_no_module_creates_a_symlink` holds it.
 

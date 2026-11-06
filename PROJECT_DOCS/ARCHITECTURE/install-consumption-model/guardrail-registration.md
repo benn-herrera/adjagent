@@ -27,8 +27,9 @@
   either.
 - **Removal**, which `_remove_retired_entry` runs behind `_settings_obstacle` and
   `_editable_settings`, and which never refuses the install. `_settings_obstacle` names a
-  symlink at the path or below the project on the way to it, dangling or not, which is never written
-  through; a non-directory on that way; and anything but a regular file at the path.
+  non-directory below the project on the way to the path, and anything but a regular file at it,
+  links followed; a link is read and edited through, and a dangling one names no file, so there is
+  nothing to remove.
   `_editable_settings` yields the text only of UTF-8 plain JSON whose container path holds the types
   it needs; an unreadable or non-UTF-8 file, one that is not a JSON object, and one with a
   wrong-typed key on the path (`null` included) yield nothing. Each is left untouched, so removal
@@ -44,14 +45,15 @@
   removal and the file left untouched, because removing it whole would delete the project's own
   hook. A file `_editable_settings` yields nothing for (comments included), one the scanner cannot
   delimit with certainty, and a path `_settings_obstacle` names are left untouched, and reported as
-  a stranded entry only where the text found there, read as UTF-8 through a symlink and with
+  a stranded entry only where the text found there, read as UTF-8 and with
   undecodable bytes replaced (`_names_text`), contains the `trace`: the missing-script report for the
   guardrail, `"kbase"` for the MCP entry. A file holding neither is not mentioned. Other
   `PreToolUse` entries and other `mcpServers` members are never touched.
 - **Flat script.** On a project install under a harness directory that is not ROOT, whose probe
-  passed, `_remove_retired_script` removes `<harness-dir>/hooks/guardrail.pl` when it is a regular
-  file, reached through no symlink, with the `!INSTALLED! … adjagent` header, then `hooks/` if that
-  leaves it empty. The same install has written the plugin's script, its replacement.
+  passed, `_remove_retired_script` removes `<harness-dir>/hooks/guardrail.pl` when the file it names
+  is a regular file with the `!INSTALLED! … adjagent` header, then `hooks/` if that leaves it empty.
+  Where the script or `hooks/` is a link, `_remove_entry` unlinks the link and what it names stays;
+  a dangling link names no file, so nothing is removed. The same install has written the plugin's script, its replacement.
 
 A user-level install runs neither the probe nor the removal: `install` takes no guardrail for it.
 

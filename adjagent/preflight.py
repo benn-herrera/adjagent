@@ -60,28 +60,24 @@ def _scratch_bases(bases: Sequence[Path], *, scratch: Path) -> tuple[list[Path],
 
 
 def _copy_tree(real: Path, copy: Path) -> None:
-    """`real`'s tree into `copy`, symlinks below it dereferenced and every `.venv` left out."""
-    shutil.copytree(
-        real,
-        copy,
-        symlinks=False,
-        ignore=shutil.ignore_patterns(VENV_DIR),
-        ignore_dangling_symlinks=True,
-        dirs_exist_ok=True,
-    )
+    """`real`'s tree into `copy`, symlinks below it dereferenced, dangling ones and every `.venv` left
+    out."""
+    shutil.copytree(real, copy, symlinks=False, ignore=_left_out_of_copy, dirs_exist_ok=True)
 
 
-def _copy_managed(
-    managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_bases: Sequence[Path], scratch: Path
-) -> None:
-    """Copy each managed path that exists to the same position below its base's counterpart, every
-    `.venv` left out. A managed path that is a symlink, dangling included, stays a symlink, so the
-    install's own checks see what the real install sees: to the copy of what it reaches where the copy
-    holds that below a base, and otherwise to a stand-in under `scratch`, outside every scratch base,
-    holding a copy of what it reaches and nothing where it dangles. Every other symlink is dereferenced,
-    so nothing in the copy points back into the target. A directory a managed path sits in is created
-    where the real one exists, since an install's checks read whether it does."""
-    links: list[tuple[Path, Path]] = []
+def _left_out_of_copy(directory: str, names: list[str]) -> list[str]:
+    """The entries of `directory` a copy leaves out: a `.venv`, and a dangling link — which `copytree`'s
+    own `ignore_dangling_symlinks` skips only at the top of the tree on Python 3.9."""
+    paths = {name: Path(directory, name) for name in names}
+    return [name for name, path in paths.items() if name == VENV_DIR or (path.is_symlink() and not path.exists())]
+
+
+def _copy_managed(managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_bases: Sequence[Path]) -> None:
+    """Copy each managed path that exists to the same position below its base's counterpart, as what it
+    names: a directory as its tree, a file as its bytes, a dangling link as nothing, and every link below
+    them dereferenced, so the copy holds no link and nothing in it points back into the target. Every
+    `.venv` is left out. A directory a managed path sits in is created where the real one exists, since
+    an install's checks read whether it does."""
     for (base, paths), scratch_base in zip(managed, scratch_bases):
         if base.is_dir():
             scratch_base.mkdir(parents=True, exist_ok=True)
@@ -89,35 +85,10 @@ def _copy_managed(
             real, copy = base / relative, scratch_base / relative
             if real.parent.is_dir():
                 copy.parent.mkdir(parents=True, exist_ok=True)
-            if os.path.islink(real):
-                links.append((real, copy))
-            elif real.is_dir():
+            if real.is_dir():
                 _copy_tree(real, copy)
             elif real.is_file():
                 shutil.copy2(real, copy)
-    # Linked once everything else is copied, so a link reaching another managed path finds its copy.
-    real_bases = [base.resolve() for base, _ in managed]
-    for index, (real, copy) in enumerate(links):
-        # A managed path below this link was copied through it; the link replaces that copy.
-        if copy.is_dir() and not copy.is_symlink():
-            shutil.rmtree(copy)
-        elif os.path.lexists(copy):
-            copy.unlink()
-        reached = real.resolve()
-        counterparts = (
-            scratch_base / reached.relative_to(real_base)
-            for real_base, scratch_base in zip(real_bases, scratch_bases)
-            if reached.is_relative_to(real_base)
-        )
-        counterpart = next((path for path in counterparts if os.path.lexists(path)), None)
-        if counterpart is None:
-            counterpart = scratch / "links" / str(index)
-            counterpart.parent.mkdir(exist_ok=True)
-            if reached.is_dir():
-                _copy_tree(reached, counterpart)
-            elif reached.is_file():
-                shutil.copy2(reached, counterpart)
-        copy.symlink_to(counterpart)
 
 
 def _tree_files(base: Path) -> set[Path]:
@@ -130,8 +101,7 @@ def _tree_files(base: Path) -> set[Path]:
 
 
 def _differs(copy: Path, real: Path) -> bool:
-    """Whether `copy` and `real` differ in bytes or in permission bits, a symlink read through. Two
-    dangling symlinks do not differ; one dangling beside one that reaches a file does."""
+    """Whether `copy` and `real` differ in bytes or in permission bits, a symlink read through."""
     if not (copy.exists() and real.exists()):
         return copy.exists() != real.exists()
     if not filecmp.cmp(copy, real, shallow=False):
@@ -164,7 +134,7 @@ def preflight(
         outer = [(bases[index], scratch_bases[index]) for index in outermost]
         stderr = io.StringIO()
         try:
-            _copy_managed(managed, scratch_bases=scratch_bases, scratch=scratch)
+            _copy_managed(managed, scratch_bases=scratch_bases)
             before = [_tree_files(scratch_base) for _, scratch_base in outer]
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
                 install(scratch_bases)
