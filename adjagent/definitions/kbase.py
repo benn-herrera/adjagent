@@ -35,7 +35,9 @@ in, in this order:
 
 Neither probe passing is a finding, not a failure. The `.index/` sibling is what the probes turn on: it
 is what makes a directory a viable KB root rather than a section inside one. Each probe tests only that
-`.index/` exists, never what it holds. Do not search the tree for a KB — section
+`.index/` exists, never what it holds: run it as
+`test -f <dir>/entry-point.md && test -d <dir>/.index`, `<dir>` being `./kb-root` or `.`, since a
+Glob or Read of `.index/` can be refused. Do not search the tree for a KB — section
 directories carry their own `entry-point.md`, and a search finds the wrong one.
 
 {clauses.KBASE_PROJECT_RULE}

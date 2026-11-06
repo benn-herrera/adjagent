@@ -85,10 +85,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     (`adjagent/definitions/kbase.py`) each state the `bearing × rigor` contribution and the pending
     rule; `scoring-system.md` only links out. One statement should hold it.
 
-17. **Must-see lists repeat boundary boilerplate.** The SPEC, ARCHITECTURE and CONVENTIONS
-    `entry-point.md` Must-see bullets are mostly the volumes' boundary lines; they should keep
-    content that would hurt to miss.
-
 18. **Claude's guardrail runs perl on every file-tool call on base installs.** The registration's
     matcher (`adjagent/harnesses/claude.py` `_guardrail_registration`) covers every file tool on
     every claude install; on a base install the script finds no kb signal and passes the call.
@@ -100,10 +96,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     CONVENTIONS `guardrails-change-together.md` and `docs/guardrail.md`. ARCHITECTURE should cite
     SPEC for what is blocked, CONVENTIONS keep only the process rules, and `docs/guardrail.md`
     keep the user's symptom and remedy.
-
-21. **The kbase router's KB probe does not name its form.** The router (`adjagent/definitions/kbase.py`)
-    says the probe tests that `kb-root/.index/` exists; a Glob or Read probe of it is refused by the
-    guardrail while `test -d` passes, so the router should name `test -d`.
 
 22. **Mage has no guardrail.** `adjagent/harnesses/mage.py` sets `guardrail=None` and SPEC
     `shipped-files.md` says mage ships none, so a mage install's `.index/` protection rests on

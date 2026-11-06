@@ -7,9 +7,9 @@ is named by its bold title as well, since numbers shift only when Q5 renumbers.
 
 | Package | What | Rating | Lifetime | Runs on | State |
 |---|---|---|---|---|---|
-| Q1 | Guardrail scripts and tests: items 10, 13, 23, 24, 25; checks: items 30, 32 | mechanical | shipped | python-coder (sonnet) | not started |
-| Q2 | Docs: items 14, 16, 17 (report only), 20 | mechanical | shipped | tech-writer (sonnet) | not started |
-| Q3 | Definition text: item 21 | mechanical | shipped | prompt-engineer (sonnet) | not started |
+| Q1 | Guardrail scripts and tests: items 10, 13, 23, 24, 25; checks: items 30, 32 | mechanical | shipped | python-coder (sonnet) | done (4a22f36) |
+| Q2 | Docs: items 14, 16, 17 (report only), 20 | mechanical | shipped | tech-writer (sonnet) | done (29efff5); item 17 ruled: every Must-see bullet stays |
+| Q3 | Definition text: item 21 | mechanical | shipped | prompt-engineer (sonnet) | done |
 | Q5 | One home for the decisions `install` and `_install_managed_paths` both make: item 5 | expert | shipped | python-coder (opus) | not started |
 | — | Plan review | — | — | prompt-engineer, architect | done |
 | Q4 | Post-plan review | review | — | python-coder, tech-writer, prompt-engineer | not started |
@@ -223,7 +223,7 @@ user-level case. Existing tests pass unchanged.
   candidate absent from that record.
 - After the change, render `q5`, `q5-opencode` and `q5-mage` the same way. `just render-diff q5-base q5`,
   `just render-diff q5-base-opencode q5-opencode` and `just render-diff q5-base-mage q5-mage` each
-  list no pair.
+  list no pair but an `AGENTS.md` whose only difference is the slot name in its heading.
 - Item 5 deleted from `ROADMAP.md`, and the list renumbered.
 
 ## Q4: Post-plan review
