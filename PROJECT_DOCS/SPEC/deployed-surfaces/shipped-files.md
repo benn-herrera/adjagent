@@ -7,12 +7,11 @@ consumer's own artifacts, such as the runner include line an install writes into
 justfile or Makefile, name that destination directly
 and cannot be asked to notice a source-side rearrangement. Its installed copy is stamped where
 Installed artifacts says: the `!INSTALLED!` banner, not `!GENERATED!`
-— a shipped package is source taken as-is, never a render. `SHIPPED_PACKAGES` is the table of those
-an install delivers by explicit mapping: each row a shipped package and the destination
-under the install ROOT it lands at, stated per row — inside a skill's own directory and so inside
-the `skills/` surface. It holds one
-row, the **docdicer tools package**, which every project install delivers to `skills/docdicer/tools/`,
-inside the `docdicer` skill's own directory. A user-level install delivers none (Install destination,
+— a shipped package is source taken as-is, never a render. A project install delivers each shipped
+package by explicit mapping, to a destination under the install ROOT stated for that package —
+inside a skill's own directory and so inside the `skills/` surface. There is one, the **docdicer
+tools package**, which every project install delivers to `skills/docdicer/tools/`, inside the
+`docdicer` skill's own directory. A user-level install delivers none (Install destination,
 above). The package holds four files:
 - `docdicer`, a POSIX `sh` script, executable, carrying the `!INSTALLED!` banner below its shebang
 - `.gitignore`, holding `.venv/` and carrying no banner

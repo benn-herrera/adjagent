@@ -80,20 +80,10 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     `kb-root/` only when its filter's last segment ends in `.md` drops both lists; it is a behaviour
     change to both scripts and the case table together.
 
-14. **ARCHITECTURE retells the kbase skill's text.** The kb set entry in
-    `PROJECT_DOCS/ARCHITECTURE/subsystem-map.md` retells the router's branches, the `installing.md`
-    walkthrough and `KB_RUNNER_TARGETS`, a second home for definition prose. It should keep the
-    mechanism only and cite `adjagent/definitions/kbase.py` for the content.
-
 15. **How a work contributes to strength is stated three times in the kbase reading reference.**
     `clauses.kb_orientation`, `reading.md`'s "Pending does not propagate" and its works paragraph
     (`adjagent/definitions/kbase.py`) each state the `bearing × rigor` contribution and the pending
     rule; `scoring-system.md` only links out. One statement should hold it.
-
-16. **`_venv` breaks the three-line recipe rule.** `python.just`'s `_venv` is a bash shebang body
-    of about twelve lines; `PROJECT_DOCS/CONVENTIONS/code-definitions-and-install/long-recipe-bodies-are-scripts.md`
-    says a body over three command lines is a script and has no shebang exemption. Either state the
-    exemption or move the body to `devtools/scripts/`.
 
 17. **Must-see lists repeat boundary boilerplate.** The SPEC, ARCHITECTURE and CONVENTIONS
     `entry-point.md` Must-see bullets are mostly the volumes' boundary lines; they should keep
@@ -110,10 +100,6 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
     CONVENTIONS `guardrails-change-together.md` and `docs/guardrail.md`. ARCHITECTURE should cite
     SPEC for what is blocked, CONVENTIONS keep only the process rules, and `docs/guardrail.md`
     keep the user's symptom and remedy.
-
-20. **SPEC names a code constant.** `PROJECT_DOCS/SPEC/deployed-surfaces/shipped-files.md` names
-    `SHIPPED_PACKAGES`, against its entry point's no-code-structure rule; the outcome stays in SPEC
-    and the constant's name moves to ARCHITECTURE.
 
 21. **The kbase router's KB probe does not name its form.** The router (`adjagent/definitions/kbase.py`)
     says the probe tests that `kb-root/.index/` exists; a Glob or Read probe of it is refused by the

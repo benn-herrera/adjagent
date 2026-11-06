@@ -2,9 +2,8 @@
 
 A **base install** — `just install` — delivers every definition this repository produces except the
 kb set: the `kbase` skill — except a mage install, which always includes the kb set. It also
-delivers each package `SHIPPED_PACKAGES` names (Deployed Surfaces, below) to its destination there:
-the docdicer tools package, inside the `docdicer` skill's own directory. A user-level install
-delivers none.
+delivers the docdicer tools package (Deployed Surfaces, below) to its destination there, inside the
+`docdicer` skill's own directory. A user-level install delivers none.
 A **kb install** — `just install-with-kb`, or any install carrying `--with-kb` — adds the kb set —
 the `kbase` skill with every supporting file it lists — together with the
 `kb-tools/` package (the runner snippets, inside the `kbase` skill's own directory), the harness's
