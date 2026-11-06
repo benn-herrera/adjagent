@@ -44,7 +44,7 @@ Under claude the set is a plugin: invoke its agents and commands as `adjagent:<n
 Justfile:
 
 ```just
-AGENTS_VER := "v0.13.1"
+AGENTS_VER := "v0.15.0"
 AGENTS_VENV := ".venv"
 # installs the pinned adjagent into the project's venv, then installs the agent set
 agents:
@@ -59,7 +59,7 @@ agents:
 Makefile:
 
 ```make
-AGENTS_VER := v0.13.1
+AGENTS_VER := v0.15.0
 AGENTS_VENV := .venv
 
 .PHONY: agents
@@ -113,7 +113,7 @@ of your own. A bare `pip install` outside a venv is refused on Homebrew and most
 `~/Library/Python/3.9/bin`, which is not on `PATH`.
 
 ```sh
-pipx install "git+https://github.com/benn-herrera/adjagent@v0.13.1"
+pipx install "git+https://github.com/benn-herrera/adjagent@v0.15.0"
 pipx ensurepath   # puts pipx's bin directory on PATH; open a new shell afterwards
 adjagent --help
 adjagent install ~/projects/foo
@@ -123,7 +123,7 @@ Or, with a venv:
 
 ```sh
 python3 -m venv ~/.venvs/adjagent
-~/.venvs/adjagent/bin/pip install "git+https://github.com/benn-herrera/adjagent@v0.13.1"
+~/.venvs/adjagent/bin/pip install "git+https://github.com/benn-herrera/adjagent@v0.15.0"
 ~/.venvs/adjagent/bin/adjagent install ~/projects/foo
 ```
 

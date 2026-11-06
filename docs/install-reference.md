@@ -98,7 +98,7 @@ Neither install is refused.
 
 ## Upgrading from the flat layout
 
-The plugin form first ships in the release after 0.14.0; 0.14.0 and earlier wrote the set directly
+The plugin form first ships in 0.15.0; 0.14.0 and earlier wrote the set directly
 under `.claude/` (`.claude/agents/`, `.claude/skills/docdicer/tools/`). Run the install over it and
 expect these changes, in the order you meet them:
 
