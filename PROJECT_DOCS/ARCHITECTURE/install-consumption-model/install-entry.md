@@ -29,10 +29,10 @@ from — a shipped package's, the kb toolchain's, or a harness's resource tree �
 outside the project root it is given: a user-level install skips that check, so a user directory that
 is a symlink out of home is accepted. The refusals name the normalised path. So does a render or harness-resource target
 holding a file without this repository's banner, or with a symlink or non-directory on its path
-below ROOT; a harness settings file that is not UTF-8 or holds the wrong type, `null` included,
-where the entry goes — the MCP settings file on a kb install, and the guardrail's
-`.claude/settings.json` on a claude install whose probe passes; and, on that install, a harness
-directory the guardrail entry cannot name. Every such check, the agents file's included, runs
+below ROOT; and a harness settings file the install writes into — the MCP settings file on a kb
+install — that is not UTF-8 or holds the wrong type, `null` included, where the entry goes. A file a
+retired entry is removed from is no refusal: removal leaves one it cannot edit alone
+([Guardrail registration](guardrail-registration.md)). Every such check, the agents file's included, runs
 before the first write, and ROOT itself is created after them. The target
 refusal names every failing path at once; a settings or entry refusal names the one it met. A
 settings path that is a symlink or not a regular file is no refusal: the merge reports it and leaves

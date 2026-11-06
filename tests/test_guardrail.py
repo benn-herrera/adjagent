@@ -202,7 +202,8 @@ def test_guardrail_cases_carry_only_known_fields() -> None:
 def test_guardrail_matcher_names_exactly_the_claude_tools_the_case_table_covers() -> None:
     """A tool the matcher sends to the hook with no case is untested, and a case for a tool the
     matcher omits tests a call the hook never sees."""
-    matcher = set(CLAUDE.guardrail.entry(CLAUDE.project_harness_dir)["matcher"].split("|"))
+    [entry] = json.loads(CLAUDE.guardrail.registration.text())["hooks"]["PreToolUse"]
+    matcher = set(entry["matcher"].split("|"))
     assert matcher == {_tool(case) for case in _CASES if _tool(case) in _OPENCODE_TOOLS}
 
 

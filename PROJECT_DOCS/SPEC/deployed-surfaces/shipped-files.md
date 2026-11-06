@@ -43,8 +43,8 @@ directory is neither its `SKILL.md` nor a supporting file it lists.
 
 A harness's shipped files are the fifth class: copied as they stand, never rendered. A harness also
 *renders* files of its own into ROOT — the plugin manifest `.claude-plugin/plugin.json`, one value
-shared by claude and mage, version included — which are generated, not copied,
-carry no banner, and are replaced whole.
+shared by claude and mage, version included, and under claude the guardrail's `hooks/hooks.json`
+registration (below) — which are generated, not copied, carry no banner, and are replaced whole.
 An install copies the installing harness's set into ROOT — the harness directory under opencode and
 mage, the plugin under claude — except a user-level install, which copies no harness file, and save a
 file conditional on a run at install time (below), so a harness file lands at the path it holds
@@ -76,9 +76,9 @@ so a base install is never refused by it. It refuses a call that reaches into
 
 This check follows symlinks, so a link into `.index/` is refused. Claude's runs at session time and
 needs perl with core `JSON::PP`; an install also registers it as a `PreToolUse` entry for Bash and the
-file tools (Read, Write, Edit, NotebookEdit, Grep, Glob) in the project's `.claude/settings.json`,
-whatever the harness directory is, keeping every other byte of that file (Write Safety, below). The
-entry runs the script only where it stands readable: where it is missing — a project that commits the
-settings file but not the script — a call reports the missing path on stderr and proceeds, and is not
-blocked.
+file tools (Read, Write, Edit, NotebookEdit, Grep, Glob) in the plugin's own `hooks/hooks.json`,
+written beside the script and only where the script's install-time run succeeds; no project settings
+file is written to register it, and one an earlier install registered it in is cleaned (Write Safety,
+below). The entry runs the script only where it stands readable: where it is missing, a call reports
+the missing path on stderr and proceeds, and is not blocked.
 

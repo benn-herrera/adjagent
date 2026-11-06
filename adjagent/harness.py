@@ -8,8 +8,9 @@ agent follows when running recipes in its shell, the files it
 renders beside the definitions, the definitions it renders nothing for, the
 prefix a definition's name takes where other definition text names it, the
 path below its harness directory the set is written into, the
-settings file it registers an MCP server in, and the guardrail hook it
-registers, where it has one. It holds no tier map, no family and
+settings file it registers an MCP server in, the guardrail hook it
+registers, where it has one, and the entries earlier installs wrote that an
+install removes. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
 renderer maps tools to spellings and computes the governed keys.
 
@@ -98,8 +99,8 @@ class McpSettings:
 
 
 class HookClaim(Enum):
-    """What one element of a settings file's hook array holds of the guardrail hook: none of it, only
-    it, or it beside a command of the project's own."""
+    """What one item of a settings file holds of an entry an earlier install wrote: none of it, only it,
+    or it beside a command of the project's own."""
 
     NONE = "none"
     ALONE = "alone"
@@ -108,18 +109,38 @@ class HookClaim(Enum):
 
 @dataclass(frozen=True)
 class GuardrailHook:
-    """The guardrail hook a harness ships and registers in a project settings file. `script` is the
-    hook script's path under `resources/<harness>/`, which is also its path under the harness directory;
-    `settings` is the settings file relative to the project root; `container` is the path in it to the
-    array the entry is an element of; `entry` builds the entry from the harness directory's path
-    relative to the project root, refusing one it cannot name; `claim` reads an element of that array
-    as `entry` writes it, for any harness directory."""
+    """The guardrail hook a harness ships and registers in a file of its own. `script` is the hook
+    script's path under `resources/<harness>/`, which is also its path under ROOT; `registration` is
+    the file below ROOT registering it, written only where the script runs on the installing machine."""
 
     script: str
+    registration: HarnessFile
+
+
+class Replacement(Enum):
+    """What an install writes in place of a retired entry, so the entry goes only on an install that
+    writes it: the guardrail registration, written where the guardrail probe passes, or the `kbase` MCP
+    entry, written on a kb install."""
+
+    GUARDRAIL = "guardrail"
+    MCP = "mcp"
+
+
+@dataclass(frozen=True)
+class RetiredEntry:
+    """An entry an earlier install registered in a settings file the project owns, which an install
+    writing its `replacement` removes. `settings` is the file relative to the project root; `container`
+    is the path in it to the array or object holding the entry; `member` is the entry's key in that
+    object, "" where the entry is an element of that array; `claim` reads an element, or the member's
+    value, as an earlier install wrote it; `trace` is text the entry leaves in the file as written, which
+    a file that cannot be parsed or edited in place is searched for."""
+
     settings: str
     container: tuple[str, ...]
-    entry: Callable[[str], dict[str, object]]
+    member: str
     claim: Callable[[object], HookClaim]
+    replacement: Replacement
+    trace: str
 
 
 @dataclass(frozen=True)
@@ -151,13 +172,14 @@ class Harness:
     reference_prefix: str = ""  # put before a definition's name wherever definition text names it; "" names it bare
     plugin_dir: str = ""  # below the harness directory, where the set is written (ROOT); "" for the directory
     reload_rule: str = ""  # what to do when an install's agents are not offered; printed after one, "" for none
+    retired_entries: tuple[RetiredEntry, ...] = ()  # entries earlier installs wrote that an install removes
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
         model_shape, an OptionalHarnessText field that is not a string, a tools table not total in
         Tool order, an MCP settings contract lacking a canonical path, a non-empty alternative name,
-        or a builder, or a guardrail hook lacking a script path, a settings path, a container path, a
-        builder, or a recogniser.
+        or a builder, a guardrail hook lacking a script path or a registration path, builder and
+        marker, or a retired entry lacking a settings path, a container path, a recogniser or a trace.
 
         An empty string is refused of the fields a body naming them always renders, since every
         harness supplies each HarnessText and a model shape. An OptionalHarnessText is a rule a
@@ -182,16 +204,26 @@ class Harness:
         guardrail = self.guardrail
         if guardrail is not None and not (
             guardrail.script
-            and guardrail.settings
-            and guardrail.container
-            and all(guardrail.container)
-            and callable(guardrail.entry)
-            and callable(guardrail.claim)
+            and guardrail.registration.path
+            and callable(guardrail.registration.text)
+            and guardrail.registration.marker
         ):
             raise InputError(
-                f"harness '{self.name}': guardrail hook needs a script path, a settings path, a container "
-                "path, a builder, and a recogniser"
+                f"harness '{self.name}': guardrail hook needs a script path, and a registration path, "
+                "builder and marker"
             )
+        for retired in self.retired_entries:
+            if not (
+                retired.settings
+                and retired.container
+                and all(retired.container)
+                and callable(retired.claim)
+                and retired.trace
+            ):
+                raise InputError(
+                    f"harness '{self.name}': a retired entry needs a settings path, a container path, a "
+                    "recogniser, and a trace"
+                )
 
     @property
     def is_standalone_plugin(self) -> bool:

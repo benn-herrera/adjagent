@@ -3,24 +3,24 @@
 A harness that declares a `guardrail` (`Harness.guardrail`, a `GuardrailHook`) ships a hook the
 install registers rather than only copies; claude declares one, opencode sets `None` because its
 plugin registers itself, and mage sets `None` and ships no hook at all. The `GuardrailHook` names the
-`script` under `resources/<harness>/`, the `settings` file relative to the project root —
-`.claude/settings.json` whatever `--subdir` is, the only path Claude Code reads — the `container`
-path in it to the array the entry is an element of
-(`hooks`, `PreToolUse`), an `entry` builder from the harness's path relative to the project to the
-hook entry, and a `claim` that reads an element of that array as `entry` writes it. The entry's
-matcher is `Bash|Read|Write|Edit|NotebookEdit|Grep|Glob` on every claude install. `_guardrail_claim`
-recognises an element by its command alone, never its matcher, so a re-install replaces an earlier
-`Bash`-only entry in place. Every claude install therefore runs the script on each file-tool call as
-well as each Bash call, and on a base install the script finds the kb signal absent and lets a
-file-tool call through. The entry's
+`script` under `resources/<harness>/`, which is also its path under ROOT, and a `registration`, the
+`HarnessFile` for the plugin's `hooks/hooks.json`: a text builder and a `marker`, the missing-script
+report below, which only this repository writes. The registration holds one `PreToolUse` entry, in
+Claude's settings shape under a top-level `hooks` key, whose matcher is
+`Bash|Read|Write|Edit|NotebookEdit|Grep|Glob` on every claude install. Every claude install therefore
+runs the script on each file-tool call as well as each Bash call, and on a base install the script
+finds the kb signal absent and lets a file-tool call through. The entry's
 command is a short `sh` program that `exec`s `perl` on
-`$CLAUDE_PROJECT_DIR/<harness-relpath>/hooks/guardrail.pl` only when that is a readable file, and
-otherwise writes `guardrail hook: no readable script at <path>` to stderr and exits 1. The guard exists because perl exits 2 for a script it
-cannot open, which Claude Code reads as a block: a project that commits `settings.json` but not
-`hooks/`, or loses the directory, would have every call the matcher names blocked. The interpreter is `perl` on
-`PATH`, never an absolute path, because the settings file is often committed and read on other
-machines. The builder refuses a harness path holding `"`, `$`, a backtick or `\`, which the
-double-quoted word the path sits in would read as shell syntax.
+`${CLAUDE_PLUGIN_ROOT}/hooks/guardrail.pl` only when that is a readable file, and
+otherwise writes `guardrail hook: no readable script at <path>` to stderr and exits 1. Claude Code
+gives a plugin's hook processes `CLAUDE_PLUGIN_ROOT`, so the command names no harness directory and
+needs no quoting refusal. The guard exists because perl exits 2 for a script it
+cannot open, which Claude Code reads as a block: a plugin that loses its `hooks/` directory would
+have every call the matcher names blocked. The interpreter is `perl` on `PATH`, never an absolute
+path, because the plugin is often committed and read on other machines. Earlier installs registered
+the same program in the project's `.claude/settings.json`, naming the script from
+`$CLAUDE_PROJECT_DIR`; the harness's retired entries ([Guardrail registration](guardrail-registration.md))
+recognise that command, which the install now removes.
 
 The script is Perl with core `JSON::PP` and `Cwd` and nothing else at session time, a port of
 `guardrail.ts`'s `mutation`, its `.index/` check and their helpers. It reads Claude Code's

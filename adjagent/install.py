@@ -4,12 +4,13 @@ below the harness directory — the harness directory itself where that is empty
 rendered into ROOT's agents/, commands/ and skills/, the shipped packages copied to their stated
 destinations — the docdicer tools inside the docdicer skill's directory, rebuilding their venv
 afterwards where one stood — each file the installing harness ships copied into ROOT as it stands, the
-harness's guardrail hook registered in the project's settings file where one install-time run of it
+harness's guardrail hook registered in a file of its own under ROOT where one install-time run of it
 succeeds, and — when the install includes kb — the kb-tools package inside the kbase skill's own
 directory, with the `kbase` MCP entry and the consumer's runner include line; a standalone plugin
 installed below its project root also gets its agents file in its harness directory. What an earlier
 layout left under the harness directory outside ROOT is removed as the prune and the retired package
-destinations reach it. Overwrites without ceremony only what carries this repository's banner, refusing
+destinations reach it, and an entry an earlier install registered in a project settings file is
+removed by the install that writes its replacement. Overwrites without ceremony only what carries this repository's banner, refusing
 over any other file at a path it writes: the consumer's git is the record of what an install
 changed."""
 
@@ -29,7 +30,7 @@ from typing import NamedTuple
 from adjagent.agents_file import AgentsFileWrite, checked_agents_file, refuse_uncommitted, write_agents_file
 from adjagent.context import Render, harnesses
 from adjagent.errors import InputError
-from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite
+from adjagent.harness import GuardrailHook, Harness, HookClaim, McpSite, Replacement, RetiredEntry
 from adjagent.install_target import user_dir_harnesses
 from adjagent.preflight import VENV_DIR, run_preflighted
 from adjagent.render import (
@@ -603,13 +604,15 @@ def _with_member(text: str, *, obj: _Object, key: str, value: object, unit: str 
     )
 
 
-def _with_element(text: str, *, arr: _Array, value: object, unit: str | None, newline: str) -> str:
-    """`text` with `value` appended to `arr` — after its last element, or alone in an empty array — on a
-    line at its siblings' indent, or inline where the file writes no such line."""
-    last_start, last_end = arr.elements[-1] if arr.elements else (None, None)
-    indent = _child_indent(text, last_start=last_start, end=arr.end, unit=unit)
-    item = _value_text(value, indent=indent, unit=unit, newline=newline)
-    return _with_item(text, start=arr.start, end=arr.end, last_end=last_end, item=item, indent=indent, newline=newline)
+def _without_span(text: str, *, start: int, end: int, items: list[tuple[int, int]], index: int) -> str:
+    """`text` without item `index` of the container spanning `start` to `end`, whose items span `items`:
+    the item and the separator joining it to a neighbour removed, every other byte kept, and a container
+    it leaves empty closed up in place."""
+    if len(items) == 1:
+        return f"{text[: start + 1]}{text[end - 1 :]}"
+    if index + 1 < len(items):
+        return f"{text[: items[index][0]]}{text[items[index + 1][0] :]}"
+    return f"{text[: items[index - 1][1]]}{text[items[index][1] :]}"
 
 
 class _Layout(NamedTuple):
@@ -668,25 +671,30 @@ def _splice(text: str, *, container: tuple[str, ...], entry: dict) -> str | None
         return None
 
 
-def _splice_element(text: str, *, container: tuple[str, ...], entry: dict, replace: int | None) -> str | None:
-    """`text` — plain JSON the caller has parsed — with `entry` an element of the array at `container`'s
-    path: replacing the element at index `replace`, else appended, every byte outside that slot kept. An
-    absent array, or a chain of objects down to it, is created holding `entry` alone. None when the
-    placement cannot be made with certainty, as for `_splice`, or where the path holds no array."""
+def _without_item(text: str, *, container: tuple[str, ...], item: str | int) -> str | None:
+    """`text` — plain JSON the caller has parsed — without one item of the container at `container`'s
+    path: the object member named `item`, or the array element at index `item`, as `_without_span`
+    removes it. None when the removal cannot be made with certainty: a level naming a key on the path
+    twice, a text this scanner cannot delimit, or a path not holding the item."""
     try:
         layout = _layout(text)
-        obj, depth, member = _descend(text, root=layout.root, container=container)
+        _, _, member = _descend(text, root=layout.root, container=container)
         if member is None:
-            return _with_chain(text, layout=layout, obj=obj, keys=container[depth:], leaf=[entry])
-        if _at(text, member.value_start) != "[":
-            raise _Unsafe(f"'{container[-1]}' is not an array")
-        arr = _array(text, member.value_start)
-        if replace is None:
-            return _with_element(text, arr=arr, value=entry, unit=layout.unit, newline=layout.newline)
-        start, end = arr.elements[replace]
-        indent = _line_indent(text, start)
-        value_text = _value_text(entry, indent=indent, unit=layout.unit, newline=layout.newline)
-        return f"{text[:start]}{value_text}{text[end:]}"
+            raise _Unsafe(f"no '{container[-1]}'")
+        opener = _at(text, member.value_start)
+        if isinstance(item, str) and opener == "{":
+            obj = _object(text, member.value_start)
+            found = _member(obj.members, item)
+            if found is None:
+                raise _Unsafe(f"no '{item}'")
+            items = [(each.key_start, each.value_end) for each in obj.members]
+            return _without_span(text, start=obj.start, end=obj.end, items=items, index=obj.members.index(found))
+        if isinstance(item, int) and opener == "[":
+            arr = _array(text, member.value_start)
+            if item >= len(arr.elements):
+                raise _Unsafe(f"no element {item}")
+            return _without_span(text, start=arr.start, end=arr.end, items=list(arr.elements), index=item)
+        raise _Unsafe(f"'{container[-1]}' does not hold the item")
     except _Unsafe:
         return None
 
@@ -822,82 +830,144 @@ def _guardrail_probe(script: Path, *, project: Path, temp_dir: str) -> str | Non
     return f"'{' '.join(argv)}' exited {result.returncode}: {first}"
 
 
-def _guardrail_claims(data: dict, *, guardrail: GuardrailHook) -> list[tuple[int, HookClaim]]:
-    """(index, claim) for each element of the array at `guardrail.container` in a parsed settings file
-    that holds the guardrail hook, as `guardrail.claim` reads it; empty where none does, or where the
-    path holds no array."""
+class _Claimed(NamedTuple):
+    """An item of a settings file holding an entry an earlier install wrote: its key or index, its value,
+    and how much of it is that entry."""
+
+    item: str | int
+    value: object
+    claim: HookClaim
+
+
+def _retired_claims(data: dict, *, entry: RetiredEntry) -> list[_Claimed]:
+    """Each item of a parsed settings file holding `entry`, as `entry.claim` reads it: the member
+    `entry.member` of the object at `entry.container`, else each element of the array there. Empty where
+    none does, or where the path holds no such container."""
     node: object = data
-    for key in guardrail.container:
+    for key in entry.container:
         node = node.get(key) if isinstance(node, dict) else None
-    if not isinstance(node, list):
-        return []
-    claims = [(index, guardrail.claim(element)) for index, element in enumerate(node)]
-    return [(index, claim) for index, claim in claims if claim is not HookClaim.NONE]
+    items: list[tuple[str | int, object]]
+    if entry.member:
+        items = [(entry.member, node[entry.member])] if isinstance(node, dict) and entry.member in node else []
+    else:
+        items = list(enumerate(node)) if isinstance(node, list) else []
+    claims = [_Claimed(item, value, entry.claim(value)) for item, value in items]
+    return [claimed for claimed in claims if claimed.claim is not HookClaim.NONE]
 
 
-def guardrail_merge(project: Path, *, guardrail: GuardrailHook, entry: dict[str, object]) -> None:
-    """Register `entry` in `guardrail.settings` under `project`, created holding it alone when absent.
+def _editable_settings(target: Path, *, entry: RetiredEntry) -> tuple[str, dict] | None:
+    """`target`'s text and parse where the removal can edit it: UTF-8 plain JSON whose path to `entry`'s
+    container holds the types that container needs. None otherwise — the removal never refuses."""
+    try:
+        plain = _plain_json_object(target)
+        if plain is not None:
+            _refuse_wrong_types(plain[1], target=target, container=entry.container, leaf=dict if entry.member else list)
+    except InputError:
+        return None
+    return plain
 
-    An existing file is the project's own and is edited, never reserialized: the entry is spliced into
-    the array at `guardrail.container`, created when absent, and every other byte — the project's own
-    hooks included — comes back as it was found. Ours is the one element holding only the guardrail
-    hook, replaced whole; with none, the entry is appended. More than one such element, or one holding
-    the hook beside another command, is reported and the file left untouched: replacing it whole would
-    delete the project's hook. So is a file that is not a plain JSON object (JSONC comments), one the
-    splice cannot place with certainty, and a path `_settings_obstacle` names, each with the entry
-    printed to merge by hand."""
-    target = project / guardrail.settings
-    by_hand = f"merge this entry by hand: {json.dumps(entry)}"
+
+def _names_text(path: Path, text: str) -> bool:
+    """Whether the file `path` reaches, a symlink followed, holds `text`, read as UTF-8 with any byte that
+    is not replaced. A path that cannot be read does not."""
+    try:
+        return text in path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def _retired_slot(entry: RetiredEntry) -> str:
+    """Where `entry` sits in its settings file, as a report names it."""
+    if entry.member:
+        return f"'{'.'.join((*entry.container, entry.member))}' member"
+    return f"'{'.'.join(entry.container)}' element"
+
+
+def _remove_retired_entry(project: Path, *, entry: RetiredEntry) -> None:
+    """Remove from the project's settings file `entry.settings` the entry an earlier install registered
+    there, the caller having written its replacement.
+
+    The file is the project's own and is edited, never reserialized: the one item `entry.claim` reads as
+    holding the entry alone is cut out as `_without_item` cuts it, and every other byte — the project's
+    own entries included — comes back as it was found. An absent file, or one holding no such item, is
+    left with nothing said. More than one such item, or one holding the entry beside a command of the
+    project's own, is reported with each printed and the file left untouched: removing it whole would
+    delete the project's command. So is one the removal cannot make with certainty. A file
+    `_editable_settings` cannot read, and a path `_settings_obstacle` names, are left untouched, and
+    reported only where the text found there holds `entry.trace`. Nothing here refuses the install."""
+    target = project / entry.settings
+    if not os.path.lexists(target):
+        return
+    slot = _retired_slot(entry)
+    unread = f"it names an earlier install's {slot}: remove that by hand"
     obstacle = _settings_obstacle(target, base=project)
-    if obstacle is not None:
-        _report_left_alone(f"{target} not written: {obstacle} — left untouched; {by_hand}")
-        return
-    if not target.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(_nested(guardrail.container, [entry]), indent=2) + "\n", encoding="utf-8")
-        print(f"wrote {target} with the guardrail hook entry")
-        return
-    plain = _plain_json_object(target)
+    plain = None if obstacle is not None else _editable_settings(target, entry=entry)
     if plain is None:
-        _report_left_alone(f"{target} is not a plain JSON object — left untouched; {by_hand}")
+        # Searched as text, a symlink read through and never written: only a file naming the entry may
+        # strand it.
+        if _names_text(target, entry.trace):
+            why = obstacle or f"{target} is not a JSON object the removal can edit"
+            _report_left_alone(f"{target} not edited: {why} — left untouched; {unread}")
         return
     text, data = plain
-    found = _guardrail_claims(data, guardrail=guardrail)
-    if len(found) > 1 or (found and found[0][1] is HookClaim.SHARED):
-        indexes = ", ".join(str(index) for index, _ in found)
+    found = _retired_claims(data, entry=entry)
+    if not found:
+        return
+    by_hand = f"remove this entry by hand: {'; '.join(json.dumps(claimed.value) for claimed in found)}"
+    if len(found) > 1 or found[0].claim is HookClaim.SHARED:
+        items = ", ".join(str(claimed.item) for claimed in found)
         _report_left_alone(
-            f"{target} names the guardrail hook in {'.'.join(guardrail.container)} entries {indexes}, not one "
-            f"entry holding it alone — left untouched; {by_hand}"
+            f"{target} holds an earlier install's {slot} in {items}, not one item holding it alone — "
+            f"left untouched; {by_hand}"
         )
         return
-    replace = found[0][0] if found else None
-    spliced = _splice_element(text, container=guardrail.container, entry=entry, replace=replace)
-    if spliced is None:
+    removed = _without_item(text, container=entry.container, item=found[0].item)
+    if removed is None:
         _report_left_alone(f"{target} could not be edited safely — left untouched; {by_hand}")
         return
-    if spliced == text:
-        print(f"{target} already registers the guardrail hook")
-        return
-    write_text_verbatim(target, spliced)
-    print(f"registered the guardrail hook in {target}")
+    write_text_verbatim(target, removed)
+    print(f"removed an earlier install's {slot} from {target}")
 
 
-def _earlier_guardrail(script: Path, *, project: Path, guardrail: GuardrailHook) -> list[Path]:
-    """The guardrail script and settings file an earlier install left registered: the script where it
-    carries the installed header, and the settings file where it holds an element `guardrail.claim`
-    accepts. A settings file the merge would not edit, or one that cannot be read or parsed, is not
-    named."""
-    left = [script] if _is_our_resource(script) else []
-    settings = project / guardrail.settings
-    if not _settings_to_read(settings, base=project):
-        return left
-    try:
-        plain = _plain_json_object(settings)
-    except InputError:
-        return left
-    if plain is not None and _guardrail_claims(plain[1], guardrail=guardrail):
-        left.append(settings)
+def _earlier_guardrail(
+    root: Path, *, harness_dir: Path, project: Path, guardrail: GuardrailHook, retired: Iterable[RetiredEntry]
+) -> list[Path]:
+    """What an earlier install left registering the guardrail: its script under ROOT, and under the
+    harness directory where a layout writing straight into it put one, where each carries the installed
+    header; its registration under ROOT where that carries its marker; and each project settings file
+    holding an entry of `retired` its recogniser accepts. A settings file the removal would not read, or
+    one that cannot be read or parsed, is not named."""
+    scripts = dict.fromkeys((root / guardrail.script, harness_dir / guardrail.script))
+    left = [script for script in scripts if _is_our_resource(script)]
+    registration = root / guardrail.registration.path
+    if _is_our_harness_file(registration, marker=guardrail.registration.marker):
+        left.append(registration)
+    for entry in retired:
+        settings = project / entry.settings
+        if not _settings_to_read(settings, base=project):
+            continue
+        try:
+            plain = _plain_json_object(settings)
+        except InputError:
+            continue
+        if plain is not None and _retired_claims(plain[1], entry=entry):
+            left.append(settings)
     return left
+
+
+def _remove_retired_script(harness_dir: Path, *, script: str) -> None:
+    """Remove the guardrail script a layout writing straight into the harness directory left at `script`
+    below it, where it carries the installed header and stands as a regular file reached through no
+    symlink, then its directory where that leaves it empty."""
+    path = harness_dir / script
+    if _blocked_component(path, base=harness_dir) is not None or path.is_symlink() or not path.is_file():
+        return
+    if not _is_our_resource(path):
+        return
+    path.unlink()
+    print(f"removed retired guardrail script {path}")
+    if path.parent != harness_dir and not any(path.parent.iterdir()):
+        path.parent.rmdir()
 
 
 def _runner_file(project: Path) -> tuple[str, Path] | None:
@@ -1121,25 +1191,28 @@ def install(
     project install of a harness whose ROOT lies below its harness directory also removes the package
     destinations an install straight into the harness directory wrote there, naming each. A harness
     with a guardrail hook has its script run once on this machine first: when that run succeeds the
-    script ships with the other resources and every install registers it in the project's settings
-    file; when it fails, neither happens, the install goes on, and the report names why and what an
-    earlier install left in place. A standalone plugin installed below its project root also has its
-    agents file installed in its harness directory, whatever the sources' commit state. A user-level
-    install — the harness directory is the harness's user harness directory, decided here from it and
-    the harness whatever route reached it — renders the definitions, prunes, removes the legacy trees
-    and, on a kb install under a harness whose MCP settings file is the plugin's, writes that entry; it
-    writes nothing else: no package, resource file, guardrail probe or registration, project MCP entry
-    or runner line. With `global_agents_file` it also installs the agents file in the harness directory,
-    refused while `uncommitted` names a change, a flag a project install ignores; `uncommitted` is called
-    only for such an install. ROOT may be absent, and is created only once every check has passed. A
-    file at a render, harness-file or resource target that does not carry what that class of file
-    states as its origin — this repository's generated banner or installed header, or the marker a
-    harness-rendered file states about itself — or a symlink or non-directory between the harness
-    directory and such a target, refuses the install; package destinations are replaced whole
-    unchecked. A refusal of the harness directory or ROOT, of the render, of a target it would
-    overwrite, of the runner file, of the MCP settings file, of the ROOT the guardrail entry cannot name
-    or of the guardrail settings file writes nothing; a settings path that is a symlink or not a regular
-    file is reported and left alone.
+    script ships with the other resources, the harness's registration file is written beside it under
+    ROOT, the guardrail script a layout writing straight into the harness directory left there is
+    removed where it carries the installed header, and so is each retired entry the registration
+    replaces; when it fails, none of that happens, the install goes on, and the report names why and
+    what an earlier install left in place. Each retired entry the `kbase` MCP entry replaces is removed
+    on a project install that includes kb. A standalone plugin installed below its project root also
+    has its agents file installed in its harness directory, whatever the sources' commit state. A
+    user-level install — the harness directory is the harness's user harness directory, decided here
+    from it and the harness whatever route reached it — renders the definitions, prunes, removes the
+    legacy trees and, on a kb install under a harness whose MCP settings file is the plugin's, writes
+    that entry; it writes nothing else: no package, resource file, guardrail probe or registration,
+    project MCP entry, retired-entry removal or runner line. With `global_agents_file` it also installs
+    the agents file in the harness directory, refused while `uncommitted` names a change, a flag a
+    project install ignores; `uncommitted` is called only for such an install. ROOT may be absent, and
+    is created only once every check has passed. A file at a render, harness-file or resource target
+    that does not carry what that class of file states as its origin — this repository's generated
+    banner or installed header, or the marker a harness-rendered file states about itself — or a
+    symlink or non-directory between the harness directory and such a target, refuses the install;
+    package destinations are replaced whole unchecked. A refusal of the harness directory or ROOT, of
+    the render, of a target it would overwrite, of the runner file or of the MCP settings file writes
+    nothing; a settings path that is a symlink or not a regular file is reported and left alone, and the
+    removal of a retired entry never refuses.
 
     Where a project install finds the docdicer tools' `.venv` before its first write, under ROOT or
     under the harness directory, it afterwards calls `tool_install` with the installed docdicer script,
@@ -1176,8 +1249,7 @@ def install(
     # render, the guardrail probe that decides whether its script is a resource target, each render,
     # harness-file and resource target the install would overwrite and the paths below the harness
     # directory it would write through, an install including kb's runner file and MCP settings file,
-    # and — when the probe passed — the guardrail entry built for this ROOT and the guardrail settings
-    # file, and a standalone plugin's agents file. ROOT itself is created only after all of them.
+    # and a standalone plugin's agents file. ROOT itself is created only after all of them.
     renders = render_all(ctx, include=lambda defn: kb_included or not excluded(defn.name))
     package_files = [] if user_level else package_copies(root, kb_included=kb_included)
     resource_files = [] if user_level else harness_resource_copies(root, harness=ctx.harness.name)
@@ -1190,14 +1262,22 @@ def install(
         else [harness_dir / dest for _, dest in _packages(kb_included=True)]
     )
     guardrail_skipped: str | None = None
+    harness_files = list(ctx.harness.rendered_files)
     if guardrail is not None:
         script = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / ctx.harness.name / guardrail.script
         guardrail_skipped = _guardrail_probe(script, project=project, temp_dir=ctx.harness.project_temp_dir)
         if guardrail_skipped is not None:
             resource_files = [(source, target) for source, target in resource_files if source != script]
+        else:
+            harness_files.append(guardrail.registration)
+            renders = (*renders, (PurePosixPath(guardrail.registration.path), guardrail.registration.text()))
+    registers_guardrail = guardrail is not None and guardrail_skipped is None
+    # An entry an earlier install registered goes only on an install that writes what replaces it.
+    replaced = {Replacement.GUARDRAIL: registers_guardrail, Replacement.MCP: writes_mcp}
+    retiring = [] if user_level else [entry for entry in ctx.harness.retired_entries if replaced[entry.replacement]]
     # The harness's own rendered files are a class of their own at the refusal: their ownership is the
-    # marker each states, not a banner a JSON manifest has no way to carry.
-    harness_markers = {PurePosixPath(file.path): file.marker for file in ctx.harness.rendered_files}
+    # marker each states, not a banner a JSON file has no way to carry.
+    harness_markers = {PurePosixPath(file.path): file.marker for file in harness_files}
     _refuse_foreign_targets(
         harness_dir,
         render_targets=[root.joinpath(*relative.parts) for relative, _ in renders if relative not in harness_markers],
@@ -1217,10 +1297,6 @@ def install(
         _, mcp_container = ctx.harness.mcp.entry(command=KBASE_NAME)
         mcp_target = _mcp_settings_file(mcp_base, harness=ctx.harness)
         _check_settings(mcp_target, base=mcp_base, container=mcp_container, leaf=object)
-    guardrail_entry: dict[str, object] | None = None
-    if guardrail is not None and guardrail_skipped is None:
-        guardrail_entry = guardrail.entry(harness_relpath)
-        _check_settings(project / guardrail.settings, base=project, container=guardrail.container, leaf=list)
     agents_file: AgentsFileWrite | None = None
     if _installs_agents_file(
         harness_dir, ctx.harness, project=project, user_level=user_level, global_agents_file=global_agents_file
@@ -1280,11 +1356,19 @@ def install(
     # snippets in and none is created.
     if writes_include_line:
         install_kb_include_line(project, harness_relpath=harness_relpath, real_project=real_project)
-    if guardrail is not None and guardrail_entry is not None:
-        guardrail_merge(project, guardrail=guardrail, entry=guardrail_entry)
-    elif guardrail is not None:
+    for entry in retiring:
+        _remove_retired_entry(project, entry=entry)
+    if guardrail is not None and registers_guardrail and harness_dir != root:
+        _remove_retired_script(harness_dir, script=guardrail.script)
+    elif guardrail is not None and not registers_guardrail:
         # Neither prune nor the one-way copy removes what an earlier install delivered, so it is named.
-        earlier = _earlier_guardrail(root / guardrail.script, project=project, guardrail=guardrail)
+        earlier = _earlier_guardrail(
+            root,
+            harness_dir=harness_dir,
+            project=project,
+            guardrail=guardrail,
+            retired=[entry for entry in ctx.harness.retired_entries if entry.replacement is Replacement.GUARDRAIL],
+        )
         left = f"; left in place from an earlier install: {', '.join(str(path) for path in earlier)}" if earlier else ""
         _report_left_alone(f"guardrail hook skipped, neither installed nor registered: {guardrail_skipped}{left}")
     if rebuild_docdicer_venv:
@@ -1310,11 +1394,12 @@ def _install_managed_paths(
     harness directory. What it writes by, never a listing of either directory, which in a user harness
     directory holds the operator's own trees. Under the harness directory, the surfaces the prune walks,
     each legacy tree, every package destination an install straight into it wrote, and the agents
-    file's paths where the run writes one; under ROOT, the surfaces, every package destination, the
-    harness's resource targets and rendered files, and the MCP settings candidates where the harness
-    keeps them there and the run may write them; under the project root, on a project install, the
-    guardrail settings file, the runner files and the MCP settings candidates where the harness keeps
-    them there."""
+    file's paths where the run writes one, and the guardrail script such an install left; under ROOT,
+    the surfaces, every package destination, the harness's resource targets, rendered files and
+    guardrail registration, and the MCP settings candidates where the harness keeps them there and the
+    run may write them; under the project root, on a project install, the runner files, the MCP
+    settings candidates where the harness keeps them there, and each settings file a retired entry is
+    removed from."""
     root = harness_dir / harness.plugin_dir
     destinations = [destination for _, destination in _packages(kb_included=True)]
     under_harness_dir = [*SURFACES, *LEGACY_TREES, *destinations]
@@ -1324,6 +1409,9 @@ def _install_managed_paths(
         *(target.relative_to(root).as_posix() for _, target in harness_resource_copies(root, harness=harness.name)),
         *(file.path for file in harness.rendered_files),
     ]
+    if harness.guardrail is not None and not user_level:
+        under_harness_dir.append(harness.guardrail.script)
+        under_root.append(harness.guardrail.registration.path)
     under_project: list[str] = []
     mcp_paths = [harness.mcp.canonical, *harness.mcp.alternatives]
     if harness.mcp.site is McpSite.HARNESS:
@@ -1332,8 +1420,7 @@ def _install_managed_paths(
         under_project += mcp_paths
     if not user_level:
         under_project += [*_JUSTFILE_NAMES, *_MAKEFILE_NAMES]
-        if harness.guardrail is not None:
-            under_project.append(harness.guardrail.settings)
+        under_project += [entry.settings for entry in harness.retired_entries]
     if _installs_agents_file(
         harness_dir, harness, project=project, user_level=user_level, global_agents_file=global_agents_file
     ):

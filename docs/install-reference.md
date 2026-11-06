@@ -107,7 +107,8 @@ and each path it pruned) and the version its runner pins.
 
 A harness's shipped file is replaced on each install, unless its install-time run fails
 ([Guardrail](guardrail.md)), and is never pruned, so one this project stops shipping stays in your
-tree until you remove it.
+tree until you remove it. The one exception is the flat layout's `.claude/hooks/guardrail.pl`, which
+a claude project install removes when it writes the plugin's replacement.
 
 ## Re-installing and `--dry-run`
 
@@ -157,9 +158,10 @@ An install refuses, writing nothing, to:
   `agents/python-coder.md`;
 - write below a symlink or a non-directory on the way to one of its targets.
 
-The refusal names each such path; move or remove them and install again. A harness settings file
-that is not UTF-8, or whose `hooks` or `PreToolUse` has the wrong shape (`null` included), refuses
-the install the same way ([Guardrail](guardrail.md)). A target that is a literal `~` is refused with
+The refusal names each such path; move or remove them and install again. A harness MCP settings file
+the install writes into that is not UTF-8, or has the wrong shape where the entry goes (`null`
+included), refuses the install the same way. Cleaning an earlier install's entries out of a
+settings file never refuses ([Guardrail](guardrail.md)). A target that is a literal `~` is refused with
 a hint that the shell did not expand it.
 
 ## What a re-install removes

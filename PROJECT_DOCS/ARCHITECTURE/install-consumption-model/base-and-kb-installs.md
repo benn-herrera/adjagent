@@ -46,7 +46,9 @@ A kb install writes three things beyond the renders — two under a harness whos
   written whole.
   One that is not plain JSON — JSONC comments a splice would destroy — or that the splice cannot
   place with certainty, or whose path `_settings_obstacle` names, is reported with the entry
-  printed, and left as it stands.
+  printed, and left as it stands. A project install that writes the entry also removes the `kbase`
+  member an earlier version registered in the project's own `.mcp.json`, as the retired entries of
+  [Guardrail registration](guardrail-registration.md) are removed.
 - **The runner include line**, appended to the project's justfile or Makefile — or to a `Makefile`
   created carrying it, where the project has neither: the non-fatal `import?` or `-include` form
   naming the installed snippets at `<harness-relpath>/skills/kbase/kb-tools/runner-snippets/<snippet>`,

@@ -13,7 +13,7 @@ line number cited below was re-taken at `3d36ff6`.
 | P0 | Live check of the plugin mechanisms | user-run | throwaway | scratch | done; its consequences are in the P0 section |
 | P1 | Reference holes and every cross-reference converted | expert | shipped | python-coder, then tech-writer | done (P1 checkpoint commit) |
 | P2 | Install root inside the plugin directory | expert | shipped | python-coder, then tech-writer | done (P2 checkpoint commit) |
-| P3 | Guardrail registration in the plugin; retired settings entries removed | expert | shipped | python-coder, then tech-writer | not started |
+| P3 | Guardrail registration in the plugin; retired settings entries removed | expert | shipped | python-coder, then tech-writer | done (P3 checkpoint commit) |
 | P3a | The agents file follows the set | expert | shipped | python-coder, then tech-writer | not started |
 | P4 | Pre-release testing | user-run, with agent-run parts | throwaway | scratch | not started |
 | P5 | Post-plan review, revision, burndown | review | — | reviewers | not started |

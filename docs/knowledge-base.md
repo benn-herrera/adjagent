@@ -75,7 +75,9 @@ an agent harness (MCP)" is the wiring guide. The same install:
    names no KB path. Each of its tools is offered under the harness's own prefix: kbase's `query` tool
    is `mcp__plugin_adjagent_kbase__query` under Claude Code and `kbase_query` under opencode. A settings file carrying
    JSONC comments, or a settings path that is a symlink or not a regular file, is reported with the
-   entry printed for you to merge by hand.
+   entry printed for you to merge by hand. A project install under Claude Code also removes the
+   `kbase` entry an earlier version wrote to the project's `.mcp.json`, keeping every other byte
+   ([Guardrail](guardrail.md) lists what is left for you to remove by hand).
 2. Appends one include line to the project's justfile or Makefile, creating a `Makefile` where there
    is neither: `import? '<ROOT>/skills/kbase/kb-tools/runner-snippets/kb.just'`, `<ROOT>` being
    `.claude/skills/adjagent` under claude and the harness directory otherwise (just 1.33 or

@@ -4,7 +4,7 @@ write nothing, the redirects, the kb-tools package and its banner, the docdicer 
 venv rebuild, the kb install path, the MCP
 settings merge, the runner include line, the harness resources a harness ships as they stand, the
 prune, the refusal to overwrite a file without this repository's banner, the claude guardrail hook's
-probe and settings merge, and the checkout premise with the checks that stand down outside one.
+probe and registration, the removal of entries earlier installs registered, and the checkout premise with the checks that stand down outside one.
 
 The package is imported from the repository root, which `just test` puts on PYTHONPATH.
 """
@@ -402,11 +402,18 @@ def _claude_mcp_file(harness_dir: Path) -> Path:
     return plugin / CLAUDE.mcp.canonical
 
 
-def _hook_entry(harness_relpath: str) -> dict:
-    """The PreToolUse entry an install whose harness directory is `harness_relpath` writes. What the
-    command does is pinned by running it (`test_the_registered_command_...`), not by its spelling."""
-    assert CLAUDE.guardrail is not None
-    return CLAUDE.guardrail.entry(harness_relpath)
+_REGISTRATION = "hooks/hooks.json"
+
+
+def _retired_hook_entry(harness_relpath: str, *, matcher: str = "Bash|Read|Write|Edit|NotebookEdit|Grep|Glob") -> dict:
+    """The PreToolUse entry an earlier install registered in the project's settings file, its script
+    under `harness_relpath`, spelled as that install wrote it: the entry an install now removes."""
+    prefix = "" if harness_relpath == "." else f"{harness_relpath}/"
+    command = (
+        f's="$CLAUDE_PROJECT_DIR/{prefix}hooks/guardrail.pl"; if [ -f "$s" ] && [ -r "$s" ]; then exec perl "$s"; '
+        'fi; echo "guardrail hook: no readable script at $s" >&2; exit 1'
+    )
+    return {"matcher": matcher, "hooks": [{"type": "command", "command": command}]}
 
 
 def test_an_opencode_install_copies_the_harnesss_plugin_byte_verbatim(tmp_path: Path) -> None:
@@ -420,18 +427,18 @@ def test_an_opencode_install_copies_the_harnesss_plugin_byte_verbatim(tmp_path: 
     assert copied.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode" / _PLUGIN).read_bytes()
 
 
-def test_a_fresh_claude_install_ships_the_guardrail_and_registers_it_in_a_new_settings_file(tmp_path: Path) -> None:
-    """Where the probe passes, the hook script lands byte-verbatim and executable under ROOT, and the
-    project gains `.claude/settings.json` holding the one entry that runs it."""
+def test_a_fresh_claude_install_ships_the_guardrail_and_registers_it_in_the_plugin(tmp_path: Path) -> None:
+    """Where the probe passes, the hook script lands byte-verbatim and executable under ROOT beside the
+    plugin's one registration, and the project gains no settings file."""
     root = tmp_path / ".claude"
     root.mkdir()
     _definition_install(root, project_root=tmp_path)
     copied = _claude_plugin(root) / _GUARDRAIL
     assert copied.read_bytes() == (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "claude" / _GUARDRAIL).read_bytes()
     assert os.access(copied, os.X_OK)
-    assert json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8")) == {
-        "hooks": {"PreToolUse": [_hook_entry(_CLAUDE_PLUGIN_RELPATH)]}
-    }
+    registration = json.loads((_claude_plugin(root) / _REGISTRATION).read_text(encoding="utf-8"))
+    assert list(registration) == ["hooks"] and len(registration["hooks"]["PreToolUse"]) == 1
+    assert not (tmp_path / _SETTINGS).exists()
 
 
 def test_a_second_install_leaves_the_copied_plugin_standing_and_prunes_only_the_stale_render(
@@ -1739,12 +1746,19 @@ def test_mcp_settings_the_merge_cannot_use_are_refused_before_the_first_write(
     assert _files(tmp_path) == before
 
 
-# The claude guardrail hook: shipped and registered in the project's `.claude/settings.json` when one
-# run of the script on this machine succeeds, every byte of that file outside our entry kept.
+# The claude guardrail hook: shipped and registered in the plugin's own `hooks/hooks.json` when one run
+# of the script on this machine succeeds, and the entry an earlier install registered in the project's
+# `.claude/settings.json` then removed, every other byte of that file kept.
 
 # A hook the project registered itself, which no install may touch.
 _SED_HOOK = '{"matcher": "Bash", "hooks": [{"type": "command", "command": "./block-sed.sh"}]}'
-_BY_HAND = "left untouched; merge this entry by hand:"
+_REMOVE_BY_HAND = "left untouched; remove this entry by hand:"
+_UNREAD = "left untouched; it names an earlier install's 'hooks.PreToolUse' element: remove that by hand"
+
+
+def _unparsed_settings(hook: dict) -> str:
+    """A settings file Claude Code would not read as strict JSON, holding `hook`."""
+    return f'{{\n  // mine\n  "hooks": {{"PreToolUse": [{json.dumps(hook)}]}}\n}}\n'
 
 
 def _claude_root(project: Path, settings: str | bytes | None = None) -> Path:
@@ -1757,102 +1771,110 @@ def _claude_root(project: Path, settings: str | bytes | None = None) -> Path:
     return root
 
 
-def test_an_existing_settings_file_gains_the_entry_beside_the_projects_own_hook(tmp_path: Path) -> None:
-    """Our entry is appended after the project's `sed` hook at its indent and line ending; every other
-    byte — other keys, the project's hook, CRLF endings — is kept."""
+def test_an_earlier_entry_after_the_projects_own_hook_is_removed_and_every_other_byte_kept(tmp_path: Path) -> None:
+    """The earlier entry goes with the separator before it; every other byte — other keys, the
+    project's hook, CRLF endings — is kept."""
     head = f'{{\r\n  "permissions": {{"allow": ["Bash"]}},\r\n  "hooks": {{\r\n    "PreToolUse": [\r\n      {_SED_HOOK}'
+    earlier = f",\r\n      {json.dumps(_retired_hook_entry('.claude'))}"
     tail = '\r\n    ]\r\n  },\r\n  "model": "opus"\r\n}\r\n'
-    root = _claude_root(tmp_path, head + tail)
+    root = _claude_root(tmp_path, head + earlier + tail)
     _definition_install(root, project_root=tmp_path)
-    raw = (tmp_path / _SETTINGS).read_bytes()
-    assert raw.startswith(head.encode()) and raw.endswith(tail.encode())
-    assert b"\n" not in raw.replace(b"\r\n", b"")
-    assert json.loads(raw) == {
-        "permissions": {"allow": ["Bash"]},
-        "hooks": {"PreToolUse": [json.loads(_SED_HOOK), _hook_entry(_CLAUDE_PLUGIN_RELPATH)]},
-        "model": "opus",
-    }
+    assert (tmp_path / _SETTINGS).read_bytes() == (head + tail).encode()
 
 
-def test_a_reinstall_replaces_our_entry_in_place_and_a_second_changes_no_byte(tmp_path: Path, capsys) -> None:
-    """The entry a `--subdir=a` install wrote is ours, though it names another harness directory: one
-    guardrail per project, so this install's entry replaces it where it stands, ahead of the project's
-    hook, and the next install finds nothing to change."""
+@pytest.mark.parametrize(
+    "earlier",
+    [
+        _retired_hook_entry(".claude"),
+        _retired_hook_entry("a"),
+        _retired_hook_entry(_CLAUDE_PLUGIN_RELPATH),
+        _retired_hook_entry(".claude", matcher="Bash"),
+    ],
+    ids=["flat-layout", "another-subdir", "plugin-script", "bash-only"],
+)
+def test_an_earlier_entry_ahead_of_the_projects_own_hook_is_removed_and_a_second_install_changes_no_byte(
+    tmp_path: Path, capsys, earlier: dict
+) -> None:
+    """Whatever harness directory or matcher an earlier install wrote, its entry is ours: one guardrail
+    per project. It goes with the separator after it, and the next install finds nothing to change."""
     head = '{\n  "hooks": {\n    "PreToolUse": [\n      '
-    tail = f",\n      {_SED_HOOK}\n    ]\n  }}\n}}\n"
-    root = _claude_root(tmp_path, head + json.dumps(_hook_entry("a")) + tail)
+    tail = f"{_SED_HOOK}\n    ]\n  }}\n}}\n"
+    root = _claude_root(tmp_path, f"{head}{json.dumps(earlier)},\n      {tail}")
+    capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     settings = tmp_path / _SETTINGS
-    first = settings.read_text(encoding="utf-8")
-    assert first.startswith(head) and first.endswith(tail)
-    assert json.loads(first)["hooks"]["PreToolUse"] == [_hook_entry(_CLAUDE_PLUGIN_RELPATH), json.loads(_SED_HOOK)]
-    capsys.readouterr()
+    assert settings.read_text(encoding="utf-8") == head + tail
+    assert _REMOVE_BY_HAND not in capsys.readouterr().err
     _definition_install(root, project_root=tmp_path)
-    assert settings.read_text(encoding="utf-8") == first
-    assert f"{settings} already registers the guardrail hook" in capsys.readouterr().out
+    assert settings.read_text(encoding="utf-8") == head + tail
 
 
-def test_an_earlier_bash_only_entry_is_replaced_in_place(tmp_path: Path, capsys) -> None:
-    """The entry an install from before the file tools were matched wrote is ours: it is replaced whole,
-    ahead of the project's hook, and the operator is not sent to merge by hand."""
-    earlier = {"matcher": "Bash", "hooks": _hook_entry(".claude")["hooks"]}
-    seed = json.dumps({"hooks": {"PreToolUse": [earlier, json.loads(_SED_HOOK)]}}, indent=2) + "\n"
+def test_an_earlier_entry_alone_in_its_array_leaves_the_array_empty_in_place(tmp_path: Path) -> None:
+    seed = json.dumps({"hooks": {"PreToolUse": [_retired_hook_entry(".claude")]}}, indent=2) + "\n"
     root = _claude_root(tmp_path, seed)
-    capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
-    settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
-    assert settings["hooks"]["PreToolUse"] == [_hook_entry(_CLAUDE_PLUGIN_RELPATH), json.loads(_SED_HOOK)]
-    assert _BY_HAND not in capsys.readouterr().err
+    assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == '{\n  "hooks": {\n    "PreToolUse": []\n  }\n}\n'
 
 
 @pytest.mark.parametrize(
     "pre_tool_use",
     [
-        [_hook_entry("a"), _hook_entry(".claude")],
-        [{"matcher": "Bash", "hooks": [*_hook_entry(".claude")["hooks"], *json.loads(_SED_HOOK)["hooks"]]}],
+        [_retired_hook_entry("a"), _retired_hook_entry(".claude")],
+        [{"matcher": "Bash", "hooks": [*_retired_hook_entry(".claude")["hooks"], *json.loads(_SED_HOOK)["hooks"]]}],
     ],
     ids=["two-entries", "beside-the-projects-own"],
 )
 def test_settings_naming_our_command_ambiguously_are_reported_and_left_untouched(
     tmp_path: Path, capsys, pre_tool_use: list
 ) -> None:
-    """Replacing either of two entries leaves the other, and replacing an entry that also runs the
-    project's hook deletes it, so the operator merges by hand."""
+    """Removing one of two entries leaves the other, and removing an entry that also runs the project's
+    hook deletes it, so the operator removes by hand, shown each entry."""
     seed = json.dumps({"hooks": {"PreToolUse": pre_tool_use}}, indent=2) + "\n"
     root = _claude_root(tmp_path, seed)
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
     err = capsys.readouterr().err
-    assert _BY_HAND in err and json.dumps(_hook_entry(_CLAUDE_PLUGIN_RELPATH)) in err
+    assert _REMOVE_BY_HAND in err and all(json.dumps(element) in err for element in pre_tool_use)
 
 
-def test_jsonc_settings_are_reported_and_left_untouched(tmp_path: Path, capsys) -> None:
-    seed = '{\n  // mine\n  "hooks": {}\n}\n'
-    root = _claude_root(tmp_path, seed)
-    capsys.readouterr()
-    _definition_install(root, project_root=tmp_path)
-    assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
-    assert f"{tmp_path / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in capsys.readouterr().err
+# How each settings file the removal cannot edit holds a PreToolUse element: strict JSON or not, decodable
+# or not, the container wrong-typed, or reached through a symlink.
+_UNEDITABLE_SETTINGS = {
+    "unparsed": lambda hook: _unparsed_settings(hook).encode(),
+    "non-utf8": lambda hook: b"\xff\xfe" + json.dumps({"hooks": {"PreToolUse": [hook]}}).encode() + b"\n",
+    "non-object-hooks": lambda hook: json.dumps({"hooks": [hook]}).encode() + b"\n",
+    "symlink": lambda hook: json.dumps({"hooks": {"PreToolUse": [hook]}}).encode() + b"\n",
+}
 
 
-@pytest.mark.parametrize(
-    "settings, message",
-    [
-        (b"\xff\xfe{}\n", "is not readable UTF-8 text"),
-        (b'{"hooks": []}\n', "holds a 'hooks' that is not an object"),
-        (b'{"hooks": {"PreToolUse": {}}}\n', "holds a 'hooks.PreToolUse' that is not an array"),
-    ],
-    ids=["non-utf8", "non-object-hooks", "non-array-pre-tool-use"],
-)
-def test_guardrail_settings_the_merge_cannot_use_are_refused_before_the_first_write(
-    tmp_path: Path, settings: bytes, message: str
+@pytest.mark.parametrize("names_ours", [True, False], ids=["names-our-command", "names-none"])
+@pytest.mark.parametrize("kind", list(_UNEDITABLE_SETTINGS))
+def test_settings_the_removal_cannot_edit_are_never_refused_and_reported_only_where_they_name_our_command(
+    tmp_path: Path, capsys, names_ours: bool, kind: str
 ) -> None:
-    root = _claude_root(tmp_path, settings)
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match=re.escape(message)):
-        _definition_install(root, project_root=tmp_path)
-    assert _files(tmp_path) == before
+    """The install completes and the file is not edited. Only a file whose text holds the command an
+    earlier install wrote may strand that entry, so only it is reported; a symlink is read through."""
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    outside.mkdir()
+    project.mkdir()
+    seed = _UNEDITABLE_SETTINGS[kind](_retired_hook_entry(".claude") if names_ours else json.loads(_SED_HOOK))
+    if kind == "symlink":
+        settings = outside / "settings.json"
+        settings.write_bytes(seed)
+        root = _claude_root(project)
+        (project / _SETTINGS).symlink_to(settings)
+        reason = f"{project / _SETTINGS} is a symlink"
+    else:
+        root = _claude_root(project, seed)
+        settings = project / _SETTINGS
+        reason = f"{settings} is not a JSON object the removal can edit"
+    capsys.readouterr()
+    _definition_install(root, project_root=project)
+    assert (_claude_plugin(root) / _REGISTRATION).is_file()
+    assert settings.read_bytes() == seed
+    reported = [line for line in capsys.readouterr().err.splitlines() if _UNREAD in line]
+    assert [reason in line for line in reported] == ([True] if names_ours else [])
 
 
 @pytest.mark.parametrize(
@@ -1869,25 +1891,33 @@ def test_a_failed_probe_installs_everything_else_and_neither_ships_nor_registers
     _definition_install(root, project_root=tmp_path)
     assert (_claude_plugin(root) / "agents/python-coder.md").is_file()
     assert not (_claude_plugin(root) / _GUARDRAIL).exists()
+    assert not (_claude_plugin(root) / _REGISTRATION).exists()
     assert not (tmp_path / _SETTINGS).exists()
     [skipped] = [line for line in capsys.readouterr().err.splitlines() if line.startswith("guardrail hook skipped")]
     assert reason in skipped and "left in place" not in skipped
 
 
-def test_a_failed_probe_after_an_install_leaves_its_script_and_entry_and_names_them(
+def test_a_failed_probe_leaves_every_earlier_script_and_registration_and_names_them(
     tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Nothing replaces them, so the plugin's script and registration, the flat layout's script and the
+    settings entry an earlier install wrote all stay, each named."""
     root = _claude_root(tmp_path)
     _definition_install(root, project_root=tmp_path)
+    flat = _plant(root / _GUARDRAIL, (_claude_plugin(root) / _GUARDRAIL).read_text(encoding="utf-8"))
+    seed = json.dumps({"hooks": {"PreToolUse": [_retired_hook_entry(".claude")]}}) + "\n"
+    (tmp_path / _SETTINGS).write_text(seed, encoding="utf-8")
     before = _files(tmp_path)
     monkeypatch.setattr("adjagent.install.GUARDRAIL_INTERPRETER", "adjagent-no-such-perl")
     capsys.readouterr()
     _definition_install(root, project_root=tmp_path)
     after = _files(tmp_path)
-    for relative in (f"{_CLAUDE_PLUGIN_RELPATH}/{_GUARDRAIL}", _SETTINGS):
+    left = [_claude_plugin(root) / _GUARDRAIL, flat, _claude_plugin(root) / _REGISTRATION, tmp_path / _SETTINGS]
+    for path in left:
+        relative = path.relative_to(tmp_path).as_posix()
         assert after[relative] == before[relative]
-    script = _claude_plugin(root) / _GUARDRAIL
-    assert f"left in place from an earlier install: {script}, {tmp_path / _SETTINGS}" in capsys.readouterr().err
+    named = ", ".join(str(path) for path in left)
+    assert f"left in place from an earlier install: {named}" in capsys.readouterr().err
 
 
 def test_an_opencode_install_writes_no_claude_settings_file(tmp_path: Path) -> None:
@@ -1898,44 +1928,44 @@ def test_an_opencode_install_writes_no_claude_settings_file(tmp_path: Path) -> N
     assert not (root / _GUARDRAIL).exists()
 
 
-@pytest.mark.parametrize("subdir", ["tools/agents", "."], ids=["subdir", "project-root"])
+@pytest.mark.parametrize("subdir", ["tools/agents", ".", 'a"b $c'], ids=["subdir", "project-root", "shell-syntax"])
 def test_the_registered_command_runs_the_script_the_install_wrote(tmp_path: Path, subdir: str) -> None:
-    """The settings file stays `.claude/settings.json` wherever ROOT sits, and the command it registers,
-    run as Claude Code runs it, reaches the script under ROOT: it blocks an in-place edit and allows a
-    plain command."""
+    """The command the plugin registers, run as Claude Code runs it, reaches the script under ROOT
+    wherever ROOT sits, a directory name a shell reads as syntax included: it blocks an in-place edit and
+    allows a plain command."""
     root = tmp_path / subdir
     root.mkdir(parents=True, exist_ok=True)
     _definition_install(root, project_root=tmp_path)
     assert (_claude_plugin(root) / _GUARDRAIL).is_file()
-    assert _run_registered_hook(tmp_path, "sed -i x f").returncode == 2
-    assert _run_registered_hook(tmp_path, "echo hi").returncode == 0
+    assert _run_registered_hook(_claude_plugin(root), project=tmp_path, command="sed -i x f").returncode == 2
+    assert _run_registered_hook(_claude_plugin(root), project=tmp_path, command="echo hi").returncode == 0
 
 
 def test_a_missing_script_does_not_block_and_names_the_path(tmp_path: Path) -> None:
-    """Perl exits 2 on a script it cannot open, which Claude Code reads as a block, so a settings file
-    committed without the hooks directory would block every call the matcher names. The registered command instead
-    exits with another status and names the missing script."""
+    """Perl exits 2 on a script it cannot open, which Claude Code reads as a block, so a plugin left
+    without its script would block every call the matcher names. The registered command instead exits 1
+    and names the missing script."""
     root = _claude_root(tmp_path)
     _definition_install(root, project_root=tmp_path)
     script = _claude_plugin(root) / _GUARDRAIL
     script.unlink()
-    result = _run_registered_hook(tmp_path, "sed -i x f")
-    assert result.returncode not in (0, 2)
+    result = _run_registered_hook(_claude_plugin(root), project=tmp_path, command="sed -i x f")
+    assert result.returncode == 1
     assert result.stderr.count("\n") == 1 and str(script) in result.stderr
 
 
-def _run_registered_hook(project: Path, command: str) -> subprocess.CompletedProcess:
-    """The one command `project`'s settings file registers, run under `sh -c` with
+def _run_registered_hook(plugin: Path, *, project: Path, command: str) -> subprocess.CompletedProcess:
+    """The one command `plugin`'s registration names, run under `sh -c` with `CLAUDE_PLUGIN_ROOT` and
     `CLAUDE_PROJECT_DIR` set and a Bash payload for `command` on stdin."""
-    settings = json.loads((project / _SETTINGS).read_text(encoding="utf-8"))
-    [[hook]] = [element["hooks"] for element in settings["hooks"]["PreToolUse"]]
+    registration = json.loads((plugin / _REGISTRATION).read_text(encoding="utf-8"))
+    [[hook]] = [element["hooks"] for element in registration["hooks"]["PreToolUse"]]
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(project)}
     return subprocess.run(
         ["sh", "-c", hook["command"]],
         input=json.dumps(payload),
         capture_output=True,
         encoding="utf-8",
-        env={**os.environ, "CLAUDE_PROJECT_DIR": str(project)},
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(plugin), "CLAUDE_PROJECT_DIR": str(project)},
         check=False,
     )
 
@@ -1947,13 +1977,20 @@ _PROJECT_GUARDRAIL = {
 }
 
 
-def test_a_projects_own_hook_running_a_guardrail_pl_is_kept_and_ours_appended(tmp_path: Path) -> None:
-    """Only the command an install writes is ours: a project hook naming a `hooks/guardrail.pl` of its
-    own is the project's, and replacing it would delete it."""
-    root = _claude_root(tmp_path, json.dumps({"hooks": {"PreToolUse": [_PROJECT_GUARDRAIL]}}, indent=2) + "\n")
+def test_a_projects_own_hook_running_a_guardrail_pl_is_kept_byte_for_byte(tmp_path: Path) -> None:
+    """Only the command an earlier install wrote is ours: a project hook naming a `hooks/guardrail.pl` of
+    its own is the project's, and removing it would delete it."""
+    seed = json.dumps({"hooks": {"PreToolUse": [_PROJECT_GUARDRAIL]}}, indent=2) + "\n"
+    root = _claude_root(tmp_path, seed)
     _definition_install(root, project_root=tmp_path)
-    settings = json.loads((tmp_path / _SETTINGS).read_text(encoding="utf-8"))
-    assert settings["hooks"]["PreToolUse"] == [_PROJECT_GUARDRAIL, _hook_entry(_CLAUDE_PLUGIN_RELPATH)]
+    assert (tmp_path / _SETTINGS).read_text(encoding="utf-8") == seed
+
+
+def test_a_flat_layout_script_without_the_installed_header_is_kept(tmp_path: Path) -> None:
+    root = _claude_root(tmp_path)
+    mine = _plant(root / _GUARDRAIL, "print 'mine';\n")
+    _definition_install(root, project_root=tmp_path)
+    assert mine.read_text(encoding="utf-8") == "print 'mine';\n"
 
 
 def test_a_failed_probe_names_neither_a_script_nor_an_entry_an_install_did_not_write(
@@ -1982,15 +2019,6 @@ def test_a_probe_that_hangs_fails_within_its_timeout(tmp_path: Path, capsys, mon
     assert not (project / _SETTINGS).exists()
     [skipped] = [line for line in capsys.readouterr().err.splitlines() if line.startswith("guardrail hook skipped")]
     assert "did not exit within 0.5 seconds" in skipped
-
-
-def test_a_harness_directory_the_hook_command_cannot_quote_is_refused_with_nothing_written(tmp_path: Path) -> None:
-    root = tmp_path / 'a"b'
-    root.mkdir()
-    before = _files(tmp_path)
-    with pytest.raises(InputError, match="cannot quote"):
-        _definition_install(root, project_root=tmp_path)
-    assert _files(tmp_path) == before
 
 
 def _plant_file(path: Path, outside: Path) -> None:
@@ -2048,10 +2076,6 @@ def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
 @pytest.mark.parametrize(
     "ctx, kb, subdir, planted, plant, reason",
     [
-        (_CLAUDE_RENDER, False, ".claude", _SETTINGS, _plant_directory, "is not a regular file"),
-        (_CLAUDE_RENDER, False, "tools", ".claude", _plant_file, "is not a directory"),
-        (_CLAUDE_RENDER, False, ".claude", _SETTINGS, _plant_link, "is a symlink"),
-        (_CLAUDE_RENDER, False, ".claude", _SETTINGS, _plant_dangling_link, "is a symlink"),
         (
             _CLAUDE_RENDER,
             True,
@@ -2065,10 +2089,6 @@ def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
         (_OPENCODE_RENDER, True, "tools", ".opencode", _plant_file, "is not a directory"),
     ],
     ids=[
-        "guardrail-directory",
-        "guardrail-parent-file",
-        "guardrail-symlink",
-        "guardrail-dangling-symlink",
         "mcp-directory",
         "mcp-symlink",
         "mcp-dangling-symlink",
@@ -2078,8 +2098,9 @@ def test_a_symlink_or_file_on_a_targets_path_is_refused_with_nothing_written(
 def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_standing(
     tmp_path: Path, capsys, ctx: Render, kb: bool, subdir: str, planted: str, plant, reason: str
 ) -> None:
-    """The install completes; the merge writes nothing there or through it — a symlink's target, dangling
-    or not, outside the project included — and names the path with the entry to merge by hand."""
+    """The install completes; the merge writes nothing there or through it — a symlink's target,
+    dangling or not, outside the project included — and names the path with the entry to merge by
+    hand."""
     project, outside = tmp_path / "project", tmp_path / "outside"
     outside.mkdir()
     (outside / "shared.json").write_text('{"shared": true}\n', encoding="utf-8")
@@ -2091,7 +2112,7 @@ def test_a_settings_path_a_merge_cannot_write_in_place_is_reported_and_left_stan
     _definition_install(root, ctx, with_kb=kb if kb else None, project_root=project)
     assert (_standing(project / planted), _files(outside)) == before
     err = capsys.readouterr().err
-    assert any(f"{project / planted} {reason}" in line and _BY_HAND in line for line in err.splitlines())
+    assert any(f"{project / planted} {reason}" in line and "left untouched; " in line for line in err.splitlines())
 
 
 # The preflight: `install` and `install-agents-file` first run into a scratch copy of the paths they
@@ -2365,18 +2386,18 @@ def test_a_dry_run_through_a_symlinked_skill_directory_writes_nowhere(tmp_path: 
 def test_a_settings_file_left_alone_is_reported_on_an_up_to_date_target(
     tmp_path: Path, capsys, dry_run: list[str]
 ) -> None:
-    """The entry to merge by hand is printed on every run that leaves the file alone, not only the one
-    that first wrote the rest."""
+    """What to remove by hand is printed on every run that leaves the file alone, not only the one that
+    first wrote the rest."""
     project = tmp_path / "project"
     project.mkdir()
-    _claude_root(project, '{\n  // mine\n  "hooks": {}\n}\n')
+    _claude_root(project, _unparsed_settings(_retired_hook_entry(".claude")))
     argv = ["install", str(project), "--harness=claude"]
     main(argv)
     capsys.readouterr()
     main([*argv, *dry_run])
     printed = capsys.readouterr()
     assert _UP_TO_DATE in printed.out
-    assert f"{project / _SETTINGS} is not a plain JSON object — {_BY_HAND}" in printed.err
+    assert f"{project / _SETTINGS} is not a JSON object the removal can edit — {_UNREAD}" in printed.err
 
 
 @pytest.mark.parametrize("linked", ["{}\n", None], ids=["link-outside-the-project", "dangling-link"])
@@ -2404,8 +2425,9 @@ def test_a_symlinked_settings_file_the_install_leaves_alone_is_up_to_date(
 # leaves none of that layout's generated files or package destinations, and a user-level plugin
 # shadowing a project's is reported.
 
-# The layout an earlier release wrote: the set straight into `.claude/`, the MCP entry in the project's
-# own `.mcp.json`, no manifest, and every reference bare.
+# The layout an earlier release wrote: the set straight into `.claude/`, its guardrail script beside it,
+# the MCP entry in the project's own `.mcp.json`, no manifest, and every reference bare. Its guardrail
+# entry in the project's settings file is planted as that release wrote it.
 _FLAT_CLAUDE_RENDER = Render(
     harness=dataclasses.replace(
         CLAUDE,
@@ -2413,40 +2435,77 @@ _FLAT_CLAUDE_RENDER = Render(
         reference_prefix="",
         mcp=dataclasses.replace(CLAUDE.mcp, site=McpSite.PROJECT),
         rendered_files=(),
+        guardrail=None,
+        retired_entries=(),
     ),
     family=CLAUDE_FAMILY,
     tier_map=dict(CLAUDE_FAMILY.tiers),
 )
+_FLAT_SETTINGS_HEAD = f'{{\n  "hooks": {{\n    "PreToolUse": [\n      {_SED_HOOK}'
+_FLAT_SETTINGS_TAIL = "\n    ]\n  }\n}\n"
 
 
 def _flat_claude_project(tmp_path: Path) -> tuple[Path, Path]:
-    """A project holding a kb install in the flat layout, with a runner file: the project and its
-    `.claude/`."""
+    """A project holding a kb install in the flat layout, with a runner file and the guardrail entry
+    beside the project's own hook: the project and its `.claude/`."""
     project, root = _claude_project(tmp_path)
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
     _definition_install(root, _FLAT_CLAUDE_RENDER, with_kb=True, project_root=project)
+    earlier = f",\n      {json.dumps(_retired_hook_entry('.claude'))}"
+    (project / _SETTINGS).write_text(_FLAT_SETTINGS_HEAD + earlier + _FLAT_SETTINGS_TAIL, encoding="utf-8")
     return project, root
 
 
-def test_an_install_over_the_flat_layout_leaves_none_of_its_generated_files_or_package_destinations(
+def test_an_install_over_the_flat_layout_leaves_none_of_its_generated_files_package_destinations_or_entries(
     tmp_path: Path, capsys
 ) -> None:
-    """Below the harness directory only the plugin, the flat layout's hook script and the project's own
-    files remain, every retired package destination is named as removed, and the include line names the
-    plugin's snippets."""
+    """Below the harness directory only the plugin, the project's own files and settings file remain,
+    every retired package destination is named as removed, the include line names the plugin's snippets,
+    and the earlier guardrail and kbase entries are gone from the project's settings files with every
+    other byte kept."""
     project, root = _flat_claude_project(tmp_path)
+    assert (root / _GUARDRAIL).is_file()
+    assert "kbase" in json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
     mine = _plant(root / "skills/mine/SKILL.md", "---\nname: mine\n---\n\nmy own skill\n")
     capsys.readouterr()
     _definition_install(root, with_kb=True, project_root=project)
     out = capsys.readouterr().out
     outside_plugin = {relative for relative in _files(root) if not relative.startswith(f"{CLAUDE.plugin_dir}/")}
-    assert outside_plugin == {_GUARDRAIL, "settings.json", "skills/mine/SKILL.md"}
+    assert outside_plugin == {"settings.json", "skills/mine/SKILL.md"}
+    assert not (root / "hooks").exists()
     assert mine.read_text(encoding="utf-8") == "---\nname: mine\n---\n\nmy own skill\n"
     for destination in ("skills/docdicer/tools", "skills/kbase/kb-tools"):
         assert f"removed retired package destination {root / destination}" in out
     assert not (_claude_plugin(root) / "SKILL.md").exists()
     line = f"import? '{_CLAUDE_PLUGIN_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'"
     assert (project / "justfile").read_text(encoding="utf-8") == f"# mine\n\n{line}\n"
+    assert (project / _SETTINGS).read_text(encoding="utf-8") == _FLAT_SETTINGS_HEAD + _FLAT_SETTINGS_TAIL
+    assert (project / ".mcp.json").read_text(encoding="utf-8") == '{\n  "mcpServers": {}\n}\n'
+
+
+@pytest.mark.parametrize(
+    "kbase, removed",
+    [
+        ({"command": "kbase", "args": ["mcp"]}, True),
+        ({"command": "/opt/kb/bin/kbase", "args": ["mcp", "--root", "/p"]}, True),
+        ({"command": "node", "args": ["kbase"]}, False),
+    ],
+    ids=["bare-command", "path-to-kbase", "another-server"],
+)
+def test_only_a_kb_install_removes_an_earlier_kbase_entry_from_the_projects_mcp_file(
+    tmp_path: Path, kbase: dict, removed: bool
+) -> None:
+    """The plugin's own entry replaces it, so only an install writing that removes it; the recogniser
+    reads the command alone, and the project's other server stays byte for byte."""
+    project, root = _claude_project(tmp_path)
+    other = '"other": {"command": "x"}'
+    seed = f'{{\n  "mcpServers": {{\n    {other},\n    "kbase": {json.dumps(kbase)}\n  }}\n}}\n'
+    mcp_file = _plant(project / ".mcp.json", seed)
+    _definition_install(root, project_root=project)
+    assert mcp_file.read_text(encoding="utf-8") == seed
+    _definition_install(root, with_kb=True, project_root=project)
+    expected = f'{{\n  "mcpServers": {{\n    {other}\n  }}\n}}\n' if removed else seed
+    assert mcp_file.read_text(encoding="utf-8") == expected
 
 
 def test_a_dry_run_over_the_flat_layout_predicts_the_migration_and_a_second_run_is_up_to_date(
@@ -2457,6 +2516,8 @@ def test_a_dry_run_over_the_flat_layout_predicts_the_migration_and_a_second_run_
     groups = _assert_dry_run_predicts(argv, project=project, capsys=capsys)
     assert ".claude/agents/python-coder.md" in groups["removed"]
     assert ".claude/skills/kbase/kb-tools/runner-snippets/kb.just" in groups["removed"]
+    assert f".claude/{_GUARDRAIL}" in groups["removed"]
+    assert {_SETTINGS, ".mcp.json"} <= groups["changed"]
     assert f"{_CLAUDE_PLUGIN_RELPATH}/agents/python-coder.md" in groups["created"]
     main(argv)
     assert _UP_TO_DATE in capsys.readouterr().out

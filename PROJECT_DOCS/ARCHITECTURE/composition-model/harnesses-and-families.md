@@ -11,8 +11,10 @@ typed `OptionalHarnessText` where the other five are `HarnessText` — the tool 
 `--model-tier-map` value is the whole map (`bare_tier_spec_is_all`), the frontmatter emitter,
 `mcp` (`McpSettings`), the settings file and server entry a kb install registers, its `site` (`McpSite`)
 naming the directory that file sits in — the project root, or, under claude and mage, ROOT — `guardrail`
-(`GuardrailHook` or `None`), the hook script and settings entry a claude install registers (Install
-Consumption Model), `rendered_files` (`HarnessFile`), the files it renders of its own beside the
+(`GuardrailHook` or `None`), the hook script and the registration file beside it that a claude install
+writes (Install Consumption Model), `retired_entries` (`RetiredEntry`, empty by default), the entries
+earlier installs registered in the project's settings files that an install removes (claude's guardrail
+element and `kbase` member), `rendered_files` (`HarnessFile`), the files it renders of its own beside the
 definitions — the plugin manifest, `harness.PLUGIN_MANIFEST`, one value claude and mage share, version
 included — `plugin_dir`, the path below the harness directory the set is written into (`skills/adjagent`
 under claude; empty otherwise, so ROOT is the harness directory), `reference_prefix`, put before a

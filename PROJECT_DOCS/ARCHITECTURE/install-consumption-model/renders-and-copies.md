@@ -48,8 +48,8 @@ The harness resource copy borrows that vocabulary and nothing else from the pack
 `harness_resource_copies` reads `resources/<harness>/` and writes each file into ROOT with
 `copyfile` and `copymode`, so it lands as the harness ships it — no suffix is stamped, whatever the
 file's type, and a header a file already holds travels with it as the file's own text. A guardrail
-script is the exception to copying every file: it joins the copies only when the probe below
-passes. Before the first write, a target that exists must be a regular file, not a symlink, with a
+script is the exception to copying every file: it joins the copies, and its registration the
+renders, only when the probe below passes. Before the first write, a target that exists must be a regular file, not a symlink, with a
 line matching `!INSTALLED! .* adjagent` among its first ten; one unreadable or without it refuses
 the install. No component between ROOT and any render or resource target may be a symlink or a
 non-directory (`_blocked_component`); one that is refuses the install in the same refusal, and
@@ -78,10 +78,12 @@ the install. No version marker or stamp file takes part.
   entry, the retired package destinations, and, where the run writes an agents file, the `path`,
   `destination`, `backup` and `native` of a non-writing `checked_agents_file` call. Under ROOT: the
   three surfaces, the destination of every package `_packages(kb_included=True)` names, the
-  harness's resource targets and rendered files, and the MCP settings candidates where
-  `McpSettings.site` is `HARNESS` and the run may write them. Under the project root, on a project
-  install: the justfile and Makefile names, the guardrail settings file, and the MCP settings
-  candidates (`Harness.mcp.canonical` and `.alternatives`) where `McpSettings.site` is `PROJECT`.
+  harness's resource targets, rendered files and guardrail registration, and the MCP settings
+  candidates where `McpSettings.site` is `HARNESS` and the run may write them. Under the harness
+  directory, on a project install: the flat layout's guardrail script path. Under the project root,
+  on a project install: the justfile and Makefile names, each settings file a retired entry is
+  removed from, and the MCP settings candidates (`Harness.mcp.canonical` and `.alternatives`) where
+  `McpSettings.site` is `PROJECT`.
 - **The copy** (`preflight.preflight`) lives in a `tempfile.TemporaryDirectory`, each managed path at
   its position below its base. A managed path that is a symlink, dangling included, is reproduced as a
   symlink, so the install's own checks see what they see on the target: to its counterpart in the copy

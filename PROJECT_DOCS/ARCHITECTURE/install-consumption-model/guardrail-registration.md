@@ -3,42 +3,59 @@
 - **Probe.** Before `_refuse_foreign_targets`, the install runs the source script once, with
   `GUARDRAIL_INTERPRETER` and no `CLAUDE_PROJECT_DIR`, on one allowed Bash call, and requires exit
   0 within `GUARDRAIL_PROBE_SECONDS`. A missing interpreter, a missing module, a broken script and
-  a hang all fail it. A failed probe never refuses the install. It drops the script from the files
-  copied, skips the settings merge and its pre-write check, and reports one line naming the exit
-  status and first stderr line, the timeout, or the `OSError`. A script and entry an earlier
-  install wrote stay, and the line names them — the script when it carries the installed header,
-  the settings file when it holds an element `claim` accepts — since the copy is one-way and prune
-  never removes an `!INSTALLED!` file. The probe is one allowed call, not the case table, which
-  runs in the test suite only.
-- **Settings merge**, which `guardrail_merge` runs as `mcp_merge` runs the MCP entry's, both behind
-  one pre-write read, `_check_settings`, and one path report, `_settings_obstacle`. The read
-  refuses a non-UTF-8 file, and, in plain JSON, a key on the container path of the wrong type,
-  `null` included: for the guardrail a `hooks` that is not an object or a `PreToolUse` that is not
-  an array. `_settings_obstacle` names a symlink at the settings path or below the project on the
-  way to it, dangling or not, which is never written through; a non-directory on that way; and
-  anything but a regular file at the path. The read passes such a path and the merge reports it with
-  the entry printed and leaves it, so neither merge raises after the first write. An absent file is
-  written whole with the one entry. A present file is spliced as the MCP entry's is, every other
-  byte kept, with an array scanner beside `_object` and an element insert beside `_with_member`; an
-  absent `hooks` or `PreToolUse` is created as `_splice` creates a missing container.
-  `install.py` holds the splice and the one, ambiguous or append decision, and no Claude settings
-  layout or command shape: the container, the entry and the recogniser come from the
-  `GuardrailHook`. Ours is a `PreToolUse` element `claim` accepts, a `hooks` array holding a command
-  that equals, in full, what the entry builder writes for some harness directory; no substring
-  counts, so a project's own hook running another `guardrail.pl` is not ours, and a command in an
-  earlier shape is not either. Exactly one such element holding only our command is replaced whole;
-  none is appended. More than one, or one holding our command beside others, is reported for a hand
-  merge and the file left untouched, because replacing it whole would delete the project's own
-  hook. Ours is recognised for any harness directory, so two installs under different `--subdir`
-  values share one settings file and the later replaces the earlier's entry: a project has one
-  guardrail.
-  A JSONC file, or one the splice cannot place with certainty, is reported with the entry printed
-  and left as it stands. Other `PreToolUse` entries are never touched.
+  a hang all fail it. A failed probe never refuses the install. It drops the script and the
+  registration from the files written, skips the retired-entry removal and the flat script's
+  removal, and reports one line naming the exit status and first stderr line, the timeout, or the
+  `OSError`. What an earlier install left stays, and the line names it: the script under ROOT, and
+  under the harness directory where the flat layout put one, when it carries the installed header;
+  the registration when it carries its marker; and a project settings file holding an item a
+  retired entry's `claim` accepts. The probe is one allowed call, not the case table, which runs in
+  the test suite only.
+- **Registration.** `GuardrailHook.registration` is written as a harness-file-class target: a file
+  at its path without the marker refuses the install like any foreign harness file, and one with it
+  is replaced whole. It is written only where the probe passed, so a registration never names a
+  script that does not run. It is a render of a constant command, so no settings merge, no
+  project-root path and no harness-directory quoting is involved, and `--subdir` does not change it.
+- **Retired entries.** `Harness.retired_entries` lists what earlier installs registered in files
+  the project owns. Each `RetiredEntry` names the settings file, the container path, the member key
+  (empty where the entry is an array element), a `claim` recogniser, the `Replacement` whose
+  write licenses the removal, and a `trace`. Claude has two. The guardrail's `PreToolUse` element in
+  `.claude/settings.json`, recognised by `_guardrail_claim`, is removed on a project install whose
+  probe passed. The `kbase` member of the project `.mcp.json`'s `mcpServers`, recognised by
+  `_kbase_claim` from its command alone (the bare `kbase`, or a path ending in it), is removed on a
+  project install that writes the kb MCP entry. A user-level install removes none: it never wrote
+  either.
+- **Removal**, which `_remove_retired_entry` runs behind `_settings_obstacle` and
+  `_editable_settings`, and which never refuses the install. `_settings_obstacle` names a
+  symlink at the path or below the project on the way to it, dangling or not, which is never written
+  through; a non-directory on that way; and anything but a regular file at the path.
+  `_editable_settings` yields the text only of UTF-8 plain JSON whose container path holds the types
+  it needs; an unreadable or non-UTF-8 file, one that is not a JSON object, and one with a
+  wrong-typed key on the path (`null` included) yield nothing. Each is left untouched, so removal
+  never raises after the first write. An absent file, or one holding
+  no item a `claim` accepts, is left with nothing said. Exactly one item the `claim` reads as ours
+  alone is cut out by `_without_item`, which removes the item and the separator joining it to a
+  neighbour, keeps every other byte, and closes an emptied container to `[]` or `{}` in place.
+  `install.py` holds the removal and the one-or-ambiguous decision, and no Claude settings layout:
+  the container, the member and the recogniser come from the `RetiredEntry`. A guardrail command is
+  ours only when equal, in full, to what an earlier install wrote for some harness directory; no
+  substring counts, so a project's own hook running another `guardrail.pl` is not ours. More than
+  one such item, or one holding our command beside others, is reported with each printed for a hand
+  removal and the file left untouched, because removing it whole would delete the project's own
+  hook. A file `_editable_settings` yields nothing for (comments included), one the scanner cannot
+  delimit with certainty, and a path `_settings_obstacle` names are left untouched, and reported as
+  a stranded entry only where the text found there, read as UTF-8 through a symlink and with
+  undecodable bytes replaced (`_names_text`), contains the `trace`: the missing-script report for the
+  guardrail, `"kbase"` for the MCP entry. A file holding neither is not mentioned. Other
+  `PreToolUse` entries and other `mcpServers` members are never touched.
+- **Flat script.** On a project install under a harness directory that is not ROOT, whose probe
+  passed, `_remove_retired_script` removes `<harness-dir>/hooks/guardrail.pl` when it is a regular
+  file, reached through no symlink, with the `!INSTALLED! … adjagent` header, then `hooks/` if that
+  leaves it empty. The same install has written the plugin's script, its replacement.
 
-A user-level install runs neither the probe nor the merge: `install` takes no guardrail for it.
+A user-level install runs neither the probe nor the removal: `install` takes no guardrail for it.
 
-The merge runs on every claude install whose probe passes, kb or not, and on
-`install-agents-here`'s: the settings file is the project's own, so it passes through no banner
-check and has no `REPO_ROOT` exemption, unlike the include line below, which is not written when
-the project is this repository.
-
+The removal runs on every claude project install that writes its replacement, and on
+`install-agents-here`'s: the settings files are the project's own, so they pass through no banner
+check and have no `REPO_ROOT` exemption, unlike the kb include line, which is not written when the
+project is this repository (Base and kb installs).

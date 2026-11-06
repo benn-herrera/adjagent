@@ -34,7 +34,7 @@ An install is **user-level** when its harness directory is the installing harnes
 `user-harness-dir`, however the target reached it. A user-level install renders the definitions its
 type carries and the files its harness renders of its own (the plugin manifest), prunes and removes
 the legacy trees as any install does, and writes nothing else but the kb set's MCP entry (below): no
-shipped harness file, no guardrail probe or registration, no shipped package (neither `kb-tools/` nor
+shipped harness file, no guardrail probe or registration, no removal of an earlier install's project settings entries, no shipped package (neither `kb-tools/` nor
 the docdicer tools package) and so no `--install` re-run, no runner include line and no runner file.
 `--install-global-agents-file` is its one opt-in: it also installs the harness agents file in the
 harness directory (Harness Agents File, below). On a project install the flag is ignored, with no
