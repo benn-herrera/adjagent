@@ -87,7 +87,7 @@ adjagent/                 the generator and every definition, run from a checkou
                           plugins, as skills/development/scripts/
 pyproject.toml            the package's build configuration: setuptools, the version read from
                           `adjagent.__version__`, the console script `adjagent`
-docs/                     the pages the README links to
+docs/                     the pages the README links to; images/ holds the README's screenshot
 dist/                     gitignored: what `just mage-dist` and `just build` write
 devtools/                 repository-maintenance tooling; render_diff.py compares two rendered slots,
                           scripts/ holds the shell scripts behind the justfile recipes
@@ -132,7 +132,7 @@ How to add a definition: [CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/adding-defini
 
 `just mage-dist` writes four files to `dist/`: for each plugin `adjagent-mage-<plugin>-v<version>.tgz`
 and its detached `.asc` signature. What a consumer does with them is in the
-[README](../README.md#mage-plugin-release); the contract is [SPEC](../PROJECT_DOCS/SPEC/mage-release.md).
+[Mage plugin release](mage-release.md); the contract is [SPEC](../PROJECT_DOCS/SPEC/mage-release.md).
 
 The build needs `gpg` holding your signing key as its default secret key; it signs with that key and
 pins no fingerprint, so a rotated key needs no code change. It removes the previous outputs and its
@@ -141,7 +141,7 @@ signing included, leaves no output of the version for either plugin and no `stag
 
 To release:
 
-1. Bump `__version__` in `adjagent/__init__.py`, update the `v<version>` examples in README, and
+1. Bump `__version__` in `adjagent/__init__.py`, update the `v<version>` examples in README and `docs/installing.md`, and
    commit them ([CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/code-definitions-and-install/version-has-one-home.md)).
 2. `just test`.
 3. `just mage-dist`.

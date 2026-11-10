@@ -12,7 +12,7 @@ where `<V>` is what `python3 -m adjagent --version` prints. For each plugin `<pl
 
 The operator downloads one tarball, may check it with `gpg --verify` against its `.asc`, and
 unpacks it into `~/Mage/Skills/`. Unpacking leaves in place any file an earlier copy holds that
-this release does not, so the operator removes `~/Mage/Skills/<plugin>` first. README.md gives the
+this release does not, so the operator removes `~/Mage/Skills/<plugin>` first. `docs/mage-release.md` gives the
 commands. No installer for the operator is shipped, and nothing checks the signature for the
 operator.
 

@@ -4,7 +4,7 @@ Every definition below is **generated**: there are no hand-maintained definition
 in an installed tree. Each is rendered from a module under `adjagent/definitions/`
 ([Development](development.md#generated-definitions)). An install delivers one **plugin**, a named
 selection of definitions; SPEC.md, Deployed Surfaces, Plugins lists each plugin's members
-([README, Plugins](../README.md#plugins)). Entries are named by where they land in the
+([Installing, Plugins](installing.md#plugins)). Entries are named by where they land in the
 install directory (`<project>/.claude/skills/<plugin>/` under claude): every entry lives under
 `agents/` unless noted as a skill. Under claude and mage an agent is invoked as `<plugin>:<name>`, and
 under opencode as `<plugin>-<name>`.
@@ -56,7 +56,7 @@ Three skills ship in the devpro plugin under every harness, except that mage omi
   installed set. It tells the session never to edit the installed definitions or the installed
   package, to put a project's behavior in its `CONVENTIONS.md` or `AGENTS.md`, and to change the
   definitions persistently only through a vendored copy or a fork
-  ([README, Customizing](../README.md#customizing-the-set)). It also covers running adjagent (the
+  ([Installing, Customizing](installing.md#customizing-the-set)). It also covers running adjagent (the
   project's runner recipe where there is one, else the release tag installed into a venv and that
   venv's `adjagent`), updating (raise the pinned version, preview with `adjagent install devpro
   --dry-run`, then install) and inspecting (`adjagent --version`, `--dry-run`). Under claude it also

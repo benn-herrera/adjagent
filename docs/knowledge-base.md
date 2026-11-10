@@ -8,7 +8,7 @@ set is **generated** from its definition module.
 
 The devpro plugin omits it. The kbase plugin delivers it: `adjagent install kbase TARGET`
 (`just install kbase TARGET` in a clone), or under mage the kbase tarball of the
-[release](../README.md#mage-plugin-release). It is the skill and the
+[release](mage-release.md). It is the skill and the
 definitions a knowledge-base project works with (SPEC.md, Deployed Surfaces, Plugins lists them;
 [Definition sets](definition-sets.md#the-kbase-plugin) describes them).
 

@@ -14,7 +14,7 @@ that protects a checkout does not apply: there is no uncommitted state to refuse
 ## Choosing the plugin and the target
 
 `adjagent install PLUGIN TARGET` takes the plugin first: `devpro` or `kbase`, with no default
-([What each holds](../README.md#plugins)). Everything below is per plugin: each has its own install
+([What each holds](installing.md#plugins)). Everything below is per plugin: each has its own install
 directory, so installing one never changes the other's.
 
 The target must be an existing directory. The harness is `--harness=NAME` when given; otherwise the
@@ -158,7 +158,7 @@ The install writes the agents file as `<plugin>/CLAUDE.md`, so a normal install 
 
 The installed tree is not for local edit. To change a definition, vendor the whole repository, or
 fork it and open a pull request; adjagent merges nothing local. A consumer's own needs go in its
-`CONVENTIONS.md` or `AGENTS.md` ([README, Customizing](../README.md#customizing-the-set)). Every
+`CONVENTIONS.md` or `AGENTS.md` ([Installing, Customizing](installing.md#customizing-the-set)). Every
 rendered file's first banner line says so. Re-running the install overwrites the tree and removes definitions this project no longer
 produces, so a local edit is replaced with no diff to show it. A project that tracks the tree reviews
 what changed in its `git diff`; one that does not has the install's report (how many files it wrote
@@ -235,5 +235,5 @@ never touched.
 ## Upgrading from 0.15.0 and earlier
 
 Nothing reads, rewrites or removes what an earlier adjagent version wrote. The files to remove by
-hand, and the one search to run in the project, are listed in [README, Upgrading from 0.15.0 and
-earlier](../README.md#upgrading-from-0150-and-earlier).
+hand, and the one search to run in the project, are listed in [Installing, Upgrading from 0.15.0 and
+earlier](installing.md#upgrading-from-0150-and-earlier).

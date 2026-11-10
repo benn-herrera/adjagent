@@ -1,31 +1,92 @@
 # Adjagent
 
-Adjagent generates two plugins of agents and skills, `devpro` (coding and platform
-specialists and more) and `kbase` (knowledge-base tooling), and installs one into your project
-with `adjagent install`.
-Every shared span of text is written once and every definition is rendered from it, tuned per model
-family, so the installed set agrees with itself.
+Unsupervised agent-written code rots quietly then fails suddenly. Adjagent installs a collaborative
+AI development process into Claude Code, opencode and Mage that lets you build to last: you work with
+the agents to design, plan, build, review, and deliver.
+
+![A kanban board with the columns Roadmap, Design, Drafted, Dispatchable, In progress and Landed; each work-package card shows its rating, mechanical or expert, and its lifetime](docs/images/kanban.webp)
+
+*Work packages from adjagent's 0.16.0 release on the board `docdicer kanban` serves: the roadmap, the
+design under way, then each package by state, rated mechanical or expert.*
+
+## What it asks of you
+
+This process does not run itself, and it does not claim to be a 10X everyone-is-now-an-engineer super suit.
+You collaborate on design, architecture, mechanisms, and standards. You have to know what good and bad look
+like and you will need to exercise that judgment frequently.
+
+## What it gets you
+
+The installed skills, agents, tools, and AGENTS.md/CLAUDE.md have been coordinated and tuned
+to maximize leverage for your attention, minimize decision fatigue, and provide visibility of and
+correction steps for the stepwise drift that is unavoidable in agentic coding processes.
+
+My ballpark estimate is a 3X gain over unassisted engineering. It's not the much-hyped 10X of the
+ad campaigns, but it is dead real and the output is production-grade. For evidence, look at the git
+history of not only this project, but also:
+
+- [linux-kernel-driver-sandbox](https://github.com/benn-herrera/linux-kernel-driver-sandbox)
+- [go-inference-lab-bench](https://github.com/benn-herrera/go-inference-lab-bench)
+- [kbase](https://github.com/benn-herrera/kbase)
+- [docdicer](https://github.com/benn-herrera/docdicer)
+
+I was able to stand up the kernel driver sandbox in a day to learn how to hand-code Linux
+kernel device drivers. And the sandbox's learning harness was not sloppy garbage. It was designed
+to be efficient, reusable, and transferable. The go-inference-lab-bench project went from a cold
+start to a scratch inference engine in Go with proven llama.cpp equivalence and data-driven support
+for multiple architectures and multiple loading formats in a little over a month. It does all of that
+in just over 16K lines of runtime code, including vision tower support and an OpenAI-compatible HTTP server.
+
+## How it works
+
+The process is the `development` skill. The `devpro` plugin installs it with the agents that carry it
+out.
+
+1. **Design.** Your request becomes a design: requirements, decisions and the questions still open.
+   You accept it before anything is planned.
+2. **Plan.** The plan cuts the design into packages small enough for one agent, each with a done-line
+   anyone can re-run. Routine packages run on a cheaper model; judgment calls get the strong one.
+3. **Build.** Specialist agents carry out the packages, and you accept each one as it lands.
+4. **Review**, at three levels:
+   - Every plan, design and brief an agent works from is reviewed by a prompt-engineer agent before
+     use.
+   - Every plan ends with reviewers from each domain it touched, then a burndown of what they found.
+   - Every few plans, a broader review catches drift no single change caused.
+5. **Deliver**, as a sprint-based release process:
+   - Plan the scope
+   - Build the features
+   - Harden the code
+   - Deliver
+
+## What it installs
+
+- **Specialist agents**: a coder for each language, platform experts, an architect, a security
+  reviewer, a tech writer and a prompt engineer ([Definition sets](docs/definition-sets.md)).
+- **Working rules and a guardrail**: the operator rules every session loads
+  ([Agents file](docs/agents-file.md)), and a hook that sends file changes through the edit tools
+  ([Guardrail](docs/guardrail.md)).
+- **One standard across handoffs.** A rule several agents carry is written once and rendered into each,
+  so the architect who designs, the coder who builds and the reviewer who checks judge the work by the
+  same text ([THESIS](PROJECT_DOCS/entry-point.md#what-is-new)).
+- **Customizable to any harness, any model family.** The same definitions render for Claude Code, opencode and Mage, and
+  per model family ([Model tuning](docs/model-tuning.md)). One runner recipe installs them.
+
+The `kbase` plugin is separate: tooling for building and maintaining a knowledge base from a canonical
+corpus ([Knowledge base](docs/knowledge-base.md)).
 
 ## Requirements and Supported Platforms
 
-- `python3` 3.9 or later with its `venv` module.
-- `git` on `PATH`: pip installs adjagent from a git tag.
-- `perl` with core `JSON::PP`, optional: the claude guardrail needs it. Without it the install skips
-  that hook and installs everything else ([Guardrail](docs/guardrail.md)).
-- The kbase plugin runs on macOS or Linux only; native Windows is unsupported for it. It needs kbase,
-  which you install, among its other requirements ([Knowledge base](docs/knowledge-base.md#requirements)).
-- The kbase plugin's runner include line needs `just` 1.33 or later, if the project's runner is a
-  justfile.
+- `python3` 3.9 or later with its `venv` module, and `git` on `PATH`.
+- Harnesses: claude (Claude Code), opencode and mage.
 
-Adjagent installs each plugin for three harnesses: claude (`.claude/skills/<plugin>/`, whose agents
-run as `<plugin>:<name>`), opencode (a directory at `.opencode/plugins/<plugin>/`, whose agents
-register as `<plugin>-<name>`) and mage (a directory of its own).
+The full list, optional requirements and the kbase plugin's included:
+[Installing](docs/installing.md#requirements).
 
 ## Quick Start Guide
 
 Add the recipe for your project's runner. It installs adjagent, pinned to `ADJAGENT_VER`, into the
 project's `.venv/` (the project's existing one, or one it creates), then installs the `devpro` plugin
-into the project for both harnesses ([Plugins](#plugins) says what each plugin holds).
+into the project for both harnesses ([Plugins](docs/installing.md#plugins) says what each plugin holds).
 
 A project that uses one harness drops the other harness's `install` line.
 
@@ -46,184 +107,30 @@ agents:
   {{ADJAGENT}} install devpro . --harness=opencode
 ```
 
-Makefile:
-
-```make
-SHELL := /bin/bash
-ADJAGENT_VER := 0.16.0
-VENV := .venv
-PYTHON := $(VENV)/bin/python
-ADJAGENT := $(VENV)/bin/adjagent
-.PHONY: agents
-agents:
-	[[ -x "$(PYTHON)" ]] || python3 -m venv "$(VENV)"
-	[[ -x "$(ADJAGENT)" && "$$("$(ADJAGENT)" --version)" == "$(ADJAGENT_VER)" ]] || \
-	  "$(PYTHON)" -m pip install "git+https://github.com/benn-herrera/adjagent@v$(ADJAGENT_VER)"
-	"$(ADJAGENT)" install devpro . --harness=claude
-	"$(ADJAGENT)" install devpro . --harness=opencode
-```
-
-Run `just agents` or `make agents`. The recipe never recreates or clears an existing `.venv`, and runs
-pip only when the venv's adjagent is not the pinned version.
+Run `just agents`. The recipe never recreates or clears an existing `.venv`, and runs pip only when
+the venv's adjagent is not the pinned version.
 
 Under claude, invoke the plugin's agents and skills as `devpro:<name>`, and run
 `/reload-plugins` (or restart Claude Code) after an install for new definitions to register.
-
-Besides the installed trees, the install keeps the operator working rules as one marked block in one
-place: your global agents file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`) if it already
-holds the block, otherwise the project's `AGENTS.md`, where under claude `CLAUDE.md` is created as the
-one-line `@AGENTS.md` redirect. A `CLAUDE.md` holding anything else is refused with nothing written
-([Refusals](docs/install-reference.md#refusals)). Only the block is replaced, and the rest of each file
-is kept; a write that changes an agents file keeps one rolling `backup.<name>` beside it, such as
-`backup.AGENTS.md`. A run that would change nothing writes nothing ([Agents file](docs/agents-file.md)).
 
 Add the installed trees to the project's `.gitignore`:
 
 ```text
 .claude/
 .opencode/
+.venv/
 ```
 
-The project's `AGENTS.md` and `CLAUDE.md` are not installed trees: the install may write them (above),
-so decide whether to commit them.
-
-The `.venv/` entry a Python project conventionally ignores covers the venv; add it if the project
-ignores nothing there. The docdicer tools' own venv needs no entry: its `.gitignore` is installed
-with it.
-
-To update, change `ADJAGENT_VER` to the new release's version and run the recipe again. Everything it
-installs is documented in the [install reference](docs/install-reference.md).
-
-To install the knowledge-base plugin, run `adjagent install kbase . --harness=claude` (or
-`--harness=opencode`) and install kbase first ([Knowledge base](docs/knowledge-base.md)).
-
-## Plugins
-
-An install delivers one plugin, named as its first argument: `adjagent install PLUGIN TARGET`. There is
-no default.
-
-- **devpro** is the coding, platform and specialist agents and their skills.
-- **kbase** is the `kbase` skill with the kb-tools runner snippets and the `kbase` MCP server entry,
-  and the definitions a knowledge-base project works with. It needs the kbase program on your
-  machine ([Knowledge base](docs/knowledge-base.md)).
-
-[SPEC](PROJECT_DOCS/SPEC/deployed-surfaces/plugins.md) (SPEC.md, Deployed Surfaces, Plugins) lists
-each plugin's members. Installing both in one place gives duplicate agents under different
-names. [Definition sets](docs/definition-sets.md) describes the definitions.
-
-## Upgrading from 0.15.0 and earlier
-
-An install never reads, rewrites or removes what an earlier version wrote, so remove these by hand
-from each project, and from `~/.claude`, `~/.config/opencode` and `~/Mage/Skills` where you installed
-at user level:
-
-- `.claude/skills/adjagent/`, the earlier claude plugin.
-- The unprefixed files in `.opencode/agents/`, `.opencode/commands/` and `.opencode/skills/` that
-  carry the generated banner (a `!GENERATED!` comment on their first lines), and the earlier
-  packages inside `.opencode/skills/`: `docdicer/tools/` (its `.venv/` included),
-  `dev-process/scripts/` and `kbase/kb-tools/`.
-- `.opencode/plugins/guardrail.ts`.
-- The `kbase` entry in `opencode.json` or `opencode.jsonc`, under `.opencode/` or the project root.
-- `~/Mage/Skills/adjagent/`, the earlier mage plugin.
-- In a project that will not install the kbase plugin: the line in its `justfile` or `Makefile` that
-  imports or includes `kb.just` / `kb.mk` from `runner-snippets/`. Installing the kbase plugin rewrites
-  that line itself.
-
-Then install the plugin you want. Text outside this repository that names the earlier process skill
-is not rewritten either. In each project, search for it and name the skill bare, "the `development`
-skill (devpro)", which each harness resolves to its own spelling:
-
-```sh
-grep -rln 'dev-process' --include='*.md' --exclude-dir=.claude --exclude-dir=.opencode .
-```
-
-The excluded directories hold installed trees, which the next install replaces.
-
-## Previewing and re-installing
-
-`--dry-run` prints what an install would create, change and remove, grouped and relative to the
-project root (a path outside it prints absolute), and writes nothing:
-
-```sh
-.venv/bin/adjagent install devpro . --harness=claude --dry-run
-```
-
-An install that would change nothing says so, exits 0 and touches nothing. Rules and sample output:
-[Install reference](docs/install-reference.md#re-installing-and---dry-run).
-
-## Running adjagent by hand
-
-To run `adjagent` yourself, for a one-off install or a preview, install it with pipx or into a venv
-of your own. A bare `pip install` outside a venv is refused on Homebrew and most distro Pythons
-(`externally-managed-environment`), and Apple's `/usr/bin/python3` puts the command in
-`~/Library/Python/3.9/bin`, which is not on `PATH`.
-
-```sh
-pipx install "git+https://github.com/benn-herrera/adjagent@v0.16.0"
-pipx ensurepath   # puts pipx's bin directory on PATH; open a new shell afterwards
-adjagent --help
-adjagent install devpro ~/projects/foo
-```
-
-Or, with a venv:
-
-```sh
-python3 -m venv ~/.venvs/adjagent
-~/.venvs/adjagent/bin/pip install "git+https://github.com/benn-herrera/adjagent@v0.16.0"
-~/.venvs/adjagent/bin/adjagent install devpro ~/projects/foo
-```
-
-A project's own pin belongs in its runner recipe, above. From a checkout of this repository the same
-command runs as `PYTHONPATH=<clone> python3 -m adjagent install devpro ~/projects/foo`, with the same result
-([Development](docs/development.md)).
-
-## Customizing the set
-
-The installed definitions and the installed adjagent package are never edited: the next install
-overwrites the definitions, and the next update overwrites the package.
-
-- **A project's own conventions** go in its `CONVENTIONS.md` or `AGENTS.md`, which the agents read and
-  no install writes.
-- **A persistent change to the definitions** means one of two routes. Vendor the whole repository
-  as an organization-hosted copy, edit the definitions there and install from it; that copy is yours to
-  maintain from then on. Or fork adjagent and open a pull request.
-
-Adjagent merges nothing local into the set it generates. The `adjagent` skill that the install delivers
-tells a session the same rule.
-
-## Mage plugin release
-
-The mage plugin is published as a release: one tarball and detached signature per plugin. Unpack
-one; `<plugin>` below is `devpro` or `kbase` ([Plugins](#plugins)). The tarballs hold the plugin only;
-the kbase plugin's `kbase` MCP command is the bare `kbase`, so you install kbase yourself
-([Knowledge base](docs/knowledge-base.md#requirements)). Contract:
-[SPEC](PROJECT_DOCS/SPEC/mage-release.md).
-
-1. Download `adjagent-mage-<plugin>-v<version>.tgz` from the release `v<version>` of
-   [benn-herrera/adjagent](https://github.com/benn-herrera/adjagent/releases), and optionally its
-   `adjagent-mage-<plugin>-v<version>.tgz.asc`.
-2. Optionally check the tarball against the signature. Fetch the release signer's public key over WKD
-   (the developer's key is at <https://keyoxide.org/wkd/benn@bennherrera.dev>), then verify:
-
-   ```sh
-   gpg --auto-key-locate wkd --locate-external-keys benn@bennherrera.dev
-   gpg --verify adjagent-mage-<plugin>-v<version>.tgz.asc adjagent-mage-<plugin>-v<version>.tgz
-   ```
-
-3. Unpack it into Mage's skills directory, removing any earlier copy first:
-
-   ```sh
-   rm -rf ~/Mage/Skills/<plugin>
-   tar -xzf adjagent-mage-<plugin>-v<version>.tgz -C ~/Mage/Skills/
-   ```
-
-   The tarball has one top-level `<plugin>/` directory, so this leaves `~/Mage/Skills/<plugin>`.
-4. For the kbase plugin, install kbase if you have not. Native Windows is unsupported for it.
-5. For the kbase plugin, restart Mage so it starts the `kbase` MCP server; the plugin's entry
-   finds `kbase` on `PATH`. Do the same after installing or upgrading kbase while Mage is running.
+[Installing](docs/installing.md) has the rest: the Makefile recipe, the agents file the install
+writes, what to commit, previewing, updating, upgrading from 0.15.0 and earlier, the kbase plugin,
+running adjagent by hand and customizing the set. Mage installs from a release tarball
+([Mage plugin release](docs/mage-release.md)).
 
 ## More documentation
 
+- [Installing](docs/installing.md): requirements, plugins, the Makefile recipe, the agents file,
+  previewing, updating, upgrading, running by hand, customizing.
+- [Mage plugin release](docs/mage-release.md): downloading, verifying and unpacking a mage plugin.
 - [Install reference](docs/install-reference.md): target and harness resolution, the install
   directory of each plugin, user-level installs, what an install writes, refusals.
 - [Guardrail](docs/guardrail.md): the hooks that block shell writes behind the edit tools.
@@ -243,7 +150,7 @@ the kbase plugin's `kbase` MCP command is the bare `kbase`, so you install kbase
 
 What adjagent installs into a project (`agents/`, `commands/`, `skills/`) is stdlib-only Python and
 shell with no third-party dependencies. Everything below is used by this repository's development,
-build and documentation checks, or by the optional kbase plugin; none is bundled.
+build and documentation checks; none is bundled.
 
 - **pytest** (the pytest developers, MIT): runs the test suite; installed into this repository's
   `.venv` by `just test`.
@@ -260,13 +167,6 @@ build and documentation checks, or by the optional kbase plugin; none is bundled
 - **docdicer** (Benn Herrera, MIT): the link and tree checks behind `just check-links`, installed into
   `.venv` from its git tag. The installed `tools/docdicer` script installs it from the same tag
   into a venv beside the script when you ask it to.
-- **pandoc** (John MacFarlane and contributors, GPL-2.0-or-later): converts LaTeX to Markdown for the
-  kbase plugin; a host program you install ([Knowledge base](docs/knowledge-base.md#requirements)).
-- **Graphviz** `dot` (Graphviz authors, Eclipse Public License; the installed 16.1.0's `COPYING` is
-  version 2.0): optional, renders the kbase plugin's claim graph diagrams as SVG; a host program you
-  install.
-- **kbase** (Benn Herrera, MIT): the Go binary the kbase plugin's runner snippets and MCP entry drive; a
-  host program you install ([Knowledge base](docs/knowledge-base.md#the-toolchain)).
 - **@opencode/plugin** (the opencode project, MIT): the module the opencode plugin
   entry, `index.ts`, imports `Plugin` from to register the plugin; opencode supplies it, and nothing
   here bundles it.

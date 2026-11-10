@@ -2,7 +2,7 @@
 
 ```
 PROJECT_DOCS/           the contract trees — THESIS, SPEC, ARCHITECTURE, CONVENTIONS — as small leaf files, one `entry-point.md` per volume; the root `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md` and `CONVENTIONS.md` are pointers to them, not sources; checked by `just check-links`
-docs/                   the human-facing pages README links to — install reference, guardrail, agents file, model tuning, definition sets, knowledge base, development — indexed by `docs/index.md`; checked by `just check-links`
+docs/                   the human-facing pages README links to — installing, mage plugin release, install reference, guardrail, agents file, model tuning, definition sets, knowledge base, development — indexed by `docs/index.md`, with `docs/images/` holding the README's screenshot; checked by `just check-links`
 agent-sandboxing/       setup for running a coding agent as an unprivileged local user — never installed
 pyproject.toml          the package's build configuration — setuptools, the version read from `adjagent.__version__`, the package-data globs, the `adjagent` console script (Packaging)
 dist/                   gitignored build product — what `just mage-dist` writes: the mage plugin tarball and its detached signature for each plugin, plus `stage/` while a build runs, removed when it ends (`DIST_DIR`, devtools/scripts/mage-dist.sh); and what `just build` writes: the wheel and sdist; created on demand
