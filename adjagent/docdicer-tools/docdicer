@@ -1,8 +1,9 @@
-#!/bin/sh
-# Launcher for docdicer, kept in a venv beside this script. `--install` builds that venv afresh and
-# installs the pinned version into it; every other invocation runs the venv's docdicer.
+#!/usr/bin/env bash
+# Launcher for docdicer, kept in a venv beside this script. `--install` builds that venv where it is
+# missing or broken and installs the pinned version into it; every other invocation runs the venv's
+# docdicer.
 
-VERSION=0.7.1
+VERSION=0.8.0
 PACKAGE="git+https://github.com/benn-herrera/docdicer@v${VERSION}"
 
 case "${0}" in
@@ -15,7 +16,7 @@ venv_bin=${venv}/bin
 venv_python=${venv_bin}/python
 venv_docdicer=${venv_bin}/docdicer
 
-if [ "${1:-}" = "--install" ]; then
+if [[ "${1:-}" = "--install" ]]; then
   function remedy() {
     {
       printf '%s\n' "docdicer needs python3 3.9 or later with its venv module."
@@ -27,16 +28,22 @@ if [ "${1:-}" = "--install" ]; then
     remedy
     exit 1
   fi
-  command rm -rf "${venv}"
-  if ! python3 -m venv "${venv}"; then
-    remedy
+  # A venv is bound to the interpreter that built it, so one whose python no longer runs (the system
+  # python3 upgraded or removed) is rebuilt; a working one is kept and its pip brought current.
+  if [[ ! -x "${venv_python}" ]] || ! "${venv_python}" -c '' 2>/dev/null; then
+    command rm -rf "${venv}"
+    if ! python3 -m venv --upgrade-deps "${venv}"; then
+      remedy
+      exit 1
+    fi
+  elif ! "${venv_python}" -m pip install --upgrade pip; then
     exit 1
   fi
-  "${venv_python}" -m pip install --upgrade "${PACKAGE}"
+  "${venv_python}" -m pip install "${PACKAGE}"
   exit "${?}"
 fi
 
-if [ ! -x "${venv_docdicer}" ]; then
+if [[ ! -x "${venv_docdicer}" ]]; then
   printf '%s\n' "docdicer is not installed here. Run: \"${0}\" --install" >&2
   exit 1
 fi

@@ -10,8 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Linux desktop development: GTK/Qt, D-Bus, systemd, X11/Wayland, native APIs (V4L2, udev, inotify) "
-            "and packaging (deb/rpm/AppImage/Flatpak/Snap). Prefer over "
-            f"{clauses.ref(name='generalist-coder')} for any Linux desktop target."
+            "and packaging (deb/rpm/AppImage/Flatpak/Snap)."
         ),
         tools=ALL,
         tier="high",

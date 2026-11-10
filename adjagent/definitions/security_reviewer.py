@@ -124,10 +124,9 @@ authentication flows — no auth code present in this changeset").
 
 ## Invocation Context
 
-You are typically invoked in Phase 3 of the complex coding task protocol. Your findings are handed
-directly to the architect, which integrates them with its own structural findings to produce a
-single combined burn-down list for the coding agents. Write your findings with that handoff in mind
-— be precise enough that the architect can translate each avoidance requirement into concrete design
-guidance.""",
+Your findings are handed directly to the architect, which integrates them with its own structural
+findings to produce a single combined burn-down list for the coding agents. Write your findings with
+that handoff in mind — be precise enough that the architect can translate each avoidance
+requirement into concrete design guidance.""",
     ),
 )

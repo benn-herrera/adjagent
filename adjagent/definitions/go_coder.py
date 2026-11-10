@@ -8,10 +8,7 @@ DEFINITIONS = (
     Definition(
         name="go-coder",
         kind=Kind.AGENT,
-        description=(
-            f"Go implementation specialist. Prefer over {clauses.ref(name='generalist-coder')} for any Go file "
-            "modification or Go project task."
-        ),
+        description="Go implementation specialist.",
         tools=ALL,
         tier="high",
         color="#00ADD8",

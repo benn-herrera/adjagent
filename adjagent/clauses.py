@@ -5,8 +5,8 @@ its text; a chunk with variants is one constant (or function) per variant,
 `CHUNK_VARIANT`. A function calls nothing, so a run of text that holds a slotted
 chunk is composed where a definition uses it. A definition interpolates these
 into its body at import. The harness and tuning strings, and the references to other
-definitions, are placeholders (spelled as `vocabulary.hole` and `vocabulary.reference`
-spell them), the only holes left for the renderer to fill.
+definitions, are placeholders, spelled as `vocabulary.hole` and `vocabulary.reference`
+spell them: the only ones left for the renderer to fill.
 
 No constant carries a leading or trailing newline: a definition's body places
 the blank lines between paragraphs.
@@ -17,16 +17,28 @@ PROJECT_HARNESS_DIR = "@!hrn-project-harness-dir!@"
 PROJECT_TEMP_DIR = "@!hrn-project-temp-dir!@"
 USER_HARNESS_DIR = "@!hrn-user-harness-dir!@"
 MCP_TOOL_PREFIX = "@!hrn-mcp-tool-prefix!@"
+SCRATCH_RULE = "@!hrn-scratch-rule!@"
+MEMORY_FILE = "@!hrn-memory-file!@"
+PLUGIN_NAME = "@!plg-name!@"
 RECIPE_RULE = "@!hrn-recipe-rule!@"
 KBASE_PROJECT_RULE = "@!hrn-kbase-project-rule!@"
 RELOAD_RULE = "@!hrn-reload-rule!@"
+SIDE_BY_SIDE_RULE = "@!hrn-side-by-side-rule!@"
+COLD_READ_RULE = "@!hrn-cold-read-rule!@"
 STEP_DOWN_MODEL = "@!tun-step-down-model!@"
 
 
 def ref(*, name: str) -> str:
-    """The reference hole naming the definition `name`, spelled as `vocabulary.reference` spells it: the
-    only way definition text names another definition."""
+    """The reference placeholder naming the definition `name`, spelled as `vocabulary.reference` spells it: the
+    only way definition text names another definition. A render that does not ship `name` is refused."""
     return f"@!ref-{name}!@"
+
+
+def optional_ref(*, name: str) -> str:
+    """The optional reference placeholder naming the definition `name`, spelled as
+    `vocabulary.optional_reference` spells it: filled as `ref` is where the render ships `name`, and
+    otherwise dropping its whole paragraph, so it stands in a paragraph of its own."""
+    return f"@!opt-{name}!@"
 
 
 # ─── Core ethos ──────────────────────────────────────────────────────────────
@@ -252,7 +264,7 @@ def data_race_frame(*, atomics: str, race_note: str = ".") -> str:
 
 TSAN_VISIBILITY = """ThreadSanitizer is how this class becomes visible."""
 
-SHELL_HOUSE_STYLE = """`#!/usr/bin/env bash` shebang, 2-space indent. Always brace variables — `${VAR}` not `$VAR`, including inside array indices (`arr[${i}]`) and positional params (`"${1}"`). Use the `function name() {` form, not bare `name() {`. Tests are `[[ ]]` not `[ ]`; string equality is `==` not `=`."""
+SHELL_HOUSE_STYLE = """Bash is the shell language: `#!/usr/bin/env bash` shebang, never a plain `sh` one — test stubs and generated scripts included — unless the project or the file states a need for another shell. 2-space indent. Always brace variables — `${VAR}` not `$VAR`, including inside array indices (`arr[${i}]`) and positional params (`"${1}"`). Use the `function name() {` form, not bare `name() {`. Tests are `[[ ]]` not `[ ]`; string equality is `==` not `=`."""
 
 
 NEW_PROJECT_SETUP = f"""**New project setup**: creating a project from scratch means creating its task-runner entry point WITH the first code, never retrofitting it later. A `justfile` by default; a `Makefile` only where the top-level utility commands genuinely need dependency management — file targets with staleness rules, generated content that must rebuild when its sources change, recursive sub-builds (`$(MAKE) -C`). Aliasing commands is never reason enough to choose Make over just. Standard targets: `build`/`rebuild`, `test`, an integration-test target, and `generate`/`regenerate` wherever generation is a distinct step the build does not own — CMake project generation in the C++/CMake family, `go generate` codegen in Go, code/data generation in Python (Rust and Zig typically need none: `build.rs`/`build.zig` own generation). Omit a target only where the task genuinely does not exist for the project — never because wiring it up is effort. No project may ever require the agent or the developer to execute a major project-iteration task from a naked command line with correctly-recalled values: the target is the memory. Also created at project birth: `{PROJECT_TEMP_DIR}/`, with a `{PROJECT_TEMP_DIR}/` entry in the root `.gitignore` — the project's scratch space (throwaway builds, probe harnesses, captured output), pre-made so the scratch-space rule never stalls on a missing directory. It lives beside `{PROJECT_HARNESS_DIR}/`, never inside it — writes under `{PROJECT_HARNESS_DIR}/` trip the permission system's own-settings protections."""
@@ -470,7 +482,7 @@ A KB built by this toolchain is **two graphs over one tree of Markdown files**, 
 - **Topography graph** — the navigation hierarchy `entry-point → domain index → subtopic index → leaf`, with `kb-root/axioms.md` declaring the corpus's axioms where it has any; a corpus declaring none has no such file, and there is then nothing to read and nothing to go looking for. A **leaf** is a translated (LaTeX→Markdown) unit of the corpus; a **summary** (subtopic, domain, entry-point) leads with Key Results drawn verbatim from below and exists to route a reader to the right leaf, not to stand in for it. Re-pitching the KB for a different reader is the reading route's job, delivered live.
 - **Claim graph** — a graph over the corpus's results. A node's host is the leaf its statement marker stands in, and which of kbase's summary pages lists it follows from that host; the two exceptions are the axiom nodes `kb-root/axioms.md` declares and the cited works below. A leaf is a container: one leaf may host any number and combination of nodes. Its scoring edges (`supports`, `founds`, `lifts`, `refutes`) close no cycle, since strength is undefined on one, while `references` and `demoted` edges bear on no strength and may cycle. A `references` edge is a pointer and never was a dependency; a `demoted` edge is a scoring edge the build set aside because it closed a cycle, and whether it is a real dependency stays open until a maintainer settles it.
 
-**The off-graph endcap.** A `wrk-` node stands for a work the corpus **cites and does not contain**. No leaf hosts one. Its id is minted, and its citation key is its `label`, unique among works, so a work three volumes cite is a single node. It is terminal — it has no premise of its own — and carries one authored value, `rigor`, the work's own standing from foundational at 1 to spurious at 0. That is not a derived strength — it sits on no build band — but it **weighs**. A claim reaches such a node by a **`founds`** edge from the work carrying the pairing's `bearing`, and the edge contributes `bearing × rigor` to the citing claim's premise `min`, exactly where an in-corpus premise's `bearing × strength` sits, so a bearing of `0.0` drives that `min` to zero. While either value is pending, the edge is left out of the citing claim's derivation, and a claim with no other participating premise reads `0` unless a lift stands over it — so those two judgements are owed rather than routed around. The edge is what tells a claim that rests on nothing from one whose warrant is outside reach: the same zero in an edge count, and not the same epistemic state.
+**The off-graph endcap.** A `wrk-` node stands for a work the corpus **cites and does not contain**. It is terminal — it has no premise of its own — and carries one authored value, `rigor`, the work's own standing from foundational at 1 to spurious at 0. That is not a derived strength — it sits on no build band — but it **weighs**. A claim reaches such a node by a **`founds`** edge from the work carrying the pairing's `bearing`, and the edge contributes `bearing × rigor` to the citing claim's premise `min`, exactly where an in-corpus premise's `bearing × strength` sits, so a bearing of `0.0` drives that `min` to zero. Any edge whose bearing or source strength is pending is left out of its target's strength, so while the work's `rigor` or the edge's `bearing` is pending, a claim with no other participating premise reads `0` unless a lift stands over it — those two judgements are owed rather than routed around. The edge is what tells a claim that rests on nothing from one whose warrant is outside reach: the same zero in an edge count, and not the same epistemic state.
 
 **The orientation documents.** No agent in this set edits `kb-root/AGENTS.md` or `kb-root/CONVENTIONS.md`, inside kbase's block or outside it.
 

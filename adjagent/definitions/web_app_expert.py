@@ -10,8 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Web app development: JS/TS, HTML/CSS, WebSockets, Web Workers, WASM integration, cross-browser "
-            "compatibility, mobile web and browser APIs. Prefer over "
-            f"{clauses.ref(name='generalist-coder')} for any web or browser target; prefer "
+            "compatibility, mobile web and browser APIs. Prefer "
             f"{clauses.ref(name='typescript-coder')} for TypeScript or JavaScript whose target is not a browser."
         ),
         tools=ALL,

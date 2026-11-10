@@ -2,8 +2,8 @@
 
 Consumer-facing behaviors and outcomes
 
-Adjagent is a drift-proof, model-tunable, harness-tunable generation system that renders agent,
-command, and skill definitions to order
+Adjagent renders agent, command and skill definitions to order, for any supported harness and
+model family, from one source in which shared text is written once
 
 Must-see:
 
@@ -15,14 +15,15 @@ Contents:
 
 - [Deployed Surfaces](deployed-surfaces/index.md)
   - [Surfaces and layout](deployed-surfaces/surfaces-and-layout.md)
-  - [Base and kb installs](deployed-surfaces/base-and-kb-installs.md)
+  - [Plugins](deployed-surfaces/plugins.md)
   - [Install destination](deployed-surfaces/install-destination.md)
-  - [Installed artifacts](deployed-surfaces/installed-artifacts.md)
+  - [Installed tree](deployed-surfaces/installed-tree.md)
   - [Shipped files](deployed-surfaces/shipped-files.md)
 - [Package and Command](package-and-command.md)
-- [Mage Plugin Distribution](mage-plugin-distribution.md)
-- [Generation System](generation-system.md)
-- [Generated-Definition Integrity](generated-definition-integrity.md)
+- [Mage Release](mage-release.md)
+- [Rendering](rendering.md)
+- [Generated files](generated-files.md)
 - [Write Safety](write-safety.md)
-- [Guest-Extraction Contract](guest-extraction-contract.md)
-- [Harness Agents File](harness-agents-file.md)
+- [Bodies usable without frontmatter](bodies-usable-without-frontmatter.md)
+- [Agents File](agents-file.md)
+- [Plan Status Form](plan-status-form.md)

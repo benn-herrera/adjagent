@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "adjagent"
 dynamic = ["version"]
-description = "A drift-proof, model-tunable generator of agent, command and skill definitions"
+description = "Adjagent renders agent, command and skill definitions to order, for any supported harness and model family, from one source in which text definitions share is written once"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -22,7 +22,7 @@ Repository = "https://github.com/benn-herrera/adjagent"
 include = ["adjagent", "adjagent.*"]
 
 [tool.setuptools.package-data]
-adjagent = ["kb-tools/**/*", "harnesses/resources/**/*", "docdicer-tools/**/*", "docdicer-tools/**/.*"]
+adjagent = ["kb-tools/**/*", "harnesses/resources/**/*", "docdicer-tools/**/*", "docdicer-tools/**/.*", "development-tools/**/*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "adjagent.__version__" }

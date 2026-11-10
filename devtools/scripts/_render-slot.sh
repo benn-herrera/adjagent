@@ -3,12 +3,14 @@
 # and rebuilt from the flags given, which are recorded in it. `--harness=NAME` is read here as well
 # as forwarded.
 #
-# The harness's agents file lands in one of two shapes: at the slot root as `<agents-file>`, for a
-# harness whose own files sit at its root (`user-harness-dir` `.` — a plugin, whose `.mcp.json` is
-# written beside it), otherwise under `harness/<name>/<agents-file>`.
+# Each plugin is rendered into its own slot project below the slot, <slot>/<plugin>/, which is also
+# the install's harness directory (`--subdir=`), so a claude slot project holds its plugin at
+# <slot>/<plugin>/skills/<plugin>/.
 #
-# The slot is the install's harness directory (`--subdir=`), so a claude slot holds the plugin, the
-# set it renders, at <slot>/skills/adjagent/.
+# Each plugin's agents file lands in one of two shapes: at the slot project's root as
+# `<agents-file>`, for a harness whose own files sit at its root (`user-harness-dir` `.` — a
+# harness-directory plugin, whose `.mcp.json` is written beside it), otherwise under
+# `<plugin>/harness/<name>/<agents-file>`.
 #
 # HOME is a fresh, empty scratch home for the whole render, removed on exit, so nothing the render
 # runs reads or writes the operator's real one.
@@ -17,6 +19,9 @@ set -euo pipefail
 : "${RENDERED_DIR:?RENDERED_DIR is empty or unset — run this script through its justfile recipe}"
 : "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"
 
+plugin_names="$("${PROJECT_ROOT}/devtools/scripts/_plugin-names.sh")"
+plugins=()
+while IFS= read -r name; do plugins+=("${name}"); done <<<"${plugin_names}"
 slug="${1}"
 shift
 scratch_home="${PROJECT_ROOT}/.claude-temp/render-home/${slug}"
@@ -32,21 +37,23 @@ for arg in "${args[@]+"${args[@]}"}"; do
     fi
 done
 [[ -z "${harness}" ]] && { harness="claude" && args+=("--harness=${harness}"); } || true
-agents_file="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" agents-file)"
-user_harness_dir="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${harness}" user-harness-dir)"
+agents_file="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${plugins[0]}" "${harness}" agents-file)"
+user_harness_dir="$("${PROJECT_ROOT}/devtools/scripts/_harness-value.sh" "${plugins[0]}" "${harness}" user-harness-dir)"
 out="${PROJECT_ROOT}/${RENDERED_DIR}/${slug}"
 rm -rf "${out}"
-if [[ "${user_harness_dir}" == "." ]]; then
-    agents_target="${out}/${agents_file}"
-    mkdir -p "${out}"
-else
-    agents_target="${out}/harness/${harness}/${agents_file}"
-    mkdir -p "${out}/harness/${harness}"
-fi
+mkdir -p "${out}"
 if [[ "$#" -gt 0 ]]; then
     printf '%s\n' "$@" > "${out}/RENDER-FLAGS.txt"
 else
     : > "${out}/RENDER-FLAGS.txt"
 fi
-"${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" "${harness}" "${agents_target}"
-PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${out}" --subdir= --with-kb "${args[@]}"
+for plugin in "${plugins[@]}"; do
+    if [[ "${user_harness_dir}" == "." ]]; then
+        agents_target="${out}/${plugin}/${agents_file}"
+    else
+        agents_target="${out}/${plugin}/harness/${harness}/${agents_file}"
+    fi
+    mkdir -p "$(dirname "${agents_target}")"
+    "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" "${harness}" "${agents_target}" "${plugin}"
+    PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${plugin}" "${out}/${plugin}" --subdir= "${args[@]}"
+done

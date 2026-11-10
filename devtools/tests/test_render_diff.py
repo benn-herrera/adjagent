@@ -6,17 +6,17 @@ from pathlib import Path
 
 from devtools.render_diff import body, line_kinds, text, walk
 
-OLD_BANNER = b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# !BODY-SHA256! abc\n#\nname: a\n---\ntext\n"
 NEW_BANNER = b"---\n# !GENERATED! from x\n# !TUNING! y\nname: a\n---\ntext\n"
+OTHER_BANNER = b"---\n# !GENERATED! from x\n# !TUNING! z\nname: a\n---\ntext\n"
 BANNERED_BODY = b"---\n# !BANNER!\nname: a\n---\ntext\n"
 COMMENT_BANNER = (
     b"<!-- !GENERATED! from adjagent/definitions/kbase.py \xe2\x80\x94 x -->\n"
-    b"<!-- !TUNING! family=claude seat=none member=none tier=a stock=b harness=claude -->\n"
+    b"<!-- !TUNING! family=claude tier=none member=none tier-map=a stock=b harness=claude -->\n"
     b"\n# Reading\n\nA paragraph.\n"
 )
 COMMENT_BANNER_OTHER = COMMENT_BANNER.replace(
-    b"<!-- !TUNING! family=claude seat=none member=none tier=a stock=b harness=claude -->",
-    b"<!-- !TUNING! family=gemma-4 seat=none member=none tier=c stock=none harness=opencode -->",
+    b"<!-- !TUNING! family=claude tier=none member=none tier-map=a stock=b harness=claude -->",
+    b"<!-- !TUNING! family=gemma-4 tier=none member=none tier-map=c stock=none harness=opencode -->",
 )
 
 
@@ -28,10 +28,7 @@ def run_walk(a: Path, b: Path) -> list[str]:
 
 
 class BodyTest(unittest.TestCase):
-    def test_old_banner_replaced(self):
-        self.assertEqual(body(OLD_BANNER), BANNERED_BODY)
-
-    def test_new_banner_replaced(self):
+    def test_banner_replaced(self):
         self.assertEqual(body(NEW_BANNER), BANNERED_BODY)
 
     def test_a_skill_files_comment_banner_is_replaced(self):
@@ -41,21 +38,19 @@ class BodyTest(unittest.TestCase):
         self.assertEqual(text(COMMENT_BANNER), text(COMMENT_BANNER_OTHER))
 
     def test_installed_banners_replaced(self):
-        old = b"#\n# !INSTALLED! from the adjagent repo\n# !BODY-SHA256! abc\n#\n"
-        new = b"# !INSTALLED! from kb-tools/x.py \xe2\x80\x94 do not edit here\n"
+        banner = b"# !INSTALLED! from kb-tools/x.py \xe2\x80\x94 do not edit here\n"
         for shebang in (b"", b"#!/usr/bin/env python3\n"):
-            for banner in (old, new):
-                with self.subTest(shebang=shebang, banner=banner):
-                    self.assertEqual(body(shebang + banner + b"x = 1\n"), shebang + b"# !BANNER!\nx = 1\n")
+            with self.subTest(shebang=shebang):
+                self.assertEqual(body(shebang + banner + b"x = 1\n"), shebang + b"# !BANNER!\nx = 1\n")
 
     def test_a_comment_that_is_not_a_banner_is_unchanged(self):
-        for data in (b"# a comment\nx = 1\n", b"#!/bin/sh\n# !INSTALLED\nx\n", b"#\n# !INSTALLED! from y\n#\n"):
+        for data in (b"# a comment\nx = 1\n", b"#!/usr/bin/env bash\n# !INSTALLED\nx\n", b"#\n# !INSTALLED! from y\n#\n"):
             with self.subTest(data=data):
                 self.assertEqual(body(data), data)
 
     def test_unbannered_files_unchanged(self):
-        short_block = b"---\n#\n# !GENERATED! from x\nname: a\n"
-        wrong_prefix = b"---\n#\n# !GENERATED! from x\n# !TUNING! y\n# other\n#\nname: a\n"
+        short_block = b"---\n# !GENERATED! from x\nname: a\n"
+        wrong_prefix = b"---\n# !GENERATED! from x\n# other\nname: a\n"
         for data in (b"no frontmatter\n# !GENERATED! from x\n", short_block, wrong_prefix):
             with self.subTest(data=data):
                 self.assertEqual(body(data), data)
@@ -126,7 +121,7 @@ class WalkTest(unittest.TestCase):
         self.b.mkdir()
 
     def test_banner_only_difference_prints_nothing(self):
-        (self.a / "f.md").write_bytes(OLD_BANNER)
+        (self.a / "f.md").write_bytes(OTHER_BANNER)
         (self.b / "f.md").write_bytes(NEW_BANNER)
         self.assertEqual(run_walk(self.a, self.b), [])
 

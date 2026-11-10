@@ -8,10 +8,7 @@ DEFINITIONS = (
     Definition(
         name="android-app-expert",
         kind=Kind.AGENT,
-        description=(
-            "Android app development: Kotlin/Compose, including NDK/JNI integration and Gradle configuration. "
-            f"Prefer over {clauses.ref(name='generalist-coder')} for any Android target."
-        ),
+        description="Android app development: Kotlin/Compose, including NDK/JNI integration and Gradle configuration.",
         tools=ALL,
         tier="high",
         color="#FFA500",

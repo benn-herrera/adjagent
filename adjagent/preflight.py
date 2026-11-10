@@ -43,19 +43,18 @@ class Difference:
 
 def _scratch_bases(bases: Sequence[Path], *, scratch: Path) -> tuple[list[Path], list[int]]:
     """Each real base's counterpart under `scratch`, in order, and the indexes of the outermost bases. A
-    base inside an earlier one — as spelled, else with symlinks followed — sits at the same position
-    below that one's counterpart, so the relation between them holds in the copy; any other base is
-    outermost and sits at `scratch/<index>/<its own name>`."""
-    spellings = [[Path(os.path.normpath(base.absolute())) for base in bases], [base.resolve() for base in bases]]
+    base inside an earlier one, both made absolute and normalized, sits at the same position below that
+    one's counterpart, so the relation between them holds in the copy; any other base is outermost and
+    sits at `scratch/<index>/<its own name>`."""
+    normalized = [Path(os.path.normpath(base.absolute())) for base in bases]
     placed: list[Path] = []
     outermost: list[int] = []
     for index, base in enumerate(bases):
         nesting = next(
             (
-                (earlier, forms[index].relative_to(forms[earlier]))
-                for forms in spellings
+                (earlier, normalized[index].relative_to(normalized[earlier]))
                 for earlier in range(index)
-                if forms[index].is_relative_to(forms[earlier])
+                if normalized[index].is_relative_to(normalized[earlier])
             ),
             None,
         )
@@ -68,29 +67,19 @@ def _scratch_bases(bases: Sequence[Path], *, scratch: Path) -> tuple[list[Path],
     return placed, outermost
 
 
-def _copy_tree(real: Path, copy: Path) -> None:
-    """`real`'s tree into `copy`, symlinks below it dereferenced, dangling ones and every `.venv` left
-    out."""
-    shutil.copytree(real, copy, symlinks=False, ignore=_left_out_of_copy, dirs_exist_ok=True)
-
-
-def _left_out_of_copy(directory: str, names: list[str]) -> list[str]:
-    """The entries of `directory` a copy leaves out: a `.venv`, and a dangling link — which `copytree`'s
-    own `ignore_dangling_symlinks` skips only at the top of the tree on Python 3.9."""
-    paths = {name: Path(directory, name) for name in names}
-    return [name for name, path in paths.items() if name == VENV_DIR or (path.is_symlink() and not path.exists())]
-
-
 def _copy_managed(managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_bases: Sequence[Path]) -> None:
-    """Copy each managed path that exists to the same position below its base's counterpart, as what it
-    names: a directory as its tree, a file as its bytes, a dangling link as nothing, and every link below
-    them dereferenced, so the copy holds no link and nothing in it points back into the target. Every
-    `.venv` is left out. A directory a managed path sits in is created where the real one exists, since
-    an install's checks read whether it does; where a regular file stands in its place instead, the
-    outermost such file is copied, so the install meets the same obstacle."""
+    """Copy each managed path that exists to the same position below its base's counterpart: a directory
+    as its tree, every `.venv` left out, and a file as its bytes. A directory a managed path sits in is
+    created where the real one exists, since an install's checks read whether it does; where a regular
+    file stands in its place instead, or in a base's, the outermost such file is copied, so the install
+    meets the same obstacle."""
     for (base, paths), scratch_base in zip(managed, scratch_bases):
         if base.is_dir():
             scratch_base.mkdir(parents=True, exist_ok=True)
+        elif base.is_file():
+            scratch_base.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(base, scratch_base)
+            continue
         for relative in paths:
             real, copy = base / relative, scratch_base / relative
             if real.parent.is_dir():
@@ -108,7 +97,7 @@ def _copy_managed(managed: Sequence[tuple[Path, Sequence[str]]], *, scratch_base
                     (scratch_base / obstacle).parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(base / obstacle, scratch_base / obstacle)
             if real.is_dir():
-                _copy_tree(real, copy)
+                shutil.copytree(real, copy, ignore=shutil.ignore_patterns(VENV_DIR), dirs_exist_ok=True)
             elif real.is_file():
                 shutil.copy2(real, copy)
 
@@ -125,7 +114,7 @@ def _tree(base: Path) -> tuple[set[Path], set[Path]]:
 
 
 def _differs(copy: Path, real: Path) -> bool:
-    """Whether `copy` and `real` differ in bytes or in permission bits, a symlink read through."""
+    """Whether `copy` and `real` differ in bytes or in permission bits."""
     if not (copy.exists() and real.exists()):
         return copy.exists() != real.exists()
     if not filecmp.cmp(copy, real, shallow=False):

@@ -8,10 +8,7 @@ DEFINITIONS = (
     Definition(
         name="rust-coder",
         kind=Kind.AGENT,
-        description=(
-            f"Rust implementation specialist. Prefer over {clauses.ref(name='generalist-coder')} for userspace "
-            "Rust work of any kind."
-        ),
+        description="Rust implementation specialist.",
         tools=ALL,
         tier="high",
         color="#dea584",

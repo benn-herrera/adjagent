@@ -6,11 +6,11 @@ directory, and each implementation's reason must equal the table's.
 A case is a shell command (`command`) or a file-tool call (`tool`, named as Claude names it or, for a
 tool only opencode has, as opencode does, with `input` in that tool's argument names). In a case,
 `@scratch@` stands for the harness's scratch directory, `@harness@` for its harness directory and
-`@root@` for the case's root, substituted in the command, the input, the files, the links, the working
-directory and the expected reason. `files` are created; `links` maps a path to a symlink target. A
-case's optional `cwd` is the session's working directory, relative to the root and defaulting to it;
-claude receives it as the input `cwd` beside `CLAUDE_PROJECT_DIR` set to the root, as Claude Code
-sends both, and opencode's shell receives it as `workdir`. A case's optional `harness`, `"claude"` or
+`@root@` for the case's root, substituted in the command, the input, the files, the working directory
+and the expected reason. `files` are created. A case's optional `cwd` is the session's working
+directory, relative to the root and defaulting to it; claude receives it as the input `cwd` beside
+`CLAUDE_PROJECT_DIR` set to the root, as Claude Code sends both, and opencode's shell receives it as
+`workdir`. A case's optional `harness`, `"claude"` or
 `"opencode"`, runs it under that implementation only. The TypeScript side runs under `bun`; a
 missing `bun` fails rather than skips, because a skip would hide drift between the two.
 """
@@ -29,16 +29,17 @@ import pytest
 from adjagent.harness import Harness
 from adjagent.harnesses.claude import HARNESS as CLAUDE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
-from adjagent.install import HARNESS_RESOURCES_SOURCE, PACKAGE_ROOT
+from adjagent.install import HARNESS_RESOURCES_SOURCE
+from adjagent.install_base import PACKAGE_ROOT
 
 _RESOURCES = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE
 _PERL_HOOK = _RESOURCES / "claude/hooks/guardrail.pl"
-_TS_PLUGIN = _RESOURCES / "opencode/plugins/guardrail.ts"
+_TS_PLUGIN = _RESOURCES / "opencode/guardrail.ts"
 _TESTS = Path(__file__).parent
 _CASES = json.loads((_TESTS / "guardrail_cases.json").read_text(encoding="utf-8"))
 _PERL_SCRATCH = CLAUDE.project_temp_dir
 _TS_SCRATCH = OPENCODE.project_temp_dir
-_CASE_FIELDS = {"command", "tool", "input", "reason", "files", "links", "cwd", "harness"}
+_CASE_FIELDS = {"command", "tool", "input", "reason", "files", "cwd", "harness"}
 _INDEX_REASON_HEAD = "kb-root/.index/ holds kbase's records"
 
 # Each Claude tool's opencode name, None where opencode has no counterpart; the Claude argument
@@ -101,7 +102,7 @@ def _fill(text: str | None, harness: Harness, root: Path) -> str | None:
 
 
 def _case_root(root: Path, case: dict, harness: Harness, script: Path) -> tuple[Path, Path, Path, dict]:
-    """The case's root, holding its files, its links and a copy of `script` at the path it takes in
+    """The case's root, holding its files and a copy of `script` at the path it takes in
     the harness directory; its working directory, created inside it; the staged script; and the
     case's tool input, filled."""
     root.mkdir()
@@ -109,10 +110,6 @@ def _case_root(root: Path, case: dict, harness: Harness, script: Path) -> tuple[
         path = root / _fill(rel, harness, root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("x\n", encoding="utf-8")
-    for rel, target in case.get("links", {}).items():
-        path = root / _fill(rel, harness, root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.symlink_to(_fill(target, harness, root))
     staged = root / harness.project_harness_dir / script.relative_to(_RESOURCES / harness.name)
     staged.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(script, staged)
@@ -204,7 +201,7 @@ def test_guardrail_cases_carry_only_known_fields() -> None:
 def test_guardrail_matcher_names_exactly_the_claude_tools_the_case_table_covers() -> None:
     """A tool the matcher sends to the hook with no case is untested, and a case for a tool the
     matcher omits tests a call the hook never sees."""
-    [entry] = json.loads(CLAUDE.guardrail.registration.text())["hooks"]["PreToolUse"]
+    [entry] = json.loads(CLAUDE.guardrail.registration.text("devpro", ()))["hooks"]["PreToolUse"]
     matcher = set(entry["matcher"].split("|"))
     assert matcher == {_tool(case) for case in _CASES if _tool(case) in _CLAUDE_TO_OPENCODE_TOOLS}
 
@@ -217,14 +214,12 @@ def test_guardrail_matcher_names_exactly_the_claude_tools_the_case_table_covers(
     ],
     ids=["pl", "ts"],
 )
-def test_guardrail_scratch_list_holds_its_harness_temp_dir(
-    script: Path, harness_scratch: str, scratch_list: str
-) -> None:
-    """Each script spells its scratch trees itself; the harness's temp directory, which the case table
-    exempts as `@scratch@`, must be among them."""
+def test_guardrail_scratch_list_is_its_harness_temp_dir(script: Path, harness_scratch: str, scratch_list: str) -> None:
+    """Each script spells its scratch list itself, and it is exactly the harness's temp directory,
+    which the case table exempts as `@scratch@`."""
     found = re.search(scratch_list, script.read_text(encoding="utf-8"), re.MULTILINE)
     assert found is not None, scratch_list
-    assert re.findall(r"""["']([^"']*)["']""", found.group(1)).count(harness_scratch) == 1
+    assert re.findall(r"""["']([^"']*)["']""", found.group(1)) == [harness_scratch]
 
 
 @pytest.mark.parametrize("index", _TS_INDEXES, ids=[_id(i) for i in _TS_INDEXES])

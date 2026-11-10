@@ -9,8 +9,8 @@ from adjagent import clauses
 from adjagent.definition import Definition, SkillFile
 from adjagent.vocabulary import Kind
 
-KBASE_MIN_VERSION = "0.10.0"
-KBASE_TAP_FORMULA = "benn-herrera/kbase/kbase"
+KBASE_MIN_VERSION = "0.11.0"
+KBASE_TAP_FORMULA = "benn-herrera/tap/kbase"
 
 DEFINITIONS = (
     Definition(
@@ -139,21 +139,12 @@ Every result in this KB is a node whose record says how trustworthy it is. When 
 on a result — and especially when assisting a derivation or research effort — surface its strength;
 do not cite a leaf as if all results were equally solid.
 
-**Where it lives.** Each result's node carries a `clm-xxxxxx` id, and `show` on that id returns its
-record; the queries below resolve a result to its id.
-
 **Derivation, lifts and caps.** `strength = min(max(derivation, every lift), every cap)`, where
-`derivation = min(rigor, every participating premise)`, and `0` where none participates:
-
-- **Premise** — a `supports` edge contributes `bearing × source strength`, a `founds` edge
-  `bearing × source rigor`. Bearings below 1 compound down a chain, so the weak point may be a low
-  bearing rather than a weak node.
-- **Lift** — an `ana-` or *run* `exp-` lifting the claim contributes `bearing × lifter strength`, above
-  the derivation.
-- **Cap** — a `clm-`, `ana-` or *run* `exp-` refuting it caps it at `1 − bearing × refuter strength`;
-  the smallest cap wins.
-- **Exclusion** — an edge whose bearing or source strength is pending is left out: no contribution,
-  no lift, no cap.
+`derivation = min(rigor, every participating premise)`, and, where none participates, `0` for a
+claim and its own rigor for an analysis. A premise is a `supports` or `founds` edge into the claim,
+a lift a `lifts` edge and a cap a `refutes` edge, each entering as its `contribution`, which
+`kbase://help/trace` defines. Bearings below 1 compound down a chain, so the weak point may be a low
+bearing rather than a weak node.
 
 The `strength` `show` reports already includes all three, and they are not interchangeable for
 derivation work: a claim solid via its *derivation* can be built on deeper, while one solid **only** via
@@ -161,25 +152,23 @@ a lift (weak derivation, strong lift) supports a conclusion yet does NOT license
 derivation on it.
 
 **Pending does not propagate.** A claim no scoring pass has reached has a pending rigor, and where a
-premise participates its strength is pending too unless a lift stands over it. Strength is computed
-over the premises that remain — possibly higher than it will read once a left-out one is judged, and
-`0` where none remains. A `0` has several causes, which `show` (`rigor`, `premise_count`) and `trace`
-with `direction: in` tell apart: no premise at all, every premise unjudged, a zero in the minimum — a
-judged `0.0` rigor or bearing, or a premise at `0` — or a refutation's cap. `find` by strength passes
-over pending claims but lists those unjudged zeros: after a build, before any bearing pass, that is
-every claim. A run `exp-` can float a pending-derivation claim to solid; a pending `ana-` never
-poisons an otherwise-sound claim.
+premise participates its strength is pending too unless a lift stands over it. A `0` has several
+causes, which `show` (`rigor`, `premises`) and `trace` with `direction: in` tell apart: no premise at
+all, every premise unjudged, a zero in the minimum — a judged `0.0` rigor or bearing, or a premise at
+`0` — or a refutation's cap. `find` with `min` or `max` passes over pending claims, but one whose
+bound admits `0` lists those unjudged zeros: after a build, before any bearing pass, that is every
+claim. A run `exp-` can float a pending-derivation claim to solid; a pending `ana-` never poisons an
+otherwise-sound claim.
 
 **Say which term, and what is unjudged.** When surfacing strength for a derivation or research effort,
-say *which term* carries the strength — derivation, lift or cap — and point at the lifting `exp-`/`ana-`
-or refuting `clm-`/`exp-`/`ana-` nodes — the evidence, and the lever for strengthening. When a claim
-reads pending, or reads a value a left-out premise has yet to move, say so plainly and name which: the
-result may well be sound, but its strength is *unassessed*, and flagging that uncertainty is not the
-same as implying solidity.
+say *which term* carries the strength — derivation, lift or cap — and point at the lifting or
+refuting nodes whose `contribution` is a number — the evidence, and the lever for strengthening.
+When a claim reads pending, or reads a value a left-out premise has yet to move, say so plainly and
+name which: the result may well be sound, but its strength is *unassessed*, and flagging that
+uncertainty is not the same as implying solidity.
 
-**Query it through the index — don't grep.** The queries are operations of the one tool
-`{clauses.MCP_TOOL_PREFIX}query`: `kbase://help/query` says what they share, and
-`kbase://help/<operation>` gives each one's arguments. Route the user's need to an operation:
+**Query it through the index — don't grep.** Route the user's need to an operation of
+`{clauses.MCP_TOOL_PREFIX}query`:
 
 - **A result named in words** ("Proposition 4.3", "the Lyapunov result") — `find` by `title` resolves
   it to its id. The user never has to know or guess an id: look it up for them, and offer it when it
@@ -192,20 +181,17 @@ same as implying solidity.
 - **Who cites a node** — `citations-of`. Surface a citation on request; do not follow it.
 
 **Assisting derivations.** When the user builds or checks a derivation, trace the strength of the
-chain it rests on (`trace` on the claim with `direction: in`: the whole chain, each edge's
-contribution) and surface the **weakest link** explicitly — a weak node or a low bearing — e.g. "this
-passes through `clm-yl5n5v` at strength 0.30, *do not build on, rework needed* — that is the
-load-bearing weak point."
+chain it rests on (`trace` on the claim with `direction: in`) and surface the **weakest link**
+explicitly — a weak node or a low bearing — e.g. "this passes through `clm-yl5n5v` at strength 0.30,
+*do not build on, rework needed* — that is the load-bearing weak point."
 
-A `wrk-` id among the claim's edges (`edges` with the claim's `id`) is a premise contributing
-`bearing × rigor`, with no derived strength of its own, so it sits on no strength band, and the
-weakest link in a chain may be a work this corpus does not contain. Name the work itself as the weak
-point when it is one — a chain that runs out of the corpus is a different exposure from a weak step
-inside it, and neither stands in for the other. Where either score is pending, the edge is left out
-of the claim's derivation, and the unsupplied score is what to report: `show` on the work's id gives
-its title and `rigor`, and `edges` with the claim's `id` gives the `founds` edge's bearing. To reach
-the work, `find` it by the citing leaf's own citation key, its `label`, rather than by its name. An
-`axm-` id is an axiom: a `founds` premise contributing `bearing × 1.0`, its rigor `1.0` by rule.
+The weakest link in a chain may be a work this corpus does not contain, a `wrk-` id among the
+claim's edges. Name the work itself as the weak point when it is one — a chain that runs out of the
+corpus is a different exposure from a weak step inside it, and neither stands in for the other.
+Where the work's `rigor` or the `founds` edge's bearing is pending, the unsupplied score is what to
+report: `show` on the work's id gives its title and `rigor`, and `edges` with the claim's `id` gives
+the bearing. To reach the work, `find` it by the citing leaf's own citation key, its `label`, rather
+than by its name.
 
 ## Cross-references
 
@@ -250,7 +236,7 @@ The same `build` call with `no-inference` true is the fast path; `kbase://help/b
 drops. Offer it for a first look at what a KB over these sources holds, or for a run the user wants
 before spending inference on a long build. State the trade when you offer it: this is the structure,
 not a complete KB, and the fast run is never upgraded later — the full build afterwards is a start
-over (*Resuming and starting over*, below) and keeps nothing of it.
+over (*Starting over*, below) and keeps nothing of it.
 
 ## Launch
 
@@ -261,7 +247,7 @@ The result holds a `wait` line. Run it as a background shell command in the same
 rather than composed from the flags, and relay the outcome when it returns.
 
 A refusal starts nothing: relay its items and their remedies, and the launch ends there. A
-`check: provider` item is a configuration gap: call the `show-config` tool and relay its document
+`check: provider` item is a configuration gap: call the `show-config` tool and relay its result
 rather than reading the file yourself to explain the refusal, so the user can fix the file the item's
 `path` names in the layer `show-config` reports. Then offer to set the provider up through
 `configure-providers`, then `configure-models`, following the steps each result's `next` gives.
@@ -282,13 +268,11 @@ argument.
 `status` on the user's request: relay its `state`, the stage under `current` and the `resume` command
 where it carries one. `cancel` only on the user's word, and relay what it returns.
 
-## Resuming and starting over
+## Starting over
 
-- **A resume** is `build` with `resume` true.
-- **Starting over** is the command `build-trail` gives for `started-at`, or removing `kb-root/`, and
-  either is the user's to run. Relay the command, and the paths under `dirty` where `build-trail`
-  lists any. Once the user has run it, call `build` with the volume roots they name — a fresh
-  build.""",
+Starting over is the command `build-trail` gives for `started-at`, or removing `kb-root/`, and
+either is the user's to run. Relay the command, and the paths under `dirty` where `build-trail` lists
+any. Once the user has run it, call `build` with the volume roots they name — a fresh build.""",
             ),
             SkillFile(
                 path="references/scoring.md",
@@ -317,7 +301,7 @@ the plan and the endpoint; you do not.
 
 Call the `score` tool, and run the `wait` line its result holds as a background shell command in the
 same turn, as printed rather than composed from the flags. When it returns, report the run's outcome
-from the document it prints, and relay its `resume` line where items remain rather than running it.
+from the result it prints, and relay its `resume` line where items remain rather than running it.
 A refusal starts nothing: relay what it names.
 
 `status` on the user's request: relay its `state`, the run's `counts` and its `resume` line where it
@@ -370,8 +354,7 @@ yourself.
 **A leaf you author is your own.** Migrating `session/` work means writing whole leaves, and those
 are yours end to end.
 
-**Metadata goes through the `write` tool.** `kbase://help/write` states the batch and its outcomes,
-and `kbase://help/<operation>` states each op.
+**Metadata goes through the `write` tool.**
 
 **Whether a batch commits `kb-root/` is the user's call.** Passing `commit` is strongly encouraged:
 it makes the batch undoable as one unit.
@@ -409,7 +392,6 @@ A leaf you add by hand carries what a built one does:
   `index.md` itself the one a directory above. Directly under `kb-root/` that parent is
   `entry-point.md`, so a domain index up-links to `../entry-point.md`; there is no
   `kb-root/index.md` to point at.
-- A statement marker per node the document hosts, placed by that node's add op.
 - Cross-references use the `> Related:` blockquote form — never paraphrase the target.
 - A node named in prose is a citation; `kbase://help/add-citation` states its forms.
 

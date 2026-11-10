@@ -1,7 +1,9 @@
 # docdicer targets. This file is installed at
-# <harness-dir>/skills/docdicer/tools/runner-snippets/ — <harness-dir> being
-# the project's .claude or .opencode — and is included from the consuming
-# project's Makefile by one line (never copied into it):
+# <harness-relpath>/skills/docdicer/tools/runner-snippets/ — <harness-relpath>
+# being the devpro plugin's install directory relative to the project root:
+# .claude/skills/devpro under claude, .opencode/plugins/devpro under opencode —
+# and is included from the consuming project's Makefile by one line (never
+# copied into it):
 #
 #     -include <harness-relpath>/skills/docdicer/tools/runner-snippets/docdicer.mk
 #
@@ -14,7 +16,7 @@
 #
 # The launcher, tools/docdicer, sits one directory up from this file, so it is
 # found from the snippet's own path in MAKEFILE_LIST, never from the project
-# root. It is POSIX sh and runs docdicer from a venv beside it; until
+# root. It is a bash script and runs docdicer from a venv beside it; until
 # `tools/docdicer --install` has built that venv, every target prints how to
 # install and fails.
 #

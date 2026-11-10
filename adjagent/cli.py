@@ -21,6 +21,8 @@ from adjagent.context import (
     build_render,
     harness_named,
     map_spec,
+    plugin_named,
+    plugins,
 )
 from adjagent.errors import InputError
 from adjagent.install import preflighted_install, run_tool_install, uncommitted_sources
@@ -43,43 +45,50 @@ def _add_tuning_flags(verb: argparse.ArgumentParser, *, harness_default: str | N
     verb.add_argument(ALIAS_MAP_FLAG, dest="alias_spec", metavar="SPEC", help="tier=alias for every tier, or all=")
 
 
+def _add_plugin(verb: argparse.ArgumentParser) -> None:
+    verb.add_argument("plugin", choices=list(plugins()), metavar="PLUGIN", help=f"one of {', '.join(plugins())}")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    """One verb, required: `render --out DIR` and `install TARGET [--subdir DIR] [--verbose]
-    [--with-kb] [--install-global-agents-file] [--dry-run]`, each with the tuning flags;
-    `install-agents-file DIR [--harness NAME] [--dry-run]`; `render-agents-file HARNESS OUT`; and
-    `harness NAME KEY`. The top-level `--version` prints the bare version. allow_abbrev=False on every parser."""
+    """One verb, required, each but `--version` taking the plugin first: `render PLUGIN --out DIR` and
+    `install PLUGIN TARGET [--subdir DIR] [--verbose] [--dry-run]`, each with the tuning flags;
+    `install-agents-file PLUGIN DIR [--harness NAME] [--dry-run]`; `render-agents-file PLUGIN HARNESS OUT`;
+    and two maintainer helpers hidden from `--help`: `harness PLUGIN NAME KEY`, and `plugins`, which prints
+    each plugin's name, one per line. No plugin is a default. The top-level `--version` prints the bare
+    version. allow_abbrev=False on every parser.
+    """
     parser = argparse.ArgumentParser(prog="adjagent", allow_abbrev=False)
     parser.add_argument("--version", action="version", version=__version__)
+    # The hidden verbs are added without help, and the verb list is set below from every other: argparse
+    # (3.9) still prints a subparser added with help=SUPPRESS, as "==SUPPRESS==", and lists every choice
+    # in the usage line.
     verbs = parser.add_subparsers(dest="verb", required=True)
-    render = verbs.add_parser("render", help="render every definition into DIR", allow_abbrev=False)
+    render = verbs.add_parser("render", help="render the plugin's definitions into DIR", allow_abbrev=False)
+    _add_plugin(render)
     render.add_argument("--out", required=True, type=Path, metavar="DIR", help="an existing output root")
     _add_tuning_flags(render, harness_default=DEFAULT_HARNESS, harness_help="the harness to render for")
     installing = verbs.add_parser(
-        "install", help="render into the target's ROOT and copy the packages", allow_abbrev=False
+        "install", help="render the plugin into its install directory and copy its packages", allow_abbrev=False
     )
+    _add_plugin(installing)
     installing.add_argument("target", type=Path, metavar="TARGET", help="an existing project or harness directory")
     installing.add_argument(
         "--subdir",
         metavar="DIR",
         default=None,
-        help="the harness directory is TARGET/DIR, TARGET being the project root; empty makes it TARGET itself",
+        help="the harness directory is TARGET/DIR, TARGET being the project root, DIR inside it; empty makes it TARGET itself",
     )
     installing.add_argument("--verbose", "-v", action="store_true", help="report every file written")
-    installing.add_argument(
-        "--with-kb", action="store_true", help="install the kb definitions and the kb-tools package"
-    )
-    installing.add_argument(
-        "--install-global-agents-file",
-        action="store_true",
-        help="on a user-level install, also install the agents file at ROOT; ignored on a project install",
-    )
     installing.add_argument("--dry-run", action="store_true", help=_DRY_RUN_HELP)
     _add_tuning_flags(
         installing,
         harness_default=None,
         harness_help="the harness to install for; detected from TARGET when not given",
     )
-    agents_file = verbs.add_parser("install-agents-file", help="install the agents file block", allow_abbrev=False)
+    agents_file = verbs.add_parser(
+        "install-agents-file", help="install the plugin's agents file block", allow_abbrev=False
+    )
+    _add_plugin(agents_file)
     agents_file.add_argument("directory", type=Path, metavar="DIR")
     agents_file.add_argument(
         "--harness",
@@ -90,17 +99,26 @@ def build_parser() -> argparse.ArgumentParser:
     agents_file.add_argument(
         "--dry-run", action="store_true", help="print which files the install would create or change; write nothing"
     )
-    fresh = verbs.add_parser("render-agents-file", help="write a fresh agents file to OUT", allow_abbrev=False)
+    fresh = verbs.add_parser(
+        "render-agents-file", help="write the plugin's fresh agents file to OUT", allow_abbrev=False
+    )
+    _add_plugin(fresh)
     fresh.add_argument("harness", metavar="HARNESS")
     fresh.add_argument("out", type=Path, metavar="OUT")
-    query = verbs.add_parser("harness", help="print one harness value", allow_abbrev=False)
+    query = verbs.add_parser("harness", allow_abbrev=False)
+    _add_plugin(query)
     query.add_argument("name", metavar="NAME")
     query.add_argument("key", choices=[key(part) for part in HarnessText], metavar="KEY")
+    verbs.add_parser("plugins", allow_abbrev=False)
+    hidden = {"harness", "plugins"}
+    verbs.metavar = "{" + ",".join(name for name in verbs.choices if name not in hidden) + "}"
     return parser
 
 
 def _tuned(args: argparse.Namespace, *, harness: str) -> Render:
-    ctx = build_render(harness=harness, family=args.family, tier_spec=args.tier_spec, alias_spec=args.alias_spec)
+    ctx = build_render(
+        harness=harness, plugin=args.plugin, family=args.family, tier_spec=args.tier_spec, alias_spec=args.alias_spec
+    )
     aliases = "" if ctx.alias_map is None else f" alias[{map_spec(ctx.alias_map)}]"
     print(f"tuning: family={ctx.family.name} tier[{map_spec(ctx.tier_map)}]{aliases} harness={ctx.harness.name}")
     return ctx
@@ -112,36 +130,38 @@ def _run(args: argparse.Namespace) -> None:
         for path in write_renders(args.out, renders):
             print(f"wrote {path}")
     elif args.verb == "install":
-        target = resolve_install_target(args.target, harness=args.harness, subdir=args.subdir)
+        target = resolve_install_target(args.target, harness=args.harness, plugin=args.plugin, subdir=args.subdir)
         preflighted_install(
             target.harness_dir,
             _tuned(args, harness=target.harness),
             verbose=args.verbose,
-            with_kb=args.with_kb,
             project_root=target.project_root,
             uncommitted=uncommitted_sources,
             tool_install=run_tool_install,
-            global_agents_file=args.install_global_agents_file,
             dry_run=args.dry_run,
         )
     elif args.verb == "install-agents-file":
         harness = harness_named(agents_file_harness(args.directory, args.harness))
         preflighted_agents_file_install(
-            args.directory, harness, uncommitted=uncommitted_sources(), dry_run=args.dry_run
+            args.directory, harness, plugin_named(args.plugin), uncommitted=uncommitted_sources, dry_run=args.dry_run
         )
     elif args.verb == "render-agents-file":
         harness = harness_named(args.harness)
-        args.out.write_text(render_agents_file(harness, scope=scope_name(harness, args.out.parent)), encoding="utf-8")
+        text = render_agents_file(harness, plugin_named(args.plugin), scope=scope_name(harness, args.out.parent))
+        args.out.write_text(text, encoding="utf-8")
         print(f"wrote {args.out}")
+    elif args.verb == "plugins":
+        print("\n".join(plugins()))
     else:
-        print(harness_named(args.name).text(HarnessText("_".join(args.key.split("-")))))
+        bound = harness_named(args.name).bound(plugin_named(args.plugin).name)
+        print(bound.text(HarnessText("_".join(args.key.split("-")))))
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run the verb. An InputError prints `error: <msg>` on stderr and exits 2."""
+    """Run the verb. An InputError or OSError prints `error: <msg>` on stderr and exits 2."""
     args = build_parser().parse_args(argv)
     try:
         _run(args)
-    except InputError as exc:
+    except (InputError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)

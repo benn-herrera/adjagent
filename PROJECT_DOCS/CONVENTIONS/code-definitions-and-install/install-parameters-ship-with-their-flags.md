@@ -5,4 +5,4 @@ through the flags `adjagent/cli.py` declares in `build_parser`, so a parameter a
 `install()` alone ships a capability no recipe can ask for. The flag lands in the same change. The
 parameter's own tests do not catch the gap: a test calling `install(...)` proves the parameter
 works, never that anything can supply it — only a call through `main([...])` proves the flag
-reaches it, the shape `--with-kb` has.
+reaches it, the shape the plugin argument has.

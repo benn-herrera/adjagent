@@ -3,38 +3,43 @@
 A harness is everything rendered output differs on between harnesses: the
 directory and file names prose spells, the tool spellings, the model shape it
 accepts and the words that render no model at all, whether a map flag's bare
-value names the whole map, the frontmatter lines it reads, the rule a dispatched
+value names the whole map, where a definition's metadata goes — the frontmatter
+lines it reads, or the registry it reads them all from — the rule a dispatched
 agent follows when running recipes in its shell, the files it
-renders beside the definitions, the definitions it renders nothing for, the
-prefix a definition's name takes where other definition text names it, the
-path below its harness directory the set is written into, the
-settings file it registers an MCP server in, the guardrail hook it
-registers, where it has one, and the entries earlier installs wrote that an
-install removes. It holds no tier map, no family and
+renders beside the definitions, the resource that registers the plugin where one
+does, the definitions it renders nothing for, the prefix a definition's name
+takes where other definition text names it, the path below its harness directory the set is written into, the
+guardrail hook it registers, where it has one. It holds no tier map, no family and
 no knowledge of any one definition. Its emitter only lays out lines; the
 renderer maps tools to spellings and computes the governed keys.
 
-The plugin name and the plugin manifest every plugin-form harness renders are here, so each value
-derived from the name has one source.
+The values that vary by plugin are templates over `{plugin}`, filled once by `Harness.bound`; a harness
+takes the plugin's name as a string and knows nothing of its members. The manifest every
+plugin-form harness renders is here, its name and marker the bound plugin's.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
 from adjagent import __version__
 from adjagent.errors import InputError
-from adjagent.vocabulary import IDENTIFIER, HarnessText, OptionalHarnessText, Tool
+from adjagent.vocabulary import IDENTIFIER, HarnessText, Kind, OptionalHarnessText, Tool
 
-PLUGIN_NAME = "adjagent"
-"""The one spelling of the plugin's name: its manifest name, and the source of every reference prefix,
-plugin directory and plugin MCP prefix a harness derives from it."""
+KBASE_OWNER = "kbase"
+"""The definition the kbase toolchain ships with: the kb-tools package, the runner include line and the
+`kbase` MCP entry are delivered where it ships, and nowhere else."""
+KBASE_NAME = "kbase"
+"""The command every harness's `kbase` MCP entry names: the bare name, resolved from PATH, where the
+user's own kbase install puts it."""
+KBASE_SERVER = "kbase"
+"""The name every harness registers the `kbase` MCP server under, which its `mcp_tool_prefix` spells."""
 
 
 @dataclass(frozen=True)
@@ -50,62 +55,96 @@ class AgentFields:
 
 
 @dataclass(frozen=True)
-class HarnessFile:
-    """A file a harness renders into the output root beside the definitions: the path below the root,
-    the builder for its whole text, and the marker a file at that path must hold to be one this
-    repository wrote (a format admitting no comment carries its ownership as a value inside it)."""
+class ShippedDefinition:
+    """One definition a render ships, in the general form a harness-rendered file reads: its name, the
+    reference the render spells it as, and its kind, its output path below the output root, its
+    description filled (None for a kind that has none), and its frontmatter values for an agent (None
+    otherwise)."""
 
-    path: str  # harness-relative, e.g. ".claude-plugin/plugin.json"
-    text: Callable[[], str]  # the whole file, final newline included
-    marker: str  # the value inside the file that makes it ours
-
-
-def _plugin_json() -> str:
-    """The plugin manifest's whole text: name, version and description, with `json.dumps`'s default
-    separators, whose space after each colon the marker is a substring of."""
-    manifest = {"name": PLUGIN_NAME, "version": __version__, "description": "Adjagent skills, agents, and MCP tools"}
-    return json.dumps(manifest, indent=2) + "\n"
-
-
-PLUGIN_MANIFEST = HarnessFile(path=".claude-plugin/plugin.json", text=_plugin_json, marker=f'"name": "{PLUGIN_NAME}"')
-"""The plugin manifest every harness that writes its set as a plugin renders beside it."""
-
-
-class McpEntryBuilder(Protocol):
-    """Builds the `kbase` server entry and the container path it nests under, from the server command,
-    which the entry names as given."""
-
-    def __call__(self, *, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]: ...
-
-
-class McpSite(Enum):
-    """Where a harness's MCP settings file lives: at the project root, where the file is the project's own
-    and the install edits it in place; or at ROOT, where it is the plugin's own, beside `skills/`."""
-
-    PROJECT = "project"
-    HARNESS = "harness"
+    name: str
+    reference: str  # the harness's reference prefix and the name
+    kind: Kind
+    path: str
+    description: str | None
+    agent: AgentFields | None
 
 
 @dataclass(frozen=True)
-class McpSettings:
-    """The settings file a harness registers the `kbase` MCP server in. `canonical` is the path relative
-    to `site`, created when absent; `alternatives` are the discovered names probed in precedence order,
-    a found one overriding the canonical; `site` is the directory those paths are joined to; `entry`
-    builds the server entry and the container path it nests under."""
+class HarnessFile:
+    """A file a harness renders into the output root beside the definitions: the path below the root,
+    the builder for its whole text from the bound plugin's name and the definitions the render ships, the
+    marker a file at that path must hold to be one this repository wrote (a format admitting no comment
+    carries its ownership as a value inside it), and the definition it is rendered with, if any."""
 
-    canonical: str
-    alternatives: tuple[str, ...]
-    site: McpSite
-    entry: McpEntryBuilder
+    path: str  # harness-relative, e.g. ".claude-plugin/plugin.json"
+    text: Callable[[str, Sequence[ShippedDefinition]], str]  # the whole file, final newline included
+    marker: str  # the value inside the file that makes it ours; may hold `{plugin}`
+    owner: str | None = None  # rendered only where this definition ships; None: wherever the harness renders
 
 
-class EntryClaim(Enum):
-    """What one item of a settings file holds of an entry an earlier install wrote: none of it, only it,
-    or it beside a command of the project's own."""
+def _plugin_json(plugin: str, shipped: Sequence[ShippedDefinition]) -> str:
+    """The manifest's whole text: the plugin's name, the version and a description, with
+    `json.dumps`'s default separators, whose space after each colon the marker is a substring of."""
+    manifest = {"name": plugin, "version": __version__, "description": "Adjagent skills, agents, and MCP tools"}
+    return json.dumps(manifest, indent=2) + "\n"
 
-    NONE = "none"
-    ALONE = "alone"
-    SHARED = "shared"
+
+PLUGIN_MANIFEST = HarnessFile(path=".claude-plugin/plugin.json", text=_plugin_json, marker='"name": "{plugin}"')
+"""The manifest every harness that writes its set as a plugin renders beside it."""
+
+
+@dataclass(frozen=True)
+class FrontmatterForm:
+    """How a harness that carries each definition's metadata in the definition's own file writes it: the
+    field lines between the fences of an agent's, and of a document's."""
+
+    agent: Callable[[AgentFields], tuple[str, ...]]
+    document: tuple[str, ...]
+
+
+# "scratch directory" is the development skill's term for that slot: filled text is not rescanned, so
+# this string cannot interpolate the term and must change with it.
+COLD_READ_SCRIPT_RULE = (
+    "- Write a brief holding the question and the documents, pasted in full, into the scratch directory, "
+    "and run each reader with this skill's `scripts/cold-read.sh <agent> <brief>`. A subagent of this "
+    "session cannot be a cold reader: it shares the session's harness, which loads the project documents "
+    "into every session started in the repository, and a reader holding the old text cannot set it aside "
+    "when told to. The script runs a new harness session instead, with no tools, from a fresh directory it "
+    "creates under the one `ADJAGENT_COLD_READ_DIR` names, holding nothing the harness loads as "
+    "instructions, and removes it when the run ends: the one working location outside the scratch "
+    "directory, and an explicit exception to the agents file's scratch-space rule. Where `ADJAGENT_COLD_READ_DIR` is unset, or the directory it names is unsuitable, the "
+    "script stops and says why. `ADJAGENT_COLD_READ_MODEL`, where set, names the reader's model. Run the "
+    "script from this harness's own copy of the skill."
+)
+"""The development skill's cold-read bullet under each harness whose install runs `cold-read.sh`."""
+
+
+def scratch_rule(*, temp_dir: str, harness_dir: str) -> str:
+    """The agents file's scratch rule, after its `/tmp` sentence, for a harness whose project scratch
+    directory sits beside its project harness directory."""
+    return (
+        f"All scratch —\nthrowaway builds, probe harnesses, captured output — goes in `{temp_dir}/` under the\n"
+        f"active project root, beside `{harness_dir}/` and never inside it (writes there trip\n"
+        "the permission system's own-settings protections). If it doesn't exist, stop and say so; don't\n"
+        "improvise a location."
+    )
+
+
+class McpEntryBuilder(Protocol):
+    """Builds the `kbase` server entry from the server command, which the entry names as given."""
+
+    def __call__(self, *, command: str) -> dict[str, str | list[str]]: ...
+
+
+def mcp_json(entry: McpEntryBuilder) -> HarnessFile:
+    """The plugin's own `.mcp.json` at ROOT, rendered whole where `KBASE_OWNER` ships: the `kbase` server
+    alone under `mcpServers`, its entry from `entry`. JSON admits no comment, so the marker is the
+    command the entry names, with `json.dumps`'s space after the colon."""
+
+    def text(plugin: str, shipped: Sequence[ShippedDefinition]) -> str:
+        return json.dumps({"mcpServers": {KBASE_SERVER: entry(command=KBASE_NAME)}}, indent=2) + "\n"
+
+    return HarnessFile(path=".mcp.json", text=text, marker=f'"command": "{KBASE_NAME}"', owner=KBASE_OWNER)
 
 
 @dataclass(frozen=True)
@@ -118,42 +157,18 @@ class GuardrailHook:
     registration: HarnessFile
 
 
-class Replacement(Enum):
-    """What an install writes in place of a retired entry, so the entry goes only on an install that
-    writes it: the guardrail registration, written where the guardrail probe passes, or the `kbase` MCP
-    entry, written on a kb install."""
-
-    GUARDRAIL = "guardrail"
-    MCP = "mcp"
-
-
-@dataclass(frozen=True)
-class RetiredEntry:
-    """An entry an earlier install registered in a settings file the project owns, which an install
-    writing its `replacement` removes. `settings` is the file relative to the project root; `container`
-    is the path in it to the array or object holding the entry; `member` is the entry's key in that
-    object, "" where the entry is an element of that array; `claim` reads an element, or the member's
-    value, as an earlier install wrote it; `trace` is text the entry leaves in the file as written, which
-    a file that cannot be parsed or edited in place is searched for."""
-
-    settings: str
-    container: tuple[str, ...]
-    member: str
-    claim: Callable[[object], EntryClaim]
-    replacement: Replacement
-    trace: str
-
-
 @dataclass(frozen=True)
 class Harness:
     """Everything a harness differs on; a new harness fills every field or fails at import."""
 
     name: str  # "claude", "opencode"; the --harness value
     agents_file: str  # "CLAUDE.md" / "AGENTS.md"
-    project_harness_dir: str  # ".claude" / ".opencode"
+    project_harness_dir: str  # ".claude" / ".opencode"; may hold `{plugin}`
     project_temp_dir: str  # ".claude-temp" / ".opencode-temp"
     user_harness_dir: str  # "~/.claude" / "~/.config/opencode"
-    mcp_tool_prefix: str  # this prefix + the tool's own name is its offered name
+    mcp_tool_prefix: str  # this prefix + the tool's own name is its offered name; may hold `{plugin}`
+    scratch_rule: str  # the agents file's rule for where scratch goes, after its `/tmp` sentence
+    memory_file: str  # the agents file's name for the operator's own instructions file
     recipe_rule: str  # the rule a dispatched agent follows running recipes in its shell; "" where there is none
     kbase_project_rule: str  # how a kbase session locates its project where the server serves many; "" otherwise
     tools: Mapping[Tool, tuple[str, ...]]  # total over Tool, in Tool order, each non-empty
@@ -162,25 +177,28 @@ class Harness:
     inherit_text: str  # what a tier rendering "inherit" emits
     inherit_synonyms: tuple[str, ...]  # further words emitting inherit_text; model_pattern accepts them
     bare_tier_spec_is_all: bool  # a --model-tier-map value naming no tier is all=<value>
-    frontmatter: Callable[[AgentFields], tuple[str, ...]]  # an agent's field lines between the fences
-    document_frontmatter: tuple[str, ...]  # a document's field lines between the fences
-    mcp: McpSettings  # the settings file this harness registers the kbase server in
+    # where each definition's metadata goes: frontmatter in its own file, or one registry file beside them all
+    definition_form: FrontmatterForm | HarnessFile
     guardrail: GuardrailHook | None  # the guardrail hook it registers; None where its own file registers itself
     rendered_files: tuple[HarnessFile, ...] = ()  # files it renders beside the definitions
     omits: frozenset[str] = frozenset()  # definition names it renders nothing for
     default_tier_spec: str | None = None  # the --model-tier-map value used when none is given; None: the family's tiers
-    plugin_parent_dir: str = ""  # a plugin's: the trailing path of the directory its plugins sit in; "" otherwise
+    plugin_parent_dir: str = (
+        ""  # a harness-directory plugin's: the trailing path of the directory its plugins sit in; "" otherwise
+    )
     reference_prefix: str = ""  # put before a definition's name wherever definition text names it; "" names it bare
-    plugin_dir: str = ""  # below the harness directory, where the set is written (ROOT); "" for the directory
+    plugin_dir: str = ""  # below the harness directory, where the plugin is written (ROOT); "" for the directory
+    entry_resource: str = ""  # the resource that registers the plugin, copied at user level too; "" for none
+    user_plugin_shadows: bool = False  # a user-level install's plugin loads in place of a project's of its name
     reload_rule: str = ""  # what to do when an install's agents are not offered; printed after one, "" for none
-    retired_entries: tuple[RetiredEntry, ...] = ()  # entries earlier installs wrote that an install removes
+    side_by_side_rule: str = ""  # what a session does where another harness's install also reaches it; "" for none
+    cold_read_rule: str = ""  # the development skill's bullet on how a cold reader is run; "" for none
 
     def __post_init__(self) -> None:
         """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
         model_shape, an OptionalHarnessText field that is not a string, a tools table not total in
-        Tool order, an MCP settings contract lacking a canonical path, a non-empty alternative name,
-        or a builder, a guardrail hook lacking a script path or a registration path, builder and
-        marker, or a retired entry lacking a settings path, a container path, a recogniser or a trace.
+        Tool order, or a guardrail hook lacking a script path or a registration path, builder and
+        marker.
 
         An empty string is refused of the fields a body naming them always renders, since every
         harness supplies each HarnessText and a model shape. An OptionalHarnessText is a rule a
@@ -197,11 +215,6 @@ class Harness:
                 raise InputError(f"harness '{self.name}': {part.value} must be a string")
         if tuple(self.tools) != tuple(Tool) or not all(self.tools.values()):
             raise InputError(f"harness '{self.name}': tools table must name every Tool, in Tool order, non-empty")
-        if not self.mcp.canonical or not all(self.mcp.alternatives) or not callable(self.mcp.entry):
-            raise InputError(
-                f"harness '{self.name}': MCP settings needs a canonical path, non-empty alternative names, "
-                "and a builder"
-            )
         guardrail = self.guardrail
         if guardrail is not None and not (
             guardrail.script
@@ -213,21 +226,44 @@ class Harness:
                 f"harness '{self.name}': guardrail hook needs a script path, and a registration path, "
                 "builder and marker"
             )
-        for retired in self.retired_entries:
-            if not (
-                retired.settings
-                and retired.container
-                and all(retired.container)
-                and callable(retired.claim)
-                and retired.trace
-            ):
-                raise InputError(
-                    f"harness '{self.name}': a retired entry needs a settings path, a container path, a "
-                    "recogniser, and a trace"
-                )
+
+    def bound(self, plugin_name: str) -> Harness:
+        """This harness for the plugin `plugin_name`: every `{plugin}` template — the plugin directory, the
+        project harness directory, the reference and MCP tool prefixes, and the marker of each rendered
+        file, of the registry and of the guardrail registration — filled with it."""
+
+        def filled(template: str) -> str:
+            return template.replace("{plugin}", plugin_name)
+
+        def marked(file: HarnessFile) -> HarnessFile:
+            return dataclasses.replace(file, marker=filled(file.marker))
+
+        form = self.definition_form
+        guardrail = self.guardrail
+        return dataclasses.replace(
+            self,
+            plugin_dir=filled(self.plugin_dir),
+            project_harness_dir=filled(self.project_harness_dir),
+            reference_prefix=filled(self.reference_prefix),
+            mcp_tool_prefix=filled(self.mcp_tool_prefix),
+            rendered_files=tuple(marked(file) for file in self.rendered_files),
+            definition_form=marked(form) if isinstance(form, HarnessFile) else form,
+            guardrail=(
+                None
+                if guardrail is None
+                else dataclasses.replace(guardrail, registration=marked(guardrail.registration))
+            ),
+        )
 
     @property
-    def is_standalone_plugin(self) -> bool:
+    def harness_files(self) -> tuple[HarnessFile, ...]:
+        """Every file this harness renders beside the definitions: its `rendered_files`, then its registry
+        where its definition form is one."""
+        registry = (self.definition_form,) if isinstance(self.definition_form, HarnessFile) else ()
+        return (*self.rendered_files, *registry)
+
+    @property
+    def is_harness_dir_plugin(self) -> bool:
         """Whether this harness's harness directory is itself a plugin: its files sit at its own root, so
         its user harness directory is `.`."""
         return self.user_harness_dir == "."

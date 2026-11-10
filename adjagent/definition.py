@@ -67,7 +67,7 @@ class Definition:
     folder: str = ""  # the path below the output root: IDENTIFIER parts joined by "/", or ""
     description: str | None = None  # one line; emitted double-quoted; holds no '"' and no newline
     tools: Tools | None = None  # see Tools; an empty tuple and a repeated tool are refused
-    tier: Tier | None = None  # the seat; the family's tier map binds the model
+    tier: Tier | None = None  # the family's tier map binds the model
     color: str | None = None  # "#RRGGBB"; emitted double-quoted
     files: tuple[SkillFile, ...] = ()  # a skill's supporting files; no other kind takes any
 

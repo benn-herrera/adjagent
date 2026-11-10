@@ -1,6 +1,6 @@
-"""The one loader for the instance packages: `definitions/`, `harnesses/` and
-`families/` each hold one module per instance, which defines a fixed
-module-level name."""
+"""The one loader for the instance packages: `definitions/`, `harnesses/`,
+`families/` and `plugins/` each hold one module per instance, which defines a
+fixed module-level name."""
 
 import importlib
 import pkgutil

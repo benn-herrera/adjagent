@@ -1,10 +1,10 @@
-"""The mage harness: claude's vocabulary copied, the plugin manifest, and no `imgread`."""
+"""The mage harness: claude's vocabulary copied, the plugin manifest, and no `adjagent` skill."""
 
 from __future__ import annotations
 
 import re
 
-from adjagent.harness import PLUGIN_MANIFEST, PLUGIN_NAME, AgentFields, Harness, McpSettings, McpSite, quoted
+from adjagent.harness import PLUGIN_MANIFEST, AgentFields, FrontmatterForm, Harness, mcp_json, quoted
 from adjagent.vocabulary import Tool
 
 
@@ -27,31 +27,42 @@ _KBASE_PROJECT_RULE = """This session's kbase server serves many projects, so ru
 project path you have established for kbase's tool calls, not as the directory you are standing in."""
 
 
-def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """A `command`/`args` entry under `mcpServers`. An application harness starts the server outside any
-    one project, so `--project-dir-required` makes every tool call name its project with `project-dir`
-    rather than fall back to the server's working directory."""
-    return {"command": command, "args": ["mcp", "--project-dir-required"]}, (
-        "mcpServers",
-        "kbase",
-    )
+def _mcp_entry(*, command: str) -> dict[str, str | list[str]]:
+    """A `command`/`args` entry. An application harness starts the server outside any one project, so
+    `--project-dir-required` makes every tool call name its project with `project-dir` rather than fall
+    back to the server's working directory."""
+    return {"command": command, "args": ["mcp", "--project-dir-required"]}
 
+
+_PROJECT_TEMP_DIR = ".mage-temp"
 
 HARNESS = Harness(
     name="mage",
     # no redirect to AGENTS.md, used directly. file installed with agent set, not separately.
     agents_file="CLAUDE.md",
-    # the plugin's own directory under the install target
-    project_harness_dir="adjagent",
-    project_temp_dir=".mage-temp",
+    # the plugin directory under the install target
+    project_harness_dir="{plugin}",
+    project_temp_dir=_PROJECT_TEMP_DIR,
     # the harness's own directory: CLAUDE.md sits beside .mcp.json, at the plugin's root
     user_harness_dir=".",
     plugin_parent_dir="Mage/Skills",
     # mage namespaces a plugin's agents, commands and skills as Claude Code does
-    reference_prefix=f"{PLUGIN_NAME}:",
+    reference_prefix="{plugin}:",
     mcp_tool_prefix="mcp_kbase_",
+    scratch_rule=(
+        f"All scratch —\nthrowaway builds, probe harnesses, captured output — goes in `{_PROJECT_TEMP_DIR}/` under the\n"
+        "active project root. If it doesn't exist, stop and say so; don't improvise a location."
+    ),
+    memory_file="the mage plugin's `CLAUDE.md` (outside its marker lines)",
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule=_KBASE_PROJECT_RULE,
+    # mage's copy of cold-read.sh refuses to run, so the reader is started by hand
+    cold_read_rule=(
+        "- Write a brief holding the question and the documents, pasted in full, and run each reader by "
+        "hand as a new session with no tools and only the brief, started outside the project: a subagent "
+        "of this session cannot be a cold reader, since it holds the project documents this session "
+        "loaded and cannot set them aside when told to."
+    ),
     tools={
         Tool.READ: ("Read",),
         Tool.GREP: ("Grep",),
@@ -68,10 +79,8 @@ HARNESS = Harness(
     inherit_text="inherit",
     inherit_synonyms=(),
     bare_tier_spec_is_all=False,
-    frontmatter=_frontmatter,
-    document_frontmatter=(),
-    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.HARNESS, entry=_mcp_entry),
+    definition_form=FrontmatterForm(agent=_frontmatter, document=()),
     guardrail=None,
-    rendered_files=(PLUGIN_MANIFEST,),
-    omits=frozenset({"imgread", "adjagent"}),
+    rendered_files=(PLUGIN_MANIFEST, mcp_json(_mcp_entry)),
+    omits=frozenset({"adjagent"}),
 )

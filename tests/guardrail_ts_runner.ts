@@ -5,14 +5,9 @@
 // for that run, and the call as opencode makes it. Stdout: a JSON array, in input order, of the
 // message each call's hook threw, or null where it threw nothing.
 //
-// Run outside `bun test`: the "@opencode/plugin" stub must be registered before the plugin
-// loads, and a static import would be hoisted above it.
+// Run outside `bun test`: the "@opencode/plugin" stub must be registered before the plugin loads.
 
-Bun.plugin({
-  setup(b) {
-    b.module("@opencode/plugin", () => ({ loader: "object", exports: { Plugin: { define: (x: unknown) => x } } }))
-  },
-})
+import "./opencode_plugin_stub.ts"
 
 type Hook = (event: { tool: string; input: unknown }) => void
 type GuardrailPlugin = {

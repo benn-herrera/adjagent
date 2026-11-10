@@ -51,11 +51,10 @@ through these steps explicitly:
 3. **Identify what you are choosing not to specify** and verify each omission is genuine flexibility
    rather than a buried assumption being pushed onto coders.
 
-For burn-down synthesis after Phase 3 security findings, additionally walk each security finding
+For burn-down synthesis after a security review's findings, additionally walk each security finding
 through the existing structural design and explicitly classify it as addendum, modification,
-backtrack, or scratch rewrite *before* drafting the combined list. The protocol already requires
-this classification — running it as a deliberate step here prevents the default-to-addendum failure
-mode.
+backtrack, or scratch rewrite *before* drafting the combined list. Running the classification as a
+deliberate step here prevents the default-to-addendum failure mode.
 
 ## Initial Design Mode
 
@@ -80,7 +79,10 @@ long-lived process, or fewer than three modules.
   code; mechanism → ARCHITECTURE.md and code, and a mechanism change that needs SPEC.md edited is a
   scope finding rather than a mechanism change; bug fix → no document changes; future intent →
   ROADMAP.md, never inline in the contract documents (a maintained project carries one, even a
-  single sentence). A vanilla project without SPEC.md is an acceptable state, not a defect.
+  single sentence). A design reopens no outcome SPEC.md states. Below SPEC.md's level of detail, a
+  piece's default is the standard pattern THESIS.md names for it, where it names one. A question
+  the design cannot settle that is an outcome rather than a mechanism is a SPEC.md gap: recommend
+  the SPEC.md change, never answer it in ARCHITECTURE.md. A vanilla project without SPEC.md is an acceptable state, not a defect.
 - **Logging**: the system must use a structured, leveled logging package — not raw writes to
   stdout/stderr. The logger must support writing to file and tee-ing to console output. Log levels
   must be runtime-configurable. Direct fmt.Println / log.Println usage in non-trivial systems is an
@@ -167,7 +169,7 @@ Systematically evaluate (use judgment about which apply):
 2. **Unused Features & Dependencies**: Dependencies used partially? "Just in case" code paths?
    Transitive deps posing version conflict/supply chain risk?
 3. **Security**: Trust boundary violations? Exploitable serialization? FFI memory safety? TOCTOU
-   races/concurrency hazards? Secret handling? — *Skip this dimension when `{clauses.ref(name="security-reviewer")}`
+   races/concurrency hazards? Secret handling? — *Skip this dimension when a security review's
    findings are being provided; the security reviewer covers it with greater depth. Apply only in
    standalone reviews.*
 4. **Deviation from Standards**: Following language/ecosystem conventions? Reinventing wheels?
@@ -209,7 +211,7 @@ Systematically evaluate (use judgment about which apply):
 
 ## Integrating Security Findings
 
-When invoked in Phase 3 synthesis (after receiving security findings), re-evaluate your structural
+When invoked for synthesis after a security review's findings, re-evaluate your structural
 findings in light of the security context. Security requirements can override, modify, or vindicate
 structural decisions. Classify the impact before producing the burn-down list:
 

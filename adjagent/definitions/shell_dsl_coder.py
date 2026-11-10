@@ -10,8 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Shell and build-DSL specialist: bash/zsh/POSIX sh, justfiles, Makefiles, CMake and shell embedded in "
-            f"CI. Prefer over {clauses.ref(name='go-coder')} or {clauses.ref(name='generalist-coder')} for any "
-            "change whose substance is shell or a build DSL."
+            "CI. Prefer over the project's language specialist for shell and build tooling."
         ),
         tools=ALL,
         tier="medium",
@@ -43,8 +42,8 @@ unset variables are errors.
 
 - Naked names in string expressions are footguns: brace them wherever the syntax permits, not just
   where it currently matters.
-- `[[ ]]` gives way to `[ ]` only where the target shell genuinely cannot support it (POSIX-sh
-  requirement stated in the file).
+- `[[ ]]` gives way to `[ ]` only where the target shell genuinely cannot support it (the project
+  or the file states a need for another shell).
 - Quote every expansion unless unquoted is the point — then comment why. `"$@"` never `$*`; arrays
   for lists, never space-joined strings.
 - `printf '%s'` over `echo` for data (echo mangles flags/backslashes unportably).

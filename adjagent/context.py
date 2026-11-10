@@ -1,16 +1,19 @@
-"""`Render`, the one parameter a render receives, and the two map flags that
+"""`Render`, the one parameter a render receives, the plugin and the two map flags that
 build it. Composes no text and does no I/O."""
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
+from adjagent.definitions import discover
 from adjagent.errors import InputError
 from adjagent.family import Family
 from adjagent.harness import Harness
 from adjagent.loading import load
+from adjagent.plugin import Plugin
 from adjagent.vocabulary import TIERS, Anchor, Tier
 
 TierMap = Mapping[Tier, str]
@@ -65,18 +68,21 @@ def map_spec(mapping: TierMap) -> str:
 
 @dataclass(frozen=True)
 class Render:
-    """The one parameter a render receives: harness, family, the invocation's two maps, and the seat
-    of the definition being rendered."""
+    """The one parameter a render receives: harness, plugin, family, the invocation's two maps, and the
+    tier of the definition being rendered. `harness` is the harness as given; `bound_harness` is it
+    bound to the plugin, for every value a `{plugin}` template fills."""
 
     harness: Harness
+    plugin: Plugin
     family: Family
     tier_map: TierMap  # effective tier -> member; total
     alias_map: TierMap | None = None  # tier -> alias; total when set
-    seat: Tier | None = None  # the rendered definition's tier; render_definition binds it
+    tier: Tier | None = None  # render_definition binds it
     scope: str = ""  # the agents file's scope name; render_agents_file binds it
 
     def __post_init__(self) -> None:
-        """Refuse a non-total map, or a family member override no tier reaches (family tiers ∪ tier_map)."""
+        """Refuse a non-total map, or a family member override no tier reaches (family tiers ∪
+        tier_map)."""
         for mapping in (self.tier_map, self.alias_map):
             if mapping is not None and set(mapping) != set(TIERS):
                 raise InputError(f"a tier map must name exactly {', '.join(TIERS)}")
@@ -89,6 +95,15 @@ class Render:
                 f"reachable members are {', '.join(sorted(reachable))}"
             )
 
+    @functools.cached_property
+    def bound_harness(self) -> Harness:
+        """The harness bound to this render's plugin (`Harness.bound`)."""
+        return self.harness.bound(self.plugin.name)
+
+    def ships(self, name: str) -> bool:
+        """Whether this render ships the definition `name`: in the plugin, and not one the harness omits."""
+        return self.plugin.ships(name) and name not in self.harness.omits
+
     def model(self, tier: Tier) -> str:
         """The tier's rendered model text: alias if the alias map is set, else member; "inherit" and the
         harness's inherit synonyms render harness.inherit_text."""
@@ -98,13 +113,13 @@ class Render:
         return text
 
     def overlay(self, anchor: Anchor) -> str:
-        """The anchor's text: tier_map[seat]'s member override, else family-wide text, else "" (seat None:
+        """The anchor's text: tier_map[tier]'s member override, else family-wide text, else "" (tier None:
         family-wide only)."""
         overlay = self.family.overlays.get(anchor)
         if overlay is None:
             return ""
-        if self.seat is not None and self.tier_map[self.seat] in overlay.members:
-            return overlay.members[self.tier_map[self.seat]]
+        if self.tier is not None and self.tier_map[self.tier] in overlay.members:
+            return overlay.members[self.tier_map[self.tier]]
         return overlay.text or ""
 
     @property
@@ -134,6 +149,26 @@ def harness_named(name: str) -> Harness:
     return known[name]
 
 
+def plugins() -> dict[str, Plugin]:
+    """Every plugin this installation knows, by name, in name order."""
+    return cast(dict[str, Plugin], load("adjagent.plugins", "PLUGIN"))
+
+
+def plugin_named(name: str) -> Plugin:
+    """The plugin `name` loads as. An unknown name is refused, listing the names there are, and so is any
+    plugin stating a definition name discovery does not find, naming the plugin and the names: a misspelt
+    member would otherwise drop out of its plugin unnoticed."""
+    known = plugins()
+    discovered = {defn.name for _, entries in discover() for defn in entries}
+    for plugin in known.values():
+        undiscovered = sorted(plugin.named - discovered)
+        if undiscovered:
+            raise InputError(f"plugin '{plugin.name}' names no discovered definition: {', '.join(undiscovered)}")
+    if name not in known:
+        raise InputError(f"unknown plugin '{name}' — plugins are {', '.join(known)}")
+    return known[name]
+
+
 def _bare_tier_spec_expanded(harness: Harness, spec: str) -> str:
     """`spec`, or `all=<spec>` where the harness reads a bare value as the whole map — a non-empty value
     holding neither `=` nor `,`, so `default` but not `default,high=omlx/X`."""
@@ -142,13 +177,15 @@ def _bare_tier_spec_expanded(harness: Harness, spec: str) -> str:
     return f"{MAP_ALL}={spec}"
 
 
-def build_render(*, harness: str, family: str, tier_spec: str | None, alias_spec: str | None) -> Render:
-    """The CLI's Render. Unknown harness/family names are refused, listing the names there are (a
-    path-shaped --family included). A tier spec that names no tier becomes all=<spec> where the harness
-    reads a bare value as the whole map. Then every tier's model text is checked against
+def build_render(*, harness: str, plugin: str, family: str, tier_spec: str | None, alias_spec: str | None) -> Render:
+    """The CLI's Render. Unknown harness/plugin/family names are refused,
+    listing the names there are (a path-shaped --family included), and so is a plugin naming an
+    undiscovered definition (`plugin_named`). A tier spec that names no tier becomes all=<spec> where the
+    harness reads a bare value as the whole map. Then every tier's model text is checked against
     harness.model_pattern, refusing with tier, value, supplier and model_shape. With no tier spec given,
     the harness's `default_tier_spec` stands in for one."""
     loaded_harness = harness_named(harness)
+    loaded_plugin = plugin_named(plugin)
     families = load("adjagent.families", "FAMILY")
     if family not in families:
         raise InputError(f"--family '{family}' names no family — families are {', '.join(families)}")
@@ -159,7 +196,7 @@ def build_render(*, harness: str, family: str, tier_spec: str | None, alias_spec
     else:
         tier_map = parse_tier_map(_bare_tier_spec_expanded(loaded_harness, spec), flag=TIER_MAP_FLAG)
     alias_map = None if alias_spec is None else parse_tier_map(alias_spec, flag=ALIAS_MAP_FLAG)
-    render = Render(harness=loaded_harness, family=loaded, tier_map=tier_map, alias_map=alias_map)
+    render = Render(harness=loaded_harness, plugin=loaded_plugin, family=loaded, tier_map=tier_map, alias_map=alias_map)
     if alias_map is not None:
         supplier = ALIAS_MAP_FLAG
     elif tier_spec is not None:

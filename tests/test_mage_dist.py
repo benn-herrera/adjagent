@@ -31,12 +31,17 @@ def _version() -> str:
     ).stdout.strip()
 
 
+_PLUGINS = ("devpro", "kbase")
+
+
 def _names(out: Path) -> dict[str, Path]:
+    """Each plugin's tarball and signature, keyed `<plugin>` and `<plugin>.asc`."""
     v = _version()
-    return {
-        "tgz": out / f"adjagent-mage-v{v}.tgz",
-        "tgz_asc": out / f"adjagent-mage-v{v}.tgz.asc",
-    }
+    names = {}
+    for plugin in _PLUGINS:
+        names[plugin] = out / f"adjagent-mage-{plugin}-v{v}.tgz"
+        names[f"{plugin}.asc"] = out / f"adjagent-mage-{plugin}-v{v}.tgz.asc"
+    return names
 
 
 @dataclass
@@ -72,23 +77,28 @@ def test_build_layout(tmp_path_factory: pytest.TempPathFactory):
     names = built.names
     assert all(p.is_file() for p in names.values())
     assert sorted(p.name for p in (built.root / "dist").iterdir()) == sorted(p.name for p in names.values())
-    assert built.build.stdout.strip() == "mage-dist: " + " ".join(str(names[k]) for k in ("tgz", "tgz_asc"))
-    extracted = built.root / "extracted"
-    with tarfile.open(names["tgz"]) as tar:
-        members = tar.getmembers()
-        entries = [m.name for m in members]
-        assert all(n == "adjagent" or n.startswith("adjagent/") for n in entries), entries
-        assert not [m.name for m in members if any("xattr" in k for k in m.pax_headers)]
-        tar.extractall(extracted)
-    tools = extracted / "adjagent/skills/kbase/kb-tools"
-    assert [p.name for p in tools.iterdir()] == ["runner-snippets"]
-    mcp = json.loads((extracted / "adjagent/.mcp.json").read_text(encoding="utf-8"))
-    assert mcp["mcpServers"]["kbase"]["command"] == "kbase"
-    assert (extracted / "adjagent/CLAUDE.md").is_file()
-    assert f"file {names['tgz'].name}\n" in names["tgz_asc"].read_text(encoding="utf-8")
+    assert built.build.stdout.splitlines() == [f"mage-dist: {names[s]} {names[f'{s}.asc']}" for s in _PLUGINS]
+    for plugin in _PLUGINS:
+        extracted = built.root / "extracted" / plugin
+        with tarfile.open(names[plugin]) as tar:
+            members = tar.getmembers()
+            entries = [m.name for m in members]
+            assert all(n == plugin or n.startswith(f"{plugin}/") for n in entries), entries
+            assert not [m.name for m in members if any("xattr" in k for k in m.pax_headers)]
+            tar.extractall(extracted)
+        root = extracted / plugin
+        assert (root / "CLAUDE.md").is_file()
+        assert f"file {names[plugin].name}\n" in names[f"{plugin}.asc"].read_text(encoding="utf-8")
+        if plugin == "kbase":
+            assert [p.name for p in (root / "skills/kbase/kb-tools").iterdir()] == ["runner-snippets"]
+            mcp = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+            assert mcp["mcpServers"]["kbase"]["command"] == "kbase"
+        else:
+            assert not (root / ".mcp.json").exists()
+            assert not list(root.rglob("kb-tools"))
 
 
-def test_rerun_replaces_the_two_files(tmp_path: Path):
+def test_rerun_replaces_the_outputs(tmp_path: Path):
     first = _build(tmp_path)
     assert first.build.returncode == 0, first.build.stderr
     for path in first.names.values():
@@ -99,10 +109,12 @@ def test_rerun_replaces_the_two_files(tmp_path: Path):
     assert not (tmp_path / "dist/stage").exists()
 
 
-def test_failed_signing_leaves_neither_output_nor_stage(tmp_path: Path):
+@pytest.mark.parametrize("failing", _PLUGINS)
+def test_a_failed_signing_of_either_plugin_leaves_no_output_nor_stage(tmp_path: Path, failing: str):
     fake = tmp_path / "bin"
     fake.mkdir()
-    (fake / "gpg").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    stub = f'#!/usr/bin/env bash\ncase "${{@: -1}}" in *-{failing}-*) exit 1 ;; esac\nexec "{STUBS}/gpg" "$@"\n'
+    (fake / "gpg").write_text(stub, encoding="utf-8")
     (fake / "gpg").chmod(0o755)
     built = _build(tmp_path, extra_path=fake)
     assert built.build.returncode != 0

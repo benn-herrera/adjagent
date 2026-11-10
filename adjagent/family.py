@@ -14,7 +14,7 @@ member is legal, a statement about that family's ladder rather than a defect.
 `Family.overlays[Anchor.X]` is an `Overlay`: family-wide `text`, per-member
 `members` overrides, or both. A definition exposes an anchor by placing
 `hole(Anchor.X)` in its body, which renders `Render.overlay(Anchor.X)` for the
-definition's seat. A member override must be reachable, spelled as some tier
+definition's tier. A member override must be reachable, spelled as some tier
 reaches it in the family's own `tiers` or in an effective `--model-tier-map`; an
 unreachable member is refused when the `Render` is built, rather than kept as an
 override that quietly never fires.

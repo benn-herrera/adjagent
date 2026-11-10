@@ -10,8 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "Windows desktop development: Win32, WinUI3/WPF/WinForms, .NET and COM/WinRT, including services, "
-            "installers (MSI/MSIX) and P/Invoke. Prefer over "
-            f"{clauses.ref(name='generalist-coder')} for any Windows desktop target."
+            "installers (MSI/MSIX) and P/Invoke."
         ),
         tools=ALL,
         tier="high",

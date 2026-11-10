@@ -9,6 +9,8 @@ import pytest
 
 import adjagent
 from adjagent import clauses
+from adjagent.definitions import discover
+from adjagent.vocabulary import Kind
 from tests._structure import carried_clauses
 
 _DEFINITIONS = Path(adjagent.__file__).parent / "definitions"
@@ -117,6 +119,23 @@ GROUPS = {
     ),
 }
 
+UNGROUPED = frozenset(
+    {
+        "applied-mathematician",
+        "architect",
+        "biz-dev-strategist",
+        "economic-historian",
+        "literature-scout",
+        "marketing-comms-expert",
+        "ml-engineer",
+        "prompt-engineer",
+        "prose-architect",
+        "security-reviewer",
+        "tech-writer",
+        "theoretical-economist",
+    }
+)
+
 EXEMPTIONS = {
     (
         "shell-dsl-coder",
@@ -178,9 +197,13 @@ def check_clause_groups(
     exemptions: dict[tuple[str, str], str],
     carried: dict[str, set[str]],
     defined: set[str],
+    *,
+    ungrouped: frozenset[str],
+    agents: set[str],
 ) -> list[str]:
     """Every way the tables and the definitions disagree, one message per finding, each naming the
-    group, the definition and the clause."""
+    group, the definition and the clause. `ungrouped` names the agents deliberately in no group;
+    `agents` is every agent definition's name."""
     messages = []
     member_group = {member: name for name, group in groups.items() for member in group.members}
     for name, group in groups.items():
@@ -208,6 +231,12 @@ def check_clause_groups(
             messages.append(f"{name}: {definition} carries {clause}, so its exemption is stale")
         elif clause not in groups[name].plain:
             messages.append(f"{name}: {definition} is exempt from {clause}, which is not a plain entry")
+    for agent in sorted(agents - set(member_group) - ungrouped):
+        messages.append(f"-: {agent} is in no group and not in UNGROUPED")
+    for name in sorted(ungrouped & set(member_group)):
+        messages.append(f"-: {name} is in UNGROUPED but is a member of {member_group[name]}")
+    for name in sorted(ungrouped - agents):
+        messages.append(f"-: {name} is in UNGROUPED but is not an agent definition")
     return messages
 
 
@@ -240,10 +269,12 @@ def _real_carried() -> dict[str, set[str]]:
 
 def test_every_member_carries_what_its_group_carries() -> None:
     defined = {name for name in vars(clauses) if not name.startswith("_")}
-    assert check_clause_groups(GROUPS, EXEMPTIONS, _real_carried(), defined) == []
+    agents = {defn.name for _, entries in discover() for defn in entries if defn.kind is Kind.AGENT}
+    assert check_clause_groups(GROUPS, EXEMPTIONS, _real_carried(), defined, ungrouped=UNGROUPED, agents=agents) == []
 
 
 _GROUP = Group(anchor="ANCHOR", members=("one", "two"), plain=("PLAIN",), alternatives=(("LEFT", "RIGHT"),))
+_AGENTS = {"one", "two"}
 _DEFINED = {"ANCHOR", "PLAIN", "LEFT", "RIGHT"}
 _CARRIED = {"one": {"ANCHOR", "PLAIN", "LEFT"}, "two": {"ANCHOR", "PLAIN", "RIGHT"}}
 
@@ -294,12 +325,31 @@ _CARRIED = {"one": {"ANCHOR", "PLAIN", "LEFT"}, "two": {"ANCHOR", "PLAIN", "RIGH
 def test_the_check_reports_each_disagreement(
     carried: dict[str, set[str]], exemptions: dict[tuple[str, str], str], defined: set[str], expected: str
 ) -> None:
-    messages = check_clause_groups({"g": _GROUP}, exemptions, carried, defined)
+    messages = check_clause_groups({"g": _GROUP}, exemptions, carried, defined, ungrouped=frozenset(), agents=_AGENTS)
+    assert any(expected in message for message in messages), messages
+
+
+@pytest.mark.parametrize(
+    ("ungrouped", "agents", "expected"),
+    [
+        pytest.param(frozenset(), _AGENTS | {"three"}, "three is in no group and not in UNGROUPED", id="unplaced"),
+        pytest.param(
+            frozenset({"one"}), _AGENTS, "one is in UNGROUPED but is a member of g", id="ungrouped-and-member"
+        ),
+        pytest.param(
+            frozenset({"three"}), _AGENTS, "three is in UNGROUPED but is not an agent definition", id="ungrouped-gone"
+        ),
+    ],
+)
+def test_the_check_reports_each_agent_placement_disagreement(
+    ungrouped: frozenset[str], agents: set[str], expected: str
+) -> None:
+    messages = check_clause_groups({"g": _GROUP}, {}, _CARRIED, _DEFINED, ungrouped=ungrouped, agents=agents)
     assert any(expected in message for message in messages), messages
 
 
 def test_the_check_is_silent_on_agreement() -> None:
-    assert check_clause_groups({"g": _GROUP}, {}, _CARRIED, _DEFINED) == []
+    assert check_clause_groups({"g": _GROUP}, {}, _CARRIED, _DEFINED, ungrouped=frozenset(), agents=_AGENTS) == []
 
 
 def test_every_exemption_quote_occurs_in_its_definition_module() -> None:

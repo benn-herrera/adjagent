@@ -4,12 +4,6 @@
 .opencode-temp/
 .opencode/
 
-# this repository's own install output: adj-tools/, where an install puts a shipped package,
-# beside the definition surfaces above and not part of any, the kb-tools package under
-# skills/kbase/, which those surface entries already ignore, the kbase MCP
-# registration at the repository root and the opencode settings, both written by an
-# install that includes kb (just install-with-kb, just install-agents-here).
-.mcp.json
 __pycache__/
 .pytest_*/
 .venv/

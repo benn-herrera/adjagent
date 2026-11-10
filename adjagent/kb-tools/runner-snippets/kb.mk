@@ -1,14 +1,16 @@
 # KB maintenance targets. This file is installed at
-# <harness-dir>/skills/kbase/kb-tools/runner-snippets/ — <harness-dir> being
-# the project's .claude or .opencode — and is included from the consuming
-# project's Makefile by one installed line (never copied into it):
+# <harness-relpath>/skills/kbase/kb-tools/runner-snippets/ — <harness-relpath>
+# being the kbase plugin's install directory relative to the project root:
+# .claude/skills/kbase under claude, .opencode/plugins/kbase under opencode — and is
+# included from the consuming project's Makefile by one installed line (never
+# copied into it):
 #
 #     -include <harness-relpath>/skills/kbase/kb-tools/runner-snippets/kb.mk
 #
 # A consumer running just instead gets the `import?` line pointing at
 # `<harness-relpath>/skills/kbase/kb-tools/runner-snippets/kb.just` (just >= 1.33).
 #
-# The line is written by `install-with-kb`, run from the consumer root — not
+# The line is written by `adjagent install kbase`, run from the consumer root — not
 # by anything in this tree. The non-fatal `-include` form is deliberate: if
 # the installed tree is absent — not yet installed, or removed — the
 # consumer's Makefile keeps working and only these KB targets go missing.

@@ -8,8 +8,9 @@ prefix. The recipe keeps its name, parameters, `[doc]` string and dependency lis
 line running the script, with each variable the script reads passed as `NAME="{{NAME}}"` ahead of
 the command — `just` variables are not exported, so a script reads nothing it was not handed. The
 line also passes the variables of the scripts it calls, which then inherit them; no script
-re-passes an environment it was given. The script guards every variable it reads with
-`: "${NAME:?...}"`, since `set -u` catches unset and not empty — and that guard message holds no
+re-passes an environment it was given. The script guards every variable the recipe hands it with
+`: "${NAME:?...}"`, or `: "${NAME?...}"` where empty is a valid value (`EXE`), since `set -u`
+catches unset and not empty — and that guard message holds no
 apostrophe, because under the bash 3.2 this host runs as `/bin/bash`, a `'` inside a
 `${NAME:?word}` opens a quote region and the script stops parsing. Arguments arrive as shell
 positionals (`"$@"`), never as textual interpolation, which loses word boundaries. A note the body

@@ -13,10 +13,15 @@ Beyond the install requirements, this repository needs:
 - The network on the first `just test`, which provisions `.venv`; docdicer installs from its git tag,
   so `git` is needed there too.
 
-The test suite needs `bun` and `perl` on `PATH`. The guardrail parity
-test (`tests/test_guardrail.py`) runs one case table through both guardrails, each case under every
+The test suite needs `bun`, `perl` and `kbase` (0.11.0 or later) on `PATH`. The kbase surface test
+(`tests/test_kbase_surface.py`) needs `kbase` and fails, not skips, without it;
+[Knowledge base](knowledge-base.md#requirements) gives the install. The guardrail parity test
+(`tests/test_guardrail.py`) runs one case table through both guardrails, each case under every
 guardrail its `harness` field allows, and fails, not skips, without `bun`. The two guardrails change
 together ([CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/code-definitions-and-install/guardrails-change-together.md)).
+The opencode plugin entry (`tests/test_opencode_entry.py`) runs under `bun` the same way, against a
+stub plugin context, so it fails, not skips, without it. The plugin membership and install cases are
+in `tests/test_plugins.py` and `tests/test_adjagent_install.py`.
 
 ```sh
 git clone https://github.com/benn-herrera/adjagent && cd adjagent
@@ -34,17 +39,20 @@ Other targets:
 
 - `just test-changed [base]` is the edit gate, run after a change. It runs only the surfaces the uncommitted
   tree (plus, given `base`, the commits since it) touches, and says which paths chose each.
-- `just render [slug]` renders the full install product, kb set included, into `rendered/<slug>/`
-  (slug defaults to `latest`), plus the harness agents file under `rendered/<slug>/harness/<name>/`:
-  `CLAUDE.md` by default, or another harness's with `--harness=NAME`. Under mage it lands at the slot
-  root instead, `rendered/<slug>/CLAUDE.md` beside `.mcp.json`, with no `harness/` directory and no
-  `Makefile`: the slot is installed with `--subdir=`, so the plugin's root is the slot itself. Under
-  claude the slot is the harness directory and holds the plugin at `<slot>/skills/adjagent/`, with
-  `.claude-plugin/plugin.json` and `.mcp.json` inside it and no `agents/` at the slot root. A claude
-  or opencode slot also holds the project's `AGENTS.md` and, under claude, the `CLAUDE.md` redirect
-  (`@AGENTS.md`). A slug starting with `reference` is refused.
+- `just render [slug]` renders the full install product of both plugins into `rendered/<slug>/`
+  (slug defaults to `latest`), one slot project per plugin: `rendered/<slug>/devpro/` and
+  `rendered/<slug>/kbase/`. Each slot project holds the plugin's harness agents file under
+  `<plugin>/harness/<name>/`: `CLAUDE.md` by default, or another harness's with `--harness=NAME`.
+  Under mage it lands at the slot project instead, `<plugin>/CLAUDE.md` (beside `.mcp.json` in kbase),
+  with no `harness/` directory and no `Makefile`: each plugin is installed with `--subdir=`, so the
+  install directory is the slot project itself. Under claude the slot project is the harness directory
+  and holds the plugin at `<plugin>/skills/<plugin>/`, with `.claude-plugin/plugin.json` inside it (and
+  `.mcp.json` in kbase) and no `agents/` at the slot project. Under opencode the plugin directory is
+  `<plugin>/plugins/<plugin>/`. A claude or opencode slot project also holds the project's `AGENTS.md`
+  and, under claude, the `CLAUDE.md` redirect (`@AGENTS.md`). A slug starting with `reference` is
+  refused.
 - A slot renders under a scratch `HOME` that is empty and removed afterward, so the install finds no
-  user-global agents file and writes the block into the slot's `AGENTS.md`, never into the real
+  global agents file and writes the block into the slot's `AGENTS.md`, never into the real
   `~/.claude` or `~/.config/opencode`. `just check-wheel` runs under a scratch home the same way.
 - `just render-diff [a] [b]` compares two slots (reference-claude against latest by default) by text, with
   each file's banner replaced by one constant line, and reports differences without failing on them.
@@ -58,20 +66,25 @@ Other targets:
 ## Repository layout
 
 ```text
-adjagent/                 the generator and every definition, run as `python3 -m adjagent`
+adjagent/                 the generator and every definition, run from a checkout as `PYTHONPATH=<clone> python3 -m adjagent`
   clauses.py              shared text: named string constants, small functions for slotted text
   definitions/            one module per definition, or per set that shares text and ships together
   harnesses/              one module per harness (claude, mage, opencode), each defining HARNESS
     resources/            one directory per harness: the files it ships, copied as they stand into
-                          the install's root (opencode/plugins/guardrail.ts, claude/hooks/guardrail.pl);
-                          the root is where the install writes the set: the plugin directory
-                          under claude, the harness directory under opencode and mage
+                          the install directory (opencode/index.ts and opencode/guardrail.ts,
+                          claude/hooks/guardrail.pl); the install directory is where the install
+                          writes: the plugin's directory under claude and opencode, the
+                          harness directory under mage
   families/               one module per model family, each defining FAMILY
-  kb-tools/               shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered by
-                          a kb install only as skills/kbase/kb-tools/
+  plugins/                one module per plugin, each defining PLUGIN: devpro and kbase; SPEC.md,
+                          Deployed Surfaces, Plugins lists each plugin's members
+  kb-tools/               shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered with
+                          the kbase skill, so by the kbase plugin only, as skills/kbase/kb-tools/
   docdicer-tools/         the docdicer launcher script, its .gitignore and runner fragments
-                          (runner-snippets/docdicer.just, docdicer.mk), delivered by every project
-                          install as skills/docdicer/tools/
+                          (runner-snippets/docdicer.just, docdicer.mk), delivered with the docdicer
+                          skill, so by devpro only, as skills/docdicer/tools/
+  development-tools/      the cold-read.sh script, delivered with the development skill, so by both
+                          plugins, as skills/development/scripts/
 pyproject.toml            the package's build configuration: setuptools, the version read from
                           `adjagent.__version__`, the console script `adjagent`
 docs/                     the pages the README links to
@@ -82,11 +95,11 @@ agent-sandboxing/         setup for running a coding agent as an unprivileged lo
 PROJECT_DOCS/             the contract trees (THESIS, SPEC, ARCHITECTURE, CONVENTIONS), one
                           `entry-point.md` per volume; the root `*.md` files are pointers to them
 rendered/                 gitignored: `just render [slug]` puts a render here per slot
-ROADMAP_PLANS/            tracked home for planned work not yet ready to execute
+ROADMAP_PLANS/            tracked home for parked work: designs and plans not under way
 ```
 
 `agents/`, `commands/` and `skills/` are not directories in this repository. They are the three
-deployed surfaces of the product, produced into `<project>/.claude/skills/adjagent/` (the plugin) by
+deployed surfaces of the product, produced into `<project>/.claude/skills/<plugin>/` by
 an install or into
 `rendered/` by `just render`. A definition module registers by existing in `definitions/`; its `kind`
 and `folder` decide where it lands, and a skill's `files` add the supporting files beneath its own
@@ -102,7 +115,7 @@ follow-on work, outside that set.
 ## Working in this repo
 
 A definition is `adjagent/definitions/<name>.py`: a `DEFINITIONS` tuple whose `body` is the rendered
-text with holes, read top to bottom as the file it renders.
+text with placeholders, read top to bottom as the file it renders.
 
 - A definition's own prose is in its module. Shared text is a named constant in
   `adjagent/clauses.py`, or a private constant of a group module whose definitions ship together.
@@ -117,14 +130,14 @@ How to add a definition: [CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/adding-defini
 
 ## Releasing the mage plugin
 
-`just mage-dist` writes two files to `dist/`: `adjagent-mage-v<version>.tgz` and its detached `.asc`
-signature. What a consumer does with them is in the [README](../README.md#mage-plugin-release); the
-contract is [SPEC](../PROJECT_DOCS/SPEC/mage-plugin-distribution.md).
+`just mage-dist` writes four files to `dist/`: for each plugin `adjagent-mage-<plugin>-v<version>.tgz`
+and its detached `.asc` signature. What a consumer does with them is in the
+[README](../README.md#mage-plugin-release); the contract is [SPEC](../PROJECT_DOCS/SPEC/mage-release.md).
 
 The build needs `gpg` holding your signing key as its default secret key; it signs with that key and
 pins no fingerprint, so a rotated key needs no code change. It removes the previous outputs and its
 `stage/`, and builds from the working tree as it stands, with no git check. A build that fails,
-signing included, leaves neither output and no `stage/`.
+signing included, leaves no output of the version for either plugin and no `stage/`.
 
 To release:
 
@@ -134,9 +147,9 @@ To release:
 3. `just mage-dist`.
 4. `just tag`, which creates the local signed tag `v<version>` and pushes nothing; push it yourself.
    It needs a gpg secret key and a TTY.
-5. Create the release `v<version>` on GitHub and upload the two files. The recipe uploads, tags and
+5. Create the release `v<version>` on GitHub and upload the four files. The recipe uploads, tags and
    pushes nothing.
-6. Smoke check: from an empty scratch directory, download the uploaded tarball and its `.asc` from
+6. Smoke check: from an empty scratch directory, download one uploaded tarball and its `.asc` from
    the release, `gpg --verify` the one against the other, and list the tarball (`tar -tzf`).
 
 ## Authoring a family
@@ -170,9 +183,10 @@ was retired 2026-08-21; the anchor mechanism replaces whole-definition forks.
 
 Every definition in [Definition sets](definition-sets.md) is **generated**. There are no
 hand-maintained definitions and nothing to edit directly in a rendered tree; the source is the
-definition's module (Working in this repo). A rendered definition carries a two-line banner inside its
-frontmatter: a generated-from line naming its definition module and stating that the file is not for
-local edit, and a tuning line recording the family, seat, tier map and harness it was rendered for. A
-skill's supporting file has no frontmatter, so it carries the same two lines as HTML comments on its first
-two lines. There is no content hash; a project that tracks the rendered output sees drift in its
+definition's module (Working in this repo). Under claude and mage a rendered definition carries a
+two-line banner inside its frontmatter: a generated-from line naming its definition module and
+stating that the file is not for local edit, and a tuning line recording the family, tier, tier map
+and harness it was rendered for. A skill's supporting file has no frontmatter, so it carries the same
+two lines as HTML comments on its first two lines, and so does every rendered file under opencode,
+whose metadata is in the plugin's `registry.json`. There is no content hash; a project that tracks the rendered output sees drift in its
 `git diff`, and one that does not loses any local edit to the next install.

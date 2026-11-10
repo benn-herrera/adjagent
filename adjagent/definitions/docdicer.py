@@ -25,6 +25,14 @@ DEFINITIONS = (
   exact formatting matters; from then on the undiced document and its tree convert into each other
   exactly. General process: undice to a new monolithic document (it will not overwrite an existing one).
   If the monolith was modified you can re-dice it back to another doc tree.
+- **An undice that does not dice back to the same tree** names the leaves that would dice
+  differently. Fix the tree, then undice again to a new monolith name (the failed one stays until
+  the user directs its removal). A leaf holding a heading at a level the dicer splits on: make that
+  heading a bold run-in title opening its paragraph, or fold it into the text around it, changing
+  no wording (do not run `refactor` on the result; it turns run-in titles back into headings). A
+  leaf whose heading disagrees with its file name: edit the heading to match the name, not the
+  file, which would move the path. A changed tree shape is never the accepted cost of an undice,
+  because other documents cite the tree's paths and a split moves them.
 - After each operation, both versions remain. Removing the one(s) no longer wanted is a separate step,
   taken at the user's direction.
 
@@ -39,6 +47,10 @@ you stand:
   when the user directs you to.
 - **It prints docdicer's usage.** docdicer is installed, and that usage is the command list:
   `tools/docdicer <command> --help` gives each command's arguments.
+
+`kanban` serves a live board of the project's roadmap, design and plan until stopped; give the user
+the command to run rather than running it yourself. `tools/docdicer kanban --help` gives the
+details.
 
 ## Runner recipes
 

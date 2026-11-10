@@ -8,10 +8,7 @@ DEFINITIONS = (
     Definition(
         name="python-coder",
         kind=Kind.AGENT,
-        description=(
-            f"Python implementation specialist. Prefer over {clauses.ref(name='generalist-coder')} for any Python "
-            "file modification or Python project task."
-        ),
+        description="Python implementation specialist.",
         tools=ALL,
         tier="high",
         color="#3776AB",

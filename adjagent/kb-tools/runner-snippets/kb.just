@@ -1,14 +1,16 @@
 # KB maintenance recipes. This file is installed at
-# <harness-dir>/skills/kbase/kb-tools/runner-snippets/ — <harness-dir> being
-# the project's .claude or .opencode — and is imported from the consuming
-# project's justfile by one installed line (never copied into it):
+# <harness-relpath>/skills/kbase/kb-tools/runner-snippets/ — <harness-relpath>
+# being the kbase plugin's install directory relative to the project root:
+# .claude/skills/kbase under claude, .opencode/plugins/kbase under opencode — and is
+# imported from the consuming project's justfile by one installed line (never
+# copied into it):
 #
 #     import? '<harness-relpath>/skills/kbase/kb-tools/runner-snippets/kb.just'
 #
 # A consumer running make instead gets the `-include` line pointing at
 # `<harness-relpath>/skills/kbase/kb-tools/runner-snippets/kb.mk`.
 #
-# The line is written by `install-with-kb`, run from the consumer root — not
+# The line is written by `adjagent install kbase`, run from the consumer root — not
 # by anything in this tree. `import?` requires just >= 1.33; the optional form
 # is deliberate: if the installed tree is absent — not yet installed, or
 # removed — the consumer's justfile keeps working and only these KB recipes

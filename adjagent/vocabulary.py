@@ -73,16 +73,21 @@ class HarnessText(Enum):
     PROJECT_TEMP_DIR = "project_temp_dir"
     USER_HARNESS_DIR = "user_harness_dir"
     MCP_TOOL_PREFIX = "mcp_tool_prefix"
+    SCRATCH_RULE = "scratch_rule"
+    MEMORY_FILE = "memory_file"
 
 
 class OptionalHarnessText(Enum):
     """A harness string a definition's prose may name that a harness may supply nothing for; each value
     is the `Harness` field it reads. Spelled and filled as a `HarnessText` is, and a harness supplying
-    nothing fills it to the empty string, which drops the paragraph the placeholder stands in."""
+    nothing fills it to the empty string, which drops the paragraph the placeholder stands in whole,
+    whatever else it says."""
 
     RECIPE_RULE = "recipe_rule"
     KBASE_PROJECT_RULE = "kbase_project_rule"
     RELOAD_RULE = "reload_rule"
+    SIDE_BY_SIDE_RULE = "side_by_side_rule"
+    COLD_READ_RULE = "cold_read_rule"
 
 
 class AgentsFileText(Enum):
@@ -99,26 +104,43 @@ class TuningText(Enum):
     STEP_DOWN_MODEL = "step_down_model"
 
 
-def key(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText | TuningText) -> str:
+class PluginText(Enum):
+    """A value of the plugin being rendered, filled in a body of every kind."""
+
+    NAME = "name"
+
+
+RenderValue = Union[HarnessText, OptionalHarnessText, Anchor, AgentsFileText, TuningText, PluginText]
+
+
+def key(name: RenderValue) -> str:
     """A render-time value's flat key: its enum value with each "_" read as "-"."""
     return "-".join(name.value.split("_"))
 
 
-def hole(name: HarnessText | OptionalHarnessText | Anchor | AgentsFileText | TuningText) -> str:
+def hole(name: RenderValue) -> str:
     """The placeholder a definition body carries for a render-time value: `@!hrn-<key>!@` for a harness
     text, optional or not, `@!fam-<key>!@` for an overlay anchor, `@!agf-<key>!@` for an agents-file
-    value, `@!tun-<key>!@` for a tuning value. No rendered prose spells `@!`."""
+    value, `@!tun-<key>!@` for a tuning value, `@!plg-<key>!@` for a plugin value. No rendered prose
+    spells `@!`."""
     namespace = {
         HarnessText: "hrn",
         OptionalHarnessText: "hrn",
         Anchor: "fam",
         AgentsFileText: "agf",
         TuningText: "tun",
+        PluginText: "plg",
     }[type(name)]
     return f"@!{namespace}-{key(name)}!@"
 
 
 def reference(name: str) -> str:
     """The placeholder definition text carries where it names the definition `name`: `@!ref-<name>!@`,
-    filled with the harness's reference prefix followed by `name`."""
+    filled with the harness's reference prefix followed by `name`. The render it is in must ship `name`."""
     return f"@!ref-{name}!@"
+
+
+def optional_reference(name: str) -> str:
+    """The placeholder for a reference the render may not ship: `@!opt-<name>!@`, filled as `reference`
+    fills where the render ships `name`, and otherwise dropping the paragraph it stands in whole."""
+    return f"@!opt-{name}!@"

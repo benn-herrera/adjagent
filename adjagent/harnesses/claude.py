@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import PurePosixPath
+from collections.abc import Sequence
 
 from adjagent.harness import (
+    COLD_READ_SCRIPT_RULE,
     PLUGIN_MANIFEST,
-    PLUGIN_NAME,
     AgentFields,
-    EntryClaim,
+    FrontmatterForm,
     GuardrailHook,
     Harness,
     HarnessFile,
-    McpSettings,
-    McpSite,
-    Replacement,
-    RetiredEntry,
+    ShippedDefinition,
+    mcp_json,
     quoted,
+    scratch_rule,
 )
 from adjagent.vocabulary import Tool
 
@@ -45,31 +44,29 @@ _RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the she
 If a recipe times out, the agent hands back naming it instead of rerunning it in the background."""
 
 
-def _mcp_entry(*, command: str) -> tuple[dict[str, str | list[str]], tuple[str, ...]]:
-    """A `command`/`args` entry under `mcpServers`."""
-    return {"command": command, "args": ["mcp"]}, ("mcpServers", "kbase")
+def _mcp_entry(*, command: str) -> dict[str, str | list[str]]:
+    """A `command`/`args` entry."""
+    return {"command": command, "args": ["mcp"]}
 
 
 _GUARDRAIL_SCRIPT = "hooks/guardrail.pl"
-# The hook command, split around the directory it names the script in. Claude Code reads exit 2 as a
-# block, and that is perl's status for a script it cannot open, so the command runs the script only
-# where it stands and otherwise names it on stderr and exits 1, which Claude Code reports without
-# blocking. The interpreter is `perl` on PATH, never an absolute path: the file registering it is often
-# committed and shared across machines. The report it makes is also the registration's marker and the
-# trace an earlier install's settings entry leaves: no file carries it that this repository did not write.
+# The hook command. Claude Code gives a plugin's hook processes the plugin's root, and runs a command
+# with no `args` through a shell, so the path is quoted. Claude Code reads exit 2 as a block, and that
+# is perl's status for a script it cannot open, so the command runs the script only where it stands
+# and otherwise names it on stderr and exits 1, which Claude Code reports without blocking. The
+# interpreter is `perl` on PATH, never an absolute path: the file registering it is often committed
+# and shared across machines. The report it makes is also the registration's marker: no file carries
+# it that this repository did not write.
 _MISSING_SCRIPT_REPORT = "guardrail hook: no readable script at $s"
-_GUARDRAIL_COMMAND_TAIL = (
-    f'{_GUARDRAIL_SCRIPT}"; if [ -f "$s" ] && [ -r "$s" ]; then exec perl "$s"; fi; '
+_PLUGIN_GUARDRAIL_COMMAND = (
+    f's="${{CLAUDE_PLUGIN_ROOT}}/{_GUARDRAIL_SCRIPT}"; if [ -f "$s" ] && [ -r "$s" ]; then exec perl "$s"; fi; '
     f'echo "{_MISSING_SCRIPT_REPORT}" >&2; exit 1'
 )
-# Claude Code gives a plugin's hook processes the plugin's root, and runs a command with no `args`
-# through a shell, so the path is quoted.
-_PLUGIN_GUARDRAIL_COMMAND = f's="${{CLAUDE_PLUGIN_ROOT}}/{_GUARDRAIL_COMMAND_TAIL}'
 
 
-def _guardrail_registration() -> str:
+def _guardrail_registration(plugin: str, shipped: Sequence[ShippedDefinition]) -> str:
     """The plugin's `hooks/hooks.json`: one PreToolUse entry running the guardrail on every Bash and
-    file-tool call."""
+    file-tool call, the same for every plugin."""
     entry = {
         "matcher": "Bash|Read|Write|Edit|NotebookEdit|Grep|Glob",
         "hooks": [{"type": "command", "command": _PLUGIN_GUARDRAIL_COMMAND}],
@@ -77,54 +74,26 @@ def _guardrail_registration() -> str:
     return json.dumps({"hooks": {"PreToolUse": [entry]}}, indent=2) + "\n"
 
 
-# The command an earlier install registered in the project's settings file, naming the script from
-# `$CLAUDE_PROJECT_DIR` through whatever harness directory it was installed in: one holding a character
-# a double-quoted shell word reads as syntax was refused, so none appears in it.
-_GUARDRAIL_COMMAND_HEAD = 's="$CLAUDE_PROJECT_DIR/'
-_UNQUOTABLE = r'"$`\\'
-_GUARDRAIL_COMMAND = re.compile(
-    rf"{re.escape(_GUARDRAIL_COMMAND_HEAD)}(?:[^{_UNQUOTABLE}]+/)?{re.escape(_GUARDRAIL_COMMAND_TAIL)}"
-)
-
-
-def _guardrail_claim(element: object) -> EntryClaim:
-    """What a PreToolUse element holds of the guardrail an earlier install registered in the project's
-    settings file: a command is ours only when it is exactly the one that install wrote, for any harness
-    directory."""
-    commands = element.get("hooks") if isinstance(element, dict) else None
-    if not isinstance(commands, list):
-        return EntryClaim.NONE
-    ours = [
-        isinstance(hook, dict)
-        and isinstance(hook.get("command"), str)
-        and _GUARDRAIL_COMMAND.fullmatch(hook["command"]) is not None
-        for hook in commands
-    ]
-    if not any(ours):
-        return EntryClaim.NONE
-    return EntryClaim.ALONE if all(ours) else EntryClaim.SHARED
-
-
-def _kbase_claim(value: object) -> EntryClaim:
-    """Whether the project `.mcp.json`'s `kbase` server is the one an earlier install wrote, read from its
-    command alone, the one field every earlier version wrote alike: the bare `kbase`, or a path to an
-    executable of that name."""
-    command = value.get("command") if isinstance(value, dict) else None
-    ours = isinstance(command, str) and PurePosixPath(command).name == "kbase"
-    return EntryClaim.ALONE if ours else EntryClaim.NONE
-
+_AGENTS_FILE = "CLAUDE.md"
+_PROJECT_HARNESS_DIR = ".claude"
+_PROJECT_TEMP_DIR = ".claude-temp"
+_USER_HARNESS_DIR = "~/.claude"
 
 HARNESS = Harness(
     name="claude",
-    agents_file="CLAUDE.md",
-    project_harness_dir=".claude",
-    project_temp_dir=".claude-temp",
-    user_harness_dir="~/.claude",
-    plugin_dir=f"skills/{PLUGIN_NAME}",
+    agents_file=_AGENTS_FILE,
+    project_harness_dir=_PROJECT_HARNESS_DIR,
+    project_temp_dir=_PROJECT_TEMP_DIR,
+    user_harness_dir=_USER_HARNESS_DIR,
+    plugin_dir="skills/{plugin}",
     # a plugin's components register only under the plugin's namespace, its MCP tools included
-    reference_prefix=f"{PLUGIN_NAME}:",
-    mcp_tool_prefix=f"mcp__plugin_{PLUGIN_NAME}_kbase__",
+    reference_prefix="{plugin}:",
+    mcp_tool_prefix="mcp__plugin_{plugin}_kbase__",
+    scratch_rule=scratch_rule(temp_dir=_PROJECT_TEMP_DIR, harness_dir=_PROJECT_HARNESS_DIR),
+    memory_file=f"`{_USER_HARNESS_DIR}/{_AGENTS_FILE}`",
+    user_plugin_shadows=True,
     reload_rule=_RELOAD_RULE,
+    cold_read_rule=COLD_READ_SCRIPT_RULE,
     recipe_rule=_RECIPE_RULE,
     kbase_project_rule="",
     tools={
@@ -143,32 +112,10 @@ HARNESS = Harness(
     inherit_text="inherit",
     inherit_synonyms=(),
     bare_tier_spec_is_all=False,
-    frontmatter=_frontmatter,
-    document_frontmatter=(),
-    mcp=McpSettings(canonical=".mcp.json", alternatives=(), site=McpSite.HARNESS, entry=_mcp_entry),
-    rendered_files=(PLUGIN_MANIFEST,),
+    definition_form=FrontmatterForm(agent=_frontmatter, document=()),
+    rendered_files=(PLUGIN_MANIFEST, mcp_json(_mcp_entry)),
     guardrail=GuardrailHook(
         script=_GUARDRAIL_SCRIPT,
         registration=HarnessFile(path="hooks/hooks.json", text=_guardrail_registration, marker=_MISSING_SCRIPT_REPORT),
-    ),
-    # What the plugin's own registration and MCP entry replace. Claude Code reads project hooks from the
-    # one settings path, whatever directory the harness was installed in.
-    retired_entries=(
-        RetiredEntry(
-            settings=".claude/settings.json",
-            container=("hooks", "PreToolUse"),
-            member="",
-            claim=_guardrail_claim,
-            replacement=Replacement.GUARDRAIL,
-            trace=_MISSING_SCRIPT_REPORT,
-        ),
-        RetiredEntry(
-            settings=".mcp.json",
-            container=("mcpServers",),
-            member="kbase",
-            claim=_kbase_claim,
-            replacement=Replacement.MCP,
-            trace='"kbase"',
-        ),
     ),
 )

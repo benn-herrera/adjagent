@@ -8,10 +8,7 @@ DEFINITIONS = (
     Definition(
         name="lua-coder",
         kind=Kind.AGENT,
-        description=(
-            "Lua implementation specialist for PUC Lua 5.1 through 5.5 or LuaJIT, standalone or embedded. Prefer "
-            f"over {clauses.ref(name='generalist-coder')} for any Lua or LuaJIT work."
-        ),
+        description="Lua implementation specialist for PUC Lua 5.1 through 5.5 or LuaJIT, standalone or embedded.",
         tools=ALL,
         tier="high",
         color="#000080",

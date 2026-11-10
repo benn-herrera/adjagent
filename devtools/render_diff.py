@@ -1,13 +1,13 @@
 """Compare two rendered slots under `rendered/` by text.
 
 A file's text is its bytes after two steps. First, its body (`body`): a file whose first line is
-`---` and whose next lines match exactly one of the two banner shapes (`OLD`, `NEW`) has those lines
+`---` and whose next lines match the banner shape (`BANNER`) has those lines
 replaced by the constant line `# !BANNER!`. A file whose first two lines match the comment shape
 (`COMMENT`) — a skill's supporting file, which has no frontmatter and carries the same two banners as
 HTML comments — has them replaced the same way. Replacing rather than deleting means a file that loses
 its banner still differs, and a block of any other shape stays in place, so it shows as a difference
 rather than hiding one. Any other file whose lines from line 1, or from line 2 below a `#!` line,
-match one of the two copied-package banner shapes (`OLD_INSTALLED`, `NEW_INSTALLED`) has them
+match the copied-package banner shape (`INSTALLED_BANNER`) has them
 replaced the same way. Second (`collapsed`), whitespace a model does not read is dropped: outside
 the frontmatter and fenced code, each paragraph is joined into one line with runs of spaces
 collapsed to one, each list item (a line starting `- `, `* `, `+ ` or `1. `/`1) `, plus its
@@ -35,16 +35,12 @@ from pathlib import Path
 
 RENDERED_DIR = Path(__file__).resolve().parent.parent / "rendered"
 
-# Line 2 onward of a bannered file, per shape: a lone `#` must match exactly,
-# every other entry is a prefix. The pre-1.0 shape's line 2 is a lone `#`,
-# so the two shapes cannot both match one file. `COMMENT` is a skill's
+# Line 2 onward of a bannered file: each entry is a line prefix. `COMMENT` is a skill's
 # supporting file, whose banner lines are HTML comments from its first line.
-OLD = (b"#", b"# !GENERATED! from ", b"# !TUNING! ", b"# !BODY-SHA256! ", b"#")
-NEW = (b"# !GENERATED! from ", b"# !TUNING! ")
+BANNER = (b"# !GENERATED! from ", b"# !TUNING! ")
 COMMENT = (b"<!-- !GENERATED! from ", b"<!-- !TUNING! ")
 # A copied package file's banner, from line 1, or from line 2 below a `#!` line.
-OLD_INSTALLED = (b"#", b"# !INSTALLED! ", b"# !BODY-SHA256! ", b"#")
-NEW_INSTALLED = (b"# !INSTALLED! from ",)
+INSTALLED_BANNER = (b"# !INSTALLED! from ",)
 FENCE_OPEN = re.compile(rb" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 FENCE_CLOSE = re.compile(rb" {0,3}(`{3,}|~{3,})[ \t]*")
 LIST_ITEM = re.compile(rb" {0,3}(?:[-*+]|\d+[.)]) ")
@@ -55,17 +51,14 @@ THEMATIC_BREAK = re.compile(rb" {0,3}([-*_])(?: *\1){2,} *")
 def body(data: bytes) -> bytes:
     lines = data.split(b"\n")
     if lines[0] == b"---":
-        start, shapes = 1, (OLD, NEW)
+        start, shape = 1, BANNER
     elif lines[0].startswith(COMMENT[0]):
-        start, shapes = 0, (COMMENT,)
+        start, shape = 0, COMMENT
     else:
-        start, shapes = (1 if lines[0].startswith(b"#!") else 0), (OLD_INSTALLED, NEW_INSTALLED)
-    for shape in shapes:
-        head = lines[start : start + len(shape)]
-        if len(head) == len(shape) and all(
-            line == want if want == b"#" else line.startswith(want) for line, want in zip(head, shape)
-        ):
-            return b"\n".join([*lines[:start], b"# !BANNER!", *lines[start + len(shape) :]])
+        start, shape = (1 if lines[0].startswith(b"#!") else 0), INSTALLED_BANNER
+    head = lines[start : start + len(shape)]
+    if len(head) == len(shape) and all(line.startswith(want) for line, want in zip(head, shape)):
+        return b"\n".join([*lines[:start], b"# !BANNER!", *lines[start + len(shape) :]])
     return data
 
 

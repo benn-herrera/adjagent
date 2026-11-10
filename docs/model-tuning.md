@@ -1,16 +1,17 @@
 # Model tuning
 
-Model-specific defensive text is delivered through **overlay anchors and model families**. A
-definition may expose an anchor at a spot where an observed failure mode needs a targeted note; with
-no overlay for the anchor in the loaded family, it renders as nothing, so the base definitions are
-identical to an anchor-free render.
+Model-specific defensive text is delivered through **anchors and model families**. A definition may
+expose an anchor at a spot where an observed failure mode needs a targeted note; with no tuning text
+for the anchor in the loaded family, it renders as nothing, so the base definitions are identical to
+an anchor-free render.
 
 A family is a Python module under `adjagent/families/`, one per model family, with its fields
-documented in the docstring of `adjagent/family.py`. It fills anchors: family-wide `text`, with
-per-model overrides inside the same module. Resolution, not accumulation: at most one overlay renders
-per anchor, model scope winning over family scope, and the filled text renders verbatim in place with
-no lead-in or wrapper. An author who wants a lead-in writes it into the overlay text. A family can
-never replace, suppress or modify base text; it only fills anchors.
+documented in the docstring of `adjagent/family.py`. It fills anchors with tuning text: family-wide
+text, and member-scoped text for one member of the family's tier map inside the same module.
+Resolution, not accumulation: at most one tuning text renders per anchor, member-scoped winning over
+family-wide, and the filled text renders verbatim in place with no lead-in or wrapper. An author who
+wants a lead-in writes it into the tuning text. A family can never replace, suppress or modify base
+text; it only fills anchors.
 
 ## Rendering a tuned set
 
@@ -19,18 +20,20 @@ module name under `adjagent/families/`. A bare model name is not a family name, 
 accepted.
 
 ```sh
-adjagent install <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]
+adjagent install <plugin> <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]
 ```
 
-`adjagent install --with-kb` takes the same flags, and so do the `just install` and
-`just install-with-kb` recipes in a clone. `adjagent install --help` gives each flag's grammar.
+Either plugin takes the same flags, and so does the `just install <plugin> <target>` recipe in a
+clone. `adjagent install --help` gives each flag's grammar.
 
 Two independent flags carry the tuning further:
 
 - `--model-tier-map` overrides which family member each tier is tuned against. A bare value is the
   whole map in one word.
 - `--model-pin-tier-alias-map` renders an alias in place of each tier's member. It takes no bare
-  value, and under claude a bare one is refused as no `tier=value` pair.
+  value, and under claude a bare one is refused as no `tier=value` pair. It serves a harness that
+  remaps aliases itself, such as Claude Code's `ANTHROPIC_*` model variables: the agent names the
+  alias, and tuning still follows the member.
 
 Under opencode, `--model-tier-map=inherit` or `=default`, two words that render alike there, means
 "the project's own model for every tier": each agent renders with no `model:` line and runs on

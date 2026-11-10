@@ -4,7 +4,7 @@
 # `install.uncommitted_sources` applies to publishing the agents file, and the lines it prints
 # are that check's own. The number is read from the `--version` flag rather than restated here,
 # `__version__` in `adjagent/__init__.py` holding the one copy. The tag is signed and annotated
-# (`git tag -s`), so it needs a gpg secret key and a TTY, and nothing is pushed: the operator pushes.
+# (`git tag -s`), so it needs a gpg secret key and a TTY, and nothing is pushed: the maintainer pushes.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"

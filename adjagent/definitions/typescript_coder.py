@@ -10,8 +10,7 @@ DEFINITIONS = (
         kind=Kind.AGENT,
         description=(
             "TypeScript and JavaScript implementation specialist for code outside the browser — Node, Deno and "
-            f"Bun services, CLIs and libraries. Prefer over {clauses.ref(name='generalist-coder')} for TypeScript "
-            "or JavaScript that does not run in a browser; browser targets go to "
+            "Bun services, CLIs and libraries. Browser targets go to "
             f"{clauses.ref(name='web-app-expert')}."
         ),
         tools=ALL,

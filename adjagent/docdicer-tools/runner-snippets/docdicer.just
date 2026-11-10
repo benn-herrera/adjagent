@@ -1,7 +1,9 @@
 # docdicer recipes. This file is installed at
-# <harness-dir>/skills/docdicer/tools/runner-snippets/ — <harness-dir> being
-# the project's .claude or .opencode — and is imported from the consuming
-# project's justfile by one line (never copied into it):
+# <harness-relpath>/skills/docdicer/tools/runner-snippets/ — <harness-relpath>
+# being the devpro plugin's install directory relative to the project root:
+# .claude/skills/devpro under claude, .opencode/plugins/devpro under opencode —
+# and is imported from the consuming project's justfile by one line (never
+# copied into it):
 #
 #     import? '<harness-relpath>/skills/docdicer/tools/runner-snippets/docdicer.just'
 #
@@ -14,7 +16,7 @@
 #
 # The launcher, tools/docdicer, sits one directory up from this file, so it is
 # found from the snippet's own location, never from the project root. It is
-# POSIX sh and runs docdicer from a venv beside it; until `tools/docdicer
+# a bash script and runs docdicer from a venv beside it; until `tools/docdicer
 # --install` has built that venv, every recipe prints how to install and fails.
 #
 # The link-check recipe is named `docdicer-check`, so it cannot collide

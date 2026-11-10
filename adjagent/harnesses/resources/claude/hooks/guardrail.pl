@@ -3,7 +3,7 @@
 #
 # Claude Code PreToolUse hook for Bash and the file tools.
 # Prevents in-place edits using shell tools, redirects model to use the Edit and Write tools.
-# On a kb install, also refuses a call that names a path in kb-root/.index/ or searches from kb-root/ without excluding it.
+# In the kbase plugin, also refuses a call that names a path in kb-root/.index/ or searches from kb-root/ without excluding it.
 #
 # Exit 2 blocks the call; any other non-zero exit is reported as a hook error and does not block.
 # Perl's own exit on a failed `use` or an uncaught `die` can be 2, so every module is loaded with
@@ -13,9 +13,9 @@ use strict;
 use warnings;
 
 # Scratch trees a command may write into without the edit tools.
-my @scratch = ('.claude-temp', 'test-data/transient');
+my @scratch = ('.claude-temp');
 
-# A kb install's signal, the kbase skill in this script's ROOT, the directory above `hooks/`: never
+# The kbase plugin's signal, the kbase skill in this script's ROOT, the directory above `hooks/`: never
 # the project root or the working directory, which --subdir makes wrong.
 (my $kb_signal = $0) =~ s{[^/]*/[^/]*\z}{skills/kbase/SKILL.md};
 
@@ -79,14 +79,28 @@ sub free {
 
 # A heredoc's body, which is not shell; substituting $1 keeps its command line.
 my $heredoc_body = qr/((?<!<)<<-?\s*(["']?)(\w+)\2[^\n]*).*?(?:\n[ \t]*\3(?=\n|\z)|\z)/s;
+my $shell_reader = qr/(?<![\w.-])(?:bash|sh|zsh)\b/;
+my $script_reader = qr/(?<![\w.-])(?:python[0-9.]*|ruby|perl|node|bash|sh|zsh)\b/;
 
-# redirects reads each >, >>, >|, >! and >&file target, skipping heredoc bodies.
+# without_heredoc_bodies removes each heredoc body, which is data, keeping its command line. A body
+# fed on that line to a reader matching $reader is its script, and stays.
+sub without_heredoc_bodies {
+  my ($cmd, $reader) = @_;
+  my $whole = $cmd;
+  $whole =~ s{$heredoc_body}{
+    my ($from, $to, $line) = ($-[0], $+[0], $1);
+    my $head = substr($whole, 0, $from) =~ s/\A.*\n//sr;
+    "${head}${line}" =~ $reader ? substr($whole, $from, $to - $from) : $line;
+  }ge;
+  return $whole;
+}
+
+# redirects reads each >, >>, >|, >! and >&file target.
 # A quoted span is matched whole, so a > inside it is never
 # examined, and the [^>=-] before an operator skips -> and =>. A >& before a
 # digit or - duplicates or closes a descriptor and writes nothing.
 sub redirects {
   my ($cmd) = @_;
-  $cmd =~ s/$heredoc_body/$1/g;
   my @out;
   while ($cmd =~ /"([^"]*)"|'([^']*)'|(?:^|[^>=-])>(?:>|&(?![\d-]))?[|!]?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>]+))/g) {
     my $target = $3 // $4 // $5;
@@ -101,9 +115,10 @@ my $writes = qr/(?:open\s*\([^)]*['"][wa]b?\+?['"]|(?:writeFile|appendFile)(?:Sy
 
 # mutation names the first form that would change a file behind the edit
 # tools' back, or undef where the command is free of them. Relative targets
-# resolve against cwd, scratch trees against root.
+# resolve against cwd, scratch trees against root. cmd is the shell the command runs; code is cmd
+# plus the bodies of heredocs that feed an interpreter, which only the inline-script check reads.
 sub mutation {
-  my ($cmd, $cwd, $root) = @_;
+  my ($cmd, $code, $cwd, $root) = @_;
   (my $unquoted = $cmd) =~ s/"[^"]*"|'[^']*'/ /g;
   return 'an in-place sed, perl or ruby edit' if $unquoted =~ $in_place;
   for my $target (redirects($cmd)) {
@@ -127,21 +142,8 @@ sub mutation {
       return "${name} overwriting ${dest}" if !in_scratch($abs, $root) && grep { -f } @hit;
     }
   }
-  return 'an inline script that writes a file' if $cmd =~ $script && $cmd =~ $writes;
+  return 'an inline script that writes a file' if $code =~ $script && $code =~ $writes;
   return undef;
-}
-
-# real follows symlinks through the longest existing prefix of a lexically resolved path, so a path
-# is judged where it lands; the part that does not exist stays as written.
-sub real {
-  my ($abs) = @_;
-  my ($head, $tail) = ($abs, '');
-  while ($head ne '' && !-e $head) {
-    $head =~ s{/([^/]*)\z}{};
-    $tail = "/$1$tail";
-  }
-  my $found = $head eq '' ? '' : Cwd::realpath($head) // $head;
-  return $found eq '/' ? ($tail || '/') : "${found}${tail}";
 }
 
 sub under {
@@ -197,28 +199,28 @@ sub search_reason {
 # search or walk rooted in kb-root/ that does not exclude .index. Existence checks pass.
 sub shell_index_reason {
   my ($cmd, $cwd, $kb, $subject) = @_;
-  for my $part (split /(?:&&|\|\||;|\||\n)/, $cmd =~ s/$heredoc_body/$1/gr) {
+  for my $part (split /(?:&&|\|\||;|\||\n)/, $cmd) {
     my @ws = grep { $_ ne '' } split /\s+/, $part;
     my $name = ($ws[0] // '') =~ s{.*/}{}sr;
     next if $name eq 'stat' || ($name =~ /^(?:test|\[)\z/ && ($ws[1] // '') =~ /^-[edf]\z/);
-    return $index_path if grep { under(real(shell_path_of($_, $cwd)), $subject) } @ws;
+    return $index_path if grep { under(shell_path_of($_, $cwd), $subject) } @ws;
     my @args = @ws[1 .. $#ws];
     my $recursive = $name =~ /^(?:rg|find|tree)\z/
       || ($name eq 'grep' && grep { /^-[a-zA-Z]*[rR]/ || /^--(?:dereference-)?recursive\z/ } @args)
       || ($name eq 'ls' && grep { /^-[a-zA-Z]*R/ || $_ eq '--recursive' } @args);
     next if !$recursive || $part =~ $excludes_index;
-    return $index_search if grep { under(real(shell_path_of($_, $cwd)), $kb) } '.', grep { !/^-/ } @args;
+    return $index_search if grep { under(shell_path_of($_, $cwd), $kb) } '.', grep { !/^-/ } @args;
   }
   return undef;
 }
 
 # index_reason names why a call reaches into <root>/kb-root/.index/, or undef where it does not. A
-# path collapses .. against cwd, then follows symlinks, as the root's own kb-root/ does.
+# path collapses .. against cwd, as the root's own kb-root/ does.
 sub index_reason {
   my ($tool, $in, $cwd, $root) = @_;
-  my $kb = real(resolve($root, 'kb-root'));
-  my $subject = real(resolve($root, 'kb-root/.index'));
-  my $at = sub { real(path_of($_[0] // '', $cwd)) };
+  my $kb = resolve($root, 'kb-root');
+  my $subject = resolve($root, 'kb-root/.index');
+  my $at = sub { path_of($_[0] // '', $cwd) };
   if ($tool eq 'Bash') {
     return shell_index_reason($in->{command} // '', $cwd, $kb, $subject);
   }
@@ -229,7 +231,7 @@ sub index_reason {
     return search_reason($at->($in->{path}), $in->{glob}, $kb, $subject);
   }
   if ($tool eq 'Glob') {
-    my $base = real(path_of(glob_root($in->{pattern} // ''), path_of($in->{path} // '', $cwd)));
+    my $base = path_of(glob_root($in->{pattern} // ''), path_of($in->{path} // '', $cwd));
     return search_reason($base, $in->{pattern}, $kb, $subject);
   }
   return undef;
@@ -247,11 +249,15 @@ my $ok = eval {
     die "no project root: CLAUDE_PROJECT_DIR is unset and the input carries no cwd\n" if !$root;
     my $cwd = $input->{cwd} || $root;
     my $in = $input->{tool_input} // {};
+    my $code = $in->{command} // '';
+    if ($tool eq 'Bash' && defined $in->{command}) {
+      $in->{command} = without_heredoc_bodies($code, $shell_reader);
+      $code = without_heredoc_bodies($code, $script_reader);
+    }
     if ($kb_on) {
-      require Cwd;
       $refusal = index_reason($tool, $in, $cwd, $root);
     }
-    $reason = mutation($in->{command} // '', $cwd, $root) if !defined $refusal && $tool eq 'Bash';
+    $reason = mutation($in->{command} // '', $code, $cwd, $root) if !defined $refusal && $tool eq 'Bash';
   }
   1;
 };

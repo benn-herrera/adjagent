@@ -2,21 +2,24 @@
 
 The `kbase` skill and portable tooling for building, navigating and maintaining a knowledge base: a
 navigable, verbatim Markdown distillation of a canonical corpus with a queryable claim-graph metadata
-spine. The set is one skill, `kbase`, with the references its router routes to. It is project-portable:
+spine. The set is one skill, `kbase`, with the supporting files its `SKILL.md` routes to. It is project-portable:
 per-project facts live in the consuming project's `kb-root/AGENTS.md`, not in the skill's text. The
 set is **generated** from its definition module.
 
-A base install omits it. `adjagent install --with-kb` (`just install-with-kb` in a clone) delivers it.
-Under mage it is always delivered.
+The devpro plugin omits it. The kbase plugin delivers it: `adjagent install kbase TARGET`
+(`just install kbase TARGET` in a clone), or under mage the kbase tarball of the
+[release](../README.md#mage-plugin-release). It is the skill and the
+definitions a knowledge-base project works with (SPEC.md, Deployed Surfaces, Plugins lists them;
+[Definition sets](definition-sets.md#the-kbase-plugin) describes them).
 
 ## Requirements
 
-- **kbase 0.10.0 or later**, installed by you; no install writes it. On macOS or Linux:
-  `brew install benn-herrera/kbase/kbase`. `kbase --version` prints the bare version, and
-  `brew upgrade benn-herrera/kbase/kbase` brings an older one up. The harness's `kbase` MCP entry runs
+- **kbase 0.11.0 or later**, installed by you; no install writes it. On macOS or Linux:
+  `brew install benn-herrera/tap/kbase`. `kbase --version` prints the bare version, and
+  `brew upgrade benn-herrera/tap/kbase` brings an older one up. The harness's `kbase` MCP entry runs
   the bare command `kbase`, so it has to be on `PATH`, and the MCP server has to be (re)started after
   an install or upgrade before its tools appear. Nothing checks the version. Native Windows is
-  unsupported for the kb set for now. An agent session can walk you through all of this: the `kbase`
+  unsupported for the kbase plugin for now. An agent session can walk you through all of this: the `kbase`
   skill's `references/installing.md`.
 - **pandoc 3.12**, LaTeX to Markdown, a host tool that is not shipped; a build refuses one out of
   range.
@@ -31,7 +34,7 @@ You don't invoke a command to use it. Ask about the knowledge base (what it says
 it, what a claim rests on) and the session loads the `kbase` skill and routes from there. The skill's
 description is what makes that work, so it also covers the case where there is no KB yet but there are
 LaTeX sources to build one from: ask it to build the KB and it identifies the volume root, confirms it
-with you, and follows the build reference.
+with you, and follows the build supporting file.
 
 A build derives the KB from the LaTeX corpus, and the corpus is the only thing that exists at that
 point. Once you have edited the KB by hand (a leaf's prose, a claim minted or wired), that work exists
@@ -58,32 +61,29 @@ KB you have been working in and you lose the work; continue an interrupted one a
 
 ## The toolchain
 
-The kb set drives **kbase**, a Go binary, not a Python package. You install it yourself and the
-install does not touch it. What the install delivers is the two runner fragments, to
-`.claude/skills/adjagent/skills/kbase/kb-tools/runner-snippets/` by default, inside the claude plugin
-(`.opencode/skills/kbase/kb-tools/runner-snippets/` under opencode;
-`skills/kbase/kb-tools/runner-snippets/` at the plugin root under mage), inside the skill's own
+The kbase plugin drives **kbase**, a Go binary, not a Python package. You install it yourself and the
+install does not touch it. What the install delivers is the two runner snippets, to
+`.claude/skills/kbase/skills/kbase/kb-tools/runner-snippets/` by default, inside the claude plugin
+(`.opencode/plugins/kbase/skills/kbase/kb-tools/runner-snippets/` under opencode;
+`skills/kbase/kb-tools/runner-snippets/` in the install directory under mage), inside the skill's own
 directory; they run `kbase` from `PATH`. kbase's own documentation is its repository,
 [benn-herrera/kbase](https://github.com/benn-herrera/kbase); its README's section "Using kbase from
 an agent harness (MCP)" is the wiring guide. The same install:
 
-1. Registers a `kbase` MCP server in the harness's own settings file: the plugin's `.mcp.json` under
-   Claude Code (`.claude/skills/adjagent/.mcp.json`, or in the user-level plugin for a user-level kb
-   install) and at the plugin root under mage; under opencode the first of `.opencode/opencode.json`,
-   `opencode.jsonc`, `opencode.json`, else `.opencode/opencode.jsonc` created. The entry's command is
+1. Registers a `kbase` MCP server. Under Claude Code it is the plugin's `.mcp.json`
+   (`.claude/skills/kbase/.mcp.json`, or in the user-level plugin for a user-level install) and
+   under mage `.mcp.json` in the install directory, each rendered whole; under opencode it is a
+   record in the plugin's `registry.json`, which its entry registers, so no `opencode.json[c]`
+   is created or changed, and a user-level install registers it too. The entry's command is
    the bare `kbase` from `PATH`, run as `kbase mcp` (`kbase mcp --project-dir-required` under mage); it
    names no KB path. Each of its tools is offered under the harness's own prefix: kbase's `query` tool
-   is `mcp__plugin_adjagent_kbase__query` under Claude Code and `kbase_query` under opencode. A settings file carrying
-   JSONC comments, or a settings path that is not a regular file, is reported with the
-   entry printed for you to merge by hand. A project install under Claude Code also removes the
-   `kbase` entry an earlier version wrote to the project's `.mcp.json`, keeping every other byte
-   ([Guardrail](guardrail.md) lists what is left for you to remove by hand).
+   is `mcp__plugin_kbase_kbase__query` under Claude Code and `kbase_query` under opencode.
 2. Appends one include line to the project's justfile or Makefile, creating a `Makefile` where there
-   is neither: `import? '<ROOT>/skills/kbase/kb-tools/runner-snippets/kb.just'`, `<ROOT>` being
-   `.claude/skills/adjagent` under claude and the harness directory otherwise (just 1.33 or
+   is neither: `import? '<install-dir>/skills/kbase/kb-tools/runner-snippets/kb.just'`, `<install-dir>` being
+   `.claude/skills/kbase` under claude and `.opencode/plugins/kbase` under opencode (just 1.33 or
    later) or the `-include` form naming `kb.mk`. Both are non-fatal, so a consumer's runner keeps
-   working if the tree is absent, and `just`/`make` then carry `kb-verify`, `kb-update-format` and
-   `kb-stats`. Under mage this step does not run: no include line and no `Makefile`, because a plugin
+   working if the tree is absent, and `just`/`make` then carry `kb-help`, `kb-init`, `kb-verify`,
+   `kb-update-format`, `kb-stats`, `kb-score` and `kb-export-latex`. Under mage this step does not run: no include line and no `Makefile`, because a plugin
    is not a repo project.
 
 The entry names no machine-specific path. Under claude it lives inside `.claude/`, which the
@@ -98,21 +98,12 @@ you enable, restart or reconnect in your harness. If a restart does not bring th
 harness process may not find `kbase` on its own `PATH`, which can differ from your shell's;
 `references/installing.md` walks through both cases. It never reaches for a second interface.
 
-The KB lives in `kb-root/` at the repository root, and the entry names no path to it: `kbase mcp`
+The KB lives in `kb-root/` at the project root, and the entry names no path to it: `kbase mcp`
 locates the KB from the working directory it is started in, as every kbase subcommand does, so the
 server must be started in the project directory. Under mage, an application serving many projects, the
 server is started with `--project-dir-required` instead: each tool call names its project with
 `project-dir`.
 
-## Staying a kb install
-
-The choice is sticky: a directory already holding a kb install is one, so a later `adjagent install`
-into it refreshes the kb set rather than dropping it. The signal is the generated `kbase` skill file,
-never the `kb-tools/` directory. A kb install replaces `skills/kbase/kb-tools/` whole, so a `kbase`
-binary and `.asc` an earlier version put there are removed, and any install removes the other trees an
-earlier version installed, naming each. A plain `adjagent install` into a directory holding no kb
-install writes nothing of the kb set (no `skills/kbase/` tree, no kb-tools tree, no MCP entry and no
-include line) and removes each file of one it finds as stale.
-
-While the install holds the kbase skill's `SKILL.md` (inside the plugin under claude), the guardrail also keeps sessions out
-of `kb-root/.index/` ([Guardrail](guardrail.md)).
+An install of the kbase plugin replaces `skills/kbase/kb-tools/` whole. While the install directory
+holds the kbase skill's `SKILL.md`, the guardrail also keeps sessions out of `kb-root/.index/`
+([Guardrail](guardrail.md)).

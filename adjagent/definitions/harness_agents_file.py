@@ -11,29 +11,27 @@ DEFINITIONS = (
         kind=Kind.AGENTS_FILE,
         body=f"""# @!agf-scope-name!@ info and directives
 
- <!-- vvv-adjagent @!agf-version!@ do not edit at or between marker lines. adjagent-vvv -->
+ <!-- vvv-adjagent {clauses.PLUGIN_NAME} @!agf-version!@ do not edit at or between marker lines. adjagent-vvv -->
 \x20
 ## Scratch space
-**INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —
-throwaway builds, probe harnesses, captured output — goes in `{clauses.PROJECT_TEMP_DIR}/` under the
-active project root, beside `{clauses.PROJECT_HARNESS_DIR}/` and never inside it (writes there trip
-the permission system's own-settings protections). If it doesn't exist, stop and say so; don't
-improvise a location.
+**INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. {clauses.SCRATCH_RULE}
 
 ## Task management
-- **Before planning, briefing or dispatching an agent, accepting returned work, or making a
-  checkpoint commit, load the `{clauses.ref(name="dev-process")}` skill.**
+
+- **Before designing, planning, briefing or dispatching an agent, accepting returned work, or
+  making a checkpoint commit, load the `{clauses.optional_ref(name="development")}` skill.**
 
 **PRINCIPLE**: erroneous, halting escalation of soluble problems destroys workflow.
 - Exhaust the written record before escalating: a decision "only the user can make" often dissolves
   against something already written. Check the contract docs (SPEC, ARCHITECTURE, CONVENTIONS), the
-  active plan, the definition of any agent involved, and the commit history for the code in
-  question. Not ROADMAP: it is future intent, and steering a present decision by it trades a
-  realistic near-term goal for a speculative one.
-- An escalation states which of those you checked. It is genuine only where two defensible readings
-  lead to materially different work and nothing written separates them — not where you have not
-  looked, and not where one side is something you brought in yourself: an oracle, standard or method
-  you chose serves the stated requirements and yields to them.
+  active plan and active design, the definition of any agent involved, and the commit history for
+  the code in question. Not ROADMAP: it is future intent, and steering a present decision by it
+  trades a realistic near-term goal for a speculative one.
+- An escalation — yours, or one an agent's report says needs the user — states which of those you
+  checked. It is genuine only where two defensible readings lead to materially different work and
+  nothing written separates them — not where you have not looked, and not where one side is
+  something you brought in yourself: an oracle, standard or method you chose serves the stated
+  requirements and yields to them.
 - When the record settles it, act on what you found and say what settled it.
 - A reviewer's severity does not scope a fix pass: a finding that cites a written rule is in scope
   whatever the label. Only a finding that needs a choice nothing written settles escalates.
@@ -78,7 +76,7 @@ to invoke one piece of implementation from another is injecting complexity where
 A behavior change — yours or a dispatched agent's — is a first-class work item: surfaced, proposed
 and landed like any other change, never a private adjustment made in passing. It lands somewhere
 permanent, preferably tracked, scoped to the domain that needs it:
-`{clauses.USER_HARNESS_DIR}/{clauses.AGENTS_FILE}`, the project `AGENTS.md`, an agent/command/skill
+{clauses.MEMORY_FILE}, the project `AGENTS.md`, an agent/command/skill
 definition, or a project doc.
 
 **INVARIANT**: Never create or update a cross-session memory store — a memory directory, its index,
@@ -126,11 +124,14 @@ changes cannot be seen at its source or corrected there.
   can earn its place while the block outweighs what it documents. The test is who reads it and when
   — a note the next editor of this file needs stays; one answering "why was this done" belongs in
   the commit, where whoever asks that already looks.
-- **Change an existing file only with the edit and write tools** — never `sed -i`, a script or a
-  heredoc: a scripted edit hits every match, not the one site meant, and shows no diff. A
-  file-writing tool — formatter, renderer, build — is exempt.
-  - These tools write JSON escapes for U+2028/U+2029 as raw characters; spell those code points
-    another way.
+- **Create or change files only with the edit and write tools** — never
+  `sed -i`, `perl -i`, a one-off script, a heredoc, or a redirect: a scripted edit hits every match,
+  not the one site meant, and shows no diff. Moving or copying a file as it stands is neither.
+  Specific exemptions:
+  - Writes to scratch space `{clauses.PROJECT_TEMP_DIR}/`
+  - File-writing tools — formatter, renderer, build
+- The edit and write tools write JSON escapes for U+2028/U+2029 as raw characters; spell those
+  code points another way, e.g. in Python `chr(0x2028)`; elsewhere the language's own escape, built at runtime.
 - **The shell tool carries the operator's interactive aliases.** Its shell is non-interactive, yet
   an alias like `rm -i` still fires there and blocks on a prompt nobody answers. Tool commands and
   dispatched instructions call `command rm`, `command cp`, `command mv` and `command ls`. Scripts on
