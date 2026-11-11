@@ -112,11 +112,7 @@ edition.
 
 Build outputs live under `target/` only (Cargo's default) — never scatter artifacts into the source tree.
 
-{clauses.warnings_as_defects(
-    enable="Run `cargo fmt` and `cargo clippy` through their targets before shipping",
-    warnings="clippy warnings",
-    suppression="an `#[allow(...)]`",
-)}
+Run `cargo fmt` and `cargo clippy -- -D warnings` through their targets before shipping, so any clippy warning fails the run; an `#[allow(...)]` carries a comment saying why.
 
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="Rust", recipes="`fmt` and `lint` recipes")}
 

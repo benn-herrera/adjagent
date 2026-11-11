@@ -100,7 +100,7 @@ ADJAGENT := "\"" + VENV + "/bin/adjagent" + "\""
 agents:
   #!/usr/bin/env bash
   set -euo pipefail
-  [[ -x {{PYTHON}} ]] || python3 -m venv "{{VENV}}"
+  [[ -x {{PYTHON}} ]] || python3 -m venv --upgrade-deps "{{VENV}}"
   [[ -x {{ADJAGENT}} && "$({{ADJAGENT}} --version)" == "{{ADJAGENT_VER}}" ]] || \
     {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
   {{ADJAGENT}} install devpro . --harness=claude

@@ -3,9 +3,10 @@ directory and the project root from TARGET. The plugin is written into ROOT, the
 below the harness directory — the harness directory itself where that is empty: every definition the
 plugin ships rendered into ROOT's agents/, commands/ and skills/, each shipped package whose owning
 definition rendered copied to its stated destination — the docdicer tools inside the docdicer skill's
-directory, rebuilding their venv afterwards where one stood, the development scripts inside the
-development skill's, the kb-tools package inside the kbase skill's, with the `kbase` MCP entry and the
-consumer's runner include line — each file the installing harness ships copied into ROOT as it stands,
+directory, replacing any venv their launcher built there, the development scripts inside the
+development skill's, the kb-tools package inside the kbase skill's, with the `kbase` MCP entry — and,
+for each copied package carrying runner snippets, its include line in the consumer's runner file; each
+file the installing harness ships copied into ROOT as it stands,
 the harness's guardrail hook registered in a file of its own under ROOT where one install-time run of
 it succeeds; a harness-directory plugin installed below its project root also gets its agents file in its
 harness directory. Overwrites without ceremony only what carries this repository's banner, refusing
@@ -46,7 +47,7 @@ from adjagent.render import (
     shipped_harness_files,
     write_renders,
 )
-from adjagent.runner_file import JUSTFILE_NAMES, MAKEFILE_NAMES, check_runner, install_kb_include_line
+from adjagent.runner_file import JUSTFILE_NAMES, MAKEFILE_NAMES, SnippetSet, check_runner, install_include_lines
 
 
 def uncommitted_sources() -> tuple[str, ...]:
@@ -63,45 +64,50 @@ def uncommitted_sources() -> tuple[str, ...]:
     return tuple(line for line in out.splitlines() if line)
 
 
-def run_tool_install(script: Path) -> str | None:
-    """Run a shipped tool's `script --install`, its output passing through: None when it exits 0, else
-    one line saying how it failed — its exit status, or why it could not be started."""
-    try:
-        result = subprocess.run([str(script), "--install"], check=False)
-    except OSError as exc:
-        return f"could not be run: {exc}"
-    return None if result.returncode == 0 else f"exited {result.returncode}"
-
-
 # The docdicer tools package, inside the docdicer skill's own directory: its launcher script, and the
-# virtual environment that script builds beside itself — not install output, so the install replaces it
-# with the package and afterwards has the script rebuild it where it existed.
+# virtual environment that script builds beside itself on its next run — not install output, so the
+# install replaces it with the package.
 DOCDICER_TOOLS_PACKAGE = "skills/docdicer/tools"
-DOCDICER_TOOLS_SCRIPT = f"{DOCDICER_TOOLS_PACKAGE}/docdicer"
-DOCDICER_TOOLS_VENV = f"{DOCDICER_TOOLS_PACKAGE}/{VENV_DIR}"
 # The development scripts package, inside the development skill's own directory: the cold-read runner.
 DEVELOPMENT_SCRIPTS_PACKAGE = "skills/development/scripts"
 
 
 class ShippedPackage(NamedTuple):
     """A package an install copies: its source directory in this package, its destination below ROOT,
-    and the definition it ships with."""
+    the definition it ships with, and the runner snippets it carries, their directory below the
+    destination, whose include line a project install writes into the project's runner file."""
 
     source: str
     destination: str
     owner: str
+    snippets: SnippetSet | None = None
+
+    def installed_snippets(self) -> SnippetSet | None:
+        """`snippets` with its directory below ROOT, as an include line names it."""
+        if self.snippets is None:
+            return None
+        return self.snippets._replace(directory=f"{self.destination}/{self.snippets.directory}")
 
 
-# The kb toolchain, inside the kbase skill's own directory; the runner include line names its snippets.
-KB_TOOLS = ShippedPackage("kb-tools", KB_TOOLS_DIR, KBASE_OWNER)
 # Every package a project install may ship, each where its owner renders; a user-level install ships
 # none. A destination is a consumer contract — a skill names its own tools relative to its directory,
-# and an installed runner line names its destination — so it is stated, never derived.
-# `package_copies`, the `!INSTALLED!` stamping and the destination replacement all read this table.
+# and an installed runner line names its snippets directory — so each is stated, never derived.
+# `package_copies`, the `!INSTALLED!` stamping, the destination replacement and the runner include
+# lines all read this table; the include lines land in its order.
 SHIPPED_PACKAGES: tuple[ShippedPackage, ...] = (
-    ShippedPackage("docdicer-tools", DOCDICER_TOOLS_PACKAGE, "docdicer"),
+    ShippedPackage(
+        "docdicer-tools",
+        DOCDICER_TOOLS_PACKAGE,
+        "docdicer",
+        SnippetSet("docdicer", "runner-snippets", {"just": "docdicer.just", "make": "docdicer.mk"}),
+    ),
     ShippedPackage("development-tools", DEVELOPMENT_SCRIPTS_PACKAGE, "development"),
-    KB_TOOLS,
+    ShippedPackage(
+        "kb-tools",
+        KB_TOOLS_DIR,
+        KBASE_OWNER,
+        SnippetSet("kb", "runner-snippets", {"just": "kb.just", "make": "kb.mk"}),
+    ),
 )
 # The harness resources: files a harness ships that land in ROOT as they stand, copied and never
 # rendered. The directory below this one in the source is the harness's own
@@ -356,11 +362,10 @@ def _installs_agents_file(harness_dir: Path, harness: Harness, *, project: Path)
 
 
 def _is_project_install_of_a_nested_plugin(harness: Harness, *, user_level: bool) -> bool:
-    """Whether an install is a project install of a nested plugin. Such an
-    install keeps the agents-file block current in the one place it lives and, where the kb-tools
-    package ships, writes the KB include line in the project's runner file. A harness-directory plugin's
-    agents file is its own, and it is no repo project, so it has no consumer runner file
-    and none is created."""
+    """Whether an install is a project install of a nested plugin. Such an install keeps the agents-file
+    block current in the one place it lives and, for each shipped package carrying runner snippets,
+    writes its include line in the project's runner file. A harness-directory plugin's agents file is its
+    own, and it is no repo project, so it has no consumer runner file and none is created."""
     return not user_level and not harness.is_harness_dir_plugin
 
 
@@ -379,14 +384,6 @@ def _resource_copies(root: Path, *, harness: Harness, user_level: bool) -> list[
     if not harness.entry_resource:
         return []
     return [(source, target) for source, target in copies if target == root / harness.entry_resource]
-
-
-def _standing_docdicer_venv(root: Path, *, user_level: bool) -> Path | None:
-    """The docdicer tools' `.venv` directory a project install finds standing, removes with its
-    package destination, and then has rebuilt; None where none stands, and for a user-level install,
-    which ships no package."""
-    venv = root / DOCDICER_TOOLS_VENV
-    return venv if not user_level and venv.is_dir() else None
 
 
 def _clear_package_destination(destination: Path) -> None:
@@ -429,36 +426,34 @@ def install(
     verbose: bool,
     project_root: Path | None = None,
     uncommitted: Callable[[], tuple[str, ...]],
-    tool_install: Callable[[Path], str | None],
     real_harness_dir: Path | None = None,
     real_project: Path | None = None,
     global_dir: Path | None = None,
 ) -> None:
-    """Install the plugin `ctx` renders into ROOT, `harness_dir / ctx.bound_harness.plugin_dir`. Every check runs
-    first, so a refusal writes nothing; then the writes; then the removals.
+    """Install the plugin `ctx` renders into ROOT, `harness_dir / ctx.bound_harness.plugin_dir`. Every
+    check runs first, so a refusal writes nothing; then the writes; then the removals.
 
-    `verbose` prints each file written. `project_root` is the project the harness directory
-    belongs to, defaulting to `harness_dir`. `uncommitted` names the uncommitted changes to the sources,
-    called only where a write must refuse on them. `tool_install` rebuilds the docdicer tools' `.venv`
-    from the installed script the path names, returning None or one line saying how it failed.
-    `real_harness_dir` and `real_project` are the harness directory and project root the install is
-    for, where `harness_dir` and `project_root` are a scratch copy of them, each defaulting to the path
-    written. `global_dir` is the harness's user harness directory, or a scratch copy of it, defaulting
-    to the directory itself."""
+    `verbose` prints each file written. `project_root` is the project the harness directory belongs to,
+    defaulting to `harness_dir`. `uncommitted` names the uncommitted changes to the sources, called only
+    where a write must refuse on them. `real_harness_dir` and `real_project` are the harness directory
+    and project root the install is for, where `harness_dir` and `project_root` are a scratch copy of
+    them, each defaulting to the path written. `global_dir` is the harness's user harness directory, or a
+    scratch copy of it, defaulting to the directory itself."""
     root = harness_dir / ctx.bound_harness.plugin_dir
     project = _lexical(harness_dir if project_root is None else Path(project_root))
     user_level = ctx.harness.name in user_dir_harnesses(harness_dir if real_harness_dir is None else real_harness_dir)
     harness_relpath = _harness_relpath(root, project)
     # Every check runs before the first write: the render, the guardrail probe that decides whether its
     # script is a resource target, each render, harness-file and resource target the install would
-    # overwrite, the runner file where kbase ships, and the agents file's.
+    # overwrite, the runner file where a shipped package carries runner snippets, and the agents file's.
     # ROOT itself is created only after all of them.
     renders = render_all(ctx)
     packages = [] if user_level else [package for package in SHIPPED_PACKAGES if ctx.ships(package.owner)]
     package_files = package_copies(root, packages)
     resource_files = _resource_copies(root, harness=ctx.harness, user_level=user_level)
     guardrail = _guardrail_in_play(ctx.bound_harness, user_level=user_level)
-    writes_include_line = KB_TOOLS in packages and _is_project_install_of_a_nested_plugin(
+    snippet_sets = [snippets for package in packages if (snippets := package.installed_snippets()) is not None]
+    writes_include_lines = bool(snippet_sets) and _is_project_install_of_a_nested_plugin(
         ctx.harness, user_level=user_level
     )
     guardrail_skipped: str | None = None
@@ -489,7 +484,7 @@ def install(
     # Everything this install copies, in one list: `keep` and the report below count a harness's own
     # files with the packages', so neither reads as a stale render.
     copies = [*package_files, *resource_files]
-    if writes_include_line:
+    if writes_include_lines:
         check_runner(project)
     agents_file: AgentsFileWrite | None = None
     if _installs_agents_file(harness_dir, ctx.harness, project=project):
@@ -504,8 +499,6 @@ def install(
             uncommitted=uncommitted,
             real_project=real_project,
         )
-    # Read before the destination is replaced, which removes the venv with the rest of the package.
-    rebuild_docdicer_venv = _standing_docdicer_venv(root, user_level=user_level) is not None
 
     root.mkdir(parents=True, exist_ok=True)
     for package in packages:
@@ -534,18 +527,13 @@ def install(
     if verbose:
         for path in [*(target for _, target in copies), *written]:
             print(f"wrote {path}")
-    if writes_include_line:
-        install_kb_include_line(project, harness_relpath=harness_relpath, real_project=real_project)
+    if writes_include_lines:
+        install_include_lines(project, snippet_sets, harness_relpath=harness_relpath, real_project=real_project)
     if guardrail is not None and not registers_guardrail:
         # Neither prune nor the one-way copy removes what an earlier install delivered, so it is named.
         earlier = _earlier_guardrail(root, guardrail=guardrail)
         left = f"; left in place from an earlier install: {', '.join(str(path) for path in earlier)}" if earlier else ""
         report_left_alone(f"guardrail hook skipped, neither installed nor registered: {guardrail_skipped}{left}")
-    if rebuild_docdicer_venv:
-        script = root / DOCDICER_TOOLS_SCRIPT
-        failure = tool_install(script)
-        if failure is not None:
-            print(f"'{script} --install' failed, the install otherwise complete: {failure}")
     _report_shadowing(root, harness=ctx.bound_harness, files=own_files, user_level=user_level)
     if ctx.harness.reload_rule:
         print(ctx.harness.reload_rule)
@@ -612,18 +600,14 @@ def preflighted_install(
     verbose: bool,
     project_root: Path | None = None,
     uncommitted: Callable[[], tuple[str, ...]],
-    tool_install: Callable[[Path], str | None],
     dry_run: bool = False,
 ) -> None:
     """`install` behind the preflight: run first into a scratch copy of the paths it manages, with the
     real harness directory and project root as its identity. Where that changed nothing, the harness
     directory is reported up to date and nothing in the target is touched — no file, no package
-    destination, no `.venv`, no `tool_install` run. With `dry_run`, what would be created, changed and
-    removed is printed relative to the project root, followed by the docdicer `.venv` rebuild the
-    install would also make, and nothing is written. Otherwise the install runs exactly as `install`
-    does. The copy holds no `.venv`, so only that real install can reach `tool_install`. Every printed
-    path and refusal names the real target."""
-    root = harness_dir / ctx.bound_harness.plugin_dir
+    destination, no `.venv`. With `dry_run`, what would be created, changed and removed is printed
+    relative to the project root, and nothing is written. Otherwise the install runs exactly as
+    `install` does. Every printed path and refusal names the real target."""
     project = _lexical(harness_dir if project_root is None else Path(project_root))
     user_level = ctx.harness.name in user_dir_harnesses(harness_dir)
     managed = _install_managed_paths(
@@ -632,14 +616,6 @@ def preflighted_install(
         project=project,
         user_level=user_level,
     )
-    dry_run_notes: list[str] = []
-    venv = _standing_docdicer_venv(root, user_level=user_level)
-    if venv is not None:
-        relpath = PurePosixPath(_harness_relpath(root, project))
-        dry_run_notes.append(
-            f"the install would also replace {_harness_relpath(venv, project)} and run "
-            f"'{relpath / DOCDICER_TOOLS_SCRIPT} --install', which needs the network"
-        )
     run_preflighted(
         managed,
         install=lambda bases: install(
@@ -648,7 +624,6 @@ def preflighted_install(
             verbose=verbose,
             project_root=bases[0],
             uncommitted=uncommitted,
-            tool_install=tool_install,
             real_harness_dir=harness_dir,
             real_project=project,
             global_dir=bases[3],
@@ -656,5 +631,4 @@ def preflighted_install(
         dry_run=dry_run,
         target=harness_dir,
         report_root=project,
-        dry_run_notes=dry_run_notes,
     )

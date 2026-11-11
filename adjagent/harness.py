@@ -118,6 +118,11 @@ COLD_READ_SCRIPT_RULE = (
 )
 """The development skill's cold-read bullet under each harness whose install runs `cold-read.sh`."""
 
+FOREGROUND_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them.
+If a recipe times out, the agent hands back naming it instead of rerunning it in the background."""
+"""The recipe rule under each harness whose shell tool takes a per-command timeout and can run a command
+in the background."""
+
 
 def scratch_rule(*, temp_dir: str, harness_dir: str) -> str:
     """The agents file's scratch rule, after its `/tmp` sentence, for a harness whose project scratch
@@ -281,3 +286,16 @@ class Harness:
 def quoted(value: str) -> str:
     """A frontmatter value in double quotes, as every emitter writes description and color."""
     return f'"{value}"'
+
+
+def agent_frontmatter(fields: AgentFields) -> tuple[str, ...]:
+    """Agent frontmatter with a comma-joined `tools` list: name; description "…"; model if non-empty;
+    color "…" if set; `tools: A, B` unless tools is None."""
+    lines = [f"name: {fields.name}", f"description: {quoted(fields.description)}"]
+    if fields.model:
+        lines.append(f"model: {fields.model}")
+    if fields.color is not None:
+        lines.append(f"color: {quoted(fields.color)}")
+    if fields.tools is not None:
+        lines.append(f"tools: {', '.join(fields.tools)}")
+    return tuple(lines)

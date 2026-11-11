@@ -85,15 +85,16 @@ DISSENT = """If you believe a directive would produce technically incorrect outp
 
 NO_PROCESS_LEFT_BEHIND = """**Nothing you start outlives your work.** No process you start is still running when you finish, and none waits on input nobody will give: a command reads the input you name or a closed stdin (`< /dev/null`), never a terminal, and one that can block runs under a timeout."""
 
+RECIPE_OUTPUT_TO_FILE = f"""**A recipe's output goes to a file, read only on failure.** Run a runner recipe whose pass or fail your report states as `<recipe> < /dev/null > {PROJECT_TEMP_DIR}/<job>-<target>.log 2>&1`: `<recipe>` the runner command as the project spells it (`just test`, `make test`), `<target>` its target name, `<job>` the package or task you were dispatched for, your own name for the task where there is none. The log path is relative to the project root, so a run from elsewhere points the redirect there; a log path your dispatch names wins. Never pipe it: the recipe's own exit status is the result, and a pipe (`| tail`, `| head`) can report its last command's instead. On success, report the pass and leave the file unread; on failure, search the file for the failure before reading it whole, and quote the failure in your report. A recipe run for its output instead — a listing, a diff — is read."""
+
 PROJECT_CONVENTIONS_OUTRANK = """**Project conventions outrank general practice.** The house style, idioms and defaults in this definition are what you bring to a project that states nothing. Where the project does state something — its CONVENTIONS.md, a file's own header or prelude, the settled style of the code around your change — the project wins and you match it rather than converting it to what is written here."""
 
 
 # The rule run that opens the coders' Core Principles and the platform experts' Code Standards:
 # each definition writes the heading, KEY_GUIDELINE and incumbent_search() ahead of it, and its own
 # prose follows it. The platform variant lacks MACHINE_GUARANTEES_CODER; adding it is a change to
-# seven definitions, not a sync repair. RECIPE_RULE stands second to last because python_coder.py and
-# shell_dsl_coder.py append their own sentence inline after the whole constant, which a paragraph
-# placed last would be joined to.
+# seven definitions, not a sync repair. PROJECT_CONVENTIONS_OUTRANK stands last: python_coder.py
+# and shell_dsl_coder.py continue its paragraph inline with their own sentence.
 CODE_PRINCIPLES_CODER = f"""{PROVE_REPLACEMENT_FIRST_CHANGE}
 
 {MACHINE_GUARANTEES_CODER}
@@ -108,11 +109,14 @@ CODE_PRINCIPLES_CODER = f"""{PROVE_REPLACEMENT_FIRST_CHANGE}
 
 {RECIPE_RULE}
 
+{RECIPE_OUTPUT_TO_FILE}
+
 {PROJECT_CONVENTIONS_OUTRANK}"""
 
 # Each platform expert follows it with its build_system(direct=...) paragraph, then
-# PROJECT_SETUP_PLATFORM. RECIPE_RULE stands before PROJECT_CONVENTIONS_OUTRANK as it does in the coder
-# stack: a platform expert builds with a toolchain too, and the two stacks read the same way.
+# PROJECT_SETUP_PLATFORM. RECIPE_RULE and RECIPE_OUTPUT_TO_FILE stand before PROJECT_CONVENTIONS_OUTRANK
+# as they do in the coder stack: a platform expert builds with a toolchain too, and the two stacks read
+# the same way.
 CODE_PRINCIPLES_PLATFORM = f"""{PROVE_REPLACEMENT_FIRST_CHANGE}
 
 {TESTS_NOT_RUNTIME_CHECKS}
@@ -124,6 +128,8 @@ CODE_PRINCIPLES_PLATFORM = f"""{PROVE_REPLACEMENT_FIRST_CHANGE}
 {NO_PROCESS_LEFT_BEHIND}
 
 {RECIPE_RULE}
+
+{RECIPE_OUTPUT_TO_FILE}
 
 {PROJECT_CONVENTIONS_OUTRANK}"""
 
@@ -250,9 +256,7 @@ def warnings_as_defects(*, enable: str, warnings: str = "warnings", suppression:
     return f"""{enable} and treat {warnings} as defects; {suppression} carries a comment saying why."""
 
 
-FULL_WARNING_SET = (
-    """Turn the compiler's full warning set on — `-Wall -Wextra` on GCC and Clang, `/W4 /permissive-` on MSVC"""
-)
+FULL_WARNING_SET = """Build with the compiler's full warning set on and warnings as errors — `-Wall -Wextra -Werror` on GCC and Clang, `/W4 /permissive- /WX` on MSVC; a suppression carries a comment saying why."""
 
 SANITIZER_BUILD_TARGET = """A sanitizer build is a target of its own, not a flag someone remembers. Build outputs stay in a build directory and never scatter into the source tree."""
 

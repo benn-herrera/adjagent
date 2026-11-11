@@ -70,8 +70,7 @@ _venv:
         # that is actually our minspec, so use it to ensure we're not using any features
         # beyond its ken
         [[ "$(uname)" == Darwin ]] && export PATH=/usr/bin/:${PATH} || true
-        python3 -m venv "{{VENV}}"
-        {{VENV_PYTHON}} -m pip install pip --upgrade
+        python3 -m venv --upgrade-deps "{{VENV}}"
     fi
     if [[ "$(cat "{{TOOLS_RECORD}}" 2>/dev/null || true)" != "$(printf '%s\n' "${tools[@]}")" ]]; then
         {{VENV_PYTHON}} -m pip install "${tools[@]}"
@@ -136,7 +135,8 @@ undice tree monolith:
 
 [doc("check every relative link and #anchor in PROJECT_DOCS, docs and the top-level *.md files, then that every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exit 1 on a broken link or an orphan")]
 check-links:
-  @just docdicer-check PROJECT_DOCS *.md
+  @just docdicer check-links PROJECT_DOCS docs *.md
+  @just docdicer check-tree PROJECT_DOCS
 
 import? ".claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just"
 

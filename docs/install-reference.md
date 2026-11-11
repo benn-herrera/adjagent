@@ -46,10 +46,11 @@ A project install writes, inside the install directory:
   ([Definition sets](definition-sets.md)). Under opencode these files have no frontmatter; the
   plugin's metadata is in `registry.json`, below.
 - `skills/<name>/SKILL.md` for each skill the plugin holds, and each skill's supporting files.
-- The packages that ship with a skill, in that skill's own directory (devpro):
-  - the docdicer tools package, `skills/docdicer/tools/`: the `docdicer` script, a `.gitignore`
-    holding `.venv/`, and `runner-snippets/docdicer.just` and `docdicer.mk`, which no install
-    includes for you ([Definition sets](definition-sets.md));
+- The packages that ship with a skill, in that skill's own directory:
+  - the docdicer tools package, `skills/docdicer/tools/` (both plugins): the `docdicer` script, a
+    `.gitignore` holding `.venv/`, and `runner-snippets/docdicer.just` and `docdicer.mk`, whose
+    include line a claude or opencode install writes (below, [Runner include
+    lines](#runner-include-lines); [Definition sets](definition-sets.md));
   - `skills/development/scripts/cold-read.sh`, in the development skill's directory: a bash
     script, executable, that has one agent read one brief with no tools ([Running a cold
     read](#running-a-cold-read)). Under mage the script refuses to run.
@@ -72,13 +73,26 @@ dialog ([Claude Code plugin loading](https://code.claude.com/docs/en/plugins/loa
 repository plugin didn't load"). A claude install that writes the plugin prints: "If the new agents
 are not available after using `adjagent install`, `/reload-plugins` rescans the agent list."
 
-`tools/docdicer --install` installs docdicer into `tools/.venv`, building the venv where it is
-missing or its python no longer runs, and otherwise keeping it and updating its pip; it needs `python3`
-3.9 or later with its venv module, `git`, and the network. An install does not run it unprompted, with one
-exception: an install that changes anything replaces the whole tools package, `tools/.venv`
-included, and where that venv existed it then runs `tools/docdicer --install` to rebuild it. If that
-run fails, the install says so in one line naming the command; its exit status and its other writes
-are unaffected.
+### Runner include lines
+
+A project install of either plugin under claude or opencode writes one include line per snippet set
+into the project's runner file (a justfile, else a Makefile): the docdicer snippets for both plugins
+and, for the kbase plugin, the kb snippets too ([Knowledge base](knowledge-base.md#the-toolchain)).
+A project with neither file gets a `Makefile` created holding every line the install writes. Each
+set is judged alone: a line for this install's directory is rewritten in place, and a line naming
+another harness directory, or two lines for the same set, are reported and left. Under mage, at
+user level, and in this repository's own runner file, nothing is written. The just form needs just
+1.33 or later.
+
+### The docdicer launcher
+
+`tools/docdicer` installs docdicer on demand and takes no `--install` argument. On every run it
+rebuilds `tools/.venv` where the venv's python is missing or does not run, installs the docdicer
+version the script names where the venv's docdicer does not report it, sends all install output to
+stderr, and then passes its arguments to docdicer unchanged. It needs `python3` 3.9 or later with its
+venv module, else it names the remedy and exits non-zero; the first run needs `git` and the network.
+No adjagent install runs it: an install that changes anything replaces the whole tools package,
+`tools/.venv` included, and the next run of the script rebuilds the venv.
 
 ### Running a cold read
 
@@ -133,7 +147,8 @@ A home-directory target is a user-level install: `adjagent install devpro ~ --ha
 
 No user settings file is written. No guardrail, no docdicer tools or development script, no
 kb-tools, no include line. The docdicer skill is
-installed without its script, and says so when asked to run it. `adjagent install-agents-file devpro ~/.claude`
+installed without its script; the skill tells its reader that a project install provides it.
+`adjagent install-agents-file devpro ~/.claude`
 installs that plugin's harness agents file there ([Agents file](agents-file.md)). A claude or opencode
 project install keeps the agents-file block current in one place, your global agents file where it
 holds the block and otherwise the project's `AGENTS.md` ([Agents file](agents-file.md#where-a-project-install-puts-it)).
@@ -150,8 +165,8 @@ the same name. Neither install is refused. Only claude reports this.
 
 `adjagent install <plugin> <plugins-parent> --harness=mage` creates `<plugins-parent>/<plugin>`. Inside
 that plugin the layout is the claude plugin's: the surfaces sit at its top level, with the manifest at
-`.claude-plugin/plugin.json` beside them, rendered rather than copied. Mage ships no hook, and the
-kbase plugin writes no include line and no `Makefile`: a plugin is not a repo project.
+`.claude-plugin/plugin.json` beside them, rendered rather than copied. Mage ships no hook, and neither
+plugin writes an include line or a `Makefile`: a plugin is not a repo project.
 The install writes the agents file as `<plugin>/CLAUDE.md`, so a normal install needs no second step.
 
 ## An installed tree is an artifact
@@ -172,7 +187,7 @@ tree until you remove it.
 
 An install first runs into a scratch copy of the paths it manages and compares the copy with the
 target. Where nothing would differ, in bytes or mode, and nothing would be created or removed, it
-says so, exits 0 and touches nothing: no file, no `tools/`, no `tools/.venv`, no re-run.
+says so, exits 0 and touches nothing: no file, no mode or modification time changed, no package destination replaced and no `tools/.venv` removed.
 
 ```text
 up to date: /home/me/foo/.claude — nothing written
@@ -197,9 +212,6 @@ changed:
 removed:
   .claude/skills/devpro/agents/retired-agent.md
 ```
-
-Where the install would replace `tools/.venv`, the dry run adds a line saying so, and that the
-install would rebuild it with `tools/docdicer --install`, which needs the network.
 
 What the install would leave alone or skip, such as a guardrail hook it skips, is printed on stderr
 with the reason. That happens on an up-to-date run and

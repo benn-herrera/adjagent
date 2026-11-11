@@ -178,6 +178,22 @@ EXEMPTIONS = {
         "warnings_as_defects",
     ): "The Go compiler emits errors, never warnings; go_coder.py runs `go vet` and `staticcheck` before shipping, which fail on any finding.",
     (
+        "c-coder",
+        "warnings_as_defects",
+    ): "c_coder.py carries FULL_WARNING_SET, whose `-Werror` and `/WX` make any warning fail the build.",
+    (
+        "cpp-coder",
+        "warnings_as_defects",
+    ): "cpp_coder.py carries FULL_WARNING_SET, whose `-Werror` and `/WX` make any warning fail the build.",
+    (
+        "rust-coder",
+        "warnings_as_defects",
+    ): "rust_coder.py runs `cargo clippy -- -D warnings`, which fails on any clippy warning.",
+    (
+        "typescript-coder",
+        "warnings_as_defects",
+    ): "typescript_coder.py runs eslint under `--max-warnings 0` or biome under `--error-on-warnings`, which fail on any lint warning; the type check fails on any type error.",
+    (
         "web-app-expert",
         "logging_backend_seam",
     ): 'web_app_expert.py ("use a structured console wrapper ... accept a logger interface so callers can substitute their own") states the wrapper rule in its own words.',

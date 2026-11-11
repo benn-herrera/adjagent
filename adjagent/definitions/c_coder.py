@@ -112,7 +112,7 @@ of `(input, want)` cases — C has no parametrization, so the table is the patte
 
 {clauses.verification_evidence()}
 
-{clauses.build_system_lead(direct="the compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET}
+{clauses.build_system_lead(direct="the compiler")} {clauses.FULL_WARNING_SET} {clauses.SANITIZER_BUILD_TARGET}
 
 Run `clang-format` and a static analyser through their targets before shipping — `clang-tidy`, `cppcheck`, or GCC's `-fanalyzer`.
 

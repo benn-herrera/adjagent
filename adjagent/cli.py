@@ -25,7 +25,7 @@ from adjagent.context import (
     plugins,
 )
 from adjagent.errors import InputError
-from adjagent.install import preflighted_install, run_tool_install, uncommitted_sources
+from adjagent.install import preflighted_install, uncommitted_sources
 from adjagent.install_target import agents_file_harness, resolve_install_target
 from adjagent.render import render_agents_file, render_all, write_renders
 from adjagent.vocabulary import HarnessText, key
@@ -137,7 +137,6 @@ def _run(args: argparse.Namespace) -> None:
             verbose=args.verbose,
             project_root=target.project_root,
             uncommitted=uncommitted_sources,
-            tool_install=run_tool_install,
             dry_run=args.dry_run,
         )
     elif args.verb == "install-agents-file":

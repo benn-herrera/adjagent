@@ -12,7 +12,7 @@ headings, thematic breaks, list items, table rows, fenced blocks and frontmatter
 and refuses a slug starting with `reference`. A slot holds one slot project per plugin
 (`rendered/<slug>/devpro/`, `rendered/<slug>/kbase/`), each an install of its plugin with itself as
 project root, so beside the definitions the kbase slot project holds the kb-tools package, the harness's
-MCP entry and the runner include line (none in the mage slot, a harness-directory plugin), and each slot project
+MCP entry and the runner include lines (the docdicer line for either plugin, the kb line for kbase; none in the mage slot, a harness-directory plugin), and each slot project
 holds, where the harness ships them, its own harness resources — the whole install product of both
 plugins, which is what makes a `render-diff` a comparison of both. A slot holds the claude hook
 script only where `perl` passes the probe on that machine, so a `render-diff` against a reference

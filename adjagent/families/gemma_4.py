@@ -65,12 +65,9 @@ FAMILY = Family(
 
 - **Reproduction claims require receipts.** When a framework claims to reproduce, recover, or re-derive a known result — a value, phenomenon, equation, or observable from another framework — treat that claim as unproven unless the derivation chain is supplied with it or can be trivially produced from the stated axioms. Bare assertions of reproduction, without the chain, are *hypotheses*, not derivations. If your reasoning depends on a reproduction claim that lacks receipts, surface that fact: name the claim, name what would be needed to produce its receipt. The rule applies to claims about the framework's outputs, not to known values the framework borrows as inputs."""
         ),
-        # ask-vs-stipulate: observed behavior — silently filling axiom gaps with
-        # textbook conventions; model — Gemma 4 31B-it, probe data 2026-04-29. Prior
-        # delivery vehicle: applied-mathematician-strict.md (created f9866d2,
-        # tightened f9e2911, retired cabf3c9), which carried this as an in-place
-        # expansion of the "Ask for what you need" bullet; the anchor renders it as a
-        # trailing note on that bullet instead.
+        # ask-vs-stipulate: observed behavior, model and probe data as gap-aversion's
+        # above. The anchor renders this as a trailing note on the "Ask for what you
+        # need" bullet, so the text opens by extending that ask.
         #
         # 2026-09-06, two edits. Asking is this entry's whole subject, so it stays
         # authored in applied-mathematician.tmpl.md — the interactive seat is the only

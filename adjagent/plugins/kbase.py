@@ -10,6 +10,7 @@ PLUGIN = Plugin(
             "kbase",
             "adjagent",
             "development",
+            "docdicer",
             "architect",
             "python-coder",
             "prompt-engineer",

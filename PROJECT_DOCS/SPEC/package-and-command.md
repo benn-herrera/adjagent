@@ -18,7 +18,8 @@ an editable install of a clone count as one. The adjagent package installed into
 environment does not, wherever the environment sits, including inside another project's repository.
 Run from an installed package:
 
-- An install of the kbase plugin writes the runner include line for any project.
+- A project install of either plugin writes its runner include lines for any project (Deployed
+  Surfaces, Plugins).
 - Installing the agents file is not refused for uncommitted changes (Agents File).
 
 From a checkout, every one of these checks holds; the uncommitted-changes refusal there covers only

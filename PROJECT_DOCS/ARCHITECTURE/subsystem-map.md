@@ -7,7 +7,7 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
 - **Coder group** — generalist-coder, language coders (c, cpp, go, lua, python, rust, typescript),
   shell-dsl-coder, platform experts (android/ios/linux/macos/web/windows-app-expert,
   linux-kernel-driver-expert), architect, and — sharing the coding-review domain — security-reviewer
-  and tech-writer, which is both the authoring and the reviewing agent for technical documentation.
+  and tech-writer, which is both the authoring and the reviewing agent for READMEs and human-facing guides.
 - **kbase plugin + kbase** — the `kbase` skill alone: the definition the devpro plugin excludes by name
   and the kbase plugin delivers with the others SPEC.md, Deployed Surfaces, Plugins lists
   (`adjagent/plugins/kbase.py`). `kbase.py` owns a directory,
@@ -35,12 +35,15 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
   nowhere.
 - **Tool-driving skills:** `adjagent` and `docdicer`, each one `SKILL.md` with no supporting files.
   `adjagent` is delivered by both plugins under every harness except mage, which omits it; `docdicer`
-  and its tools package are devpro's alone.
-  `docdicer.py` names its
-  script `tools/docdicer`, relative to the skill's directory, and reads three states from running
-  it: the script absent (a user-level install delivers no tools), the venv absent (offer
-  `--install`, run only at the operator's direction) and installed (the script's `--help` is the
-  command list, which the skill does not restate). `adjagent.py` states the rule for changing the
+  and its tools package are delivered by both plugins.
+  `docdicer.py` names its script `tools/docdicer`, relative to the skill's directory, and says its
+  first run installs docdicer beside it; the script's `--help` is the command list, which the skill
+  does not restate. The skill carries no runner-snippet advice and no install step; its one
+  runner instruction is that where the project's runner includes the docdicer snippet, docdicer is
+  run through the recipes (`docdicer`, `docdicer-check-plan`, `docdicer-kanban`, `docdicer-help`).
+  It also carries a paragraph, an optional reference to `kbase` (Rendering, Placeholders), saying
+  `kb-root/` belongs to kbase and docdicer leaves it alone unless the user directs otherwise; it
+  renders only where kbase ships. `adjagent.py` states the rule for changing the
   installed tree — never edit it, put project behavior in CONVENTIONS.md or AGENTS.md, change the
   definitions only through a vendored copy or a fork — and how to update and inspect it, naming
   `adjagent install <plugin>` (the plugin spelled by the `@!plg-name!@` placeholder), `--dry-run` and `adjagent --version` and the runner's `ADJAGENT_VER` (the variable a consuming project's justfile or Makefile sets to pin the adjagent version). It also
@@ -61,17 +64,19 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
   the plan, review document, design and set-aside locations and the form stated in SPEC.md, Plan
   Status Form, in three places: the *Terms* section's fixed table (the locations), the entry body's
   `## Plan status` section and `references/release.md`. Each term the process names (active plan,
-  edit gate, step-down model and the rest) is one module-level `*_TERM` constant that every
+  step-down model and the rest) is one module-level `*_TERM` constant that every
   mention in the six files interpolates; a test reads `development.py` and fails where a term's
   value is written literally in a body string, so no two mentions can name a term differently. Its
-  `docdicer` references are optional references, so under kbase the dicing guidance drops out
-  (Rendering, Placeholders). The sentence naming the default step-down model is
+  `docdicer` references are optional references (Rendering, Placeholders), and `docdicer` ships
+  with both plugins, so each fills. The *Plan status* section renders whole under every plugin;
+  its `check-plan` bullet is a paragraph of its own, so an optional reference that fills to nothing
+  drops that bullet alone. The sentence naming the default step-down model is
   `clauses.STEP_DOWN_MODEL`, the `tun` placeholder (Rendering, Placeholders), so that sentence alone
   renders only where the rendering assigns a model for the step-down tier.
 - **Install machinery** — the one entry not rendered from a definition: `install.py` renders, copies
   and prunes; `install_base.py` holds what the install modules share (the package and checkout
   paths, the kb-tools package paths, the path checks, UTF-8 text reading and the report of what an
-  install left alone); `runner_file.py` writes the runner include line; `preflight.py` runs that
+  install left alone); `runner_file.py` writes the runner include lines, one per `SnippetSet` the install passes it; `preflight.py` runs that
   install into a scratch copy and compares (Install, Renders and copies); `agents_file.py`
   does the same for the agents file (Agents File). The imports layer: `install_base.py`, `preflight.py` and `install_target.py` import
   no other install module; `runner_file.py` imports `install_base.py`; `agents_file.py` imports

@@ -155,11 +155,7 @@ types; type stripping emits nothing. Outside Deno the type check is `tsc --noEmi
 a JavaScript project is type-checked only where it already runs `tsc` over JSDoc (`checkJs`).
 Output goes to the `outDir` (`dist/`) — `tsc` with no `outDir` writes each `.js` beside its `.ts`.
 
-{clauses.warnings_as_defects(
-    enable="Run the type check, the linter (eslint with typescript-eslint's type-checked rules) and the formatter's check (prettier), or biome for both where the project uses it, through their targets before shipping",
-    warnings="type errors and lint warnings",
-    suppression="an `// eslint-disable-next-line <rule>` or `// @ts-expect-error`",
-)} Never `@ts-ignore`: `@ts-expect-error` fails once the error it covers is gone.
+Run the type check, the linter (eslint with typescript-eslint's type-checked rules, under `--max-warnings 0`) and the formatter's check (prettier), or biome for both under `--error-on-warnings` where the project uses it, through their targets before shipping, so any type error or lint warning fails the run; an `// eslint-disable-next-line <rule>` or `// @ts-expect-error` carries a comment saying why. Never `@ts-ignore`: `@ts-expect-error` fails once the error it covers is gone.
 
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="TypeScript", recipes="`typecheck`, `fmt` and `lint` recipes")} On Node and Bun the `package.json` (`"type": "module"`, `engines`), a `tsconfig.json` with `strict`
 on and `module` and `moduleResolution` set for the target runtime, and the lint and format configs

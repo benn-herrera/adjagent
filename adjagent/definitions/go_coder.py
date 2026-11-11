@@ -77,7 +77,7 @@ symbols. Build tag `cgo` is implicit when CGo is in use.
 
 {clauses.build_system_lead(ops="build, test, and integration", direct="the compiler (`go build`, `clang`, CGo compilation, etc.)")} Integration targets may dispatch to shell scripts for complex procedures.
 
-`bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` before shipping.
+`bin/` at the project root holds all build outputs and is `.gitignore`d — never scatter outputs into the source tree. Use build tags (`//go:build`), `go:generate`, `go:embed` for static assets. `ldflags` for version injection. Cross-compilation via `GOOS`/`GOARCH`. Run `go vet` and `staticcheck` through their targets before shipping.
 
 {clauses.NEW_PROJECT_SETUP} {clauses.new_project_runner_recipes(language="Go", recipes="`fmt` and `lint` recipes")}
 

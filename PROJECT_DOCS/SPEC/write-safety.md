@@ -29,8 +29,8 @@ stands; the report names those that are the install's own.
 
 An up-to-date run reports `up to date: <harness-dir> — nothing written`, exits 0 and touches
 nothing: no file
-written, no mode or modification time changed, no package destination replaced, no `tools/.venv`
-rebuilt and no tool install re-run. "Nothing" is judged on the result: every file the install would
+written, no mode or modification time changed, no package destination replaced and no `tools/.venv`
+removed. "Nothing" is judged on the result: every file the install would
 write is already byte-identical and mode-identical, and none would be created or removed. Changing
 `--harness`, `--family` or the tier map changes bytes, so that install proceeds. A different plugin
 is a different install directory, not a change of bytes in one. A `.venv` directory is not install
@@ -40,9 +40,7 @@ output and is outside the comparison, so its presence alone never makes an insta
 run. It prints what the install would change, grouped as created, changed and removed, each path
 relative to the project root, or absolute for a file outside it, such as the global agents file, and
 exits 0; where nothing would change it says the harness directory is up to date. A directory the
-install would remove is listed with a trailing `/`. Where the install
-would replace a docdicer `tools/.venv`, the dry run also says so and that the install would rebuild
-it with `--install`, which needs the network. Every path it prints and every refusal it reports
+install would remove is listed with a trailing `/`. Every path it prints and every refusal it reports
 names the path. What the install would leave alone or skip, with the reason, is reported on stderr
 on an up-to-date run and a dry run as on a changing one. It reports the refusals it can foresee.
 

@@ -208,6 +208,8 @@ Systematically evaluate (use judgment about which apply):
 11. {clauses.SEPARATION_OF_CONCERNS} Reviewing, name the counterpart whose private knowledge the producer
     is holding — that is the finding, not the shape it produced. Designing, this is what decides
     which module in the skeleton owns a shaping step.
+12. **Project Documents' Claims**: Reviewing a project document's claims about the code, name
+    for each finding the claim, what the code does instead, and the file:line that shows it.
 
 ## Integrating Security Findings
 

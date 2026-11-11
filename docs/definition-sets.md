@@ -18,7 +18,7 @@ Everything in this section except the `kbase` skill.
 - `architect.md`: architecture review and design
 - `security-reviewer.md`: security-specific reviewer
 - `generalist-coder.md`
-- `tech-writer.md`: technical documentation author and review seat
+- `tech-writer.md`: README and human-facing guide author and review seat
 - Language-specific coders: `c-coder.md`, `cpp-coder.md`, `go-coder.md`, `lua-coder.md`,
   `python-coder.md`, `rust-coder.md`, `shell-dsl-coder.md`, `typescript-coder.md`
 - Platform-specific coders: `android-app-expert.md`, `ios-app-expert.md`, `linux-app-expert.md`,
@@ -46,11 +46,12 @@ Single-purpose agents invoked directly for non-coding work.
 - `theoretical-economist.md`: stress-tests production and growth, market-structure and
   mechanism-design claims; the economics lens in an adversarial panel
 - `prompt-engineer.md`: authors and revises model-facing text: agent definitions, commands, skills,
-  definition bodies, tuning text, agent-facing docs
+  definition bodies, tuning text, agent-facing docs, the project documents and ROADMAP.md
 
 ### Skills
 
-Three skills ship in the devpro plugin under every harness, except that mage omits `adjagent`.
+Three skills, `adjagent`, `docdicer` and `development`, ship in both plugins under every harness,
+except that mage omits `adjagent`.
 
 - **`adjagent`** (`skills/adjagent/SKILL.md`): how a session changes, updates and inspects the
   installed set. It tells the session never to edit the installed definitions or the installed
@@ -63,15 +64,18 @@ Three skills ship in the devpro plugin under every harness, except that mage omi
   says what to do when the new agents are not offered after an install: run `/reload-plugins`.
 - **`docdicer`** (`skills/docdicer/SKILL.md`): dicing markdown into a tree of small linked files under
   one `entry-point.md`, and undicing a tree back into one document, so a session loads only the
-  leaves a task needs. It runs through `tools/docdicer` in its own directory, and offers
-  `tools/docdicer --install` only to run at your direction. A user-level install delivers the skill
-  without the script ([Install reference](install-reference.md)).
+  leaves a task needs. Both plugins deliver it, so a kbase project has the `kanban` board,
+  `check-plan` and plan dicing. It runs through `tools/docdicer` in its own directory, whose first
+  run installs docdicer beside the script (it needs `python3` 3.9 or later with its `venv` module,
+  `git` and the network); no install runs it. Where kbase ships, the skill says `kb-root/` and
+  everything under it belongs to kbase and is not diced, undiced or link-checked unless you direct
+  it. A user-level install delivers the skill without the script ([Install
+  reference](install-reference.md)).
 
   **Runner snippets.** The tools package also carries `runner-snippets/docdicer.just` and
-  `docdicer.mk`. No install adds an include line for them; a project opts in by adding one to its
-  runner file, naming where the install put them (below `.claude/skills/devpro/` under claude,
-  `.opencode/plugins/devpro/` under opencode), and the docdicer skill offers that line at your
-  direction:
+  `docdicer.mk`. A project install of either plugin under claude or opencode adds the include line
+  for them to the project's runner file, naming where the install put them (below
+  `.claude/skills/<plugin>/` under claude, `.opencode/plugins/<plugin>/` under opencode):
 
   ```just
   import? '.claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just'
@@ -81,11 +85,19 @@ Three skills ship in the devpro plugin under every harness, except that mage omi
   -include .claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.mk
   ```
 
-  Each gives two recipes. `docdicer` passes its arguments to `tools/docdicer`. `docdicer-check` runs
-  `check-links` over the roots (default `PROJECT_DOCS *.md`), then `check-tree` over a tree (default
-  `PROJECT_DOCS`). In make the arguments are `DOCDICER_ARGS`, `DOCDICER_ROOTS` and `DOCDICER_TREE`.
-  The just form needs just 1.33 or later. The recipes fail with install instructions until
-  `tools/docdicer --install` has built the venv.
+  Each gives the recipes `docdicer`, which passes its arguments to `tools/docdicer` (in make, as
+  `DOCDICER_ARGS`), `docdicer-check-plan`, `docdicer-kanban` and `docdicer-help`. Where the runner
+  includes the snippet, the skill runs docdicer through them. The just form needs just 1.33 or
+  later.
+
+  A link check depends on the project's layout, so the snippets carry none; the project writes its
+  own recipe from `docdicer`. This repository's `check-links` is one:
+
+  ```just
+  check-links:
+    @just docdicer check-links PROJECT_DOCS docs *.md
+    @just docdicer check-tree PROJECT_DOCS
+  ```
 - **`development`** (`skills/development/SKILL.md`, with `references/`): one development process for
   the main session, covering design, planning, dispatching agents, accepting their work,
   checkpoint commits, post-plan review and releases as sequences of plans. A project's own rule in
@@ -101,4 +113,4 @@ Three skills ship in the devpro plugin under every harness, except that mage omi
 
 The **`kbase`** skill, the knowledge-base skill ([Knowledge base](knowledge-base.md)), and the agents
 and skills a knowledge-base project works with, described above; SPEC.md, Deployed Surfaces, Plugins
-lists them. Its `development` skill drops the dicing guidance, since it carries no `docdicer`.
+lists them. Its `development` skill carries the dicing guidance, since the plugin carries `docdicer`.

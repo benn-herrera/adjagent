@@ -187,12 +187,10 @@ def run_preflighted(
     dry_run: bool,
     target: Path,
     report_root: Path,
-    dry_run_notes: Sequence[str] = (),
 ) -> None:
     """Run `install` into the real bases only where `preflight` finds it would change something. Where
     it would change nothing, report `target` up to date and write nothing. With `dry_run`, print what
-    would be created, changed and removed, each path relative to `report_root`, then `dry_run_notes`
-    — what the install would do beyond the files compared — and write nothing.
+    would be created, changed and removed, each path relative to `report_root`, and write nothing.
     Where nothing is written, what the install would have left alone or skipped is printed on stderr;
     the real install prints its own."""
     difference = preflight(managed, install=install)
@@ -213,8 +211,6 @@ def run_preflighted(
             print(f"{group}:")
             for path in paths:
                 print(f"  {_shown(path, report_root=report_root)}")
-    for note in dry_run_notes:
-        print(note)
     _print_reports(difference)
 
 

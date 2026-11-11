@@ -1,6 +1,7 @@
 """docdicer: the skill that dices markdown into trees of small linked files, and undices them, through
 the launcher shipped beside it in `tools/`."""
 
+from adjagent import clauses
 from adjagent.definition import Definition
 from adjagent.vocabulary import Kind
 
@@ -11,11 +12,11 @@ DEFINITIONS = (
         description=(
             "Use when a markdown document is to be diced into a tree of small linked files or a diced tree "
             "undiced back into one document, when a project's contract documents are to be diced or a diced "
-            "tree's links and structure checked, when a plan or design has grown too large to read whole, or "
-            "when the user asks to install docdicer; NOT for ordinary markdown editing, a leaf of a diced "
-            "tree included."
+            "tree's links and structure checked, when a plan or design has grown too large to read whole, "
+            "when a plan's status form is to be checked (`check-plan`), or when the project's kanban board "
+            "is to be shown (`kanban`); NOT for ordinary markdown editing, a leaf of a diced tree included."
         ),
-        body="""## When
+        body=f"""## When
 
 - **Dice** a project's contract documents when the user or the project's own documents call for it,
   and a plan or design too large to read whole.
@@ -36,37 +37,26 @@ DEFINITIONS = (
 - After each operation, both versions remain. Removing the one(s) no longer wanted is a separate step,
   taken at the user's direction.
 
+`kb-root/` and everything under it belongs to the `{clauses.optional_ref(name="kbase")}` skill: do not
+dice, undice or link-check any of it unless the user directs that for it specifically.
+
 ## The script
 
-docdicer runs through `tools/docdicer` in this skill's directory, which passes its arguments to
-docdicer; run the script by its path under that directory. `tools/docdicer --help` tells you where
-you stand:
+Where the project's justfile or Makefile includes a `docdicer.just` or `docdicer.mk` snippet, use
+its recipes in place of `tools/docdicer`: `just docdicer <arguments>` or
+`make docdicer DOCDICER_ARGS='<arguments>'`, and `docdicer-check-plan` by name under either.
+`docdicer-check-plan` checks the active plan only; check another plan with
+`just docdicer check-plan <path>` or `make docdicer DOCDICER_ARGS='check-plan <path>'`.
 
-- **It says docdicer is not installed here.** Offer `tools/docdicer --install`, which installs
-  docdicer beside the script and needs `python3` 3.9 or later, `git` and the network. Run it only
-  when the user directs you to.
-- **It prints docdicer's usage.** docdicer is installed, and that usage is the command list:
-  `tools/docdicer <command> --help` gives each command's arguments.
+Without those recipes, docdicer runs through `tools/docdicer` in this skill's directory, which
+passes its arguments to docdicer; run the script by its path under that directory, and check a plan
+with `tools/docdicer check-plan <path>`. Its first run installs docdicer beside it, which needs `git`
+and the network. `tools/docdicer --help` is the command list, and `tools/docdicer <command> --help`
+gives each command's arguments. Where this skill's directory has no `tools/docdicer`, as under a
+user-level install, a project install provides it.
 
 `kanban` serves a live board of the project's roadmap, design and plan until stopped; give the user
-the command to run rather than running it yourself. `tools/docdicer kanban --help` gives the
-details.
-
-## Runner recipes
-
-`tools/runner-snippets/` in this skill's directory holds `docdicer.just` and `docdicer.mk`, each giving a
-project's runner two recipes: `docdicer`, which passes its arguments to docdicer, and `docdicer-check`,
-which checks every link under its roots, then that every file of its tree is listed and reachable. The
-tree defaults to `PROJECT_DOCS` and the roots to `PROJECT_DOCS *.md`; for another tree, pass `tree` and
-`roots` (`DOCDICER_TREE` and `DOCDICER_ROOTS` for make).
-
-- **The project has a justfile or Makefile and the user wants docdicer recipes.** Offer one line for
-  that file, `<dir>` being this skill's directory relative to the project root:
-  `import? '<dir>/tools/runner-snippets/docdicer.just'` in a justfile,
-  `-include <dir>/tools/runner-snippets/docdicer.mk` in a Makefile. Add it only when the user directs
-  you to.
-- **The project's runner includes the snippet.** Run docdicer as `just docdicer <arguments>` or
-  `make docdicer DOCDICER_ARGS='<arguments>'`, not by `tools/docdicer`, and run `docdicer-check` after
-  editing a diced tree.""",
+the command to run rather than running it yourself: `docdicer-kanban` where the recipes are
+included, `tools/docdicer kanban` without them. `tools/docdicer kanban --help` gives the details.""",
     ),
 )

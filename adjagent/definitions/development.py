@@ -15,7 +15,6 @@ ACTIVE_DESIGN_TERM = "active design"
 ACTIVE_PLAN_TERM = "active plan"
 PARKED_PLANS_TERM = "parked-plans directory"
 SCRATCH_TERM = "scratch directory"
-EDIT_GATE_TERM = "edit gate"
 CHECKPOINT_GATE_TERM = "checkpoint gate"
 REFERENCE_SEARCH_TERM = "reference search"
 STEP_DOWN_MODEL_TERM = "step-down model"
@@ -61,7 +60,7 @@ The rules use these terms.
 | {PARKED_PLANS_TERM} | `ROADMAP_PLANS/` at the repository root | where partly-planned work waits |
 | {SCRATCH_TERM} | `{clauses.PROJECT_TEMP_DIR}/` at the repository root | untracked working files |
 | {REFERENCE_SEARCH_TERM} | `git grep -l '<name>'` | lists every file that references a name |
-| {POST_PLAN_REVIEWERS_TERM} | the agent whose domain each change touched: the coder for each changed language, `{clauses.ref(name="architect")}` where structure changed, `{clauses.ref(name="tech-writer")}` where documents changed, `{clauses.ref(name="prompt-engineer")}` where model-facing text changed | the agents that review a finished plan |
+| {POST_PLAN_REVIEWERS_TERM} | the agent for each domain the plan changed substantively — a change where a defect would pass unseen without that seat: the coder for each changed language, `{clauses.ref(name="architect")}` where structure, or the project documents' claims about the code, changed, `{clauses.ref(name="tech-writer")}` where READMEs or human-facing guides changed, `{clauses.ref(name="prompt-engineer")}` where model-facing text, the project documents or ROADMAP.md changed | the agents that review a finished plan |
 | {REVIEW_DOCUMENT_TERM} | `ACTIVE_PLAN_REVIEW.md` at the repository root | the post-plan review's findings, which the post-plan burndown is drafted from |
 
 **Bindable terms.** A project binds one with a line `<term>: <value>` in CONVENTIONS.md, and a
@@ -69,7 +68,6 @@ binding replaces the default. A term marked — has no default.
 
 | Term | Default | What it is |
 | --- | --- | --- |
-| {EDIT_GATE_TERM} | — | the runner targets that verify one edit |
 | {CHECKPOINT_GATE_TERM} | — | the runner targets run before a checkpoint commit |
 | {STEP_DOWN_MODEL_TERM} | the model the sentence after this table names; — where none follows | the model a mechanical dispatch runs on |
 | {STEP_DOWN_APPLICATION_TERM} | — | how a mechanical dispatch gets the {STEP_DOWN_MODEL_TERM} where a dispatch cannot choose its model |
@@ -129,7 +127,7 @@ bindable term that has no default and is unbound, ask the user for it then, thro
   its target sends the next reader to invent what it said.
 - Rigor scales with the code's intended lifetime (*Skipping a step*). The plan states each
   package's intended lifetime, and by default it gets: **shipped** → the whole of this skill;
-  **exploratory** → the {EDIT_GATE_TERM} and the {CHECKPOINT_GATE_TERM}, no post-plan review;
+  **exploratory** → the done-line and the {CHECKPOINT_GATE_TERM}, no post-plan review;
   **throwaway** → the {SCRATCH_TERM} only, never committed. The plan sets the lifetime,
   never the agent doing the work; code that outlives its stated lifetime gets the whole process
   before it ships. *Purpose:* process costs what the code will cost to keep, and no one lowers
@@ -190,8 +188,9 @@ the same way.
   `Post-plan burndown`.
 - Set a state in the same turn as the act that changes it. *Purpose:* the table never trails the
   work.
-- After each edit to a plan, run `check-plan` on it (on its `entry-point.md` where it is diced; the
-  `{clauses.optional_ref(name="docdicer")}` skill) and fix what it reports.
+
+After each edit to a plan, run `check-plan` on it (on its `entry-point.md` where it is diced; the
+`{clauses.optional_ref(name="docdicer")}` skill) and fix what it reports.
 
 ## Dispatchability
 
@@ -208,15 +207,17 @@ A work package is dispatchable only when:
   them is in scope; a test failing on behaviour the package does not state it changes is reported as
   a finding, never edited to pass. *Purpose:* an expectation moves only with its requirement, so an
   invariant test still stops wrong work;
-- its done-line is stated in runner targets. *Purpose:* done is a run anyone can repeat, not a
-  judgment;
+- its done-line names, from the project's runner targets, those that check what the package changes
+  (a package that changes only documents names only document checks, such as a link check), run
+  once, at the package's end; the package is done when that run passes, or fails only where the plan
+  names the breakage the package leaves and the later package or `ROADMAP.md` item that resolves it.
+  *Purpose:* done is a run anyone can repeat, not a judgment, and no package hands on a breakage the
+  plan does not account for;
 - a before/after measurement done-line carries a passing run on the base commit, taken during
   planning. *Purpose:* a failed comparison is known to come from the change, not from a baseline that
   never passed;
 - it has had `{clauses.ref(name="prompt-engineer")}` usability review, then `{clauses.ref(name="architect")}` revision. *Purpose:* the agent that
-  executes it can act on it before it costs a dispatch;
-- its brief names the {EDIT_GATE_TERM}'s targets, run after each edit. *Purpose:* each edit is
-  verified while its cause is fresh.
+  executes it can act on it before it costs a dispatch.
 
 A plan whose packages fail this is neither offered for approval nor dispatched. *Purpose:* what is
 approved can run as approved.
@@ -274,7 +275,7 @@ approved can run as approved.
 ## Gates and checkpoints
 
 - The {CHECKPOINT_GATE_TERM} runs once, before a checkpoint commit, never between edits. *Purpose:*
-  the slow gate is paid once.
+  the {CHECKPOINT_GATE_TERM}'s cost is paid once.
 - A checkpoint is incomplete until every document describing the changed behaviour is updated, the
   contract documents included. *Purpose:* what a checkpoint ships matches its documentation.
 
@@ -347,21 +348,28 @@ one's answer feeds the next.
    *Purpose:* the project documents start from what the project is most like.
 4. **The project documents**, drafted from 1–3 as `references/project-documents.md` describes:
    THESIS.md by you with the user, from 3's breakdown; SPEC.md and ARCHITECTURE.md by
-   `{clauses.ref(name="architect")}`, or SPEC.md by `{clauses.ref(name="tech-writer")}` for a project with no code;
-   CONVENTIONS.md by you, from the choices made in 2. A project with no code may omit
-   ARCHITECTURE.md, at the owner's choice. *Purpose:* each document is drafted by the agent whose
-   discipline it needs.
+   `{clauses.ref(name="tech-writer")}` with the user; CONVENTIONS.md by you, from the choices made in 2. Where the
+   project has code, `{clauses.ref(name="architect")}` produces its initial design, held to SPEC.md;
+   ARCHITECTURE.md is drafted from that design's invariants and skeleton. A behavioural acceptance
+   criterion in the design (an outcome, not a mechanism) that SPEC.md does not already state is a
+   SPEC.md gap raised with the user, not ARCHITECTURE.md content. `{clauses.ref(name="prompt-engineer")}` reviews
+   each of the four drafts before the user accepts it, and authors and reviews their changes from
+   then on; the user remains their owner. A project
+   with no code may omit ARCHITECTURE.md, at the owner's choice. *Purpose:* each document is drafted
+   by the agent whose discipline it needs.
 
    Dicing them is the `{clauses.optional_ref(name="docdicer")}` skill's.
 
 5. **A runner**, if one is needed: `just` by default; `make` only where the project has targets that
    must rebuild only when their inputs are newer than their outputs. A project on an ecosystem's
    native task surface (npm scripts, cargo) still gets a justfile whose recipes call into it.
-   Record the choice in CONVENTIONS.md, then settle the runner targets the {EDIT_GATE_TERM} and the
-   {CHECKPOINT_GATE_TERM} will name. *Purpose:* every gate binding takes the same form.
+   Record the choice in CONVENTIONS.md, then settle the runner targets the {CHECKPOINT_GATE_TERM}
+   will name. *Purpose:* the {CHECKPOINT_GATE_TERM} takes the form every done-line takes: runner
+   targets.
 6. Go to `references/project-setup.md` to bind the terms.
 
-A project with no code has gates too: its {EDIT_GATE_TERM} may be a link check or a document build.""",
+A project with no code has runner targets too: its done-lines and its {CHECKPOINT_GATE_TERM} may
+name a link check or a document build.""",
             ),
             SkillFile(
                 path="references/project-documents.md",

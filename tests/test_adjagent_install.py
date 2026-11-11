@@ -1,7 +1,7 @@
 """The agents-file render and installer, and the definition install, each case checked against values
 the code under test did not compute: the marker span, the bytes kept outside it, the refusals that
-write nothing, the redirects, the kb-tools package and its banner, the docdicer tools package and its
-venv rebuild, the kb install path, the kbase
+write nothing, the redirects, the kb-tools package and its banner, the docdicer tools package replaced
+whole with its venv, the kb install path, the kbase
 `.mcp.json`, the runner include line, the harness resources a harness ships as they stand, the
 prune, the refusal to overwrite a file without this repository's banner, the claude guardrail hook's
 probe and registration, the removal of entries earlier installs registered, and the checkout premise with the checks that stand down outside one.
@@ -36,6 +36,7 @@ from adjagent.harnesses.mage import HARNESS as MAGE
 from adjagent.harnesses.opencode import HARNESS as OPENCODE
 from adjagent.install import (
     HARNESS_RESOURCES_SOURCE,
+    SHIPPED_PACKAGES,
     ShippedPackage,
     _is_our_resource,
     harness_resource_copies,
@@ -55,8 +56,13 @@ from adjagent.render import (
     render_all,
     render_definition,
 )
-from adjagent.runner_file import _named_harnesses, install_kb_include_line, kb_include_line
+from adjagent.runner_file import _named_harnesses, include_line, install_include_lines
 from adjagent.vocabulary import Kind
+
+_SNIPPET_SETS = {
+    package.source: snippets for package in SHIPPED_PACKAGES if (snippets := package.installed_snippets()) is not None
+}
+_KB_SNIPPETS = _SNIPPET_SETS["kb-tools"]
 
 _BEGIN = " <!-- vvv-adjagent do not edit at or between marker lines. adjagent-vvv -->"
 """The begin marker line an earlier, unstamped revision wrote: a block of no plugin."""
@@ -284,9 +290,9 @@ def _site_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_outside_a_checkout_a_project_at_site_packages_gets_its_include_line(_site_packages: Path) -> None:
     (_site_packages / "justfile").write_text("", encoding="utf-8")
-    install_kb_include_line(_site_packages, harness_relpath=".claude")
+    install_include_lines(_site_packages, [_KB_SNIPPETS], harness_relpath=".claude")
     lines = (_site_packages / "justfile").read_text(encoding="utf-8").splitlines()
-    assert kb_include_line(runner="just", harness_relpath=".claude") in lines
+    assert include_line(_KB_SNIPPETS, runner="just", harness_relpath=".claude") in lines
 
 
 def test_a_project_directory_under_claude_writes_agents_md_and_the_redirect(tmp_path: Path) -> None:
@@ -389,26 +395,12 @@ def _definition_install(
         verbose=False,
         project_root=project_root,
         uncommitted=_committed,
-        tool_install=_ToolInstalls(),
     )
 
 
 def _committed() -> tuple[str, ...]:
     """No uncommitted sources, so a mage install's agents file does not turn on this tree's git state."""
     return ()
-
-
-class _ToolInstalls:
-    """A stand-in for `run_tool_install`, so no test reaches the network: it records each script it is
-    asked to run with `--install` and answers `failure`."""
-
-    def __init__(self, failure: str | None = None) -> None:
-        self.scripts: list[Path] = []
-        self.failure = failure
-
-    def __call__(self, script: Path) -> str | None:
-        self.scripts.append(script)
-        return self.failure
 
 
 # The harness resources: the files a harness ships for its own harness directory, copied into ROOT as
@@ -558,9 +550,10 @@ def _delivers_the_kbase_server(project: Path, root: Path) -> bool:
 def test_supporting_artifacts_ship_with_the_definition_that_owns_them(
     tmp_path: Path, harness: str, plugin_dir_of: Callable[[Path, Plugin], Path], plugin: Plugin
 ) -> None:
-    """Both plugins carry the development scripts. devpro carries the docdicer tools, and none of the
-    kbase toolchain; kbase carries the kb-tools package, the kbase MCP entry and the runner include line,
-    and not the docdicer tools. No install writes a project's opencode settings file."""
+    """Both plugins carry the development scripts. Both carry the docdicer tools; devpro carries none of the
+    kbase toolchain; kbase carries the kb-tools package, the kbase MCP entry and the kb runner include
+    line. Both write the docdicer include line, kbase beside the kb one in the same runner file. No
+    install writes a project's opencode settings file."""
     project = tmp_path / "project"
     project.mkdir()
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
@@ -568,11 +561,13 @@ def test_supporting_artifacts_ship_with_the_definition_that_owns_them(
     root = plugin_dir_of(project, plugin)
     kbase = plugin is KBASE
     assert (root / _DEVELOPMENT_SCRIPTS).is_file()
-    assert (root / _DOCDICER_PACKAGE).is_file() is not kbase
+    assert (root / _DOCDICER_PACKAGE).is_file()
     assert (root / _KBASE_PACKAGE).is_file() is kbase
     assert _delivers_the_kbase_server(project, root) is kbase
     assert not any(path.name in _OPENCODE_SETTINGS_NAMES for path in project.rglob("*"))
-    assert ("runner-snippets/kb.just" in (project / "justfile").read_text(encoding="utf-8")) is kbase
+    justfile = (project / "justfile").read_text(encoding="utf-8")
+    assert "runner-snippets/docdicer.just" in justfile
+    assert ("runner-snippets/kb.just" in justfile) is kbase
     assert not (project / "Makefile").exists()
 
 
@@ -596,7 +591,7 @@ def test_an_install_changes_nothing_outside_its_own_install_directory(tmp_path: 
 
 
 def test_a_kbase_install_writes_the_kbase_skill_the_package_the_mcp_entry_and_the_include_line(
-    tmp_path: Path, capsys
+    tmp_path: Path,
 ) -> None:
     project = tmp_path
     root = project / ".claude"
@@ -616,10 +611,11 @@ def test_a_kbase_install_writes_the_kbase_skill_the_package_the_mcp_entry_and_th
         "mcpServers": {"kbase": {"command": "kbase", "args": ["mcp"]}}
     }
     assert not (project / ".mcp.json").exists()
+    relpath = plugin.relative_to(project).as_posix()
     assert (project / "justfile").read_text(encoding="utf-8") == (
-        f"# mine\n\nimport? '{plugin.relative_to(project).as_posix()}/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
+        f"# mine\n\nimport? '{relpath}/skills/docdicer/tools/runner-snippets/docdicer.just'\n"
+        f"\nimport? '{relpath}/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     )
-    assert "appended the KB include line" in capsys.readouterr().out
 
 
 def test_the_version_flag_prints_the_constant_and_nothing_else(capsys) -> None:
@@ -884,9 +880,7 @@ def test_a_verbose_mage_install_lists_the_manifest_as_written(tmp_path: Path, ca
     root = project / "plugins/adjagent"
     root.mkdir(parents=True)
     capsys.readouterr()
-    install(
-        root, _MAGE_RENDER, verbose=True, project_root=project, uncommitted=_committed, tool_install=_ToolInstalls()
-    )
+    install(root, _MAGE_RENDER, verbose=True, project_root=project, uncommitted=_committed)
     assert f"wrote {root / _MAGE_MANIFEST}" in capsys.readouterr().out.splitlines()
 
 
@@ -896,17 +890,22 @@ def test_the_include_line_is_appended_to_an_existing_justfile(tmp_path: Path) ->
     (tmp_path / "justfile").write_text("default:\n  @echo hi\n", encoding="utf-8")
     _definition_install(root, plugin=KBASE, project_root=tmp_path)
     assert (tmp_path / "justfile").read_text(encoding="utf-8") == (
-        f"default:\n  @echo hi\n\nimport? '{_CLAUDE_KBASE_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
+        f"default:\n  @echo hi\n\nimport? '{_CLAUDE_KBASE_RELPATH}/skills/docdicer/tools/runner-snippets/docdicer.just'\n"
+        f"\nimport? '{_CLAUDE_KBASE_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     )
 
 
 def test_a_makefile_is_created_when_the_project_has_neither_runner_file(tmp_path: Path) -> None:
+    """Created once, holding every set's line in `SHIPPED_PACKAGES` order."""
     root = tmp_path / ".opencode"
     root.mkdir()
     _definition_install(root, _OPENCODE_RENDER, plugin=KBASE, project_root=tmp_path)
     text = (tmp_path / "Makefile").read_text(encoding="utf-8")
     assert text.startswith("# Makefile — created by the adjagent installer.\n")
-    assert "-include .opencode/plugins/kbase/skills/kbase/kb-tools/runner-snippets/kb.mk\n" in text
+    assert text.endswith(
+        "\n-include .opencode/plugins/kbase/skills/docdicer/tools/runner-snippets/docdicer.mk\n"
+        "-include .opencode/plugins/kbase/skills/kbase/kb-tools/runner-snippets/kb.mk\n"
+    )
     assert not (tmp_path / "justfile").exists()
 
 
@@ -935,7 +934,7 @@ def test_a_second_harness_writes_no_include_line_and_reports_the_first(tmp_path:
     ids=["hand-written", "short-tree"],
 )
 def test_an_include_line_for_this_harness_under_any_tree_is_rewritten_in_place(
-    tmp_path: Path, capsys, snippets_path: str
+    tmp_path: Path, snippets_path: str
 ) -> None:
     """A line naming this harness directory is this install's line whatever tree its path spells, one
     no release here wrote included, so its whole path is replaced where it stands, naming the
@@ -944,31 +943,43 @@ def test_an_include_line_for_this_harness_under_any_tree_is_rewritten_in_place(
     root = project / ".claude"
     root.mkdir()
     (project / "justfile").write_text(f"default:\n  @echo hi\n\nimport? '.claude/{snippets_path}/kb.just'\n")
-    capsys.readouterr()
     _definition_install(root, plugin=KBASE, project_root=project)
     text = (project / "justfile").read_text(encoding="utf-8")
     expected = f"import? '{_CLAUDE_KBASE_RELPATH}/skills/kbase/kb-tools/runner-snippets/kb.just'"
-    assert text == f"default:\n  @echo hi\n\n{expected}\n"
-    assert text.count("runner-snippets") == 1
-    assert "rewrote the KB include line" in capsys.readouterr().out
+    docdicer = f"import? '{_CLAUDE_KBASE_RELPATH}/skills/docdicer/tools/runner-snippets/docdicer.just'"
+    assert text == f"default:\n  @echo hi\n\n{expected}\n\n{docdicer}\n"
+    assert text.count("runner-snippets/kb.just") == 1
 
 
 @pytest.mark.parametrize(
-    "snippets_path",
-    ["custom/kb-tools/runner-snippets"],
-    ids=["hand-written"],
+    "present, appended, label",
+    [
+        (
+            "import? '.claude/skills/kbase/skills/docdicer/tools/runner-snippets/docdicer.just'",
+            "import? '.opencode/plugins/kbase/skills/kbase/kb-tools/runner-snippets/kb.just'",
+            "docdicer",
+        ),
+        (
+            "import? '.claude/skills/kbase/skills/kbase/kb-tools/runner-snippets/kb.just'",
+            "import? '.opencode/plugins/kbase/skills/docdicer/tools/runner-snippets/docdicer.just'",
+            "kb",
+        ),
+    ],
+    ids=["docdicer-present", "kb-present"],
 )
-def test_an_include_line_for_another_harness_is_reported_and_left(tmp_path: Path, capsys, snippets_path: str) -> None:
+def test_each_snippet_set_is_judged_alone(tmp_path: Path, capsys, present: str, appended: str, label: str) -> None:
+    """One set's line naming another harness is reported and left byte for byte; it neither counts as
+    the other set's line nor stops that line being appended."""
     project = tmp_path
     root = project / ".opencode"
     root.mkdir()
-    line = f"import? '.claude/{snippets_path}/kb.just'"
-    (project / "justfile").write_text(f"{line}\n", encoding="utf-8")
+    (project / "justfile").write_text(f"{present}\n", encoding="utf-8")
     capsys.readouterr()
     _definition_install(root, _OPENCODE_RENDER, plugin=KBASE, project_root=project)
-    assert (project / "justfile").read_text(encoding="utf-8") == f"{line}\n"
+    assert (project / "justfile").read_text(encoding="utf-8") == f"{present}\n\n{appended}\n"
     err = capsys.readouterr().err
-    assert "no include line written" in err and "'claude'" in err
+    assert err.count("no include line written") == 1
+    assert f" {label} snippets" in err and "'claude'" in err
 
 
 @pytest.mark.parametrize(
@@ -994,7 +1005,7 @@ def test_the_include_line_rewrite_touches_only_its_own_path_token(tmp_path: Path
     """A commented line is not an include; a rewrite replaces the snippets path alone, keeping an
     assignment's left-hand side, a trailing comment and the file's own line endings."""
     (tmp_path / "justfile").write_bytes(prior.encode("utf-8"))
-    install_kb_include_line(tmp_path, harness_relpath=".claude")
+    install_include_lines(tmp_path, [_KB_SNIPPETS], harness_relpath=".claude")
     assert (tmp_path / "justfile").read_bytes() == expected.encode("utf-8")
 
 
@@ -1003,7 +1014,7 @@ def test_a_makefile_include_line_is_recognized_by_the_same_shape(tmp_path: Path)
     `kb.mk`: a stale tree is rewritten in place and no second line lands beside it."""
     prior = "all:\n\t@echo hi\n\n-include .opencode/custom/kb-tools/runner-snippets/kb.mk\n"
     (tmp_path / "Makefile").write_text(prior, encoding="utf-8")
-    install_kb_include_line(tmp_path, harness_relpath=".opencode")
+    install_include_lines(tmp_path, [_KB_SNIPPETS], harness_relpath=".opencode")
     text = (tmp_path / "Makefile").read_text(encoding="utf-8")
     assert text == "all:\n\t@echo hi\n\n-include .opencode/skills/kbase/kb-tools/runner-snippets/kb.mk\n"
 
@@ -1015,14 +1026,16 @@ def test_two_include_lines_are_reported_and_left(tmp_path: Path, capsys) -> None
         "import? '.claude/skills/kbase/kb-tools/runner-snippets/kb.just'\n"
     )
     (tmp_path / "justfile").write_text(prior, encoding="utf-8")
-    install_kb_include_line(tmp_path, harness_relpath=".claude")
+    install_include_lines(tmp_path, [_KB_SNIPPETS], harness_relpath=".claude")
     assert (tmp_path / "justfile").read_text(encoding="utf-8") == prior
     assert "names the kb snippets on lines 1, 2" in capsys.readouterr().err
 
 
 def test_an_include_line_naming_no_harness_reports_its_raw_prefix() -> None:
     [match] = _named_harnesses(
-        "default:\n  @echo hi\nimport? 'tools/skills/kbase/kb-tools/runner-snippets/kb.just'\n", runner="just"
+        "default:\n  @echo hi\nimport? 'tools/skills/kbase/kb-tools/runner-snippets/kb.just'\n",
+        _KB_SNIPPETS,
+        runner="just",
     )
     assert (match.name, match.index) == ("tools", 2)
 
@@ -1032,7 +1045,7 @@ def test_a_line_is_a_line_for_the_runner_whose_snippet_it_names(runner: str, mat
     """`kb.just` is the justfile's snippet and `kb.mk` the Makefile's, so one runner's snippet named in
     the other's file is not an include line that install has to rewrite."""
     text = "import? '.claude/kb-tools/runner-snippets/kb.just'\n"
-    assert bool(_named_harnesses(text, runner=runner)) is matched
+    assert bool(_named_harnesses(text, _KB_SNIPPETS, runner=runner)) is matched
 
 
 def test_a_non_utf8_runner_file_is_refused_before_the_first_write(tmp_path: Path) -> None:
@@ -1049,9 +1062,20 @@ def test_a_non_utf8_runner_file_is_refused_before_the_first_write(tmp_path: Path
 
 def test_the_repositorys_own_project_root_gets_no_include_line() -> None:
     before = (REPO_ROOT / "justfile").read_bytes()
-    install_kb_include_line(REPO_ROOT, harness_relpath=".claude")
+    install_include_lines(REPO_ROOT, list(_SNIPPET_SETS.values()), harness_relpath=".claude")
     assert (REPO_ROOT / "justfile").read_bytes() == before
     assert not (REPO_ROOT / "Makefile").exists()
+
+
+def test_no_two_snippet_sets_name_the_same_snippet() -> None:
+    """An include line is recognized by its snippets directory's name and snippet file alone, so a pair
+    two sets shared would let one set's line count as the other's."""
+    pairs = [
+        (PurePosixPath(snippet_set.directory).name, snippet)
+        for snippet_set in _SNIPPET_SETS.values()
+        for snippet in snippet_set.snippets.values()
+    ]
+    assert len(pairs) == len(set(pairs))
 
 
 def test_a_shipped_package_leaves_its_tests_and_documents_behind(
@@ -1071,9 +1095,7 @@ def test_a_shipped_package_leaves_its_tests_and_documents_behind(
     )
     project = tmp_path / "project"
     root = project / ".claude"
-    install(
-        root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed, tool_install=_ToolInstalls()
-    )
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed)
     plugin = _claude_plugin(root)
     assert (plugin / "adj-tools/probe_pkg/tool.py").is_file()
     assert not (plugin / "adj-tools/probe_pkg/tests").exists()
@@ -1083,9 +1105,7 @@ def test_a_shipped_package_leaves_its_tests_and_documents_behind(
 def test_a_direct_install_into_the_user_directory_is_user_level(_home: Path) -> None:
     root = _home / ".claude"
     root.mkdir(parents=True)
-    install(
-        root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=_ToolInstalls()
-    )
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed)
     assert (_claude_plugin(root) / "agents").is_dir()
     assert not (_claude_plugin(root) / "hooks").exists() and not (root / "settings.json").exists()
 
@@ -1102,30 +1122,27 @@ def test_a_user_level_opencode_install_copies_the_entry_and_no_guardrail(
     monkeypatch.setattr("adjagent.install.PACKAGE_ROOT", tmp_path / "repo")
     root = _home / ".config/opencode"
     root.mkdir(parents=True)
-    install(
-        root, _OPENCODE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=_ToolInstalls()
-    )
+    install(root, _OPENCODE_RENDER, verbose=False, project_root=_home, uncommitted=_committed)
     plugin = _opencode_plugin(root)
     assert (plugin / "index.ts").read_bytes() == (resources / "index.ts").read_bytes()
     assert not (plugin / _TS_GUARDRAIL).exists()
 
 
 # The docdicer tools package: copied into the docdicer skill's own directory, its launcher stamped by
-# name, and its venv rebuilt after an install that replaced it.
+# name, replacing any venv its launcher built there.
 
 # Below a claude harness directory: the plugin's own docdicer tools destination.
 _DOCDICER_TOOLS = f"{CLAUDE.bound(DEVPRO.name).plugin_dir}/skills/docdicer/tools"
 _DOCDICER_SOURCE = PACKAGE_ROOT / "docdicer-tools"
 
 
-def _preflighted(root: Path, *, project: Path, tool_install: _ToolInstalls, dry_run: bool = False) -> None:
+def _preflighted(root: Path, *, project: Path, dry_run: bool = False) -> None:
     preflighted_install(
         root,
         _CLAUDE_RENDER,
         verbose=False,
         project_root=project,
         uncommitted=_committed,
-        tool_install=tool_install,
         dry_run=dry_run,
     )
 
@@ -1144,16 +1161,15 @@ def _plant(path: Path, text: str = "planted\n") -> Path:
     return path
 
 
-def test_a_reinstall_replaces_the_docdicer_tools_whole_and_rebuilds_the_venv_that_stood(tmp_path: Path) -> None:
-    """The stale file is a difference, so the install proceeds past the preflight; the copy it runs into
-    holds no `.venv`, so only the real install calls the runner."""
+def test_a_reinstall_replaces_the_docdicer_tools_whole_with_their_venv(tmp_path: Path) -> None:
+    """The stale file is a difference, so the install proceeds past the preflight and replaces the
+    package, the launcher's `.venv` with it, for the launcher to rebuild on its next run."""
     project, root = _claude_project(tmp_path)
-    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    _preflighted(root, project=project)
     tools = root / _DOCDICER_TOOLS
     stale = _plant(tools / "stale.txt")
     marker = _plant(tools / ".venv/marker")
-    runner = _ToolInstalls()
-    _preflighted(root, project=project, tool_install=runner)
+    _preflighted(root, project=project)
     script = tools / "docdicer"
     lines = script.read_text(encoding="utf-8").split("\n")
     source_lines = (_DOCDICER_SOURCE / "docdicer").read_text(encoding="utf-8").split("\n")
@@ -1165,86 +1181,38 @@ def test_a_reinstall_replaces_the_docdicer_tools_whole_and_rebuilds_the_venv_tha
     assert gitignore == (_DOCDICER_SOURCE / ".gitignore").read_bytes()
     assert ".venv/" in gitignore.decode("utf-8").splitlines()
     assert not stale.exists() and not marker.exists()
-    assert runner.scripts == [script]
 
 
-def test_an_install_with_no_docdicer_venv_runs_no_tool_install(tmp_path: Path) -> None:
+def test_an_up_to_date_target_with_a_docdicer_venv_is_left_untouched(tmp_path: Path, capsys) -> None:
     project, root = _claude_project(tmp_path)
-    _plant(root / _DOCDICER_TOOLS / "stale.txt")
-    runner = _ToolInstalls()
-    install(root, _CLAUDE_RENDER, verbose=False, project_root=project, uncommitted=_committed, tool_install=runner)
-    assert (root / _DOCDICER_TOOLS / "docdicer").is_file()
-    assert runner.scripts == []
-
-
-def test_an_up_to_date_target_with_a_docdicer_venv_runs_nothing(tmp_path: Path, capsys) -> None:
-    project, root = _claude_project(tmp_path)
-    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    _preflighted(root, project=project)
     _plant(root / _DOCDICER_TOOLS / ".venv/marker")
     state = _state(project)
-    runner = _ToolInstalls()
     capsys.readouterr()
-    _preflighted(root, project=project, tool_install=runner)
+    _preflighted(root, project=project)
     assert _UP_TO_DATE in capsys.readouterr().out
     assert _state(project) == state
-    assert runner.scripts == []
-
-
-def test_a_dry_run_says_the_install_would_rebuild_the_docdicer_venv_and_runs_nothing(tmp_path: Path, capsys) -> None:
-    """The venv is outside the comparison, so the one stale render is what makes the install proceed;
-    the dry run names the venv rebuild that install would also make."""
-    project, root = _claude_project(tmp_path)
-    _preflighted(root, project=project, tool_install=_ToolInstalls())
-    marker = _plant(root / _DOCDICER_TOOLS / ".venv/marker")
-    _plant(_claude_plugin(root) / "agents/gone.md", _NEW_BANNER)
-    runner = _ToolInstalls()
-    capsys.readouterr()
-    _preflighted(root, project=project, tool_install=runner, dry_run=True)
-    out = capsys.readouterr().out
-    assert marker.is_file() and runner.scripts == []
-    assert f".claude/{_DOCDICER_TOOLS}/.venv" in out and f".claude/{_DOCDICER_TOOLS}/docdicer --install" in out
 
 
 def test_a_mode_change_alone_is_a_difference(tmp_path: Path, capsys) -> None:
     project, root = _claude_project(tmp_path)
-    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    _preflighted(root, project=project)
     script = root / _DOCDICER_TOOLS / "docdicer"
     script.chmod(0o644)
     capsys.readouterr()
-    _preflighted(root, project=project, tool_install=_ToolInstalls(), dry_run=True)
+    _preflighted(root, project=project, dry_run=True)
     assert _dry_run_groups(capsys.readouterr().out) == {"changed": {f".claude/{_DOCDICER_TOOLS}/docdicer"}}
-    _preflighted(root, project=project, tool_install=_ToolInstalls())
+    _preflighted(root, project=project)
     assert _UP_TO_DATE not in capsys.readouterr().out
     assert os.access(script, os.X_OK)
 
 
-def test_a_failed_tool_install_is_reported_and_the_install_completes(tmp_path: Path, capsys) -> None:
-    project, root = _claude_project(tmp_path)
-    _definition_install(root, project_root=project)
-    _plant(root / _DOCDICER_TOOLS / ".venv/marker")
-    capsys.readouterr()
-    install(
-        root,
-        _CLAUDE_RENDER,
-        verbose=False,
-        project_root=project,
-        uncommitted=_committed,
-        tool_install=_ToolInstalls(failure="exited 1"),
-    )
-    assert all((_claude_plugin(root) / path).is_file() for path, _ in render_all(_CLAUDE_RENDER))
-    assert (root / _DOCDICER_TOOLS / "docdicer").is_file() and (root / _DOCDICER_TOOLS / ".gitignore").is_file()
-    script = str(root / _DOCDICER_TOOLS / "docdicer")
-    assert len([line for line in capsys.readouterr().out.splitlines() if script in line]) == 1
-
-
-def test_a_user_level_install_ships_no_docdicer_tools_and_runs_no_tool_install(_home: Path) -> None:
+def test_a_user_level_install_ships_no_docdicer_tools(_home: Path) -> None:
     root = _home / ".claude"
     marker = _plant(root / _DOCDICER_TOOLS / ".venv/marker")
-    runner = _ToolInstalls()
-    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=runner)
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed)
     assert not (root / _DOCDICER_TOOLS / "docdicer").exists()
     assert marker.is_file()
-    assert runner.scripts == []
 
 
 # The development scripts package: copied into the development skill's own directory on every project
@@ -1279,9 +1247,7 @@ def test_a_project_install_ships_the_cold_read_script_stamped_and_executable(
 
 def test_a_user_level_install_ships_no_cold_read_script(_home: Path) -> None:
     root = _home / ".claude"
-    install(
-        root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed, tool_install=_ToolInstalls()
-    )
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=_home, uncommitted=_committed)
     assert _installed_cold_reads(_home) == []
 
 
@@ -1305,22 +1271,6 @@ def test_the_cold_read_script_installed_under_mage_refuses(tmp_path: Path) -> No
     assert "claude and opencode only" in result.stderr
 
 
-def test_the_install_verb_hands_the_tool_install_runner_to_the_install(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    runner = _ToolInstalls()
-    monkeypatch.setattr("adjagent.cli.run_tool_install", runner)
-    argv = ["install", "devpro", str(project), "--harness=claude"]
-    main(argv)
-    tools = project / ".claude" / _DOCDICER_TOOLS
-    _plant(tools / ".venv/marker")
-    _plant(tools / "stale.txt")
-    main(argv)
-    assert runner.scripts == [tools / "docdicer"]
-
-
 @pytest.fixture(scope="module")
 def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A consumer's ROOT, the claude plugin of the kbase plugin: the plugin plus the kb-tools package."""
@@ -1335,7 +1285,6 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
             verbose=False,
             project_root=project,
             uncommitted=_committed,
-            tool_install=_ToolInstalls(),
         )
     return _claude_plugin(root, KBASE)
 
@@ -1349,7 +1298,7 @@ def test_install_writes_every_render_and_stamps_the_packages_once(installed: Pat
 
 
 def test_reinstall_prunes_only_our_stale_definitions(tmp_path: Path, capsys) -> None:
-    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
+    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
     plugin = _claude_plugin(tmp_path)
     planted = {
         "agents/kb-maintainer.md": _NEW_BANNER,
@@ -1362,7 +1311,7 @@ def test_reinstall_prunes_only_our_stale_definitions(tmp_path: Path, capsys) -> 
         (plugin / relative).parent.mkdir(parents=True, exist_ok=True)
         (plugin / relative).write_text(text, encoding="utf-8")
     capsys.readouterr()
-    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed, tool_install=_ToolInstalls())
+    install(tmp_path, _CLAUDE_RENDER, verbose=False, uncommitted=_committed)
     left = {relative for relative in planted if (plugin / relative).exists()}
     assert left == {"agents/mine.md", "agents/x.md.00.bak"}
     assert not (plugin / "agents/gone").exists() and not (plugin / "agents/gone-too").exists()
@@ -1894,9 +1843,7 @@ def _user_level_plugin(home: Path) -> Path:
     """A user-level claude plugin installed under `home`: its manifest's path."""
     root = home / ".claude"
     root.mkdir(parents=True)
-    install(
-        root, _CLAUDE_RENDER, verbose=False, project_root=home, uncommitted=_committed, tool_install=_ToolInstalls()
-    )
+    install(root, _CLAUDE_RENDER, verbose=False, project_root=home, uncommitted=_committed)
     return _claude_plugin(root) / ".claude-plugin/plugin.json"
 
 
@@ -1973,7 +1920,7 @@ def test_without_a_global_block_a_project_install_keeps_it_in_the_projects_agent
     project.mkdir()
     main(["install", "devpro", str(project), f"--harness={name}"])
     rendered = render_agents_file(harness, DEVPRO, scope=project.name).encode()
-    top = {path: data for path, data in _files(project).items() if "/" not in path}
+    top = {path: data for path, data in _files(project).items() if "/" not in path and path != "Makefile"}
     assert top == {"AGENTS.md": rendered, **({"CLAUDE.md": b"@AGENTS.md\n"} if redirect else {})}
     assert _global_agents_file(tmp_path / "home", harness).read_text(encoding="utf-8") == "# my global rules\n"
 

@@ -68,6 +68,7 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 11. **Placeholder spelling.** The `@!<namespace>-<key>!@` spelling (`adjagent/vocabulary.py`,
     `hole`) dates from before definition bodies were plain Python strings. Reconsider whether a
     plainer spelling now serves.
+
 12. **The cold-read script is unreliable under opencode.** `adjagent/development-tools/cold-read.sh`
     runs each read in a fresh directory, and in a directory where opencode's background service has
     never run a session, models a provider plugin discovers (`opencode-models-discovery`) are
@@ -85,3 +86,39 @@ Future intent only. Not part of the contract doc set; not handed to coding dispa
 15. **Verify the opencode plugin entry against each opencode release.** `index.ts` is written for
     opencode v2.2.6 (SPEC `deployed-surfaces/shipped-files.md`) and tested only against a stub of
     that version's plugin API; nothing re-checks it when opencode changes.
+
+16. **Change-case analysis run by agents.** A skill, or an addition to the `development` skill,
+    that performs change-case analysis in the SAAM tradition: enumerate plausible future changes to
+    a system, trace each through the design to every module and contract it touches, and judge the
+    architecture by how far those changes spread. Uses: periodic re-review of a long-lived project,
+    evaluation of a brownfield project, and evaluation of a large new architecture. Performed by
+    people, the method consumed senior engineering attention and found little where those engineers
+    had already designed against the failures it detects. Agents make it cheaper to run, and their
+    designs produce those failures: an agent tends to build each piece as the typical form of
+    something it resembles, then extend it toward a full implementation of that thing, which the
+    project does not want, and the weaknesses of the aggregate are the ones change-case analysis
+    exposes. The process may still be heavy, and it asks for speculation about future change, which
+    agents do poorly; partially implementing a change case, so the trace runs through code that
+    exists rather than predicted code, is one possible workaround. Brownfield evaluation overlaps
+    item 2, which this would serve rather than absorb. Separate skill or `development` addition is
+    undecided.
+
+17. **Rename adjagent to devpro. devpro is the default installed plugin.**
+    This change will be a bump to version 0.17.0.
+    The tool, its Python package, its CLI command and its repository take the name devpro. 
+    `devpro install <target>` installs the devpro
+    plugin; `--plugin=kbase` selects kbase, and `--plugin=devpro`, the default, is accepted. SPEC
+    `deployed-surfaces/plugins.md` ("The plugin argument has no default") and `package-and-command.md`
+    change with it. The old name is carried into consumer projects by the generated banner the install
+    recognizes its own files by, the agents-file marker line, the runner's `ADJAGENT_VER`, the
+    `adjagent` skill, and pinned git URLs; with release tags out, each needs a compatibility rule
+    (the install accepting the old banner and marker for a stated window) and a migration note in
+    `docs/installing.md`. Whether "devpro" collides with an existing project or mark is unchecked.
+    
+18. **Change commit message attribution postscript**
+    This change targets release 0.17.0 (goes out with #17)
+    The commit message postscript, separated from the rest of the commit message by a blank line, will read:
+    `ai assisted by [devpro](https://github.com/benn-herrera/devpro). submitter takes full responsibility.`
+    Because this plugin supports multiple harnesses the harness and model will not be mentioned either
+    in this line or in a separate acknowledgement. they don't need our marketing assistance and that falls
+    under the rubric of 'submitter takes full responsibility.'

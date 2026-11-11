@@ -13,8 +13,8 @@ the set.
   that hook and installs everything else ([Guardrail](guardrail.md)).
 - The kbase plugin runs on macOS or Linux only; native Windows is unsupported for it. It needs kbase,
   which you install, among its other requirements ([Knowledge base](knowledge-base.md#requirements)).
-- The kbase plugin's runner include line needs `just` 1.33 or later, if the project's runner is a
-  justfile.
+- The runner include lines either plugin's project install writes need `just` 1.33 or later, if the
+  project's runner is a justfile.
 
 Adjagent installs each plugin for three harnesses: claude (`.claude/skills/<plugin>/`, whose agents
 run as `<plugin>:<name>`), opencode (a directory at `.opencode/plugins/<plugin>/`, whose agents
@@ -27,7 +27,7 @@ no default.
 
 - **devpro** is the coding, platform and specialist agents and their skills.
 - **kbase** is the `kbase` skill with the kb-tools runner snippets and the `kbase` MCP server entry,
-  and the definitions a knowledge-base project works with. It needs the kbase program on your
+  the `docdicer` skill with its tools, and the definitions a knowledge-base project works with. It needs the kbase program on your
   machine ([Knowledge base](knowledge-base.md)).
 
 [SPEC](../PROJECT_DOCS/SPEC/deployed-surfaces/plugins.md) (SPEC.md, Deployed Surfaces, Plugins) lists
@@ -46,7 +46,7 @@ PYTHON := $(VENV)/bin/python
 ADJAGENT := $(VENV)/bin/adjagent
 .PHONY: agents
 agents:
-	[[ -x "$(PYTHON)" ]] || python3 -m venv "$(VENV)"
+	[[ -x "$(PYTHON)" ]] || python3 -m venv --upgrade-deps "$(VENV)"
 	[[ -x "$(ADJAGENT)" && "$$("$(ADJAGENT)" --version)" == "$(ADJAGENT_VER)" ]] || \
 	  "$(PYTHON)" -m pip install "git+https://github.com/benn-herrera/adjagent@v$(ADJAGENT_VER)"
 	"$(ADJAGENT)" install devpro . --harness=claude

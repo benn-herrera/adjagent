@@ -72,7 +72,7 @@ rendered definition. The copy is one-way, not a mirror — `prune` owns the inst
 `agents/`, `commands/` and `skills/` and nothing outside them. A harness-rendered file is checked a
 third way, by its `HarnessFile.marker`.
 
-**Preflight and the tool install.** The CLI reaches `install` through `install.preflighted_install`,
+**Preflight.** The CLI reaches `install` through `install.preflighted_install`,
 which runs the unchanged install into a scratch copy of the paths it manages and compares the
 scratch copy with the real paths (`adjagent/preflight.py`). The install decides what is written,
 run where its writes cannot reach the real paths; `_install_managed_paths` is a hand-kept list of
@@ -100,12 +100,11 @@ part.
 - **The run** calls `install` on the scratch copy with `real_harness_dir` and `real_project` naming
   the real paths, because three decisions compare a written path with a fixed location and a
   scratch copy would decide them differently: whether the harness directory is user-level, whether
-  the project is `REPO_ROOT` (the include line is skipped there), and the agents file's
+  the project is `REPO_ROOT` (the include lines are skipped there), and the agents file's
   user-harness-directory test and title, which `checked_agents_file` and `install_agents_file` read
   from their `real_directory` parameter. Its stdout, the write log, is discarded. What the install
   leaves alone or skips goes to stderr, which the run captures and prints again, each scratch base
-  replaced by the real one, on the up-to-date and dry-run outcomes. `tool_install` is passed and
-  never reached, the scratch copy holding no `.venv`. An `InputError` or `OSError` from the scratch copy or the run is raised as an
+  replaced by the real one, on the up-to-date and dry-run outcomes. An `InputError` or `OSError` from the scratch copy or the run is raised as an
   `InputError` with each scratch base replaced by the real one, so no refusal and no printed path
   names the scratch copy.
 - **The comparison** is of files. A path in the scratch copy
@@ -114,27 +113,17 @@ part.
   removal alone: one in the scratch copy before the run and gone after it is removed. `.venv`
   directories (`VENV_DIR`) are outside it.
 - **The outcome** (`run_preflighted`): with no difference it returns before the real install, and
-  with `--dry-run` it prints the comparison, the notes `preflighted_install` passes and the
+  with `--dry-run` it prints the comparison and the
   captured reports, then returns. Otherwise the real install runs as `install` always has.
 - **Obstacles.** A regular file where a directory on the way to a managed path should be
   (`.opencode` as a file) is copied in the directory's place (`_copy_managed`), so the scratch
   install meets the obstacle the real one does.
 
-**The tool install.** `install` takes `tool_install`, a keyword-only callable from a script path to
-`None` on success or a one-line failure description, shaped like `uncommitted`. On a project
-install, before its first write, it records whether `skills/docdicer/tools/.venv` is a directory
-under the install directory (`_standing_docdicer_venv`); the package replacement then removes it
-with the rest of the destination. After every other write it calls
-`tool_install` with `<install-dir>/skills/docdicer/tools/docdicer` if a venv was there, and prints
-the description when one comes back. `cli.py` passes `install.run_tool_install`, a `subprocess.run` of
-`[script, "--install"]` whose non-zero exit or `OSError` becomes the description; `install.py`
-reimplements neither venv creation nor pip. A test passes a recording runner, so none reaches the
-network. The install runs `docdicer --install` because the package replace removed the tool's own
-venv and the script restores it; the install manages no dependencies across packages. This steps
-past copying files into place because SPEC.md, Shipped files, requires the docdicer a project
-already installed to stay matched to the replaced script; it re-runs only an install the operator
-already made, never makes a first one, and resolves nothing itself — the shipped script's own
-`--install` does the work.
+**No tool install.** `install` runs no shipped package's script and takes no callable for one. The docdicer
+tools package's destination is replaced whole like any other, which removes the `.venv` the launcher
+built beside itself; the launcher rebuilds the venv and reinstalls the docdicer it names on its
+next run (SPEC.md, Deployed Surfaces, Shipped files). The install manages no dependencies across
+packages, and needs no network.
 
 **Shadow report and reload sentence.** The last two steps of `install`, for a harness whose
 `user_plugin_shadows` is set — claude alone, the one whose user-level plugin loads in place of a

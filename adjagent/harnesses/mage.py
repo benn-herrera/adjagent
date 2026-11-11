@@ -1,27 +1,19 @@
-"""The mage harness: claude's vocabulary copied, the plugin manifest, and no `adjagent` skill."""
+"""The mage harness: the shared frontmatter emitter and recipe rule from `adjagent.harness`, the rest of
+claude's vocabulary copied, the plugin manifest, and no `adjagent` skill."""
 
 from __future__ import annotations
 
 import re
 
-from adjagent.harness import PLUGIN_MANIFEST, AgentFields, FrontmatterForm, Harness, mcp_json, quoted
+from adjagent.harness import (
+    FOREGROUND_RECIPE_RULE,
+    PLUGIN_MANIFEST,
+    FrontmatterForm,
+    Harness,
+    agent_frontmatter,
+    mcp_json,
+)
 from adjagent.vocabulary import Tool
-
-
-def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
-    """name; description "…"; model if non-empty; color "…" if set; `tools: A, B` unless tools is None."""
-    lines = [f"name: {fields.name}", f"description: {quoted(fields.description)}"]
-    if fields.model:
-        lines.append(f"model: {fields.model}")
-    if fields.color is not None:
-        lines.append(f"color: {quoted(fields.color)}")
-    if fields.tools is not None:
-        lines.append(f"tools: {', '.join(fields.tools)}")
-    return tuple(lines)
-
-
-_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them.
-If a recipe times out, the agent hands back naming it instead of rerunning it in the background."""
 
 _KBASE_PROJECT_RULE = """This session's kbase server serves many projects, so run the probes above with `.` read as the
 project path you have established for kbase's tool calls, not as the directory you are standing in."""
@@ -54,7 +46,7 @@ HARNESS = Harness(
         "active project root. If it doesn't exist, stop and say so; don't improvise a location."
     ),
     memory_file="the mage plugin's `CLAUDE.md` (outside its marker lines)",
-    recipe_rule=_RECIPE_RULE,
+    recipe_rule=FOREGROUND_RECIPE_RULE,
     kbase_project_rule=_KBASE_PROJECT_RULE,
     # mage's copy of cold-read.sh refuses to run, so the reader is started by hand
     cold_read_rule=(
@@ -79,7 +71,7 @@ HARNESS = Harness(
     inherit_text="inherit",
     inherit_synonyms=(),
     bare_tier_spec_is_all=False,
-    definition_form=FrontmatterForm(agent=_frontmatter, document=()),
+    definition_form=FrontmatterForm(agent=agent_frontmatter, document=()),
     guardrail=None,
     rendered_files=(PLUGIN_MANIFEST, mcp_json(_mcp_entry)),
     omits=frozenset({"adjagent"}),

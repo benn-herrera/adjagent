@@ -9,7 +9,7 @@ from adjagent import clauses
 from adjagent.definition import Definition, SkillFile
 from adjagent.vocabulary import Kind
 
-KBASE_MIN_VERSION = "0.11.0"
+KBASE_MIN_VERSION = "0.11.1"
 KBASE_TAP_FORMULA = "benn-herrera/tap/kbase"
 
 DEFINITIONS = (

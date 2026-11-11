@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Launcher for docdicer, kept in a venv beside this script. `--install` builds that venv where it is
-# missing or broken and installs the pinned version into it; every other invocation runs the venv's
-# docdicer.
+# Launcher for docdicer: on first use it builds a venv beside this script and installs the pinned
+# docdicer there, sending install output to stderr.
 
-VERSION=0.8.0
+VERSION=0.8.1
 PACKAGE="git+https://github.com/benn-herrera/docdicer@v${VERSION}"
 
 case "${0}" in
@@ -16,36 +15,24 @@ venv_bin=${venv}/bin
 venv_python=${venv_bin}/python
 venv_docdicer=${venv_bin}/docdicer
 
-if [[ "${1:-}" = "--install" ]]; then
-  function remedy() {
-    {
-      printf '%s\n' "docdicer needs python3 3.9 or later with its venv module."
-      printf '%s\n' "  macOS: brew install python  (or: xcode-select --install)"
-      printf '%s\n' "  Linux: install the distribution's python3 package and, where it is split out, its venv module (Debian and Ubuntu: python3-venv)."
-    } >&2
-  }
-  if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
-    remedy
-    exit 1
-  fi
-  # A venv is bound to the interpreter that built it, so one whose python no longer runs (the system
-  # python3 upgraded or removed) is rebuilt; a working one is kept and its pip brought current.
-  if [[ ! -x "${venv_python}" ]] || ! "${venv_python}" -c '' 2>/dev/null; then
-    command rm -rf "${venv}"
-    if ! python3 -m venv --upgrade-deps "${venv}"; then
-      remedy
-      exit 1
-    fi
-  elif ! "${venv_python}" -m pip install --upgrade pip; then
-    exit 1
-  fi
-  "${venv_python}" -m pip install "${PACKAGE}"
-  exit "${?}"
-fi
-
-if [[ ! -x "${venv_docdicer}" ]]; then
-  printf '%s\n' "docdicer is not installed here. Run: \"${0}\" --install" >&2
+function remedy() {
+  {
+    printf 'docdicer needs python3 3.9 or later with its venv module.\n'
+    case "$(uname)" in
+      Darwin) printf '  brew install python (or: xcode-select --install)\n';;
+      Linux) printf '  use your package manager to install python3 and, if split out, python3-venv\n';;
+      *) printf '  install python3 via pyenv or from python.org\n';;
+    esac
+  } >&2
   exit 1
-fi
+}
+
+{ [[ -x "${venv_python}" ]]  && "${venv_python}" -c '' 2> /dev/null; } || {
+  command rm -rf "${venv}" && \
+  python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null && \
+  python3 -m venv --upgrade-deps "${venv}"
+} >&2 || { command rm -rf "${venv}"; remedy; }
+[[ -x "${venv_docdicer}" && "$("${venv_docdicer}" --version)" == "${VERSION}" ]] || \
+  "${venv_python}" -m pip install "${PACKAGE}" >&2 || exit 1
 
 exec "${venv_docdicer}" "${@}"

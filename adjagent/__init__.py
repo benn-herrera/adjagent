@@ -25,7 +25,7 @@ or a family overlay anchor, filled once by `render.filled_body`.
     preflight.py     the install run into a scratch copy first: up to date, --dry-run, or the real run
     install_base.py  what the install modules share: package and checkout roots, the kb-tools package
                      paths, path checks, UTF-8 reading
-    runner_file.py   the runner include line
+    runner_file.py   the runner include lines, one per snippet set the install passes in
     install.py       the install: renders, the shipped packages' stamped copy, and the prune
     agents_file.py   the agents-file install: the marker span, redirects, and the rolling backup
     cli.py           the argparse surface
@@ -47,4 +47,4 @@ the text of every file is a function of the definition, the plugin, the harness,
 the family and the two maps, and of nothing else.
 """
 
-__version__ = "0.16.0"
+__version__ = "0.16.1"

@@ -8,15 +8,15 @@ from collections.abc import Sequence
 
 from adjagent.harness import (
     COLD_READ_SCRIPT_RULE,
+    FOREGROUND_RECIPE_RULE,
     PLUGIN_MANIFEST,
-    AgentFields,
     FrontmatterForm,
     GuardrailHook,
     Harness,
     HarnessFile,
     ShippedDefinition,
+    agent_frontmatter,
     mcp_json,
-    quoted,
     scratch_rule,
 )
 from adjagent.vocabulary import Tool
@@ -26,22 +26,6 @@ from adjagent.vocabulary import Tool
 _RELOAD_RULE = (
     "If the new agents are not available after using `adjagent install`, `/reload-plugins` rescans the agent list."
 )
-
-
-def _frontmatter(fields: AgentFields) -> tuple[str, ...]:
-    """name; description "…"; model if non-empty; color "…" if set; `tools: A, B` unless tools is None."""
-    lines = [f"name: {fields.name}", f"description: {quoted(fields.description)}"]
-    if fields.model:
-        lines.append(f"model: {fields.model}")
-    if fields.color is not None:
-        lines.append(f"color: {quoted(fields.color)}")
-    if fields.tools is not None:
-        lines.append(f"tools: {', '.join(fields.tools)}")
-    return tuple(lines)
-
-
-_RECIPE_RULE = """A dispatched agent runs recipes in the foreground with the shell tool's timeout set to cover them.
-If a recipe times out, the agent hands back naming it instead of rerunning it in the background."""
 
 
 def _mcp_entry(*, command: str) -> dict[str, str | list[str]]:
@@ -94,7 +78,7 @@ HARNESS = Harness(
     user_plugin_shadows=True,
     reload_rule=_RELOAD_RULE,
     cold_read_rule=COLD_READ_SCRIPT_RULE,
-    recipe_rule=_RECIPE_RULE,
+    recipe_rule=FOREGROUND_RECIPE_RULE,
     kbase_project_rule="",
     tools={
         Tool.READ: ("Read",),
@@ -112,7 +96,7 @@ HARNESS = Harness(
     inherit_text="inherit",
     inherit_synonyms=(),
     bare_tier_spec_is_all=False,
-    definition_form=FrontmatterForm(agent=_frontmatter, document=()),
+    definition_form=FrontmatterForm(agent=agent_frontmatter, document=()),
     rendered_files=(PLUGIN_MANIFEST, mcp_json(_mcp_entry)),
     guardrail=GuardrailHook(
         script=_GUARDRAIL_SCRIPT,

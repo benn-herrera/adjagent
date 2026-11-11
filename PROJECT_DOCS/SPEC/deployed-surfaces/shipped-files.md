@@ -4,32 +4,36 @@ A **shipped package** is plain code, never rendered and so never carrying a gene
 installed at its **package destination**, a fixed directory under the install directory. Its
 installed copy is stamped where Installed tree says: the installed banner, not the generated
 banner. A package ships with the definition it belongs to, and only where that definition ships
-(Plugins). The devpro plugin delivers the **docdicer tools package** at its package destination under
-the install directory, `skills/docdicer/tools/`: inside the `docdicer` skill's own directory. It
-also delivers the **development scripts package**, `skills/development/scripts/`, inside the
+(Plugins). Both plugins deliver the **docdicer tools package** at its package destination under
+the install directory, `skills/docdicer/tools/`: inside the `docdicer` skill's own directory. They
+also deliver the **development scripts package**, `skills/development/scripts/`, inside the
 `development` skill's own directory (below), under mage as under claude and opencode. The kbase
-plugin delivers the kb-tools package (below). A user-level install delivers none (SPEC.md, Deployed
-Surfaces, Install destination). The docdicer package holds four files:
+plugin also delivers the kb-tools package (below). A user-level install delivers none (SPEC.md,
+Deployed Surfaces, Install destination). The docdicer package holds four files:
 - `docdicer`, a `bash` script, executable, carrying the installed banner below its shebang
 - `.gitignore`, holding `.venv/` and carrying no banner
 - `runner-snippets/docdicer.just` and `runner-snippets/docdicer.mk`, runner snippets for a
-  consuming project to include, each carrying the installed banner at its top. No install writes a
-  runner include line for them; a project opts in by adding one itself.
+  consuming project to include, each carrying the installed banner at its top. A project install of
+  either plugin under claude or opencode writes the docdicer runner include line for them (Plugins).
+  They define the recipes `docdicer`, `docdicer-check-plan`, `docdicer-kanban` and `docdicer-help`.
 
-The script's behavior, run as `tools/docdicer` from the skill's directory:
-- `--install` installs into `tools/.venv` the docdicer version the script names. It keeps a
-  `tools/.venv` whose python runs and brings its pip current; it builds the venv, with current pip,
-  where there is none or its python no longer runs. Where `python3` 3.9 or later is not on the host,
-  it names the remedy and exits non-zero
-- with no `tools/.venv` and any other arguments, it says how to install and exits non-zero
-- otherwise its arguments pass to docdicer unchanged
+The launcher installs docdicer on demand and takes no `--install` argument. Run as
+`tools/docdicer` from the skill's directory, on every run it:
+- rebuilds `tools/.venv` where the venv's python is missing or does not run. Where `python3` 3.9 or
+  later with its `venv` module is not on the host, it names the remedy and exits non-zero
+- installs into `tools/.venv` the docdicer version the script names, where the venv's docdicer does
+  not report that version; a failure exits non-zero
+- sends all install output to stderr
+- then passes its arguments to docdicer unchanged
 
-An install that changes anything replaces the package whole, `tools/.venv` included. Where
-`tools/.venv` existed before that install, the install afterwards runs `tools/docdicer --install`,
-the **tool install**, so the installed docdicer stays matched to the script. A failure of that run
-is reported in one line naming the command; the install's exit status and the rest of its writes
-are unaffected. An up-to-date run (Write Safety) runs nothing. A `.venv` directly under a package
+The first run, and any run after the venv is lost, therefore needs the network and `git`. No install
+runs the launcher. An install that changes anything replaces the package whole, `tools/.venv`
+included, and leaves the venv to be rebuilt on the next run. A `.venv` directly under a package
 destination is not install output.
+
+Where the project's runner includes the docdicer snippet, the `docdicer` skill directs the agent to
+run docdicer through its recipes rather than through `tools/docdicer`. The skill carries no other
+runner-snippet advice and no install step.
 
 The development scripts package holds one file, `cold-read.sh`, a `bash` script, executable,
 carrying the installed banner below its shebang. A **cold read** is one agent reading one brief

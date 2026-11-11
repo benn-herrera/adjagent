@@ -64,10 +64,12 @@ bound harness never holds another plugin's values. Harness detection
 (`install_target._detected_harness`) reads only plugin-independent values, so it runs before
 binding. The manifest's `name`, both prefixes, the install directory and the MCP prefix are each derived from the
 plugin's name. `inherit_synonyms` and `bare_tier_spec_is_all` differ between claude and
-opencode, as the harness strings above do, and mage holds claude's assumed values (model pattern,
-aliases, tool spellings, frontmatter, recipe rule) as copies it may revise independently: opencode holds
+opencode, as the harness strings above do: opencode holds
 `("default",)` and `True`, with `inherit_text` empty; claude holds `()` and `False`,
-`inherit_text` `inherit`, and refuses a bare tier spec as no `tier=value` pair.
+`inherit_text` `inherit`, and refuses a bare tier spec as no `tier=value` pair. Mage reads the shared
+frontmatter emitter (`agent_frontmatter`) and recipe rule (`FOREGROUND_RECIPE_RULE`) from
+`harness.py`, and holds claude's other assumed values (model pattern, aliases, tool spellings) as
+copies it may revise independently.
 
 **Plugins.** A plugin is a `Plugin` dataclass (`adjagent/plugin.py`): a name and either the definition
 names it ships (`include`) or the ones it leaves out (`exclude`), validated at construction, with

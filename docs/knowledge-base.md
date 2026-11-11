@@ -14,7 +14,7 @@ definitions a knowledge-base project works with (SPEC.md, Deployed Surfaces, Plu
 
 ## Requirements
 
-- **kbase 0.11.0 or later**, installed by you; no install writes it. On macOS or Linux:
+- **kbase 0.11.1 or later**, installed by you; no install writes it. On macOS or Linux:
   `brew install benn-herrera/tap/kbase`. `kbase --version` prints the bare version, and
   `brew upgrade benn-herrera/tap/kbase` brings an older one up. The harness's `kbase` MCP entry runs
   the bare command `kbase`, so it has to be on `PATH`, and the MCP server has to be (re)started after
@@ -62,7 +62,7 @@ KB you have been working in and you lose the work; continue an interrupted one a
 ## The toolchain
 
 The kbase plugin drives **kbase**, a Go binary, not a Python package. You install it yourself and the
-install does not touch it. What the install delivers is the two runner snippets, to
+install does not touch it. Of kbase itself the install delivers only the two kb runner snippets (it also delivers the `docdicer` skill's tools, below), to
 `.claude/skills/kbase/skills/kbase/kb-tools/runner-snippets/` by default, inside the claude plugin
 (`.opencode/plugins/kbase/skills/kbase/kb-tools/runner-snippets/` under opencode;
 `skills/kbase/kb-tools/runner-snippets/` in the install directory under mage), inside the skill's own
@@ -78,13 +78,18 @@ an agent harness (MCP)" is the wiring guide. The same install:
    the bare `kbase` from `PATH`, run as `kbase mcp` (`kbase mcp --project-dir-required` under mage); it
    names no KB path. Each of its tools is offered under the harness's own prefix: kbase's `query` tool
    is `mcp__plugin_kbase_kbase__query` under Claude Code and `kbase_query` under opencode.
-2. Appends one include line to the project's justfile or Makefile, creating a `Makefile` where there
-   is neither: `import? '<install-dir>/skills/kbase/kb-tools/runner-snippets/kb.just'`, `<install-dir>` being
+2. Appends two include lines to the project's justfile or Makefile, creating a `Makefile` holding
+   both where there is neither. The kb line is
+   `import? '<install-dir>/skills/kbase/kb-tools/runner-snippets/kb.just'`, `<install-dir>` being
    `.claude/skills/kbase` under claude and `.opencode/plugins/kbase` under opencode (just 1.33 or
-   later) or the `-include` form naming `kb.mk`. Both are non-fatal, so a consumer's runner keeps
-   working if the tree is absent, and `just`/`make` then carry `kb-help`, `kb-init`, `kb-verify`,
-   `kb-update-format`, `kb-stats`, `kb-score` and `kb-export-latex`. Under mage this step does not run: no include line and no `Makefile`, because a plugin
-   is not a repo project.
+   later), or the `-include` form naming `kb.mk`; the docdicer line is the same form naming
+   `<install-dir>/skills/docdicer/tools/runner-snippets/docdicer.just` or `docdicer.mk`. Both are
+   non-fatal, so a consumer's runner keeps working if the tree is absent, and `just`/`make` then
+   carry `kb-help`, `kb-init`, `kb-verify`, `kb-update-format`, `kb-stats`, `kb-score` and
+   `kb-export-latex`, and `docdicer`, `docdicer-check-plan`, `docdicer-kanban` and `docdicer-help`.
+   Under mage this step does not run: no include lines and no `Makefile`, because a plugin is not a
+   repo project. The plugin also delivers the `docdicer` skill and its tools, so the project has the
+   `kanban` board, `check-plan` and plan dicing ([Install reference](install-reference.md#the-docdicer-launcher)).
 
 The entry names no machine-specific path. Under claude it lives inside `.claude/`, which the
 [README](../README.md#quick-start-guide) already has you ignore.

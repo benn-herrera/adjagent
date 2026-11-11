@@ -9,7 +9,7 @@ no plugin changes (`_detected_harness`), binds that harness to the plugin, and r
 the harness directory (`InstallTarget.harness_dir`) and the project root (`InstallTarget.project_root`),
 each built from that lexical path. Only mage's harness directory depends on the plugin, its
 `project_harness_dir` being `{plugin}`. `install` uses the project root as spelled, and resolves it
-only to compare it with this checkout (`REPO_ROOT`, `runner_file.install_kb_include_line`), so
+only to compare it with this checkout (`REPO_ROOT`, `runner_file.install_include_lines`), so
 two spellings of the checkout compare equal. The install directory's path relative to it
 (`_harness_relpath`) is taken as both are spelled. The harness and harness directory follow
 SPEC.md, Install destination; every directory name is read from the `Harness` values
@@ -20,7 +20,7 @@ directory compare equal. The resolver decides neither the install directory nor 
 install is user-level; `cli.py` passes the harness directory to `install`, which computes
 `root = harness_dir / harness.plugin_dir` and decides user-level from
 `user_dir_harnesses(harness_dir)` naming the harness, whatever the route to it, and then renders
-and prunes and skips the packages, guardrail and the runner include line, and the harness resources
+and prunes and skips the packages, guardrail and the runner include lines, and the harness resources
 but the entry that registers the plugin (Install, Renders and copies). Prune is in terms of
 the install directory, and the agents file in terms of the harness directory, which holds the
 install directory. `install.py` writes the agents file in the harness directory for a harness-directory

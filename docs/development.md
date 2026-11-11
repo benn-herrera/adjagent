@@ -13,7 +13,7 @@ Beyond the install requirements, this repository needs:
 - The network on the first `just test`, which provisions `.venv`; docdicer installs from its git tag,
   so `git` is needed there too.
 
-The test suite needs `bun`, `perl` and `kbase` (0.11.0 or later) on `PATH`. The kbase surface test
+The test suite needs `bun`, `perl` and `kbase` (0.11.1 or later) on `PATH`. The kbase surface test
 (`tests/test_kbase_surface.py`) needs `kbase` and fails, not skips, without it;
 [Knowledge base](knowledge-base.md#requirements) gives the install. The guardrail parity test
 (`tests/test_guardrail.py`) runs one case table through both guardrails, each case under every
@@ -37,7 +37,7 @@ on whatever `python3` is installed. Using the repository directly does not requi
 
 Other targets:
 
-- `just test-changed [base]` is the edit gate, run after a change. It runs only the surfaces the uncommitted
+- `just test-changed [base]` is a target a package's done-line may name. It runs only the surfaces the uncommitted
   tree (plus, given `base`, the commits since it) touches, and says which paths chose each.
 - `just render [slug]` renders the full install product of both plugins into `rendered/<slug>/`
   (slug defaults to `latest`), one slot project per plugin: `rendered/<slug>/devpro/` and
@@ -82,7 +82,7 @@ adjagent/                 the generator and every definition, run from a checkou
                           the kbase skill, so by the kbase plugin only, as skills/kbase/kb-tools/
   docdicer-tools/         the docdicer launcher script, its .gitignore and runner fragments
                           (runner-snippets/docdicer.just, docdicer.mk), delivered with the docdicer
-                          skill, so by devpro only, as skills/docdicer/tools/
+                          skill, so by both plugins, as skills/docdicer/tools/
   development-tools/      the cold-read.sh script, delivered with the development skill, so by both
                           plugins, as skills/development/scripts/
 pyproject.toml            the package's build configuration: setuptools, the version read from
@@ -124,7 +124,7 @@ text with placeholders, read top to bottom as the file it renders.
 - To see what a change does, run `just render`, then `just render-diff`. An unknown placeholder fails
   at render; a definition module holding anything but imports, string constants and `DEFINITIONS`
   fails the suite.
-- The edit gate is `just test-changed`; the checkpoint gate is `just test`.
+- The checkpoint gate is `just test`; a package's done-line names targets such as `just test-changed`.
 
 How to add a definition: [CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/adding-definitions/index.md).
 

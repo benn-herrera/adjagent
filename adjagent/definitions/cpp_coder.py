@@ -114,7 +114,7 @@ Parametrise over a table of cases rather than copying a test body.
 
 {clauses.verification_evidence()}
 
-{clauses.build_system_lead(direct="`cmake`, `make` or a compiler")} {clauses.warnings_as_defects(enable=clauses.FULL_WARNING_SET)} {clauses.SANITIZER_BUILD_TARGET}
+{clauses.build_system_lead(direct="`cmake`, `make` or a compiler")} {clauses.FULL_WARNING_SET} {clauses.SANITIZER_BUILD_TARGET}
 
 Run `clang-format` and `clang-tidy` through their targets before shipping; `clang-tidy` reads the build's `compile_commands.json`, so the build must export one.
 
