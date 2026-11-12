@@ -1,20 +1,22 @@
 # Install reference
 
-The rules behind `adjagent install`: where it writes, what it writes, what it leaves alone and when
-it refuses. The route that puts adjagent into a project is in the [README](../README.md#quick-start-guide).
+The rules behind `devpro install`: where it writes, what it writes, what it leaves alone and when
+it refuses. The route that puts devpro into a project is in the [README](../README.md#quick-start-guide).
 
-`adjagent` and `PYTHONPATH=<clone> python3 -m adjagent` (from a checkout) are the same command. In a
-checkout, the `just` recipes are maintainer conveniences that map to `adjagent` verbs: `just install`
-is `adjagent install`, and `just install-agents-file` is `adjagent install-agents-file`. `just
-render` is not `adjagent render`: it takes a slug and forwards its `--*` flags to `adjagent
-install`, once for each plugin. Every `--*` flag after the target forwards verbatim, so tuning the
-render is one more flag ([Model tuning](model-tuning.md)). Run from an installed package, the check
+`devpro` and `PYTHONPATH=<clone> python3 -m devpro` (from a checkout) are the same command. In a
+checkout, the `just` recipes are maintainer conveniences that map to `devpro` verbs: `just install
+<target>` is `devpro install <target>`, and `just install-agents-file <dir>` is `devpro
+install-agents-file <dir>`; both forward the remaining arguments, `--plugin=NAME` included. `just
+render` is not `devpro render`: it takes a slug and forwards its `--*` flags to `devpro
+install`, once for each plugin; it refuses `--plugin`, in either form, since it renders every
+plugin. `install` and `install-agents-file` forward every `--*` flag after the target verbatim, so
+tuning the render is one more flag ([Model tuning](model-tuning.md)). Run from an installed package, the check
 that protects a checkout does not apply: there is no uncommitted state to refuse the agents file for.
 
 ## Choosing the plugin and the target
 
-`adjagent install PLUGIN TARGET` takes the plugin first: `devpro` or `kbase`, with no default
-([What each holds](installing.md#plugins)). Everything below is per plugin: each has its own install
+`devpro install TARGET [--plugin=NAME]` takes the plugin as `--plugin=NAME`: `devpro` or `kbase`,
+default `devpro`; a positional plugin is refused ([What each holds](installing.md#plugins)). Everything below is per plugin: each has its own install
 directory, so installing one never changes the other's.
 
 The target must be an existing directory. The harness is `--harness=NAME` when given; otherwise the
@@ -65,13 +67,13 @@ A project install writes, inside the install directory:
 - For the kbase plugin, the `kbase` skill and the rest of what [Knowledge base](knowledge-base.md)
   lists.
 
-Under mage the `adjagent` skill is omitted. Claude Code reads the plugin's `agents/`, `commands/`
+Under mage the `install` skill is omitted. Claude Code reads the plugin's `agents/`, `commands/`
 and `skills/` from `.claude/skills/<plugin>/`. Test suites and caches stay behind.
 
 A project plugin loads only when the session starts at the project root, after Claude Code's trust
 dialog ([Claude Code plugin loading](https://code.claude.com/docs/en/plugins/loading), "Check why a
 repository plugin didn't load"). A claude install that writes the plugin prints: "If the new agents
-are not available after using `adjagent install`, `/reload-plugins` rescans the agent list."
+are not available after using `devpro install`, `/reload-plugins` rescans the agent list."
 
 ### Runner include lines
 
@@ -91,8 +93,9 @@ rebuilds `tools/.venv` where the venv's python is missing or does not run, insta
 version the script names where the venv's docdicer does not report it, sends all install output to
 stderr, and then passes its arguments to docdicer unchanged. It needs `python3` 3.9 or later with its
 venv module, else it names the remedy and exits non-zero; the first run needs `git` and the network.
-No adjagent install runs it: an install that changes anything replaces the whole tools package,
-`tools/.venv` included, and the next run of the script rebuilds the venv.
+No devpro install runs it: an install replaces the tools package's files and leaves
+`tools/.venv` in place, and the next run of the script updates the venv where its docdicer is another
+version.
 
 ### Running a cold read
 
@@ -107,13 +110,13 @@ It runs under claude and opencode only, and from the copy under the harness you 
 Under opencode it composes the agent's file in its fresh directory from the agent's record in
 `registry.json` and its body file.
 
-It needs `ADJAGENT_COLD_READ_DIR`: an existing directory outside the project, with no `CLAUDE.md`,
+It needs `DEVPRO_COLD_READ_DIR`: an existing directory outside the project, with no `CLAUDE.md`,
 `AGENTS.md` or other instruction file at or above it (your own `~/.claude/` is exempt). Each run
 works in a fresh private child of it, which the script removes on exit. Where the variable is unset
 or the directory unsuitable, the script says why, naming the file where one is the cause, and
 creates nothing.
 
-To pin the reader's model, set `ADJAGENT_COLD_READ_MODEL`: a model name or alias under claude
+To pin the reader's model, set `DEVPRO_COLD_READ_MODEL`: a model name or alias under claude
 (`opus`), `provider/model` under opencode. Unset, the reader gets the model the harness gives the
 agent.
 
@@ -136,7 +139,7 @@ are missing. Causes and remedies, per [Claude Code plugin loading](https://code.
 
 ## User-level installs
 
-A home-directory target is a user-level install: `adjagent install devpro ~ --harness=claude` (or
+A home-directory target is a user-level install: `devpro install ~ --harness=claude` (or
 `opencode`) renders the plugin's definitions into `~/.claude/skills/devpro/`
 (`~/.config/opencode/plugins/devpro/`), with the manifest under claude and
 `registry.json` under opencode, and writes nothing else but:
@@ -148,7 +151,7 @@ A home-directory target is a user-level install: `adjagent install devpro ~ --ha
 No user settings file is written. No guardrail, no docdicer tools or development script, no
 kb-tools, no include line. The docdicer skill is
 installed without its script; the skill tells its reader that a project install provides it.
-`adjagent install-agents-file devpro ~/.claude`
+`devpro install-agents-file ~/.claude`
 installs that plugin's harness agents file there ([Agents file](agents-file.md)). A claude or opencode
 project install keeps the agents-file block current in one place, your global agents file where it
 holds the block and otherwise the project's `AGENTS.md` ([Agents file](agents-file.md#where-a-project-install-puts-it)).
@@ -163,7 +166,7 @@ the same name. Neither install is refused. Only claude reports this.
 
 ## Mage
 
-`adjagent install <plugin> <plugins-parent> --harness=mage` creates `<plugins-parent>/<plugin>`. Inside
+`devpro install <plugins-parent> --plugin=<plugin> --harness=mage` creates `<plugins-parent>/<plugin>`. Inside
 that plugin the layout is the claude plugin's: the surfaces sit at its top level, with the manifest at
 `.claude-plugin/plugin.json` beside them, rendered rather than copied. Mage ships no hook, and neither
 plugin writes an include line or a `Makefile`: a plugin is not a repo project.
@@ -172,7 +175,7 @@ The install writes the agents file as `<plugin>/CLAUDE.md`, so a normal install 
 ## An installed tree is an artifact
 
 The installed tree is not for local edit. To change a definition, vendor the whole repository, or
-fork it and open a pull request; adjagent merges nothing local. A consumer's own needs go in its
+fork it and open a pull request; devpro merges nothing local. A consumer's own needs go in its
 `CONVENTIONS.md` or `AGENTS.md` ([Installing, Customizing](installing.md#customizing-the-set)). Every
 rendered file's first banner line says so. Re-running the install overwrites the tree and removes definitions this project no longer
 produces, so a local edit is replaced with no diff to show it. A project that tracks the tree reviews
@@ -217,7 +220,7 @@ What the install would leave alone or skip, such as a guardrail hook it skips, i
 with the reason. That happens on an up-to-date run and
 a dry run as on a changing one.
 
-`adjagent install-agents-file` takes `--dry-run` too ([Agents file](agents-file.md)). Printed paths
+`devpro install-agents-file` takes `--dry-run` too ([Agents file](agents-file.md)). Printed paths
 and refusals name the real target, never the scratch copy. A dry run foresees the refusals an
 install makes ([Refusals](#refusals)).
 
@@ -226,7 +229,8 @@ install makes ([Refusals](#refusals)).
 An install refuses, writing nothing, to:
 
 - overwrite a file at one of its paths that carries no banner of this project's, such as your own
-  `agents/python-coder.md`;
+  `agents/python-coder.md`. A file a release before 0.17.0 wrote counts: its banner names the
+  generator's earlier name, so it is foreign, and prune leaves it;
 - keep the block in a project whose `CLAUDE.md` holds anything but the one-line `@AGENTS.md`
   redirect. Remedy: move that content into `AGENTS.md` and replace `CLAUDE.md` with `@AGENTS.md`;
 - write an agents file (the project's `AGENTS.md`, or your global agents file) that holds marker lines other
@@ -243,9 +247,3 @@ A re-install removes each file under the install directory's `agents/`, `command
 that it did not write and that carries this project's generated banner, naming each. It looks
 nowhere else, so another plugin's install directory is never touched. A file without a banner is
 never touched.
-
-## Upgrading from 0.15.0 and earlier
-
-Nothing reads, rewrites or removes what an earlier adjagent version wrote. The files to remove by
-hand, and the one search to run in the project, are listed in [Installing, Upgrading from 0.15.0 and
-earlier](installing.md#upgrading-from-0150-and-earlier).

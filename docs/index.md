@@ -1,11 +1,11 @@
-# adjagent documentation
+# devpro documentation
 
-The [README](../README.md) holds what adjagent is and its quick start. These pages hold the rest.
+The [README](../README.md) holds what devpro is and its quick start. These pages hold the rest.
 
 - [Installing](installing.md): requirements, plugins, the Makefile recipe, the agents file, what to
-  commit, previewing, updating, upgrading, running adjagent by hand, customizing the set.
+  commit, previewing, updating, running devpro by hand, customizing the set.
 - [Mage plugin release](mage-release.md): downloading, verifying and unpacking a mage plugin.
-- [Install reference](install-reference.md): where `adjagent install` writes for each plugin, what it
+- [Install reference](install-reference.md): where `devpro install` writes for each plugin, what it
   writes, `--dry-run` and the up-to-date report, refusals.
 - [Guardrail](guardrail.md): the claude and opencode hooks that block shell writes behind the edit tools.
 - [Agents file](agents-file.md): the operator-level working rules and how they are installed.

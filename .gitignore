@@ -3,6 +3,7 @@
 .claude/
 .opencode-temp/
 .opencode/
+backup.*
 
 __pycache__/
 .pytest_*/

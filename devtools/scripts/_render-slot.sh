@@ -55,5 +55,5 @@ for plugin in "${plugins[@]}"; do
     fi
     mkdir -p "$(dirname "${agents_target}")"
     "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" "${harness}" "${agents_target}" "${plugin}"
-    PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${plugin}" "${out}/${plugin}" --subdir= "${args[@]}"
+    PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${out}/${plugin}" --plugin="${plugin}" --subdir= "${args[@]}"
 done

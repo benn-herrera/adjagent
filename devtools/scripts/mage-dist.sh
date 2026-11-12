@@ -28,7 +28,7 @@ function resolve_names() {
 }
 
 function tarball() {
-  printf 'adjagent-mage-%s-v%s.tgz' "${1}" "${ver}"
+  printf 'devpro-mage-%s-v%s.tgz' "${1}" "${ver}"
 }
 
 # Runs once validation has passed: no earlier refusal removes anything.
@@ -42,8 +42,8 @@ function clean_outputs() {
 function stage_plugin() {
   local plugin="${1}" plugin_dir="${2}"
   mkdir -p "${stage}/${plugin_dir}"
-  PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${plugin}" "${stage}/${plugin_dir}" \
-    --subdir= --harness=mage >&2
+  PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${stage}/${plugin_dir}" \
+    --plugin="${plugin}" --subdir= --harness=mage >&2
   "${PROJECT_ROOT}/devtools/scripts/render-agents-file.sh" mage "${stage}/${plugin_dir}/${agents_file}" "${plugin}" >&2
 }
 

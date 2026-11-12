@@ -59,8 +59,8 @@ present. The install report is made on a dry run and on an up-to-date run as on 
 other harness reports it.
 
 A claude install that writes the plugin prints one sentence after it: "If the new agents are not
-available after using `adjagent install`, `/reload-plugins` rescans the agent list." The installed
-`adjagent` skill says the same.
+available after using `devpro install`, `/reload-plugins` rescans the agent list." The installed
+`install` skill says the same.
 
 An install writes into its install directory: every definition its plugin and its harness carry,
 rendered by that same invocation, together with the shipped packages those definitions read (Shipped files),

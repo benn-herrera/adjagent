@@ -6,13 +6,14 @@ supported harness. Its content depends on the harness, the plugin and where it i
 name of the directory it is installed in.
 
 The installed content is one **agents-file block**, from a begin marker line
-`<!-- vvv-adjagent <plugin> <version> … adjagent-vvv -->` to an end marker line
-`<!-- ^^^-adjagent … adjagent-^^^ -->`. A file holds one block, and the plugin on the begin marker
+`<!-- vvv-devpro <plugin> <version> … devpro-vvv -->` to an end marker line
+`<!-- ^^^-devpro … devpro-^^^ -->`. A file holds one block, and the plugin on the begin marker
 says whose it is. `install-agents-file` into a user harness directory leaves a project's copy in
 place; the next project install removes it. A
 **redirect file** is a one-line `@AGENTS.md` under another name a harness reads.
 
-`adjagent install-agents-file PLUGIN DIR` installs that plugin's agents file into the directory the
+`devpro install-agents-file DIR [--plugin=NAME]`, the plugin defaulted as Deployed Surfaces,
+Plugins states, installs that plugin's agents file into the directory the
 operator names — the harness's user harness directory or a project's own — and is the only way the
 agents-file block first reaches a user harness directory, or changes the plugin a global block
 belongs to. `install` also writes it, under the same rules as `install-agents-file`, in two cases:
@@ -21,7 +22,7 @@ belongs to. `install` also writes it, under the same rules as `install-agents-fi
   inside that plugin's own directory;
 - on every claude or opencode project install, which keeps the agents-file block in exactly one
   place:
-  - if the global agents file holds any adjagent marker line, the install keeps it current
+  - if the global agents file holds any marker line, the install keeps it current
     there, as the plugin its begin marker names, and removes any project copy, reporting what it
     removed and why. A block whose begin marker names no plugin is kept as the installing plugin's.
     A global block of the other plugin stays that plugin's: no install reports it, refuses on it or
@@ -53,7 +54,10 @@ keeps the block in the project's `AGENTS.md`; the branch that keeps it in the gl
 reads or writes the project's file of that other name.
 
 The installed file carries the repository's content as the agents-file block, recognised by the
-fixed ends of its marker lines so a block any earlier revision wrote is still found; installation
+fixed ends of its marker lines, so a block any earlier revision with these markers wrote is still
+found. A marker line of a release before 0.17.0, which spells the generator's earlier name, is not
+a marker line: a file holding only those is a file with no marker line, and the block is appended
+after them. Installation
 replaces that block and keeps every other byte of the file as the operator's, writes an absent file
 whole, appends the block at the end of a file with no marker line, every existing byte kept, and
 refuses with nothing written a file with any other marker lines than one ordered pair. A
@@ -61,7 +65,7 @@ destination whose only content is one `@<path>` import is a redirect followed on
 named directory, and never rewritten itself; a longer chain, or a redirect target outside that
 directory, is refused with nothing written.
 
-The begin marker line carries the version of adjagent that last changed the block's content. Content
+The begin marker line carries the version of devpro that last changed the block's content. Content
 identical but for the marker lines writes nothing, whatever the version stamp, and the stamp stays.
 Differing content is rewritten and stamped with the installing version, unless the existing stamp is
 a later release than the installing one: then the block is left and the install reports "not

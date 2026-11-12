@@ -27,8 +27,8 @@ The launcher installs docdicer on demand and takes no `--install` argument. Run 
 - then passes its arguments to docdicer unchanged
 
 The first run, and any run after the venv is lost, therefore needs the network and `git`. No install
-runs the launcher. An install that changes anything replaces the package whole, `tools/.venv`
-included, and leaves the venv to be rebuilt on the next run. A `.venv` directly under a package
+runs the launcher. An install leaves `tools/.venv` in place; on its next run the launcher's checks
+above rebuild or update it. A `.venv` directly under a package
 destination is not install output.
 
 Where the project's runner includes the docdicer snippet, the `docdicer` skill directs the agent to
@@ -48,14 +48,14 @@ with no tools and none of the project's instruction files in context. The script
   file with every tool denied, composed from that agent's record in the plugin's registry and its
   body file; the session is not added to the operator's history.
 - That directory is a mode 0700 child of the directory the environment variable
-  `ADJAGENT_COLD_READ_DIR` names, and is removed when the script exits, on failure and on
+  `DEVPRO_COLD_READ_DIR` names, and is removed when the script exits, on failure and on
   interruption included. The script refuses, naming the cause and creating nothing, where the
   variable is not set, does not name an existing directory, names a directory inside the project
   root, or names one with an instruction file (`CLAUDE.md`, `AGENTS.md` or another the harnesses
   load) at or above it, other than in the operator's own `~/.claude/`; it names that file.
 - An agent the installed set does not hold fails the run with no output; under claude the script
   says the agent did not load and passes on the available agents claude named.
-- Where the environment variable `ADJAGENT_COLD_READ_MODEL` is set and not empty, the reader runs on
+- Where the environment variable `DEVPRO_COLD_READ_MODEL` is set and not empty, the reader runs on
   that model (under claude a model name or alias, under opencode `provider/model`); otherwise on the
   model the harness gives the agent. A model the harness rejects fails the run with no output.
 - Under opencode a brief whose first character is `-` is refused.
@@ -87,7 +87,7 @@ path it holds below the install directory: opencode's at `<install-dir>/index.ts
 `<install-dir>/guardrail.ts`, and claude's at `<install-dir>/hooks/guardrail.pl` (mage ships none):
 in the install directory, outside its three deployed surfaces. Each keeps its bytes and its mode:
 the install stamps nothing on them. Every such file carries an installed banner
-(`!INSTALLED! … adjagent`) in its first ten lines — the guardrails' name this repository and forbid
+(`!INSTALLED! … devpro`) in its first ten lines — the guardrails' name this repository and forbid
 edits. A harness shipping none copies nothing, which is not an error.
 
 Opencode loads the plugin directory and registers its agents, skills, commands and, where
@@ -113,7 +113,7 @@ by every check, an interpreter's (`python3 -`, `perl`, `ruby`, `node`) only by t
 write check. Its own command line is read like any other. This check blocks with `Blocked: <reason>` and a pointer to the edit tools.
 
 Their `.index/` check is active only where the install directory holds the kbase skill's skill entry
-file, which they look for on every call, so a devpro install is never blocked by it. It blocks a call
+file, which they look for on every call, so an install of the devpro plugin is never blocked by it. It blocks a call
 that reaches into `<project>/kb-root/.index/`, whose index records kbase's own tools read and
 change:
 - a shell command with a word naming a path there, existence checks (`stat`, and `test` or `[` with `-e`, `-d` or `-f`) excepted

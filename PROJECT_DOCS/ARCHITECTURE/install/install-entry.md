@@ -1,9 +1,11 @@
 ### Install entry
 
-`just install plugin target *args` is a one-line recipe over `python3 -m adjagent install "$@"`; the
-installed `adjagent install` is the same verb (Packaging). The verb takes PLUGIN, a choice among the
-plugins `adjagent/plugins/` holds with no default, and TARGET, its first non-flag argument after it, and
-`adjagent/install_target.py` resolves the target, writing nothing: `resolve_install_target`
+`just install target *args` is a one-line recipe over `python3 -m devpro install "$@"`; the
+installed `devpro install` is the same verb (Packaging). The verb takes TARGET, its one positional
+argument, and `--plugin=NAME`, a choice among the plugins `devpro/plugins/` holds, default
+`context.DEFAULT_PLUGIN` (`cli._add_plugin`); a second positional is an argument argparse does not
+recognise, refused with exit 2 before anything is written.
+`devpro/install_target.py` resolves the target, writing nothing: `resolve_install_target`
 normalises the target lexically — made absolute, `..` collapsed — detects the harness from values
 no plugin changes (`_detected_harness`), binds that harness to the plugin, and returns the harness,
 the harness directory (`InstallTarget.harness_dir`) and the project root (`InstallTarget.project_root`),

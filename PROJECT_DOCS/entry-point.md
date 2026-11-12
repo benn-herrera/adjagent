@@ -1,4 +1,4 @@
-# THESIS - adjagent
+# THESIS - devpro
 
 What this project is and why
 
@@ -8,9 +8,9 @@ This thesis does not:
 - Put forth project mechanisms or code structure, that belongs to ARCHITECTURE
 - Dictate project-specific process, that belongs to CONVENTIONS
 
-## adjagent in plain terms
+## devpro in plain terms
 
-adjagent generates a set of agent, command and skill definitions — the instruction files a coding
+devpro generates a set of agent, command and skill definitions — the instruction files a coding
 harness such as Claude Code, opencode, or a general harness application like Mage loads — and installs
 them into a project, or into a user's own harness setup. The definitions are written in Python as string
 constants; text several definitions share is written once and filled into each; the result is
@@ -27,7 +27,7 @@ standard piece gets the standard answer and attention goes to the new ones.
 Each row names the standard pattern a piece is most like. The last column names the larger system
 the piece resembles and is not — the direction work on it must not drift.
 
-| adjagent piece | Most like | It is not |
+| devpro piece | Most like | It is not |
 |---|---|---|
 | Definitions | A Python module per agent, command or skill, holding string constants | A DSL or a prompt framework |
 | Shared text | Named string constants, referenced by name from the definitions that carry them | A macro engine |
@@ -62,6 +62,6 @@ for each tier, and may add text at anchors but never replace or remove a definit
 
 Volumes:
 
-- [SPEC](SPEC/entry-point.md): Adjagent renders agent, command and skill definitions to order, for any supported harness and model family, from one source in which shared text is written once; the two plugins it ships, consumed by other projects, are its flagship renderings.
+- [SPEC](SPEC/entry-point.md): The devpro project renders agent, command and skill definitions to order, for any supported harness and model family, from one source in which shared text is written once; the two plugins it ships, consumed by other projects, are its flagship renderings.
 - [ARCHITECTURE](ARCHITECTURE/entry-point.md): How the generation system, and the agent and skill set it ships, are built to satisfy SPEC.md.
 - [CONVENTIONS](CONVENTIONS/entry-point.md): House rules and project-specific traps only.

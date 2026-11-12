@@ -3,8 +3,8 @@
 What each plugin delivers is SPEC.md, Deployed Surfaces,
 [Plugins](../../SPEC/deployed-surfaces/plugins.md); this leaf is how an install selects and ships it.
 
-**Membership.** A plugin is a `Plugin` (`adjagent/plugin.py`), one module in `adjagent/plugins/` defining
-`PLUGIN`: devpro states what it leaves out (`kbase`), kbase what it ships. `Render.ships(name)` is
+**Membership.** A plugin is a `Plugin` (`devpro/plugin.py`), one module in `devpro/plugins/` defining
+`PLUGIN`: the devpro plugin states what it leaves out (`kbase`), kbase what it ships. `Render.ships(name)` is
 `plugin.ships(name) and name not in harness.omits`, and `render.rendered_definitions` keeps
 exactly the definitions it admits, so a definition the plugin does not carry is never rendered, and
 the skill's directory is never created by a run that omits it. `discover()` is the closed set
@@ -12,9 +12,9 @@ every plugin's names are checked against (`context.plugin_named`). The install f
 own and reads no plugin's name: everything below is keyed on a definition's name, the owner.
 
 **Owners.** A supporting artifact ships iff the definition that uses it ships. Each package is a row
-of `SHIPPED_PACKAGES` (`adjagent/install.py`), a `ShippedPackage` of source, destination, owner and `snippets` (a `runner_file.SnippetSet`, or none):
+of `SHIPPED_PACKAGES` (`devpro/install.py`), a `ShippedPackage` of source, destination, owner and `snippets` (a `runner_file.SnippetSet`, or none):
 
-| source in `adjagent/` | destination below the install directory | owner |
+| source in `devpro/` | destination below the install directory | owner |
 |---|---|---|
 | `docdicer-tools` | `skills/docdicer/tools` | `docdicer` |
 | `development-tools` | `skills/development/scripts` | `development` |

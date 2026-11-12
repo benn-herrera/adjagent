@@ -13,11 +13,11 @@ inside the plugin directory is not also loaded as an opencode plugin module of i
 names the `script` under `resources/<harness>/`, which is also its path under the install
 directory, and a `registration`, the
 `HarnessFile` for the plugin's `hooks/hooks.json`: a text builder, `_guardrail_registration`
-(`adjagent/harnesses/claude.py`), and a `marker`, the missing-script report (Shipped files), which
+(`devpro/harnesses/claude.py`), and a `marker`, the missing-script report (Shipped files), which
 only this repository writes. The registration holds one `PreToolUse` entry, in Claude's settings
 shape under a top-level `hooks` key, whose matcher is `Bash|Read|Write|Edit|NotebookEdit|Grep|Glob`
 on every claude install, as the text builder writes it. Every claude install therefore runs the
-script on each file-tool call as well as each Bash call, and on a devpro install the script finds
+script on each file-tool call as well as each Bash call, and on an install of the devpro plugin the script finds
 the kbase signal absent and lets a file-tool call through. The entry's command is a short `sh` program that
 `exec`s `perl` on `${CLAUDE_PLUGIN_ROOT}/hooks/guardrail.pl` only when that is a readable file, and
 otherwise writes the missing-script report to stderr and exits 1. Claude Code gives a plugin's hook
@@ -45,7 +45,7 @@ from the root or the working directory, which `--subdir` would make wrong: `guar
 `<install-dir>/skills/kbase/SKILL.md`; and `guardrail.ts` from
 `import.meta.url`, which is `<install-dir>/guardrail.ts`, so its signal is
 `<install-dir>/skills/kbase/SKILL.md` as well, `./skills/kbase/SKILL.md` from the script. Both are
-relative to the install directory, so the signal is present where the kbase plugin is installed and absent where devpro is.
+relative to the install directory, so the signal is present where the kbase plugin is installed and absent where the devpro plugin is.
 
 Exit 2 is the block path alone: a failed `use` or `die` in Perl can itself exit 2, which would block
 every call the matcher names, so every module beyond `strict` and `warnings` is loaded with `require`

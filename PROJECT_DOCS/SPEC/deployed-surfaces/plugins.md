@@ -1,13 +1,17 @@
 ### Plugins
 
-An install delivers one **plugin**, a named selection of definitions: `adjagent install devpro` or
-`adjagent install kbase`. The plugin argument has no default. A harness may carry fewer than every
-definition of its plugin: mage does not carry `adjagent`.
+An install delivers one **plugin**, a named selection of definitions: `devpro install TARGET` or
+`devpro install TARGET --plugin=kbase`. Every command that takes a plugin takes it as
+`--plugin=NAME`, default `devpro`. The first positional is the target, so a plugin name there is
+read as a target directory (a lone `devpro install kbase` is refused where no directory `kbase`
+exists: "install target 'kbase' is not an existing directory"), and a second positional is refused
+before anything is written. A harness may carry fewer than every definition of its plugin: mage does
+not carry `install`.
 
 - **devpro** delivers every definition but `kbase`: the coding, platform and specialist agents, the
-  `development`, `docdicer` and `adjagent` skills and the rest.
+  `development`, `docdicer` and `install` skills and the rest.
 - **kbase** delivers fourteen definitions: the `kbase` skill, which drives kbase, a separately
-  installed knowledge-base program and MCP server, with its supporting files, and `adjagent`,
+  installed knowledge-base program and MCP server, with its supporting files, and `install`,
   `development`, `docdicer`, `architect`, `python-coder`, `prompt-engineer`, `tech-writer`, `shell-dsl-coder`,
   `applied-mathematician`, `economic-historian`, `theoretical-economist`, `prose-architect` and
   `literature-scout`.
@@ -68,7 +72,7 @@ The kbase plugin is supported on macOS and Linux, where Homebrew provides kbase 
 `benn-herrera/tap/kbase`; native Windows is unsupported for it, and no install refuses or warns on
 Windows.
 
-adjagent, the generator, needs Python 3.9 or later on the host; the kbase plugin's toolchain is the
+devpro, the generator, needs Python 3.9 or later on the host; the kbase plugin's toolchain is the
 `kbase` executable the operator installs, which needs no Python. The docdicer launcher needs `python3` 3.9 or later with its `venv` module,
 and installing the package from its git URL needs `git` on `PATH`.
 Everything else the kbase plugin needs (pandoc 3.12, git, a way to reach a model) is kbase's own

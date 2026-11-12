@@ -1,6 +1,6 @@
 ### Opencode entry
 
-`adjagent/harnesses/resources/opencode/index.ts` is opencode's plugin entry (SPEC.md, Deployed
+`devpro/harnesses/resources/opencode/index.ts` is opencode's plugin entry (SPEC.md, Deployed
 Surfaces, Shipped files). It is written for opencode v2.2.6 and is the same file for both plugins. The
 install copies it, with `guardrail.ts`, to the install directory as a harness resource (Renders and
 copies); a user-level install copies the entry alone.

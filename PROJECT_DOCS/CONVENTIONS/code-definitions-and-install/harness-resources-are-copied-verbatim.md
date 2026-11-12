@@ -1,6 +1,6 @@
 ### Harness resources are copied verbatim
 
-The install stamps nothing on a file under `adjagent/harnesses/resources/`, which never takes
+The install stamps nothing on a file under `devpro/harnesses/resources/`, which never takes
 the package loop. A consuming project receives what the source holds, an installed banner the file
 already carries included, as the file's own text. That installed banner is required (SPEC.md, Write
 Safety), and the source test enforces it for every file a harness ships. The loop beside it

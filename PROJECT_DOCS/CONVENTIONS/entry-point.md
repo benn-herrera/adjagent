@@ -1,4 +1,4 @@
-# CONVENTIONS – Adjagent
+# CONVENTIONS – devpro
 
 Project-specific process and house rules
 
@@ -21,6 +21,7 @@ Contents:
   - [Never comment in a rendered body](code-definitions-and-install/never-comment-in-a-rendered-body.md)
   - [Untracked output is not source](code-definitions-and-install/untracked-output-is-not-source.md)
   - [Plugin membership has one home](code-definitions-and-install/plugin-membership-has-one-home.md)
+  - [`devpro` names the project and a plugin](code-definitions-and-install/devpro-names-the-project-and-a-plugin.md)
   - [Runner include line is exact](code-definitions-and-install/runner-include-line-is-exact.md)
   - [Recognizer spells rendered banner](code-definitions-and-install/recognizer-spells-rendered-banner.md)
   - [Harness resources are copied verbatim](code-definitions-and-install/harness-resources-are-copied-verbatim.md)

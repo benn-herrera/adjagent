@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from adjagent import cli
-from adjagent.context import DEFAULT_FAMILY, build_render
-from adjagent.harnesses.opencode import HARNESS as OPENCODE
-from adjagent.plugins.kbase import PLUGIN as KBASE
-from adjagent.render import filled_body, render_definition, rendered_definitions
+from devpro import cli
+from devpro.context import DEFAULT_FAMILY, build_render
+from devpro.harnesses.opencode import HARNESS as OPENCODE
+from devpro.plugins.kbase import PLUGIN as KBASE
+from devpro.render import filled_body, render_definition, rendered_definitions
 
 _RUNNER = Path(__file__).parent / "opencode_entry_runner.ts"
 
@@ -48,7 +48,7 @@ def _installed(target: Path, *, harness_dir: Path) -> tuple[Path, dict]:
     plugin directory and its registry."""
     if shutil.which("bun") is None:
         pytest.fail("bun is not on PATH: the opencode entry cannot run without it")
-    cli.main(["install", KBASE.name, str(target), "--harness=opencode"])
+    cli.main(["install", str(target), f"--plugin={KBASE.name}", "--harness=opencode"])
     plugin = harness_dir / OPENCODE.bound(KBASE.name).plugin_dir
     return plugin, json.loads((plugin / "registry.json").read_text(encoding="utf-8"))
 

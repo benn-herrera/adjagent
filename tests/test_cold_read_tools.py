@@ -15,12 +15,12 @@ from typing import cast
 
 import pytest
 
-from adjagent import cli
-from adjagent.context import DEFAULT_FAMILY, build_render
-from adjagent.harness import Harness
-from adjagent.install_base import PACKAGE_ROOT
-from adjagent.loading import load
-from adjagent.render import filled_body, rendered_definitions
+from devpro import cli
+from devpro.context import DEFAULT_FAMILY, build_render
+from devpro.harness import Harness
+from devpro.install_base import PACKAGE_ROOT
+from devpro.loading import load
+from devpro.render import filled_body, rendered_definitions
 
 _SCRIPT = PACKAGE_ROOT / "development-tools" / "cold-read.sh"
 
@@ -59,7 +59,7 @@ def _place(tmp_path: Path, copy: Path) -> Path:
         (project / _CLAUDE_COPY.parent.parent.parent / ".claude-plugin").mkdir()
         return directory / "cold-read.sh"
     project.mkdir()
-    cli.main(["install", "devpro", str(project), "--harness=opencode"])
+    cli.main(["install", str(project), "--harness=opencode"])
     registry_path = project / _OPENCODE_COPY.parents[2] / "registry.json"
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     next(record for record in registry["agents"] if record["id"] == "devpro-architect").update(_ARCHITECT_FIELDS)
@@ -109,7 +109,7 @@ class _Run:
             **extra,
         }
         if loc is not None:
-            env["ADJAGENT_COLD_READ_DIR"] = str(loc)
+            env["DEVPRO_COLD_READ_DIR"] = str(loc)
         return subprocess.run(
             [str(script), *args],
             capture_output=True,
@@ -153,7 +153,7 @@ def _refused_with_nothing_created(
 
 
 def test_a_location_not_given_is_refused(run: _Run, claude_script: Path) -> None:
-    _refused_with_nothing_created(run, claude_script, None, says="ADJAGENT_COLD_READ_DIR is not set")
+    _refused_with_nothing_created(run, claude_script, None, says="DEVPRO_COLD_READ_DIR is not set")
 
 
 def test_a_location_that_is_not_a_directory_is_refused(run: _Run, claude_script: Path) -> None:
@@ -185,7 +185,7 @@ def test_the_users_own_claude_directory_above_the_location_is_exempt(run: _Run, 
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("where", ["tools", "adjagent/skills/development/scripts"])
+@pytest.mark.parametrize("where", ["tools", "devpro/skills/development/scripts"])
 def test_a_copy_under_no_claude_or_opencode_directory_refuses_naming_both(
     run: _Run, tmp_path: Path, where: str
 ) -> None:
@@ -265,8 +265,8 @@ def test_claude_reads_the_brief_on_stdin_with_no_tools_from_an_empty_run_directo
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ({"ADJAGENT_COLD_READ_MODEL": "opus"}, ["--model", "opus"]),
-        ({"ADJAGENT_COLD_READ_MODEL": ""}, []),
+        ({"DEVPRO_COLD_READ_MODEL": "opus"}, ["--model", "opus"]),
+        ({"DEVPRO_COLD_READ_MODEL": ""}, []),
         ({}, []),
     ],
     ids=["set", "empty", "unset"],
@@ -371,7 +371,7 @@ def test_a_failing_harness_removes_the_run_directory_and_the_output(run: _Run, t
 
 
 def _harnesses() -> dict[str, Harness]:
-    loaded = cast(dict[str, Harness], load("adjagent.harnesses", "HARNESS"))
+    loaded = cast(dict[str, Harness], load("devpro.harnesses", "HARNESS"))
     return {name: harness.bound("devpro") for name, harness in loaded.items()}
 
 

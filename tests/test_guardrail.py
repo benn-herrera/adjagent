@@ -26,11 +26,11 @@ from pathlib import Path
 
 import pytest
 
-from adjagent.harness import Harness
-from adjagent.harnesses.claude import HARNESS as CLAUDE
-from adjagent.harnesses.opencode import HARNESS as OPENCODE
-from adjagent.install import HARNESS_RESOURCES_SOURCE
-from adjagent.install_base import PACKAGE_ROOT
+from devpro.harness import Harness
+from devpro.harnesses.claude import HARNESS as CLAUDE
+from devpro.harnesses.opencode import HARNESS as OPENCODE
+from devpro.install import HARNESS_RESOURCES_SOURCE
+from devpro.install_base import PACKAGE_ROOT
 
 _RESOURCES = PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE
 _PERL_HOOK = _RESOURCES / "claude/hooks/guardrail.pl"

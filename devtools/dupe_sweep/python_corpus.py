@@ -12,7 +12,7 @@ from .corpus import corpus
 
 log = logging.getLogger(__name__)
 
-CODE_PREFIXES = ("adjagent", "devtools")
+CODE_PREFIXES = ("devpro", "devtools")
 CODE_UNSWEPT = ("devtools/tests/",)
 
 

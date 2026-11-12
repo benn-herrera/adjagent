@@ -5,12 +5,12 @@ description and skill supporting file, the agents file, and every family overlay
 
 A spelling counts as a reference when it is:
 - a hyphenated definition name as a whole word, not inside a path or a longer name;
-- any other definition name in backticks, except the three that are also an executable, a tool or
-  a CLI (`adjagent`, `docdicer`, `kbase`);
-- one of those three in backticks followed by ` skill`.
+- any other definition name in backticks, except the two that are also a tool or a CLI
+  (`docdicer`, `kbase`);
+- one of those two in backticks followed by ` skill`.
 
-Role nouns ("hand that to the architect") and those three names as their programs ("Every other
-`adjagent` command") are prose, and stay bare.
+Role nouns ("hand that to the architect") and those two names as their programs ("Run `kbase`
+itself") are prose, and stay bare.
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ from typing import cast
 
 import pytest
 
-from adjagent.definitions import discover
-from adjagent.family import Family
-from adjagent.loading import load
-from adjagent.render import PLACEHOLDER
-from adjagent.vocabulary import reference
+from devpro.definitions import discover
+from devpro.family import Family
+from devpro.loading import load
+from devpro.render import PLACEHOLDER
+from devpro.vocabulary import reference
 
-_PROGRAM_NAMES = frozenset({"adjagent", "docdicer", "kbase"})
+_PROGRAM_NAMES = frozenset({"docdicer", "kbase"})
 
 
 def _reference_spellings(names: Collection[str]) -> re.Pattern[str]:
@@ -61,7 +61,7 @@ def _definition_texts() -> list[tuple[str, str]]:
 
 
 def _overlay_texts() -> list[tuple[str, str]]:
-    families = cast(dict[str, Family], load("adjagent.families", "FAMILY"))
+    families = cast(dict[str, Family], load("devpro.families", "FAMILY"))
     texts = []
     for family_name, family in families.items():
         for anchor, overlay in family.overlays.items():
@@ -92,7 +92,7 @@ def test_no_definition_text_names_a_definition_outside_a_hole() -> None:
         (f"Prefer over {reference('python-coder')} for any Python task.", []),
         (f"load the `{reference('development')}` skill.", []),
         ("hand that to the architect to integrate", []),
-        ("Every other `adjagent` command runs as installed", []),
+        ("Every other `devpro` command runs as installed", []),
         ("Run `kbase` itself", []),
         ("the file agents/python-coder.md", []),
         ("a python-coders seat", []),

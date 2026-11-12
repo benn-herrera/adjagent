@@ -1,4 +1,4 @@
-# ARCHITECTURE – Adjagent
+# ARCHITECTURE – devpro
 
 How this project's implementation meets requirements designated by SPEC
 

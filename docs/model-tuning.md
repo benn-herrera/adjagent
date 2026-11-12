@@ -5,8 +5,8 @@ expose an anchor at a spot where an observed failure mode needs a targeted note;
 for the anchor in the loaded family, it renders as nothing, so the base definitions are identical to
 an anchor-free render.
 
-A family is a Python module under `adjagent/families/`, one per model family, with its fields
-documented in the docstring of `adjagent/family.py`. It fills anchors with tuning text: family-wide
+A family is a Python module under `devpro/families/`, one per model family, with its fields
+documented in the docstring of `devpro/family.py`. It fills anchors with tuning text: family-wide
 text, and member-scoped text for one member of the family's tier map inside the same module.
 Resolution, not accumulation: at most one tuning text renders per anchor, member-scoped winning over
 family-wide, and the filled text renders verbatim in place with no lead-in or wrapper. An author who
@@ -16,15 +16,15 @@ text; it only fills anchors.
 ## Rendering a tuned set
 
 Tuned sets are rendered to order, typically out of repo, with `--family NAME`, where `NAME` is a
-module name under `adjagent/families/`. A bare model name is not a family name, and a path is not
+module name under `devpro/families/`. A bare model name is not a family name, and a path is not
 accepted.
 
 ```sh
-adjagent install <plugin> <target> [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]
+devpro install <target> [--plugin=NAME] [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--harness=NAME]
 ```
 
-Either plugin takes the same flags, and so does the `just install <plugin> <target>` recipe in a
-clone. `adjagent install --help` gives each flag's grammar.
+Either plugin takes the same flags, and so does the `just install <target> [--plugin=NAME]` recipe in a
+clone. `devpro install --help` gives each flag's grammar.
 
 Two independent flags carry the tuning further:
 

@@ -4,8 +4,8 @@ An install renders every definition its plugin ships — for a skill, its skill 
 each supporting file it lists — and every harness-rendered file whose owner ships (the plugin
 manifest and `.mcp.json` under claude and mage, `registry.json` under opencode), bar a definition the
 harness declares it renders nothing for (`Harness.omits`), replaces
-the destination of each `SHIPPED_PACKAGES` row whose owner ships whole with a copy — a `.venv` below
-it included — copies each
+the destination of each `SHIPPED_PACKAGES` row whose owner ships whole with a copy — a `.venv` directly
+below it kept — copies each
 harness resource the installing harness ships into the install directory as it stands — bar a
 guardrail script whose probe fails (below) — writes the rendered definitions over what is there,
 and removes each file under the install directory's `agents/`, `commands/` or `skills/` that this
@@ -39,7 +39,7 @@ The docdicer package lands inside the `docdicer` skill's own directory, so the s
 harness directory (SPEC.md, Deployed Surfaces, Installed tree), because the skill's
 directory differs by harness.
 
-The development scripts package, `adjagent/development-tools/`, takes the same package copy and adds
+The development scripts package, `devpro/development-tools/`, takes the same package copy and adds
 no code path: one row, `("development-tools", DEVELOPMENT_SCRIPTS_PACKAGE, "development")`, in
 `SHIPPED_PACKAGES`. Its one file, `cold-read.sh`, is stamped by suffix and keeps its mode, and the
 package is replaced whole and never pruned. It is one script for both harnesses, never rendered. It
@@ -51,7 +51,7 @@ matching the JSON text, and composes the run directory's agent file, `.opencode/
 frontmatter holding the record's description, its model where present, the mode and
 `permission: "*": deny`, then the body file with its banner lines stripped. It restates the two
 directory names and the instruction names; `tests/test_cold_read_tools.py` holds the names against
-`Harness.project_harness_dir` and every harness's `agents_file`. Mage's devpro install ships the
+`Harness.project_harness_dir` and every harness's `agents_file`. Mage's install of the devpro plugin ships the
 file too, since `development` ships there, and there it refuses.
 
 The harness resource copy borrows those copy exclusions and nothing else from the package path:
@@ -63,9 +63,10 @@ copies, and its registration the rendered definitions, only when the probe below
 user-level install copies one resource only, the harness's entry (`Harness.entry_resource`,
 opencode's `index.ts`): the plugin cannot register without it, and the entry imports the guardrail
 only where `guardrail.ts` stands beside it. Before the
-first write, `_RESOURCE_BANNER` (`!INSTALLED! .* adjagent`) is matched against the first ten lines
+first write, `_RESOURCE_BANNER` (`!INSTALLED! .* devpro`) is matched against the first ten lines
 of an existing destination. Package destinations are exempt from the banner and marker checks.
-`_clear_package_destination` empties the directory a destination is, and unlinks any other file
+`_clear_package_destination` empties the directory a destination is, all but a `.venv`
+(`VENV_DIR`) directly under it, and unlinks any other file
 there. No error is swallowed: an `OSError` from the clear propagates. The harness resources join the same `copies` list as the packages', so the prune's
 `keep` holds them and the install report counts them: a harness resource never reads as a stale
 rendered definition. The copy is one-way, not a mirror — `prune` owns the install directory's
@@ -74,7 +75,7 @@ third way, by its `HarnessFile.marker`.
 
 **Preflight.** The CLI reaches `install` through `install.preflighted_install`,
 which runs the unchanged install into a scratch copy of the paths it manages and compares the
-scratch copy with the real paths (`adjagent/preflight.py`). The install decides what is written,
+scratch copy with the real paths (`devpro/preflight.py`). The install decides what is written,
 run where its writes cannot reach the real paths; `_install_managed_paths` is a hand-kept list of
 where it may write, and the dry-run prediction tests (`_assert_dry_run_predicts`, which has a
 user-level case) hold that list against the install. Nothing recorded from an earlier install takes
@@ -120,9 +121,9 @@ part.
   install meets the obstacle the real one does.
 
 **No tool install.** `install` runs no shipped package's script and takes no callable for one. The docdicer
-tools package's destination is replaced whole like any other, which removes the `.venv` the launcher
-built beside itself; the launcher rebuilds the venv and reinstalls the docdicer it names on its
-next run (SPEC.md, Deployed Surfaces, Shipped files). The install manages no dependencies across
+tools package's destination is replaced like any other, and the `.venv` the launcher built beside
+itself is kept. On its next run the launcher rebuilds that venv where its python does not run, and
+reinstalls the docdicer it names where the venv's docdicer reports another version (SPEC.md, Deployed Surfaces, Shipped files). The install manages no dependencies across
 packages, and needs no network.
 
 **Shadow report and reload sentence.** The last two steps of `install`, for a harness whose

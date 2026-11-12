@@ -1,7 +1,8 @@
 ### Recognizer spells rendered banner
 
 The install's recognizer spells the banner the renderer writes. `install.py` builds its
-generated-file prefixes from `render.GENERATED_MARK`, so what recognises a rendered definition reads
+generated-file prefixes from `render.GENERATED_MARK`, and the package the banner's module path opens
+with from `PACKAGE_ROOT.name` (`_PAYLOAD_PATH`), so what recognises a rendered definition reads
 the spelling the renderer writes. A test that plants a literal `!GENERATED!` banner does not hold
 that binding — a change on either side passes it — so the case plants a rendered definition. A
 harness-rendered file carries no banner: its `HarnessFile.marker` is what reads it as ours, and the

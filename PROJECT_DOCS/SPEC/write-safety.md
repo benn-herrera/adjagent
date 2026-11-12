@@ -2,18 +2,23 @@
 
 An install overwrites every rendered definition where the destination is absent or carries a
 generated banner: the `!GENERATED!` line inside the frontmatter, or the comment form a supporting
-file opens with, which every rendered file does under opencode. A harness-rendered file is ours when it holds its ownership marker, and any other
+file opens with, which every rendered file does under opencode. A generated banner names a source
+under `devpro/` (`!GENERATED! from devpro/…`). A harness-rendered file is ours when it holds its ownership marker, and any other
 file at that path refuses like any foreign file. Any other file at a destination — one a project
-wrote itself, or a directory — refuses the install with nothing written, naming each such path.
+wrote itself, or a directory — refuses the install with nothing written, naming each such path. A
+rendered file or harness resource a release before 0.17.0 wrote names its source under the
+generator's earlier name, so it is foreign: at a destination it refuses the install, and prune
+leaves it.
 
 The install removes — naming each in its install report — every file under a deployed surface of
 its install directory, and of no other directory, that it did not write and that carries a generated
 banner, and with them any
 directory that leaves empty; this removal takes no file that lacks a generated banner. The install
 directory itself is never removed, and a directory that was already empty stays. A package
-destination is replaced whole, `skills/kbase/kb-tools/` included. The development scripts package is
-replaced the same way. So is the docdicer tools package, a `.venv` under it included. A harness resource is replaced whole on each
-install when the file already at its path carries `!INSTALLED! … adjagent` in its first ten lines;
+destination is replaced whole, `skills/kbase/kb-tools/` included, except a `.venv` directly under it,
+which stays. The development scripts package and the docdicer tools package are replaced the same way.
+A harness resource is replaced whole on each
+install when the file already at its path carries `!INSTALLED! … devpro` in its first ten lines;
 any other file there refuses the install the same way. It is not removed by prune: a harness
 resource this repository stops shipping stays until the consuming project removes it. A
 harness-rendered file takes the first two rules: replaced whole on each install where it holds its

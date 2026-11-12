@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-import adjagent
-from adjagent import clauses
-from adjagent.definitions import discover
-from adjagent.vocabulary import Kind
+import devpro
+from devpro import clauses
+from devpro.definitions import discover
+from devpro.vocabulary import Kind
 from tests._structure import carried_clauses
 
-_DEFINITIONS = Path(adjagent.__file__).parent / "definitions"
+_DEFINITIONS = Path(devpro.__file__).parent / "definitions"
 
 
 @dataclass(frozen=True)
@@ -225,7 +225,7 @@ def check_clause_groups(
     for name, group in groups.items():
         table_names = {group.anchor, *group.plain, *(clause for pair in group.alternatives for clause in pair)}
         for clause in sorted(table_names - defined):
-            messages.append(f"{name}: clause {clause} is not defined in adjagent/clauses.py")
+            messages.append(f"{name}: clause {clause} is not defined in devpro/clauses.py")
         carriers = {definition for definition, names in carried.items() if group.anchor in names}
         for definition in sorted(carriers - set(group.members)):
             messages.append(f"{name}: {definition} carries {group.anchor} but is not listed as a member")

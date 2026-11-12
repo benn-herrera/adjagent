@@ -1,9 +1,9 @@
 # Definition sets
 
 Every definition below is **generated**: there are no hand-maintained definitions and nothing to edit
-in an installed tree. Each is rendered from a module under `adjagent/definitions/`
+in an installed tree. Each is rendered from a module under `devpro/definitions/`
 ([Development](development.md#generated-definitions)). An install delivers one **plugin**, a named
-selection of definitions; SPEC.md, Deployed Surfaces, Plugins lists each plugin's members
+selection of definitions; [SPEC's Plugins page](../PROJECT_DOCS/SPEC/deployed-surfaces/plugins.md) lists each plugin's members
 ([Installing, Plugins](installing.md#plugins)). Entries are named by where they land in the
 install directory (`<project>/.claude/skills/<plugin>/` under claude): every entry lives under
 `agents/` unless noted as a skill. Under claude and mage an agent is invoked as `<plugin>:<name>`, and
@@ -50,17 +50,17 @@ Single-purpose agents invoked directly for non-coding work.
 
 ### Skills
 
-Three skills, `adjagent`, `docdicer` and `development`, ship in both plugins under every harness,
-except that mage omits `adjagent`.
+Three skills, `install`, `docdicer` and `development`, ship in both plugins under every harness,
+except that mage omits `install`.
 
-- **`adjagent`** (`skills/adjagent/SKILL.md`): how a session changes, updates and inspects the
+- **`install`** (`skills/install/SKILL.md`): how a session changes, updates and inspects the
   installed set. It tells the session never to edit the installed definitions or the installed
   package, to put a project's behavior in its `CONVENTIONS.md` or `AGENTS.md`, and to change the
   definitions persistently only through a vendored copy or a fork
-  ([Installing, Customizing](installing.md#customizing-the-set)). It also covers running adjagent (the
+  ([Installing, Customizing](installing.md#customizing-the-set)). It also covers running devpro (the
   project's runner recipe where there is one, else the release tag installed into a venv and that
-  venv's `adjagent`), updating (raise the pinned version, preview with `adjagent install devpro
-  --dry-run`, then install) and inspecting (`adjagent --version`, `--dry-run`). Under claude it also
+  venv's `devpro`), updating (raise the pinned version, preview with `devpro install
+  --plugin=devpro --dry-run`, then install) and inspecting (`devpro --version`, `--dry-run`). Under claude it also
   says what to do when the new agents are not offered after an install: run `/reload-plugins`.
 - **`docdicer`** (`skills/docdicer/SKILL.md`): dicing markdown into a tree of small linked files under
   one `entry-point.md`, and undicing a tree back into one document, so a session loads only the
@@ -100,7 +100,10 @@ except that mage omits `adjagent`.
   ```
 - **`development`** (`skills/development/SKILL.md`, with `references/`): one development process for
   the main session, covering design, planning, dispatching agents, accepting their work,
-  checkpoint commits, post-plan review and releases as sequences of plans. A project's own rule in
+  checkpoint commits, post-plan review and releases as sequences of plans. Every commit message and
+  pull-request description the session writes carries an attribution line naming devpro and the
+  harness, and no model, as its own paragraph directly before any trailer block and otherwise last;
+  it is the only attribution. A project's own rule in
   its `CONVENTIONS.md` overrules the skill's. Where a rule needs a value the project has not
   recorded, such as the runner targets that verify an edit, the session asks you and records the
   answer in `CONVENTIONS.md` rather than guessing. The supporting files cover starting a new
@@ -112,5 +115,5 @@ except that mage omits `adjagent`.
 ## The kbase plugin
 
 The **`kbase`** skill, the knowledge-base skill ([Knowledge base](knowledge-base.md)), and the agents
-and skills a knowledge-base project works with, described above; SPEC.md, Deployed Surfaces, Plugins
+and skills a knowledge-base project works with, described above; [SPEC's Plugins page](../PROJECT_DOCS/SPEC/deployed-surfaces/plugins.md)
 lists them. Its `development` skill carries the dicing guidance, since the plugin carries `docdicer`.

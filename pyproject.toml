@@ -3,9 +3,9 @@ requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adjagent"
+name = "devpro"
 dynamic = ["version"]
-description = "Adjagent renders agent, command and skill definitions to order, for any supported harness and model family, from one source in which text definitions share is written once"
+description = "Devpro renders agent, command and skill definitions to order, for any supported harness and model family, from one source in which text definitions share is written once"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -13,16 +13,16 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.scripts]
-adjagent = "adjagent.cli:main"
+devpro = "devpro.cli:main"
 
 [project.urls]
-Repository = "https://github.com/benn-herrera/adjagent"
+Repository = "https://github.com/benn-herrera/devpro"
 
 [tool.setuptools.packages.find]
-include = ["adjagent", "adjagent.*"]
+include = ["devpro", "devpro.*"]
 
 [tool.setuptools.package-data]
-adjagent = ["kb-tools/**/*", "harnesses/resources/**/*", "docdicer-tools/**/*", "docdicer-tools/**/.*", "development-tools/**/*"]
+devpro = ["kb-tools/**/*", "harnesses/resources/**/*", "docdicer-tools/**/*", "docdicer-tools/**/.*", "development-tools/**/*"]
 
 [tool.setuptools.dynamic]
-version = { attr = "adjagent.__version__" }
+version = { attr = "devpro.__version__" }

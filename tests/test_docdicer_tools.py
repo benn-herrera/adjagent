@@ -1,6 +1,6 @@
 """The shipped `docdicer` launcher, run as a consumer runs it: each case on a copy of the script in its
 own directory, with a stub `python3` first on the subprocess's PATH, so no case reaches the network or
-writes under `adjagent/`.
+writes under `devpro/`.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from adjagent.install_base import PACKAGE_ROOT
+from devpro.install_base import PACKAGE_ROOT
 
 _SCRIPT = PACKAGE_ROOT / "docdicer-tools" / "docdicer"
 

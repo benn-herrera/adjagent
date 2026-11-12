@@ -11,22 +11,22 @@ from typing import cast
 
 import pytest
 
-from adjagent.context import Render, build_render, harness_named, plugin_named
-from adjagent.definition import Definition
-from adjagent.errors import InputError
-from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
-from adjagent.harness import PLUGIN_MANIFEST, Harness
-from adjagent.harnesses.claude import HARNESS as CLAUDE
-from adjagent.harnesses.opencode import HARNESS as OPENCODE
-from adjagent.loading import load
-from adjagent.plugin import Plugin
-from adjagent.plugins.devpro import PLUGIN as DEVPRO
-from adjagent.plugins.kbase import PLUGIN as KBASE
-from adjagent.render import definitions, filled_body, render_agents_file, render_all, rendered_definitions
-from adjagent.vocabulary import Kind, optional_reference, reference
+from devpro.context import Render, build_render, harness_named, plugin_named
+from devpro.definition import Definition
+from devpro.errors import InputError
+from devpro.families.claude import FAMILY as CLAUDE_FAMILY
+from devpro.harness import PLUGIN_MANIFEST, Harness
+from devpro.harnesses.claude import HARNESS as CLAUDE
+from devpro.harnesses.opencode import HARNESS as OPENCODE
+from devpro.loading import load
+from devpro.plugin import Plugin
+from devpro.plugins.devpro import PLUGIN as DEVPRO
+from devpro.plugins.kbase import PLUGIN as KBASE
+from devpro.render import definitions, filled_body, render_agents_file, render_all, rendered_definitions
+from devpro.vocabulary import Kind, optional_reference, reference
 
-_PLUGINS = sorted(cast(dict[str, Plugin], load("adjagent.plugins", "PLUGIN")))
-_HARNESSES = sorted(cast(dict[str, Harness], load("adjagent.harnesses", "HARNESS")))
+_PLUGINS = sorted(cast(dict[str, Plugin], load("devpro.plugins", "PLUGIN")))
+_HARNESSES = sorted(cast(dict[str, Harness], load("devpro.harnesses", "HARNESS")))
 _PAIRS = [(plugin, harness) for plugin in _PLUGINS for harness in _HARNESSES]
 
 
@@ -48,12 +48,12 @@ def test_a_render_ships_exactly_its_plugins_members_less_what_the_harness_omits(
     expected = {name for name in discovered if ctx.plugin.ships(name)} - ctx.harness.omits
     assert {defn.name for _, defn in rendered_definitions(ctx)} == expected
     assert expected
-    assert ctx.harness.omits == ({"adjagent"} if harness == "mage" else set())
+    assert ctx.harness.omits == ({"install"} if harness == "mage" else set())
 
 
 def test_a_plugin_naming_an_undiscovered_definition_refuses_every_render(monkeypatch: pytest.MonkeyPatch) -> None:
     misspelt = Plugin(name="probe", include=frozenset({"python-coder", "pyhton-coder"}))
-    monkeypatch.setattr("adjagent.context.plugins", lambda: {"devpro": DEVPRO, "probe": misspelt})
+    monkeypatch.setattr("devpro.context.plugins", lambda: {"devpro": DEVPRO, "probe": misspelt})
     with pytest.raises(InputError, match=re.escape("plugin 'probe' names no discovered definition: pyhton-coder")):
         build_render(harness="claude", plugin="devpro", family="claude", tier_spec=None, alias_spec=None)
 
@@ -134,7 +134,7 @@ def test_each_plugins_agents_file_carries_the_development_bullet(harness: Harnes
 
 def _unprefixed_text(plugin: Plugin) -> str:
     """The plugin's claude agents file, its reference prefix and its begin marker's plugin word removed."""
-    text = render_agents_file(CLAUDE, plugin, scope="x").replace(f"vvv-adjagent {plugin.name} ", "vvv-adjagent ")
+    text = render_agents_file(CLAUDE, plugin, scope="x").replace(f"vvv-devpro {plugin.name} ", "vvv-devpro ")
     return text.replace(CLAUDE.bound(plugin.name).reference_prefix, "")
 
 

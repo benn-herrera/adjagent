@@ -1,4 +1,4 @@
-# THESIS - adjagent
+# THESIS - devpro
 
 The THESIS now lives in the `PROJECT_DOCS/` tree: start at [PROJECT_DOCS/entry-point.md](PROJECT_DOCS/entry-point.md).
 

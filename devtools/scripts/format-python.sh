@@ -9,8 +9,8 @@ set -euo pipefail
 : "${FLAKE8_IGNORE:?FLAKE8_IGNORE is empty or unset — run this script through its justfile recipe}"
 
 if [[ "$#" -eq 0 ]]; then
-    black_isort_paths=(tests adjagent devtools)
-    flake8_paths=(adjagent devtools tests)
+    black_isort_paths=(tests devpro devtools)
+    flake8_paths=(devpro devtools tests)
 else
     black_isort_paths=("$@")
     flake8_paths=("$@")

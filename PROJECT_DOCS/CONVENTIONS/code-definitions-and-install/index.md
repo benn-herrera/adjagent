@@ -11,6 +11,7 @@ Contents:
 - [Never comment in a rendered body](never-comment-in-a-rendered-body.md)
 - [Untracked output is not source](untracked-output-is-not-source.md)
 - [Plugin membership has one home](plugin-membership-has-one-home.md)
+- [`devpro` names the project and a plugin](devpro-names-the-project-and-a-plugin.md)
 - [Runner include line is exact](runner-include-line-is-exact.md)
 - [Recognizer spells rendered banner](recognizer-spells-rendered-banner.md)
 - [Harness resources are copied verbatim](harness-resources-are-copied-verbatim.md)

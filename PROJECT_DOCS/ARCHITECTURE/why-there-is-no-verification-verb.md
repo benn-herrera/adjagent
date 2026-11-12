@@ -22,11 +22,11 @@ anchors) are the baseline, written only by `just retake-reference`, so a `render
 change reports that change and nothing the baseline already held. The plugin manifest (claude and
 mage) and every slot's agents-file begin marker carry `__version__`.
 
-`tests/test_adjagent.py` holds the package's properties: each kind's frontmatter against literal
+`tests/test_devpro.py` holds the package's properties: each kind's frontmatter against literal
 lines, a skill's directory — its two fields and a comment-bannered supporting file — against
 literal output, every definition under `agents/` extracting frontmatter-free, placeholder filling
 and refusal, tuning-text resolution, the line cap on every rendered definition but a supporting file, and the structural rules
-(Rendering). `tests/test_adjagent_install.py` holds the install and agents-file cases.
+(Rendering). `tests/test_devpro_install.py` holds the install and agents-file cases.
 `tests/test_opencode_entry.py` runs the opencode plugin entry under `bun` against a stub plugin
 context, and `tests/test_plugins.py` holds the plugin membership and per-plugin content cases. The
 two guardrails are held to one behaviour by `tests/test_guardrail.py`, which runs every case of

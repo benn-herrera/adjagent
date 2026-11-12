@@ -1,9 +1,9 @@
-# SPEC – Adjagent
+# SPEC – devpro
 
 Consumer-facing behaviors and outcomes
 
-Adjagent renders agent, command and skill definitions to order, for any supported harness and
-model family, from one source in which shared text is written once
+The devpro project renders agent, command and skill definitions to order, for any supported
+harness and model family, from one source in which shared text is written once
 
 Must-see:
 

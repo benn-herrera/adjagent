@@ -1,4 +1,4 @@
-# CONVENTIONS – Adjagent
+# CONVENTIONS – devpro
 
 The CONVENTIONS now live in the `PROJECT_DOCS/` tree: start at [PROJECT_DOCS/CONVENTIONS/entry-point.md](PROJECT_DOCS/CONVENTIONS/entry-point.md).
 

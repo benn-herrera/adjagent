@@ -1,7 +1,7 @@
 # Agents file
 
 The agent definitions assume a set of operator-level working rules, published as one definition
-(`adjagent/definitions/harness_agents_file.py`) and rendered per harness. Among them: a project may
+(`devpro/definitions/harness_agents_file.py`) and rendered per harness. Among them: a project may
 keep its contract documents diced, as trees under `PROJECT_DOCS/`. Before designing, planning,
 briefing or dispatching an agent, accepting returned work or making a checkpoint commit, either
 plugin's file tells the session to load the `development` skill
@@ -16,18 +16,19 @@ those names point at nothing.
 ## Installing it
 
 ```sh
-adjagent install-agents-file <plugin> <dir> [--harness NAME] [--dry-run]
+devpro install-agents-file <dir> [--plugin=NAME] [--harness NAME] [--dry-run]
 ```
 
-In a checkout, `just install-agents-file <plugin> <dir> [--harness NAME] [--dry-run]` does the same.
-`<dir>` is `~/.claude`, `~/.config/opencode`, a project root, or a plugin directory under mage. A
-file holds one block, and its begin marker names the plugin: `vvv-adjagent <plugin> <version> …`.
-Installing a plugin's agents file writes that plugin's block.
+In a checkout, `just install-agents-file <dir> [--plugin=NAME] [--harness NAME] [--dry-run]` does the
+same. `<dir>` is `~/.claude`, `~/.config/opencode`, a project root, or a plugin directory under mage.
+A file holds one block, and its begin marker names the plugin: `vvv-devpro <plugin> <version> …`.
+Installing a plugin's agents file writes that plugin's block. Marker lines a release before 0.17.0
+wrote spell the generator's earlier name and are not marker lines: the block is appended after them.
 
 - The harness is inferred when `<dir>` is a user harness directory. For a project root, or
-  anything else, name it: `adjagent install-agents-file ~/projects/foo --harness=opencode`.
+  anything else, name it: `devpro install-agents-file ~/projects/foo --harness=opencode`.
 - Inference covers only a harness whose user directory is absolute, so mage is always named:
-  `adjagent install-agents-file <dir> --harness=mage`.
+  `devpro install-agents-file <dir> --harness=mage`.
 
 The directives live in `AGENTS.md`. Into a user harness directory the install writes the
 file that harness reads there (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`). Anywhere else
@@ -36,14 +37,14 @@ one-line redirect `@AGENTS.md` (Claude Code's `CLAUDE.md`), leaving an existing 
 `CLAUDE.md` there holding anything else is refused with nothing written: move its content into
 `AGENTS.md` and replace it with `@AGENTS.md` yourself.
 
-Under mage the destination is the plugin's own directory, so `adjagent install-agents-file <dir> --harness=mage`
+Under mage the destination is the plugin's own directory, so `devpro install-agents-file <dir> --harness=mage`
 takes `<plugins-parent>/<plugin>` and writes `<dir>/CLAUDE.md` directly, never an `AGENTS.md`
-redirect. `adjagent install <plugin> <plugins-parent> --harness=mage` writes it too, so a normal
+redirect. `devpro install <plugins-parent> --plugin=<plugin> --harness=mage` writes it too, so a normal
 install needs no second step.
 
 ## Where a project install puts it
 
-`adjagent install` into a claude or opencode project keeps the block in exactly one place. The block
+`devpro install` into a claude or opencode project keeps the block in exactly one place. The block
 first reaches your global agents file by `install-agents-file` (above);
 a project install never puts it there first.
 
@@ -51,7 +52,7 @@ a project install never puts it there first.
   block: the install keeps it current there, as the plugin its begin marker names, and removes any
   copy from the project's `AGENTS.md`. A block whose marker names no plugin is kept as the installing
   plugin's. A global block of the other plugin stays that plugin's, and the plugin it belongs to changes
-  only through `install-agents-file <plugin>` into your user harness directory. The install removes
+  only through `install-agents-file --plugin=<plugin>` into your user harness directory. The install removes
   only the block from the project, backs the file up and keeps the file even if it is left empty,
   and says what it removed.
 - It holds none: the install keeps the installing plugin's block in the project's `AGENTS.md`, creating the file if
@@ -59,10 +60,10 @@ a project install never puts it there first.
   and refuses, with nothing written, a `CLAUDE.md` holding anything else. With the block in your global
   agents file the install neither reads nor writes the project's `CLAUDE.md`.
 
-Run from a checkout while `adjagent/` has uncommitted changes, the write into your global agents file is
+Run from a checkout while `devpro/` has uncommitted changes, the write into your global agents file is
 refused; the project's `AGENTS.md` and redirect are not.
 
-Each block's begin marker line carries its plugin and the adjagent version that last changed its content. The block
+Each block's begin marker line carries its plugin and the devpro version that last changed its content. The block
 is rewritten when its content differs; an install older than the stamped version leaves it and prints
 "not downgraded" with both versions. The full rule is in
 [SPEC](../PROJECT_DOCS/SPEC/agents-file.md).
@@ -98,7 +99,7 @@ git update-index --skip-worktree AGENTS.md
 
 ## What it replaces
 
-The install replaces only the block between the `adjagent` marker lines and keeps everything outside
+The install replaces only the block between the `devpro` marker lines and keeps everything outside
 it; put your own rules outside the markers. Edits inside the block are not preserved. An absent file
 is written whole, and a file with no marker lines gets the block appended at its end after a blank
 line, every existing byte kept.
@@ -107,7 +108,7 @@ line, every existing byte kept.
   target and leaves the redirect alone. A redirect to another redirect, or to a file outside `<dir>`,
   is refused for you to merge by hand.
 - A file with marker lines other than one begin line followed by one end line is refused with
-  nothing written. Run from a checkout while `adjagent/` has uncommitted changes, an install into a
+  nothing written. Run from a checkout while `devpro/` has uncommitted changes, an install into a
   user harness directory is refused too; one into a project directory is not.
 - A write that changes the file keeps one rolling `backup.<name>` of what it replaced.
 

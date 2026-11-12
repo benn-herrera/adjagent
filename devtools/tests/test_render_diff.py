@@ -10,7 +10,7 @@ NEW_BANNER = b"---\n# !GENERATED! from x\n# !TUNING! y\nname: a\n---\ntext\n"
 OTHER_BANNER = b"---\n# !GENERATED! from x\n# !TUNING! z\nname: a\n---\ntext\n"
 BANNERED_BODY = b"---\n# !BANNER!\nname: a\n---\ntext\n"
 COMMENT_BANNER = (
-    b"<!-- !GENERATED! from adjagent/definitions/kbase.py \xe2\x80\x94 x -->\n"
+    b"<!-- !GENERATED! from devpro/definitions/kbase.py \xe2\x80\x94 x -->\n"
     b"<!-- !TUNING! family=claude tier=none member=none tier-map=a stock=b harness=claude -->\n"
     b"\n# Reading\n\nA paragraph.\n"
 )
@@ -44,7 +44,11 @@ class BodyTest(unittest.TestCase):
                 self.assertEqual(body(shebang + banner + b"x = 1\n"), shebang + b"# !BANNER!\nx = 1\n")
 
     def test_a_comment_that_is_not_a_banner_is_unchanged(self):
-        for data in (b"# a comment\nx = 1\n", b"#!/usr/bin/env bash\n# !INSTALLED\nx\n", b"#\n# !INSTALLED! from y\n#\n"):
+        for data in (
+            b"# a comment\nx = 1\n",
+            b"#!/usr/bin/env bash\n# !INSTALLED\nx\n",
+            b"#\n# !INSTALLED! from y\n#\n",
+        ):
             with self.subTest(data=data):
                 self.assertEqual(body(data), data)
 

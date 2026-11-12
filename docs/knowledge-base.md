@@ -6,10 +6,10 @@ spine. The set is one skill, `kbase`, with the supporting files its `SKILL.md` r
 per-project facts live in the consuming project's `kb-root/AGENTS.md`, not in the skill's text. The
 set is **generated** from its definition module.
 
-The devpro plugin omits it. The kbase plugin delivers it: `adjagent install kbase TARGET`
-(`just install kbase TARGET` in a clone), or under mage the kbase tarball of the
+The devpro plugin omits it. The kbase plugin delivers it: `devpro install TARGET --plugin=kbase`
+(`just install TARGET --plugin=kbase` in a clone), or under mage the kbase tarball of the
 [release](mage-release.md). It is the skill and the
-definitions a knowledge-base project works with (SPEC.md, Deployed Surfaces, Plugins lists them;
+definitions a knowledge-base project works with ([SPEC's Plugins page](../PROJECT_DOCS/SPEC/deployed-surfaces/plugins.md) lists them;
 [Definition sets](definition-sets.md#the-kbase-plugin) describes them).
 
 ## Requirements

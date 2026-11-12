@@ -15,7 +15,7 @@ what `f` writes around `_FRAME`. A literal argument stays clause text, a slot fi
 own sentence.
 
 Paths name definition modules relative to the repository root. With none, every
-`adjagent/definitions/*.py` whose name does not start with `_` is read, in sorted path order.
+`devpro/definitions/*.py` whose name does not start with `_` is read, in sorted path order.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from adjagent.render import PLACEHOLDER
+from devpro.render import PLACEHOLDER
 from devtools.render_diff import LIST_ITEM, line_kinds
 
 
@@ -116,8 +116,8 @@ def join_sites(source: str, *, namespace: dict, path: str) -> list[str]:
 
 def main(paths: list[str]) -> int:
     total = 0
-    for path in paths or sorted(str(p) for p in Path("adjagent/definitions").glob("[!_]*.py")):
-        module = importlib.import_module("adjagent.definitions." + Path(path).stem)
+    for path in paths or sorted(str(p) for p in Path("devpro/definitions").glob("[!_]*.py")):
+        module = importlib.import_module("devpro.definitions." + Path(path).stem)
         sites = join_sites(Path(path).read_text(encoding="utf-8"), namespace=vars(module), path=path)
         for site in sites:
             print(site)

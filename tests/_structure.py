@@ -36,7 +36,7 @@ FUNCTION_RULE = (
 )
 DEFINITION_TOP_RULE = "a definition module's top level holds only imports, string constants and DEFINITIONS"
 TEXT_TOP_RULE = "the text module's top level holds only string constants and text functions"
-IMPORT_RULE = "the clauses module is imported only as `from adjagent import clauses`"
+IMPORT_RULE = "the clauses module is imported only as `from devpro import clauses`"
 
 
 def carried_clauses(source: str) -> dict[str, set[str]]:
@@ -236,10 +236,10 @@ def _is_constant_text(node: ast.expr, *, names: dict[str, ast.expr] | set[str]) 
 
 def _imports_text_wrongly(node: ast.Import | ast.ImportFrom) -> bool:
     if isinstance(node, ast.Import):
-        return any(alias.name == f"adjagent.{CLAUSES}" for alias in node.names)
-    if node.module == f"adjagent.{CLAUSES}":
+        return any(alias.name == f"devpro.{CLAUSES}" for alias in node.names)
+    if node.module == f"devpro.{CLAUSES}":
         return True
-    return node.module == "adjagent" and any(alias.name == CLAUSES and alias.asname is not None for alias in node.names)
+    return node.module == "devpro" and any(alias.name == CLAUSES and alias.asname is not None for alias in node.names)
 
 
 def _is_text_function(node: ast.FunctionDef, constants: dict[str, ast.expr]) -> bool:

@@ -11,7 +11,7 @@ manifest by verb (``render-manifest section-index``) was ``kb-latex-specialist``
 retired with the LaTeX-reading survey pipeline it served.
 """
 
-from adjagent.render import definitions
+from devpro.render import definitions
 
 #: ``definition -> the view it must be able to obtain``. Empty: no surviving
 #: seat works from the manifest by verb. Kept as the shape a future seat's

@@ -1,16 +1,17 @@
 ### Harnesses and families
 
-A harness is a `Harness` dataclass (`adjagent/harness.py`) holding everything that differs between
-harnesses: the seven harness strings, typed `HarnessText` — `HarnessText.MCP_TOOL_PREFIX` among
+A harness is a `Harness` dataclass (`devpro/harness.py`) holding everything that differs between
+harnesses: the eight harness strings, typed `HarnessText` — `HarnessText.MCP_TOOL_PREFIX` among
 them, `mcp__plugin_{plugin}_kbase__` under claude, `mcp_kbase_` under mage and `kbase_` under
-opencode, a server tool's offered name being that prefix plus the tool's own, and `scratch_rule`
-and `memory_file`, the agents file's rule for where scratch goes and its name for the operator's own
-instructions file (Placeholders); the six
+opencode, a server tool's offered name being that prefix plus the tool's own, `display_name`, the
+harness's name in prose, lowercase (`claude code`, `opencode`, `mage`) and refused otherwise, and
+`scratch_rule` and `memory_file`, the agents file's rule for where scratch goes and its name for the
+operator's own instructions file (Placeholders); the five
 harness-specific paragraphs, typed `OptionalHarnessText` — `recipe_rule`, `kbase_project_rule`
 (supplied under mage alone, whose server is started `--project-dir-required`), `reload_rule`
-(supplied under claude alone: the sentence a claude install prints and the `adjagent` skill
+(supplied under claude alone: the sentence a claude install prints and the `install` skill
 carries), `side_by_side_rule` (supplied under opencode alone, in its own paragraph of the
-`adjagent` skill) and `cold_read_rule` (supplied under every harness: claude and opencode share
+`install` skill) and `cold_read_rule` (supplied under every harness: claude and opencode share
 `harness.COLD_READ_SCRIPT_RULE`, which runs `cold-read.sh`, opencode adding that the script is not yet
 reliable there, and mage, whose copy of the script refuses to run, says to start the reader by
 hand);
@@ -24,7 +25,7 @@ registry builder (opencode). Under opencode a definition's metadata is not front
 renders one registry, `registry.json`, from the same `AgentFields` the claude and mage emitters read,
 and a copied entry, `index.ts`, registers the plugin's bodies from it at run time. Opencode has no
 directory layout that holds a plugin in one directory under prefixed names; an opencode plugin module's transforms
-do. The registry's layout is `adjagent/harnesses/opencode.py`'s, the wire format it owns, and the
+do. The registry's layout is `devpro/harnesses/opencode.py`'s, the wire format it owns, and the
 entry parses nothing but JSON; `render.py` hands the builder a general-form list of what it
 rendered (`ShippedDefinition`: name, reference, kind, output path, filled
 description, and `AgentFields` for an agent) and shapes no harness's wire format. Under opencode
@@ -71,23 +72,23 @@ frontmatter emitter (`agent_frontmatter`) and recipe rule (`FOREGROUND_RECIPE_RU
 `harness.py`, and holds claude's other assumed values (model pattern, aliases, tool spellings) as
 copies it may revise independently.
 
-**Plugins.** A plugin is a `Plugin` dataclass (`adjagent/plugin.py`): a name and either the definition
+**Plugins.** A plugin is a `Plugin` dataclass (`devpro/plugin.py`): a name and either the definition
 names it ships (`include`) or the ones it leaves out (`exclude`), validated at construction, with
-`ships(name)`. An instance is one module in `adjagent/plugins/` defining `PLUGIN`, loaded by
+`ships(name)`. An instance is one module in `devpro/plugins/` defining `PLUGIN`, loaded by
 `loading.load` as harnesses and families are; `devpro.py` excludes `kbase`, `kbase.py` includes
 the names listed in SPEC.md, Deployed Surfaces, Plugins. A plugin is the same shape as a harness's `omits`, a selection of definitions, and no
 profile of its own. `plugin.py` imports no harness, render or definition: the dependency direction is
 `vocabulary` ← `plugin` ← `context` → `harness`.
 
 A family is a
-`Family` dataclass (`adjagent/family.py`) holding the tier map and the tuning text by anchor. An
-instance is one module, in `adjagent/harnesses/`, `adjagent/families/` or `adjagent/plugins/`,
+`Family` dataclass (`devpro/family.py`) holding the tier map and the tuning text by anchor. An
+instance is one module, in `devpro/harnesses/`, `devpro/families/` or `devpro/plugins/`,
 defining `HARNESS`, `FAMILY` or `PLUGIN`, with no class in it. A harness, family or plugin is registered by its module existing, with no
 list to keep: a registry that could fall out of step with the modules is not representable.
 `loading.load` reads the modules of a package in name order and
 keys each by its module name with `_` read as `-` (`gemma_4.py` is `gemma-4`). The constructor is
 the validator: an instance missing a field, or a family not staffing exactly the five tiers, fails
-at import. The `Render` record (`adjagent/context.py`) carries the harness, the plugin, the family and the
+at import. The `Render` record (`devpro/context.py`) carries the harness, the plugin, the family and the
 invocation's tier map and alias map, and resolves a tier to its rendered model text and an anchor
 to its tuning text: a tier whose text is `inherit` or a synonym becomes `inherit_text`, and the
 `--model-tier-map` tier spec, alone, gains the bare-to-`all=` expansion before parsing.

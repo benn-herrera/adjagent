@@ -1,7 +1,7 @@
 ### Structural rules
 
 The substitution-depth, shared-paragraph and prompt checks fix the properties in SPEC.md, Rendering; the clause
-group check holds a group's shared clauses. Each is a test in the suite (`just test adjagent`).
+group check holds a group's shared clauses. Each is a test in the suite (`just test devpro`).
 `render` runs none: a syntax-tree analysis has no place on an operator's machine of unknown Python.
 The sweeps that read rendered text run per plugin (`_PLUGIN_RENDERS`), each plugin's definitions as it
 ships them, so a paragraph an optional reference drops from one plugin is judged in the other, and
@@ -21,14 +21,14 @@ each prompt takes its own plugin's agents file.
   cannot carry a call of its own — a `SkillFile` path is a string literal and nothing else. The same
   walk confirms a definition module's top level holds only imports, string constants and
   `DEFINITIONS`.
-- **A paragraph two rendered definitions share has one source.** `tests/test_adjagent.py` renders
+- **A paragraph two rendered definitions share has one source.** `tests/test_devpro.py` renders
   every definition twice, once as written and once with each `clauses` constant, function and
   private constant standing as a sentinel, and fails on a paragraph or list item that survives both
   in two rendered definitions: it was written out rather than taken from a constant. A skill is
   swept the same way, each of its files walked as a rendered definition in its own right and
   labelled by the path it renders to, so a paragraph a skill entry file and a supporting file both
   carry is found as readily as one two definitions share.
-- **No shared clause twice in one prompt.** `tests/test_adjagent.py` runs two checks over every
+- **No shared clause twice in one prompt.** `tests/test_devpro.py` runs two checks over every
   prompt, and fails on either.
   - A prompt is one rendered definition taken together with the installed agents file; the agents
     file's own rendered definition is a prompt alone. A command or a skill entry file also takes

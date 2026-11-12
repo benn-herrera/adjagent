@@ -22,7 +22,7 @@ SCRIPT = REPO / "devtools/scripts/mage-dist.sh"
 @functools.cache
 def _version() -> str:
     return subprocess.run(
-        ["python3", "-m", "adjagent", "--version"],
+        ["python3", "-m", "devpro", "--version"],
         cwd=REPO,
         env={**os.environ, "PYTHONPATH": str(REPO)},
         capture_output=True,
@@ -39,8 +39,8 @@ def _names(out: Path) -> dict[str, Path]:
     v = _version()
     names = {}
     for plugin in _PLUGINS:
-        names[plugin] = out / f"adjagent-mage-{plugin}-v{v}.tgz"
-        names[f"{plugin}.asc"] = out / f"adjagent-mage-{plugin}-v{v}.tgz.asc"
+        names[plugin] = out / f"devpro-mage-{plugin}-v{v}.tgz"
+        names[f"{plugin}.asc"] = out / f"devpro-mage-{plugin}-v{v}.tgz.asc"
     return names
 
 
@@ -62,7 +62,7 @@ def _build(root: Path, extra_path: Path | None = None) -> Dist:
         **os.environ,
         "PATH": path,
         "PROJECT_ROOT": str(REPO),
-        "GEN": "adjagent",
+        "GEN": "devpro",
         "DIST_DIR": str(root / "dist"),
     }
     done = subprocess.run(

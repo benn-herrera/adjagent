@@ -27,6 +27,9 @@
 # The slot is removed and rebuilt on every render. A slug starting with `reference` is refused with
 # nothing touched: those slots are the pre-1.0 oracle until stage 6 re-renders them.
 #
+# Every `--*` flag but `--plugin` is forwarded to the install; `--plugin` or `--plugin=…` is refused,
+# since `_render-slot.sh` sets it per plugin.
+#
 # Every plugin is rendered, so a `render-diff` compares each. The kbase slot project carries the
 # kb-tools package and its own MCP entry (a claude slot project's entry is the plugin's, in
 # <slot>/kbase/skills/kbase/). A harness-directory plugin's slot project (`mage`) carries no runner
@@ -38,6 +41,10 @@ slug="latest"
 args=()
 have_slug=""
 for arg in "$@"; do
+    if [[ "${arg}" == --plugin || "${arg}" == --plugin=* ]]; then
+        printf '%s\n' "error: render renders every plugin; --plugin is not accepted" >&2
+        exit 1
+    fi
     if [[ -z "${have_slug}" && "${arg}" != --* ]]; then
         slug="${arg}"
         have_slug=1

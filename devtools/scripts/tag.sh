@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # `tag`'s body: a tag names a commit whose own files carry the number it is tagged with, so this
-# refuses while `adjagent/` is uncommitted — the same reasoning
+# refuses while `devpro/` is uncommitted — the same reasoning
 # `install.uncommitted_sources` applies to publishing the agents file, and the lines it prints
 # are that check's own. The number is read from the `--version` flag rather than restated here,
-# `__version__` in `adjagent/__init__.py` holding the one copy. The tag is signed and annotated
+# `__version__` in `devpro/__init__.py` holding the one copy. The tag is signed and annotated
 # (`git tag -s`), so it needs a gpg secret key and a TTY, and nothing is pushed: the maintainer pushes.
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${GEN:?GEN is empty or unset — run this script through its justfile recipe}"
 
-# The `adjagent` pathspec below is relative to the working directory, so the
+# The `devpro` pathspec below is relative to the working directory, so the
 # repository root is named rather than assumed.
 cd "${PROJECT_ROOT}"
-dirty="$(git status --porcelain -- adjagent)"
+dirty="$(git status --porcelain -- devpro)"
 if [[ -n "${dirty}" ]]; then
-    printf '%s\n' "error: adjagent/ has uncommitted changes — a tag must name a commit whose files carry the version it is tagged with:" >&2
+    printf '%s\n' "error: devpro/ has uncommitted changes — a tag must name a commit whose files carry the version it is tagged with:" >&2
     printf '%s\n' "${dirty}" >&2
     exit 1
 fi
@@ -27,7 +27,7 @@ if [[ -z "${version}" ]]; then
 fi
 tag="v${version}"
 if git rev-parse --verify --quiet "refs/tags/${tag}" > /dev/null; then
-    printf '%s\n' "error: tag '${tag}' already exists — bump __version__ in adjagent/__init__.py before tagging again" >&2
+    printf '%s\n' "error: tag '${tag}' already exists — bump __version__ in devpro/__init__.py before tagging again" >&2
     exit 1
 fi
 GPG_TTY=$(tty) git tag -s "${tag}" -m"release ${tag}"

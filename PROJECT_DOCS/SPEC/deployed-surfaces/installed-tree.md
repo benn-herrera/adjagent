@@ -16,10 +16,10 @@ carries the same two lines as HTML comments — its first two lines, above a bla
 written without frontmatter and carries the two lines as those comments. A copied package file of a script or
 build-file type (`.py`, `.sh`, `.mk`, `.just`), and the extensionless launcher `tools/docdicer`,
 carries an installed banner at its top, below its shebang where it has one. Both banners say to
-request changes from the adjagent project and that local needs belong in the consuming project's
+request changes from the devpro project and that local needs belong in the consuming project's
 CONVENTIONS.md. An installed banner names the source file it was copied from. A copied package
 file keeps its source's mode. A harness resource
-(Shipped files) carries its own installed banner, a `!INSTALLED! … adjagent` line in its first ten
+(Shipped files) carries its own installed banner, a `!INSTALLED! … devpro` line in its first ten
 lines, as shipped: the install adds nothing to it. A harness-rendered file — the plugin manifest and
 `.mcp.json` under claude and mage, `registry.json` under opencode, and under claude the guardrail
 registration — carries no banner; its **ownership marker**, a fixed string in its content, states

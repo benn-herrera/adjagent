@@ -21,14 +21,14 @@ guardrail its `harness` field allows, and fails, not skips, without `bun`. The t
 together ([CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/code-definitions-and-install/guardrails-change-together.md)).
 The opencode plugin entry (`tests/test_opencode_entry.py`) runs under `bun` the same way, against a
 stub plugin context, so it fails, not skips, without it. The plugin membership and install cases are
-in `tests/test_plugins.py` and `tests/test_adjagent_install.py`.
+in `tests/test_plugins.py` and `tests/test_devpro_install.py`.
 
 ```sh
-git clone https://github.com/benn-herrera/adjagent && cd adjagent
+git clone https://github.com/benn-herrera/devpro && cd devpro
 just test
 ```
 
-`just test` runs the full tooling test suite: the `adjagent`, `dupe_sweep`, `docs` and `wheel`
+`just test` runs the full tooling test suite: the `devpro`, `dupe_sweep`, `docs` and `wheel`
 surfaces, auto-provisioning a `.venv`. The `docs` surface is `just check-links`, which checks every
 relative link and anchor in `PROJECT_DOCS/`, `docs/` and the top-level `*.md` files. The `wheel`
 surface is `just check-wheel`. The `.venv` prefers `/usr/bin/python3` on macOS, the Xcode
@@ -60,13 +60,13 @@ Other targets:
   after a content change is accepted.
 - `just build` builds the wheel and sdist into `dist/` with the `.venv`'s setuptools, offline and with
   no git check. `just check-wheel [python]` builds, then installs the wheel into a throwaway venv and
-  checks that its package data equals the tree and that the installed `adjagent` runs and installs the
+  checks that its package data equals the tree and that the installed `devpro` runs and installs the
   same product as the checkout.
 
 ## Repository layout
 
 ```text
-adjagent/                 the generator and every definition, run from a checkout as `PYTHONPATH=<clone> python3 -m adjagent`
+devpro/                   the generator and every definition, run from a checkout as `PYTHONPATH=<clone> python3 -m devpro`
   clauses.py              shared text: named string constants, small functions for slotted text
   definitions/            one module per definition, or per set that shares text and ships together
   harnesses/              one module per harness (claude, mage, opencode), each defining HARNESS
@@ -76,8 +76,8 @@ adjagent/                 the generator and every definition, run from a checkou
                           writes: the plugin's directory under claude and opencode, the
                           harness directory under mage
   families/               one module per model family, each defining FAMILY
-  plugins/                one module per plugin, each defining PLUGIN: devpro and kbase; SPEC.md,
-                          Deployed Surfaces, Plugins lists each plugin's members
+  plugins/                one module per plugin, each defining PLUGIN: devpro and kbase; SPEC's
+                          deployed-surfaces/plugins.md lists each plugin's members
   kb-tools/               shipped KB runner fragments (runner-snippets/kb.just, kb.mk), delivered with
                           the kbase skill, so by the kbase plugin only, as skills/kbase/kb-tools/
   docdicer-tools/         the docdicer launcher script, its .gitignore and runner fragments
@@ -86,7 +86,7 @@ adjagent/                 the generator and every definition, run from a checkou
   development-tools/      the cold-read.sh script, delivered with the development skill, so by both
                           plugins, as skills/development/scripts/
 pyproject.toml            the package's build configuration: setuptools, the version read from
-                          `adjagent.__version__`, the console script `adjagent`
+                          `devpro.__version__`, the console script `devpro`
 docs/                     the pages the README links to; images/ holds the README's screenshot
 dist/                     gitignored: what `just mage-dist` and `just build` write
 devtools/                 repository-maintenance tooling; render_diff.py compares two rendered slots,
@@ -114,11 +114,11 @@ follow-on work, outside that set.
 
 ## Working in this repo
 
-A definition is `adjagent/definitions/<name>.py`: a `DEFINITIONS` tuple whose `body` is the rendered
+A definition is `devpro/definitions/<name>.py`: a `DEFINITIONS` tuple whose `body` is the rendered
 text with placeholders, read top to bottom as the file it renders.
 
 - A definition's own prose is in its module. Shared text is a named constant in
-  `adjagent/clauses.py`, or a private constant of a group module whose definitions ship together.
+  `devpro/clauses.py`, or a private constant of a group module whose definitions ship together.
 - To change what shared text says for every definition, edit the constant; to change it for one, edit
   that definition's module.
 - To see what a change does, run `just render`, then `just render-diff`. An unknown placeholder fails
@@ -130,7 +130,7 @@ How to add a definition: [CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/adding-defini
 
 ## Releasing the mage plugin
 
-`just mage-dist` writes four files to `dist/`: for each plugin `adjagent-mage-<plugin>-v<version>.tgz`
+`just mage-dist` writes four files to `dist/`: for each plugin `devpro-mage-<plugin>-v<version>.tgz`
 and its detached `.asc` signature. What a consumer does with them is in the
 [Mage plugin release](mage-release.md); the contract is [SPEC](../PROJECT_DOCS/SPEC/mage-release.md).
 
@@ -141,7 +141,7 @@ signing included, leaves no output of the version for either plugin and no `stag
 
 To release:
 
-1. Bump `__version__` in `adjagent/__init__.py`, update the `v<version>` examples in README and `docs/installing.md`, and
+1. Bump `__version__` in `devpro/__init__.py`, update the `v<version>` examples in README and `docs/installing.md`, and
    commit them ([CONVENTIONS](../PROJECT_DOCS/CONVENTIONS/code-definitions-and-install/version-has-one-home.md)).
 2. `just test`.
 3. `just mage-dist`.
@@ -154,8 +154,8 @@ To release:
 
 ## Authoring a family
 
-A family is a module under `adjagent/families/` defining `FAMILY`; the fields, and how tiers, member
-overrides and `--model-tier-map` interact, are in the docstring of `adjagent/family.py`.
+A family is a module under `devpro/families/` defining `FAMILY`; the fields, and how tiers, member
+overrides and `--model-tier-map` interact, are in the docstring of `devpro/family.py`.
 
 The mechanism is a response to a real phenomenon: agent definitions tend to accumulate defensive
 language that's keyed to the *specific* model they were tested against. Defensive clauses that

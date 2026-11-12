@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# `test`'s body. PYTHONPATH is the repository root, here and in the tests: `adjagent` and
-# `devtools` are top-level packages under it, and the tests import `adjagent` from that root the
+# `test`'s body. PYTHONPATH is the repository root, here and in the tests: `devpro` and
+# `devtools` are top-level packages under it, and the tests import `devpro` from that root the
 # same way `sweep-python` runs `devtools.dupe_sweep`. Nothing an install writes is importable — the
 # installed tree holds runner snippets, not a python package.
 #
@@ -29,7 +29,7 @@ surface="${1}"
 full_run=0
 case "${surface}" in
     "") dirs=(tests devtools/tests); full_run=1 ;;
-    adjagent) dirs=(tests) ;;
+    devpro) dirs=(tests) ;;
     dupe_sweep) dirs=(devtools/tests) ;;
     docs)
         if [[ "$#" -gt 1 ]]; then
@@ -46,7 +46,7 @@ case "${surface}" in
         exec "${JUST}" --justfile "${JUSTFILE}" check-wheel
         ;;
     *)
-        printf '%s\n' "error: unknown test surface '${surface}' — valid values: adjagent, dupe_sweep, docs, wheel; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" ${surface}" >&2
+        printf '%s\n' "error: unknown test surface '${surface}' — valid values: devpro, dupe_sweep, docs, wheel; a leading flag binds here instead — pass it with an explicit empty surface: just test \"\" ${surface}" >&2
         exit 1
         ;;
 esac

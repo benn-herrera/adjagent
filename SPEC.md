@@ -1,4 +1,4 @@
-# SPEC – Adjagent
+# SPEC – devpro
 
 The SPEC now lives in the `PROJECT_DOCS/` tree: start at [PROJECT_DOCS/SPEC/entry-point.md](PROJECT_DOCS/SPEC/entry-point.md).
 

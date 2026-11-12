@@ -2,7 +2,7 @@
 
 The repository exposes exactly three deployed surfaces, `agents/`, `commands/` and `skills/`: the
 trees of rendered definitions, and one part of the install product (below). Every definition is
-produced to order into the output root an invocation names: `adjagent render PLUGIN --out <dir>`
+produced to order into the output root an invocation names: `devpro render --out <dir> [--plugin=NAME]`
 renders the plugin's definitions (Plugins) into `<dir>`, an existing directory, and `install` renders
 into its install directory (Install destination). `agents/` holds one file per agent and per
 **document**, a definition agents read but never dispatch; `commands/` holds one file per command.
@@ -36,9 +36,9 @@ one of two distribution channels; the other, the mage release (SPEC.md, Mage Rel
 by an operator. Install delivers one plugin, `devpro` or `kbase`, and no other. Its usage:
 
 ```sh
-adjagent install PLUGIN TARGET [--harness=NAME] [--subdir=DIR] [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--dry-run] [--verbose]
+devpro install TARGET [--plugin=NAME] [--harness=NAME] [--subdir=DIR] [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--dry-run] [--verbose]
 ```
 
-`PLUGIN` has no default. From a checkout of this repository the same command runs as
-`PYTHONPATH=<clone> python3 -m adjagent install …`, with the same result (Package and Command).
+Plugins states `--plugin`'s default. From a checkout of this repository the same command runs as
+`PYTHONPATH=<clone> python3 -m devpro install …`, with the same result (Package and Command).
 `--dry-run` previews an install without writing anything (SPEC.md, Write Safety).

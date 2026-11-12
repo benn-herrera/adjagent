@@ -1,8 +1,8 @@
 ## Subsystem Map
 
-Every entry below but the last is rendered from the definition module under `adjagent/definitions/`
+Every entry below but the last is rendered from the definition module under `devpro/definitions/`
 named for its output path, or for its group module (Rendering). A shared-text name given
-here is a constant or function in `adjagent/clauses.py`, and an anchor is spelled `fam-<key>`.
+here is a constant or function in `devpro/clauses.py`, and an anchor is spelled `fam-<key>`.
 
 - **Coder group** — generalist-coder, language coders (c, cpp, go, lua, python, rust, typescript),
   shell-dsl-coder, platform experts (android/ios/linux/macos/web/windows-app-expert,
@@ -10,7 +10,7 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
   and tech-writer, which is both the authoring and the reviewing agent for READMEs and human-facing guides.
 - **kbase plugin + kbase** — the `kbase` skill alone: the definition the devpro plugin excludes by name
   and the kbase plugin delivers with the others SPEC.md, Deployed Surfaces, Plugins lists
-  (`adjagent/plugins/kbase.py`). `kbase.py` owns a directory,
+  (`devpro/plugins/kbase.py`). `kbase.py` owns a directory,
   `skills/kbase/SKILL.md` routing by request and `skills/kbase/references/reading.md`,
   `building.md`, `maintaining.md`, `scoring.md`, `scoring-system.md` and `installing.md` carrying
   what each route needs; the skill entry file is the only text every session pays for, and the rule
@@ -26,15 +26,15 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
   written once, as `KBASE_MIN_VERSION` and `KBASE_TAP_FORMULA` in `kbase.py`, and filled into the
   skill entry file and `installing.md`. `clauses.KB_RUNNER_TARGETS` goes to the maintaining
   supporting file. The consuming project's runner targets are the `kb-`-prefixed recipes of this
-  repository's `adjagent/kb-tools/runner-snippets/kb.just` and `kb.mk`, prefixed so they cannot
+  repository's `devpro/kb-tools/runner-snippets/kb.just` and `kb.mk`, prefixed so they cannot
   collide with a consuming project's own targets.
 - **Specialists** — applied-mathematician, biz-dev-strategist, economic-historian, literature-scout,
   marketing-comms-expert, ml-engineer, prompt-engineer, prose-architect, theoretical-economist:
   single-purpose, invoked directly rather than as part of a coding pipeline.
   applied-mathematician carries the `fam-ask-vs-stipulate` anchor; `fam-gap-aversion` renders
   nowhere.
-- **Tool-driving skills:** `adjagent` and `docdicer`, each one `SKILL.md` with no supporting files.
-  `adjagent` is delivered by both plugins under every harness except mage, which omits it; `docdicer`
+- **Tool-driving skills:** `install` and `docdicer`, each one `SKILL.md` with no supporting files.
+  `install` is delivered by both plugins under every harness except mage, which omits it; `docdicer`
   and its tools package are delivered by both plugins.
   `docdicer.py` names its script `tools/docdicer`, relative to the skill's directory, and says its
   first run installs docdicer beside it; the script's `--help` is the command list, which the skill
@@ -43,17 +43,19 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
   run through the recipes (`docdicer`, `docdicer-check-plan`, `docdicer-kanban`, `docdicer-help`).
   It also carries a paragraph, an optional reference to `kbase` (Rendering, Placeholders), saying
   `kb-root/` belongs to kbase and docdicer leaves it alone unless the user directs otherwise; it
-  renders only where kbase ships. `adjagent.py` states the rule for changing the
+  renders only where kbase ships. `definitions/install.py` states the rule for changing the
   installed tree — never edit it, put project behavior in CONVENTIONS.md or AGENTS.md, change the
-  definitions only through a vendored copy or a fork — and how to update and inspect it, naming
-  `adjagent install <plugin>` (the plugin spelled by the `@!plg-name!@` placeholder), `--dry-run` and `adjagent --version` and the runner's `ADJAGENT_VER` (the variable a consuming project's justfile or Makefile sets to pin the adjagent version). It also
-  states how to run adjagent: the project's runner recipe where there is one, else the release tag
-  installed into a venv and that venv's `adjagent`. Under claude a paragraph of its own, the
+  definitions only through a vendored copy or a fork of the devpro project — and how to update and
+  inspect it, naming `devpro install --plugin=<plugin>` (the plugin spelled by the `@!plg-name!@`
+  placeholder), `--dry-run` and `devpro --version` and the runner's `DEVPRO_VER` (the variable a
+  consuming project's justfile or Makefile sets to pin the devpro version). It also
+  states how to run `devpro`: the project's runner recipe where there is one, else the release tag
+  of `clauses.REPOSITORY_URL` installed into a venv and that venv's `devpro`. Under claude a paragraph of its own, the
   `reload_rule` placeholder (Rendering, Placeholders), says to run `/reload-plugins` when
   the agents an install wrote are not offered; the paragraph drops where the harness supplies none.
   Under opencode a further paragraph, the `side_by_side_rule` placeholder, says how to stop
   opencode loading a claude install's skills. Mage omits the skill. The docdicer version the script
-  installs is written once, as `VERSION` in `adjagent/docdicer-tools/docdicer`.
+  installs is written once, as `VERSION` in `devpro/docdicer-tools/docdicer`.
 - **Development skill** — `development` (`definitions/development.py`): one `SKILL.md` and five
   supporting files (`references/new-project.md`, `project-documents.md`, `project-setup.md`,
   `adopting.md`, `release.md`), carried as `SkillFile`s, delivered by both plugins under every
@@ -72,10 +74,14 @@ here is a constant or function in `adjagent/clauses.py`, and an anchor is spelle
   its `check-plan` bullet is a paragraph of its own, so an optional reference that fills to nothing
   drops that bullet alone. The sentence naming the default step-down model is
   `clauses.STEP_DOWN_MODEL`, the `tun` placeholder (Rendering, Placeholders), so that sentence alone
-  renders only where the rendering assigns a model for the step-down tier.
+  renders only where the rendering assigns a model for the step-down tier. The entry body's
+  `## Commits and pull requests` section gives the attribution line every commit message and
+  pull-request description carries; it names the harness by `clauses.DISPLAY_NAME`, the
+  harness's `display_name` (Rendering, Placeholders), and no model, and links the repository by
+  `clauses.REPOSITORY_URL`.
 - **Install machinery** — the one entry not rendered from a definition: `install.py` renders, copies
   and prunes; `install_base.py` holds what the install modules share (the package and checkout
-  paths, the kb-tools package paths, the path checks, UTF-8 text reading and the report of what an
+  paths, the kb-tools package paths, `VENV_DIR`, the path checks, UTF-8 text reading and the report of what an
   install left alone); `runner_file.py` writes the runner include lines, one per `SnippetSet` the install passes it; `preflight.py` runs that
   install into a scratch copy and compares (Install, Renders and copies); `agents_file.py`
   does the same for the agents file (Agents File). The imports layer: `install_base.py`, `preflight.py` and `install_target.py` import

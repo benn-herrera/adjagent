@@ -29,12 +29,12 @@ from typing import NoReturn
 
 import pytest
 
-from adjagent.context import Render, harnesses
-from adjagent.definitions.kbase import KBASE_MIN_VERSION
-from adjagent.families.claude import FAMILY as CLAUDE_FAMILY
-from adjagent.harness import Harness
-from adjagent.plugins.kbase import PLUGIN as KBASE
-from adjagent.render import render_all, rendered_definitions
+from devpro.context import Render, harnesses
+from devpro.definitions.kbase import KBASE_MIN_VERSION
+from devpro.families.claude import FAMILY as CLAUDE_FAMILY
+from devpro.harness import Harness
+from devpro.plugins.kbase import PLUGIN as KBASE
+from devpro.render import render_all, rendered_definitions
 
 _READ_TIMEOUT_S = 10
 _HELP = "kbase://help/"
@@ -54,9 +54,9 @@ _NOT_OFFERED = {
     "refutes": "a scoring relation, which add-edge's help lists unquoted",
     "references": "the relation carrying no strength, which add-edge's help lists unquoted",
     "kbase": "the executable and the MCP server, named by the user's install, not by the server",
-    "kb-stats": "a runner target adjagent's kb install writes",
-    "kb-update-format": "a runner target adjagent's kb install writes",
-    "kb-verify": "a runner target adjagent's kb install writes",
+    "kb-stats": "a runner target devpro's kb install writes",
+    "kb-update-format": "a runner target devpro's kb install writes",
+    "kb-verify": "a runner target devpro's kb install writes",
     "clm-yl5n5v": "an example claim id in the skill's prose",
     "main": "a git branch",
     "bin": "Homebrew's directory of executables",
@@ -159,7 +159,7 @@ def surface(tmp_path_factory: pytest.TempPathFactory) -> _Surface:
                 {
                     "protocolVersion": "2025-06-18",
                     "capabilities": {},
-                    "clientInfo": {"name": "adjagent-tests", "version": "0"},
+                    "clientInfo": {"name": "devpro-tests", "version": "0"},
                 },
             )
             session.notify("notifications/initialized")

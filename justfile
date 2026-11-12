@@ -17,19 +17,19 @@ set positional-arguments := true
 
 PROJECT_ROOT := justfile_directory()
 
-GEN := "adjagent"
+GEN := "devpro"
 
 default:
     @just --list | grep -v '\[dev\]'
     @echo "===="
     @just --list | grep '\[dev\]'
 
-[doc("install <plugin> into an existing <target>: [--harness=NAME] [--subdir=DIR] [--dry-run] [tuning flags]; an up-to-date target is left untouched; --dry-run prints what would be created, changed and removed and writes nothing; docs/install-reference.md has the rules")]
-install plugin target *args:
+[doc("install a plugin, [--plugin=NAME], into an existing <target>: [--harness=NAME] [--subdir=DIR] [--dry-run] [tuning flags]; an up-to-date target is left untouched; --dry-run prints what would be created, changed and removed and writes nothing; docs/install-reference.md has the rules")]
+install target *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "$@"
 
-[doc("install <plugin>'s harness agents file into <dir>, replacing only the adjagent block and keeping everything outside it; refuses a file without one ordered marker pair; <dir> is ~/.claude, ~/.config/opencode, or a project root; [--harness NAME] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis; an up-to-date file is left untouched; [--dry-run] prints whether the agents file and any redirect would be created or changed and writes nothing")]
-install-agents-file plugin dir *args:
+[doc("install a plugin's harness agents file, [--plugin=NAME], into <dir>, replacing only the devpro block and keeping everything outside it; replaces the block in a file holding one ordered marker pair, appends it to a file with no marker line, writes an absent file whole, and refuses any other file; <dir> is ~/.claude, ~/.config/opencode, or a project root; [--harness NAME] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis; an up-to-date file is left untouched; [--dry-run] prints whether the agents file and any redirect would be created or changed and writes nothing")]
+install-agents-file dir *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install-agents-file "$@"
 
 ##
@@ -85,11 +85,11 @@ _venv:
 # not a privileged tree.
 RENDERED_DIR := "rendered"
 
-[doc("tag the current commit v<version>, <version> read from `python3 -m adjagent --version`; refuses while adjagent/ has uncommitted changes or the tag already exists, and never pushes")]
+[doc("tag the current commit v<version>, <version> read from `python3 -m devpro --version`; refuses while devpro/ has uncommitted changes or the tag already exists, and never pushes")]
 tag:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/tag.sh
 
-[doc("build the mage release of each plugin from the working tree into dist/ (override with DIST_DIR) as adjagent-mage-<plugin>-v<version>.tgz, each with a detached .asc signed by the release key; removes stale outputs and the stage on exit, and a failure leaves no output of the version for either plugin; uploads nothing")]
+[doc("build the mage release of each plugin from the working tree into dist/ (override with DIST_DIR) as devpro-mage-<plugin>-v<version>.tgz, each with a detached .asc signed by the release key; removes stale outputs and the stage on exit, and a failure leaves no output of the version for either plugin; uploads nothing")]
 mage-dist:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/mage-dist.sh
 
@@ -97,11 +97,11 @@ mage-dist:
 build: _venv
     @{{VENV_PYTHON}} -m build --no-isolation --outdir "{{PROJECT_ROOT}}/dist" "{{PROJECT_ROOT}}"
 
-[doc("[dev] build, then prove the wheel: its package data equals the non-.py files under adjagent/ that git tracks or would track, and installed into a throwaway venv made from <python> (default /usr/bin/python3) it imports from that venv, runs as the adjagent console script, installs byte-identically to the checkout, and writes the mage plugin's agents file outside a checkout")]
+[doc("[dev] build, then prove the wheel: its package data equals the non-.py files under devpro/ that git tracks or would track, and installed into a throwaway venv made from <python> (default /usr/bin/python3) it imports from that venv, runs as the devpro console script, installs byte-identically to the checkout, and writes the mage plugin's agents file outside a checkout")]
 check-wheel python="/usr/bin/python3": build
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" PYBIN="{{PYBIN}}" EXE="{{EXE}}" ./devtools/scripts/check-wheel.sh "$@"
 
-[doc("[dev] render every plugin's install product, each at its own slot project rendered/<slug>/<plugin>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug), plus its agents file for --harness=NAME (default claude) into rendered/<slug>/<plugin>/harness/<NAME>/, or at the slot project's root for a harness-directory plugin (`mage`) — refuses a slug starting with reference; every --* flag, --harness included, forwards verbatim to `python3 -m adjagent install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
+[doc("[dev] render every plugin's install product, each at its own slot project rendered/<slug>/<plugin>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug), plus its agents file for --harness=NAME (default claude) into rendered/<slug>/<plugin>/harness/<NAME>/, or at the slot project's root for a harness-directory plugin (`mage`) — refuses a slug starting with reference; every --* flag but --plugin (refused: every plugin is rendered), --harness included, forwards verbatim to `python3 -m devpro install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
 render *args:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/render.sh "$@"
 
@@ -158,12 +158,12 @@ import? ".claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.ju
 render-diff a="reference-claude" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
-[doc("[dev] run tooling python tests and the markdown link check: no argument runs all four (adjagent + dupe_sweep pytest, then docs: just check-links with its defaults, then wheel: just check-wheel); a surface argument (adjagent, dupe_sweep, docs, wheel) runs only that one; further arguments, never given to docs or wheel, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+[doc("[dev] run tooling python tests and the markdown link check: no argument runs all four (devpro + dupe_sweep pytest, then docs: just check-links with its defaults, then wheel: just check-wheel); a surface argument (devpro, dupe_sweep, docs, wheel) runs only that one; further arguments, never given to docs or wheel, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
 test surface="" *pytest_args: _venv
     @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON={{VENV_PYTHON}} JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test.sh "$@"
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
-[doc("[dev] black-format, isort, flake8 the generator (adjagent), the tests and devtools, or the given path(s) in place of all of them")]
+[doc("[dev] black-format, isort, flake8 the generator (devpro), the tests and devtools, or the given path(s) in place of all of them")]
 format-python *paths: _venv
     @VENV_PYTHON={{VENV_PYTHON}} FLAKE8_IGNORE="{{FLAKE8_IGNORE}}" ./devtools/scripts/format-python.sh "$@"
 
@@ -194,10 +194,10 @@ sweep-python *args:
 # check-wheel: the build configuration it builds from, and the package tree
 # whose data it checks.
 TEST_SURFACE_MAP := "
-adjagent/ adjagent
-adjagent/ wheel
-tests/ adjagent
-devtools/render_diff.py adjagent
+devpro/ devpro
+devpro/ wheel
+tests/ devpro
+devtools/render_diff.py devpro
 devtools/ dupe_sweep
 PROJECT_DOCS/ docs
 *.md docs
@@ -212,11 +212,12 @@ devtools/scripts/ ALL
 test-changed base="":
     @PROJECT_ROOT="{{PROJECT_ROOT}}" TEST_SURFACE_MAP="{{TEST_SURFACE_MAP}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test-changed.sh "$@"
 
-# This repository's own install: the devpro plugin, once per harness.
+# This repository's own install: the devpro plugin, once per harness. The last
+# run writes the agents-file block, so claude runs last: it is the harness used most here.
 [private]
 install-agents-here:
-    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install devpro "{{PROJECT_ROOT}}" --harness=claude
-    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install devpro "{{PROJECT_ROOT}}" --harness=opencode
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --plugin=devpro --harness=opencode
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --plugin=devpro --harness=claude
 
 [doc("[dev] list each definition-body unit that joins a clauses.* interpolation to the module's own text, one line per unit naming its first clause's line, then the count; given paths, only those definition modules")]
 clause-join-sites *paths:

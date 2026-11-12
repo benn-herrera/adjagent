@@ -50,13 +50,13 @@ function from_wheel() {
 }
 
 cd "${scratch}"
-imported="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -c 'import adjagent; print(adjagent.__file__)')"
-[[ "${imported}" == "${venv}/"* ]] || fail "adjagent imported from ${imported}, outside ${venv}"
-wheel_ver="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --version)"
+imported="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -c 'import devpro; print(devpro.__file__)')"
+[[ "${imported}" == "${venv}/"* ]] || fail "devpro imported from ${imported}, outside ${venv}"
+wheel_ver="$(from_wheel "${venv}/${PYBIN}/devpro${EXE}" --version)"
 [[ "${wheel_ver}" == "${ver}" ]] || fail "the wheel reports version ${wheel_ver}, the checkout ${ver}"
-script_help="$(from_wheel "${venv}/${PYBIN}/adjagent${EXE}" --help)"
-module_help="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -m adjagent --help)"
-[[ "${script_help}" == "${module_help}" ]] || fail "adjagent --help differs from python -m adjagent --help"
+script_help="$(from_wheel "${venv}/${PYBIN}/devpro${EXE}" --help)"
+module_help="$(from_wheel "${venv}/${PYBIN}/python${EXE}" -I -m devpro --help)"
+[[ "${script_help}" == "${module_help}" ]] || fail "devpro --help differs from python -m devpro --help"
 
 # Each project is named `project`: its AGENTS.md is titled with the project directory's name. One
 # project per plugin on each side, so each plugin's install is compared.
@@ -65,14 +65,14 @@ for plugin in ${plugin_names}; do
     mkdir -p "${side}/${plugin}/project/.claude"
     : > "${side}/${plugin}/project/justfile"
   done
-  from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${plugin}" "${scratch}/from-wheel/${plugin}/project" > /dev/null
-  PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${plugin}" "${scratch}/from-checkout/${plugin}/project" > /dev/null
+  from_wheel "${venv}/${PYBIN}/devpro${EXE}" install "${scratch}/from-wheel/${plugin}/project" --plugin="${plugin}" > /dev/null
+  PYTHONPATH="${PROJECT_ROOT}" python3 -m "${GEN}" install "${scratch}/from-checkout/${plugin}/project" --plugin="${plugin}" > /dev/null
 done
 diff -r from-wheel from-checkout || fail "the wheel's install differs from the checkout's"
 
 mkdir plugins
 for plugin in ${plugin_names}; do
-  from_wheel "${venv}/${PYBIN}/adjagent${EXE}" install "${plugin}" "${scratch}/plugins" --harness=mage > /dev/null
+  from_wheel "${venv}/${PYBIN}/devpro${EXE}" install "${scratch}/plugins" --plugin="${plugin}" --harness=mage > /dev/null
   [[ -f "plugins/${plugin}/CLAUDE.md" ]] || fail "the mage install wrote no plugins/${plugin}/CLAUDE.md"
 done
 
