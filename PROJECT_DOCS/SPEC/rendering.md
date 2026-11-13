@@ -4,7 +4,8 @@ A **model family** (`--family`) is a named group of models that assigns a model 
 add tuning text at anchors (below). A **tier map** assigns one model, the tier's **member**, to each
 of five **tiers**, `highest`, `high`, `medium`, `low`, `lowest`, ordered by capability. An optional
 **alias map** (`--model-pin-tier-alias-map`, a tier spec's syntax with no bare form) pins, per tier,
-an alias rendered in place of the member; tuning text still follows the member.
+an alias rendered in place of the member; tuning text still follows the member. It serves a harness
+that remaps aliases itself, such as `claude` through Claude Code's `ANTHROPIC_*` model variables.
 
 A definition's **base text** is its untuned text. An **anchor** is a named place in it where a
 model family may add **tuning text**. Family-wide tuning text applies at every tier. Member-scoped
@@ -59,8 +60,8 @@ mage `<plugin>:<name>` for an agent, a command or a skill, and under opencode `<
 Apart from the plugin's name and the namespace it gives references, text differs between plugins only
 by an optional reference's paragraph being present or absent.
 
-References close within the shipped set, the definitions the render's plugin carries that its
-harness does not omit. A render in which a definition refers to one outside that set is refused,
+References close within the shipped set, the definitions the render's plugin carries. A render in
+which a definition refers to one outside that set is refused,
 naming the definition that refers and the one it refers to, and nothing is written. An **optional
 reference** is the one exception: where its referent does not ship, the paragraph holding it is
 dropped whole, and the rest of the definition is unchanged.

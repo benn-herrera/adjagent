@@ -34,7 +34,7 @@ import pytest
 import devpro
 import devpro.clauses
 from devpro.agents_file import is_marker_line
-from devpro.context import TIER_MAP_FLAG, Render, build_render, parse_tier_map
+from devpro.context import TIER_MAP_FLAG, Render, build_render, harnesses, parse_tier_map
 from devpro.definition import Definition, SkillFile
 from devpro.definitions import definitions_of, discover
 from devpro.errors import InputError
@@ -515,8 +515,8 @@ def test_render_all_emits_every_file_of_a_shipped_skill_and_the_plugin_drops_a_w
     assert not any(path.parts[:2] == ("skills", "kbase") for path in without)
 
 
-# mage's output is a Claude Code plugin directory: claude's vocabulary, one file of its own — the
-# manifest — and nothing for the definition it omits, whose skill claude's slot already holds.
+# mage's output is a Claude Code plugin directory: claude's vocabulary and one file of its own, the
+# manifest.
 _MAGE_RENDER = Render(harness=MAGE, plugin=KBASE, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
 _MAGE_MANIFEST = PurePosixPath(".claude-plugin/plugin.json")
 
@@ -526,7 +526,6 @@ def test_a_mage_render_writes_the_plugin_tree_straight_into_the_root(tmp_path: P
     one grown under another directory is a tree Claude Code does not read."""
     written = {path.relative_to(tmp_path).as_posix() for path in write_renders(tmp_path, render_all(_MAGE_RENDER))}
     assert {"agents/python-coder.md", "skills/kbase/SKILL.md", str(_MAGE_MANIFEST)} <= written
-    assert "skills/install/SKILL.md" not in written
 
 
 def test_the_manifest_is_the_three_key_object_carrying_the_version() -> None:
@@ -557,6 +556,25 @@ def test_the_kb_reading_reference_names_the_harness_mcp_tool(harness: Harness, t
     ctx = Render(harness=harness, plugin=KBASE, family=CLAUDE_FAMILY, tier_map=_ALL_INHERIT)
     reference = dict(render_all(ctx))[PurePosixPath("skills/kbase/references/reading.md")]
     assert f"`{tool_name}`" in reference
+
+
+def _user_install_paths() -> set[str]:
+    """Each loaded harness's user plugin directory as the guide spells it, and the directory mage's plugin
+    parent names, read from the profiles."""
+    paths = set()
+    for harness in harnesses().values():
+        if harness.plugin_dir:
+            paths.add(f"{harness.user_harness_dir}/{harness.plugin_dir.replace('{plugin}', '<plugin>')}/")
+        if harness.plugin_parent_dir:
+            paths.add(f"~/{harness.plugin_parent_dir}/")
+    return paths
+
+
+@pytest.mark.parametrize("harness", harnesses())
+def test_the_guide_names_every_harness_install_path_under_every_harness(harness: str) -> None:
+    ctx = build_render(plugin="devpro", harness=harness, family="claude", tier_spec=None, alias_spec=None)
+    [text] = [text for path, text in render_all(ctx) if str(path).endswith("guide/references/installing.md")]
+    assert [path for path in sorted(_user_install_paths()) if path not in text] == []
 
 
 def _routed_references(router: str) -> set[str]:
@@ -1321,7 +1339,7 @@ def _outputs(defn: Definition, sentinel: Definition) -> list[tuple[str, str, str
 
 def _in_plugin(defn: Definition, ctx: Render) -> bool:
     """Whether `ctx`'s plugin carries `defn`: a definition it ships, or the agents file every plugin has."""
-    return defn.kind is Kind.AGENTS_FILE or ctx.ships(defn.name)
+    return defn.kind is Kind.AGENTS_FILE or ctx.plugin.ships(defn.name)
 
 
 def _uncredited_shared_paragraphs(sources: dict[str, str]) -> list[str]:

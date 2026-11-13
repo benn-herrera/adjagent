@@ -19,7 +19,6 @@ import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import cast
 
 import pytest
 
@@ -50,7 +49,6 @@ from devpro.plugin import Plugin
 from devpro.plugins.devpro import PLUGIN as DEVPRO
 from devpro.plugins.kbase import PLUGIN as KBASE
 from devpro.render import (
-    definitions,
     filled_body,
     render_agents_file,
     render_all,
@@ -497,20 +495,6 @@ def test_the_resources_tree_is_not_read_as_a_harness_module() -> None:
     assert (PACKAGE_ROOT / HARNESS_RESOURCES_SOURCE / "opencode").is_dir()
 
 
-def test_every_harness_omits_a_name_the_package_discovers() -> None:
-    """`omits` is matched against definition names by string, so a name nothing discovers drops nothing
-    and ships the file it was meant to, silently. Each name is checked against discovery instead."""
-    discovered = {defn.name for _, defn in definitions()}
-    harnesses = cast(dict[str, Harness], load("devpro.harnesses", "HARNESS"))
-    unknown = [
-        (harness_name, omitted)
-        for harness_name, harness in harnesses.items()
-        for omitted in sorted(harness.omits)
-        if omitted not in discovered
-    ]
-    assert unknown == []
-
-
 def test_a_duplicate_output_is_refused_even_when_the_plugin_ships_neither_definition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -862,6 +846,16 @@ def test_a_mage_devpro_install_ships_no_part_of_the_kbase_toolchain(tmp_path: Pa
     assert not (root / ".mcp.json").exists()
     assert not (root / "skills/kbase").exists()
     assert (root / "agents/python-coder.md").is_file()
+
+
+def test_a_mage_kbase_install_ships_the_kbase_toolchain(tmp_path: Path) -> None:
+    """Under mage the kbase plugin carries its kbase skill and the kb-tools package."""
+    project = tmp_path
+    root = project / "plugins/kbase"
+    root.mkdir(parents=True)
+    _definition_install(root, _MAGE_RENDER, plugin=KBASE, project_root=project)
+    assert (root / _KBASE_PACKAGE).is_file()
+    assert (root / "skills/kbase").is_dir()
 
 
 # A mage install is a plugin directory that is carried or published from where it stands: nothing in it

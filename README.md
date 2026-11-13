@@ -1,13 +1,12 @@
 # devpro
 
 Unsupervised agent-written code rots quietly then fails suddenly. devpro installs a collaborative
-AI development process into Claude Code, opencode and Mage that lets you build to last: you work with
+AI development process into Claude Code, opencode, or mage that lets you build to last: you work with
 the agents to design, plan, build, review, and deliver.
 
-![A kanban board with the columns Roadmap, Design, Drafted, Dispatchable, In progress and Landed; each work-package card shows its rating, mechanical or expert, and its lifetime](docs/images/kanban.webp)
+![kanban screenshot](images/kanban.webp)
 
-*Work packages from the 0.16.0 release on the board `docdicer kanban` serves: the roadmap, the
-design under way, then each package by state, rated mechanical or expert.*
+*Work packages on the board `docdicer kanban` serves*
 
 ## What it asks of you
 
@@ -17,7 +16,7 @@ like and you will need to exercise that judgment frequently.
 
 ## What it gets you
 
-The installed skills, agents, tools, and AGENTS.md/CLAUDE.md have been coordinated and tuned
+The installed skills, agents, tools, and AGENTS.md have been coordinated and tuned
 to maximize leverage for your attention, minimize decision fatigue, and provide visibility of and
 correction steps for the stepwise drift that is unavoidable in agentic coding processes.
 
@@ -37,123 +36,71 @@ start to a scratch inference engine in Go with proven llama.cpp equivalence and 
 for multiple architectures and multiple loading formats in a little over a month. It does all of that
 in just over 16K lines of runtime code, including vision tower support and an OpenAI-compatible HTTP server.
 
-## How it works
-
-The process is the `development` skill. The `devpro` plugin installs it with the agents that carry it
-out.
-
-1. **Design.** Your request becomes a design: requirements, decisions and the questions still open.
-   You accept it before anything is planned.
-2. **Plan.** The plan cuts the design into packages small enough for one agent, each with a done-line
-   anyone can re-run. Routine packages run on a cheaper model; judgment calls get the strong one.
-3. **Build.** Specialist agents carry out the packages, and you accept each one as it lands.
-4. **Review**, at three levels:
-   - Every plan, design and brief an agent works from is reviewed by a prompt-engineer agent before
-     use.
-   - Every plan ends with reviewers from each domain it touched, then a burndown of what they found.
-   - Every few plans, a broader review catches drift no single change caused.
-5. **Deliver**, as a sprint-based release process:
-   - Plan the scope
-   - Build the features
-   - Harden the code
-   - Deliver
-
-## What it installs
-
-- **Specialist agents**: a coder for each language, platform experts, an architect, a security
-  reviewer, a tech writer and a prompt engineer ([Definition sets](docs/definition-sets.md)).
-- **Working rules and a guardrail**: the operator rules every session loads
-  ([Agents file](docs/agents-file.md)), and a hook that sends file changes through the edit tools
-  ([Guardrail](docs/guardrail.md)).
-- **One standard across handoffs.** A rule several agents carry is written once and rendered into each,
-  so the architect who designs, the coder who builds and the reviewer who checks judge the work by the
-  same text ([THESIS](PROJECT_DOCS/entry-point.md#what-is-new)).
-- **Customizable to any harness, any model family.** The same definitions render for Claude Code, opencode and Mage, and
-  per model family ([Model tuning](docs/model-tuning.md)). One runner recipe installs them.
-
-The `kbase` plugin is separate: tooling for building and maintaining a knowledge base from a canonical
-corpus ([Knowledge base](docs/knowledge-base.md)).
-
 ## Requirements and Supported Platforms
 
-- `python3` 3.9 or later with its `venv` module, and `git` on `PATH`.
-- The runner include lines either plugin's project install writes need `just` 1.33 or later, if the
-  project's runner is a justfile.
-- Harnesses: claude (Claude Code), opencode and mage.
-
-The full list, optional requirements and the kbase plugin's included:
-[Installing](docs/installing.md#requirements).
+- Harnesses: claude, opencode, or mage (so far). pi and codex are doable but aren't my daily drivers
+- Homebrew (macOS or Linux), to install devpro.
+- `git` on `PATH`.
+- `just` 1.33.0 or later, where the project's runner is a justfile: a claude or opencode install
+  writes include lines into it.
+- `perl` on `PATH` with core `JSON::PP`, for the claude guardrail hook. Without them the claude install
+  skips the hook, says why, and installs everything else.
 
 ## Quick Start Guide
 
-Add the recipe for your project's runner. It installs devpro, pinned to `DEVPRO_VER`, into the
-project's `.venv/` (the project's existing one, or one it creates), then installs the `devpro` plugin
-into the project for both harnesses ([Plugins](docs/installing.md#plugins) says what each plugin holds).
+### Claude Code and opencode
 
-A project that uses one harness drops the other harness's `install` line.
+Install devpro, then run its install from the project root:
 
-Justfile:
-
-```just
-DEVPRO_VER := "0.17.0"
-VENV := justfile_dir() / ".venv"
-PYTHON := "\"" + VENV + "/bin/python" + "\""
-DEVPRO := "\"" + VENV + "/bin/devpro" + "\""
-agents:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  [[ -x {{PYTHON}} ]] || python3 -m venv --upgrade-deps "{{VENV}}"
-  [[ -x {{DEVPRO}} && "$({{DEVPRO}} --version)" == "{{DEVPRO_VER}}" ]] || \
-    {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/devpro@v{{DEVPRO_VER}}"
-  {{DEVPRO}} install . --harness=claude
-  {{DEVPRO}} install . --harness=opencode
+```sh
+brew install benn-herrera/tap/devpro
+devpro install .
 ```
-
-Run `just agents`. The recipe never recreates or clears an existing `.venv`, and runs pip only when
-the venv's devpro is not the pinned version.
-
-A project install also writes the docdicer include line into the project's `justfile` or `Makefile`,
-creating a `Makefile` where there is neither. That runner file is tracked: commit it
-([Runner include lines](docs/install-reference.md#runner-include-lines)).
-
-Under claude, invoke the plugin's agents and skills as `devpro:<name>`, and run
-`/reload-plugins` (or restart Claude Code) after an install for new definitions to register.
 
 Add the installed trees to the project's `.gitignore`:
 
 ```text
 .claude/
-.opencode/
-.venv/
+# agent scratch space
+.claude-temp/
 __pycache__/
 ```
 
-The ignored trees are not committed: on each clone, run the install recipe again to re-create them.
+For opencode, use `.opencode/` and `.opencode-temp/` in place of the two claude entries.
 
-[Installing](docs/installing.md) has the rest: the Makefile recipe, the agents file the install
-writes, what to commit, previewing, updating, the kbase plugin, running devpro by hand and
-customizing the set. Mage installs from a release tarball
-([Mage plugin release](docs/mage-release.md)).
+The install detects your harness by the presence of a `.claude` or `.opencode` directory. It also
+adds include lines to the project's `justfile` or `Makefile` (a project with neither gets a new
+`Makefile`) for the runner files it installs, and writes the project's `AGENTS.md` (under claude, also
+a one-line `CLAUDE.md` redirect to it). Commit the edited `justfile` or `Makefile` and the agents
+file; the installed `.claude/` or `.opencode/` tree is not committed, which is why it is in `.gitignore`.
 
-## More documentation
+In a project the harness has never opened, create `.claude/` (or `.opencode/`) first, or add
+`--harness=claude` (or `--harness=opencode`) to the install line.
 
-- [Installing](docs/installing.md): requirements, plugins, the Makefile recipe, the agents file,
-  previewing, updating, running by hand, customizing.
-- [Mage plugin release](docs/mage-release.md): downloading, verifying and unpacking a mage plugin.
-- [Install reference](docs/install-reference.md): target and harness resolution, the install
-  directory of each plugin, user-level installs, what an install writes, refusals.
-- [Guardrail](docs/guardrail.md): the hooks that block shell writes behind the edit tools.
-- [Agents file](docs/agents-file.md): the operator-level working rules.
-- [Model tuning](docs/model-tuning.md): families, anchors and tier maps.
-- [Definition sets](docs/definition-sets.md): the agents and skills of each plugin.
-- [Knowledge base](docs/knowledge-base.md): the kbase plugin and its toolchain.
-- [Development](docs/development.md): building, testing, layout, releasing, authoring a family.
-- [Agent sandboxing](agent-sandboxing/README.md): a checklist for running an agent harness as a
-  separate, unprivileged local user. It is accident protection, not hack-proofing.
-- [docs index](docs/index.md), and the project's contract documents under `PROJECT_DOCS/`:
-  [THESIS](PROJECT_DOCS/entry-point.md), [SPEC](PROJECT_DOCS/SPEC/entry-point.md),
-  [ARCHITECTURE](PROJECT_DOCS/ARCHITECTURE/entry-point.md),
-  [CONVENTIONS](PROJECT_DOCS/CONVENTIONS/entry-point.md).
+To update, run `brew upgrade devpro`, then the same install line, with the same flags.
+
+### Mage
+
+Install devpro, then run its install into Mage's skills directory:
+
+```sh
+brew install benn-herrera/tap/devpro
+mkdir -p ~/Mage/Skills
+devpro install ~/Mage/Skills --plugin=devpro --harness=mage
+```
+
+This writes `~/Mage/Skills/devpro/`. `--plugin=kbase` writes `~/Mage/Skills/kbase/`, the
+knowledge-base plugin; restart Mage after installing it.
+
+To update, run `brew upgrade devpro`, then the same `devpro install` line.
+
+## Next: ask your agent
+
+Start your coding harness, or, if a session was already open during the install, reload it: run
+`/reload-plugins` or restart under Claude Code, restart under opencode, and, after installing the
+kbase plugin, restart Mage. Then ask the session agent to load the `guide` skill: `devpro:guide` under
+claude and mage, `devpro-guide` under opencode. It starts a design, explains how the development
+process runs, shows the board, and installs, updates, inspects or changes what you just installed.
 
 ## Third Party Acknowledgements
 

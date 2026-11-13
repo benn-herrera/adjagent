@@ -6,6 +6,12 @@ a rendered-definition or harness-resource destination it refuses and writes noth
 Write Safety). A package destination belongs to this repository entire, and no file there is for local
 edit.
 
+An installed tree needs no devpro installation: removing the devpro package, or replacing it with
+another version, changes nothing any installed file does, and only the next `devpro install` needs
+the package. The devpro plugin adds no machine-level dependency: beyond the harness, it runs only
+what installing the devpro package already requires. What a plugin needs beyond that is the
+operator's to install, as Plugins states for each.
+
 A rendered definition, a copied script or build file, and a harness resource each states its origin
 in banner lines; a harness-rendered file states it in its ownership marker; no other installed file
 carries a banner. A rendered definition carries two banner lines inside its frontmatter: the

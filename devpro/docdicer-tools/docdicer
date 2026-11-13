@@ -2,7 +2,7 @@
 # Launcher for docdicer: on first use it builds a venv beside this script and installs the pinned
 # docdicer there, sending install output to stderr.
 
-VERSION=0.8.1
+VERSION=0.11.0
 PACKAGE="git+https://github.com/benn-herrera/docdicer@v${VERSION}"
 
 case "${0}" in

@@ -28,6 +28,9 @@ SIDE_BY_SIDE_RULE = "@!hrn-side-by-side-rule!@"
 COLD_READ_RULE = "@!hrn-cold-read-rule!@"
 STEP_DOWN_MODEL = "@!tun-step-down-model!@"
 
+PLAN_SIZE_LIMIT_DEFAULT = "800 lines"
+PERIODIC_REVIEW_INTERVAL_DEFAULT = "3"
+
 REPOSITORY_URL = "https://github.com/benn-herrera/devpro"
 
 

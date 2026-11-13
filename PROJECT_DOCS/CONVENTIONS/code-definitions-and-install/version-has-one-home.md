@@ -8,7 +8,3 @@ marker line (every harness). So after a bump, `just render-diff` shows the manif
 and mage slots, the marker line in every slot, and nothing else. A recipe or script reads the
 version from `python3 -m devpro --version` and a harness's values through
 `devtools/scripts/_harness-value.sh`, and writes neither down.
-
-The mage release is cut by hand from the tagged version: `just mage-dist` signs with the
-maintainer's default `gpg` secret key, so no agent runs it. The maintainer publishes the tarball and
-its `.asc` to release `v<V>` of `benn-herrera/devpro`.

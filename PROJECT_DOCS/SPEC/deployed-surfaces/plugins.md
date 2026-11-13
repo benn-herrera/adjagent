@@ -5,13 +5,12 @@ An install delivers one **plugin**, a named selection of definitions: `devpro in
 `--plugin=NAME`, default `devpro`. The first positional is the target, so a plugin name there is
 read as a target directory (a lone `devpro install kbase` is refused where no directory `kbase`
 exists: "install target 'kbase' is not an existing directory"), and a second positional is refused
-before anything is written. A harness may carry fewer than every definition of its plugin: mage does
-not carry `install`.
+before anything is written. Every harness carries every definition of its plugin.
 
 - **devpro** delivers every definition but `kbase`: the coding, platform and specialist agents, the
-  `development`, `docdicer` and `install` skills and the rest.
+  `development`, `docdicer` and `guide` skills (SPEC.md, Guide and README) and the rest.
 - **kbase** delivers fourteen definitions: the `kbase` skill, which drives kbase, a separately
-  installed knowledge-base program and MCP server, with its supporting files, and `install`,
+  installed knowledge-base program and MCP server, with its supporting files, and `guide`,
   `development`, `docdicer`, `architect`, `python-coder`, `prompt-engineer`, `tech-writer`, `shell-dsl-coder`,
   `applied-mathematician`, `economic-historian`, `theoretical-economist`, `prose-architect` and
   `literature-scout`.
@@ -65,9 +64,10 @@ Installing both plugins in one place gives duplicate agents under different name
 No install reads, rewrites or removes a file outside its own managed set.
 
 No install writes, copies, verifies or locates a `kbase` executable. The operator installs kbase
-themselves (docs/knowledge-base.md, Requirements), and every harness's `kbase` MCP entry names the
+themselves, as the `kbase` skill's `references/installing.md` walks a session through, and every harness's `kbase` MCP entry names the
 bare command `kbase`, resolved from `PATH`, with the argument `mcp` and no KB path; under mage the
-entry keeps its `--project-dir-required` argument. Version 0.11.1 is the minimum kbase this product is written for, and nothing checks it.
+entry keeps its `--project-dir-required` argument, and Mage gives the servers it starts access to
+system tools, so `kbase` resolves there. Version 0.11.1 is the minimum kbase this product is written for, and nothing checks it.
 The kbase plugin is supported on macOS and Linux, where Homebrew provides kbase as
 `benn-herrera/tap/kbase`; native Windows is unsupported for it, and no install refuses or warns on
 Windows.

@@ -191,7 +191,6 @@ class Harness:
     definition_form: FrontmatterForm | HarnessFile
     guardrail: GuardrailHook | None  # the guardrail hook it registers; None where its own file registers itself
     rendered_files: tuple[HarnessFile, ...] = ()  # files it renders beside the definitions
-    omits: frozenset[str] = frozenset()  # definition names it renders nothing for
     default_tier_spec: str | None = None  # the --model-tier-map value used when none is given; None: the family's tiers
     plugin_parent_dir: str = (
         ""  # a harness-directory plugin's: the trailing path of the directory its plugins sit in; "" otherwise
@@ -205,7 +204,7 @@ class Harness:
     cold_read_rule: str = ""  # the development skill's bullet on how a cold reader is run; "" for none
 
     def __post_init__(self) -> None:
-        """Refuse a non-IDENTIFIER name or omitted definition name, an empty HarnessText field or
+        """Refuse a non-IDENTIFIER name, an empty HarnessText field or
         model_shape, a display_name that is not lowercase, an OptionalHarnessText field that is not a string, a tools table not total in
         Tool order, or a guardrail hook lacking a script path or a registration path, builder and
         marker.
@@ -216,8 +215,6 @@ class Harness:
         paragraph its placeholder stands in."""
         if re.fullmatch(IDENTIFIER, self.name) is None:
             raise InputError(f"harness '{self.name}': name is not a strict-kebab identifier")
-        if any(re.fullmatch(IDENTIFIER, name) is None for name in self.omits):
-            raise InputError(f"harness '{self.name}': omits holds a name that is not a strict-kebab identifier")
         if not all(self.text(part) for part in HarnessText) or not self.model_shape:
             raise InputError(f"harness '{self.name}': an empty string field")
         if self.display_name != self.display_name.lower():

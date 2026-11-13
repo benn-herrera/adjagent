@@ -193,6 +193,11 @@ needs it. A violation is a section whose meaning depends on a section that follo
 name the reorder), or one heading carrying two concerns whose split the reader would have to invent
 (name the split point).
 
+**Delta form** — a design whose `##` sections are delta sections (`## SPEC delta`,
+`## ARCHITECTURE delta`, `## Code delta`) holds only entries, each of which applies to its target
+with nothing left to interpret. A violation is an entry an executor would have to interpret (quote
+it; name what is missing).
+
 ### Plans
 
 **Executability** — each step leaves its executor knowing the act and the observation that confirms

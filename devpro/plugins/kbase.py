@@ -8,7 +8,7 @@ PLUGIN = Plugin(
     include=frozenset(
         {
             "kbase",
-            "install",
+            "guide",
             "development",
             "docdicer",
             "architect",

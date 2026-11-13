@@ -451,7 +451,7 @@ def install(
     # overwrite, the runner file where a shipped package carries runner snippets, and the agents file's.
     # ROOT itself is created only after all of them.
     renders = render_all(ctx)
-    packages = [] if user_level else [package for package in SHIPPED_PACKAGES if ctx.ships(package.owner)]
+    packages = [] if user_level else [package for package in SHIPPED_PACKAGES if ctx.plugin.ships(package.owner)]
     package_files = package_copies(root, packages)
     resource_files = _resource_copies(root, harness=ctx.harness, user_level=user_level)
     guardrail = _guardrail_in_play(ctx.bound_harness, user_level=user_level)

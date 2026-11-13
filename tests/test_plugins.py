@@ -1,5 +1,5 @@
 """Plugins in the render: each plugin renders under each harness with every template filled and every
-reference closed, membership is validated against discovery and is exactly what a render ships, an
+reference closed, membership is validated against discovery, an
 out-of-plugin reference refuses while an optional one drops its paragraph, and the agents file carries
 the paragraphs only its plugin's definitions back."""
 
@@ -22,7 +22,7 @@ from devpro.loading import load
 from devpro.plugin import Plugin
 from devpro.plugins.devpro import PLUGIN as DEVPRO
 from devpro.plugins.kbase import PLUGIN as KBASE
-from devpro.render import definitions, filled_body, render_agents_file, render_all, rendered_definitions
+from devpro.render import filled_body, render_agents_file, render_all
 from devpro.vocabulary import Kind, optional_reference, reference
 
 _PLUGINS = sorted(cast(dict[str, Plugin], load("devpro.plugins", "PLUGIN")))
@@ -39,16 +39,6 @@ def test_every_plugin_renders_under_every_harness_with_nothing_left_unfilled(plu
     texts.append(render_agents_file(harness_named(harness), plugin_named(plugin), scope="x"))
     leaks = [match for text in texts for match in re.findall(r"\{plugin\}|@![a-z0-9.-]+!@", text)]
     assert leaks == []
-
-
-@pytest.mark.parametrize("plugin, harness", _PAIRS)
-def test_a_render_ships_exactly_its_plugins_members_less_what_the_harness_omits(plugin: str, harness: str) -> None:
-    ctx = build_render(harness=harness, plugin=plugin, family="claude", tier_spec=None, alias_spec=None)
-    discovered = {defn.name for _, defn in definitions()}
-    expected = {name for name in discovered if ctx.plugin.ships(name)} - ctx.harness.omits
-    assert {defn.name for _, defn in rendered_definitions(ctx)} == expected
-    assert expected
-    assert ctx.harness.omits == ({"install"} if harness == "mage" else set())
 
 
 def test_a_plugin_naming_an_undiscovered_definition_refuses_every_render(monkeypatch: pytest.MonkeyPatch) -> None:

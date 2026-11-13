@@ -24,8 +24,7 @@ devpro project root is the whole build configuration.
 - **Offline build.** `just build` runs `python -m build --no-isolation` in `.venv` and writes the
   wheel and sdist to `dist/`, so it uses the venv's own setuptools, not a downloaded one. `.venv`'s
   install line in `python.just` therefore pins `setuptools~=82.0.1` and `build~=1.4.4`, the last
-  releases that run on Python 3.9. The build makes no git check, following `mage-dist`
-  (Recipes). A build also
+  releases that run on Python 3.9. The build makes no git check. A build also
   writes `devpro.egg-info/` at the devpro project root, which `.gitignore` covers. The sdist is
   a byproduct of the build: SPEC.md, Package and Command names no sdist install source, and
   `check-wheel` checks only that the sdist exists.
@@ -34,8 +33,8 @@ devpro project root is the whole build configuration.
   `GIT_CEILING_DIRECTORIES` at that scratch directory, it checks that `devpro` imports from the
   venv, that the console script and `python -m devpro` print the same `--help` and the checkout's
   version, that an install of each plugin into a scratch project equals the checkout's
-  byte for byte (each exercises packages the other lacks), and that a mage install of the devpro
-  plugin writes `devpro/CLAUDE.md`. It is the `wheel` test surface:
+  byte for byte (each exercises packages the other lacks), and that a mage install of each plugin
+  writes `<plugin>/CLAUDE.md`. It is the `wheel` test surface:
   `just test wheel`, and the last step of an unscoped `just test`. A change to `pyproject.toml` or
   under `devpro/` selects it in `just test-changed`.
 

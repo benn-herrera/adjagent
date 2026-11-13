@@ -4,8 +4,8 @@ What each plugin delivers is SPEC.md, Deployed Surfaces,
 [Plugins](../../SPEC/deployed-surfaces/plugins.md); this leaf is how an install selects and ships it.
 
 **Membership.** A plugin is a `Plugin` (`devpro/plugin.py`), one module in `devpro/plugins/` defining
-`PLUGIN`: the devpro plugin states what it leaves out (`kbase`), kbase what it ships. `Render.ships(name)` is
-`plugin.ships(name) and name not in harness.omits`, and `render.rendered_definitions` keeps
+`PLUGIN`: the devpro plugin states what it leaves out (`kbase`), kbase what it ships. By
+`Plugin.ships(name)` (Rendering, Harnesses and families), `render.rendered_definitions` keeps
 exactly the definitions it admits, so a definition the plugin does not carry is never rendered, and
 the skill's directory is never created by a run that omits it. `discover()` is the closed set
 every plugin's names are checked against (`context.plugin_named`). The install filters nothing of its
@@ -20,7 +20,7 @@ of `SHIPPED_PACKAGES` (`devpro/install.py`), a `ShippedPackage` of source, desti
 | `development-tools` | `skills/development/scripts` | `development` |
 | `kb-tools` | `skills/kbase/kb-tools` | `kbase` |
 
-`install` takes the rows whose owner `ctx.ships`, and none on a user-level install. Those rows are
+`install` takes the rows whose owner `Plugin.ships(name)` admits, and none on a user-level install. Those rows are
 what `package_copies` copies and `_clear_package_destination` empties before the copy, so the
 destination is emptied in place while the skill's `SKILL.md` and supporting files beside it are not
 touched. A harness-rendered file is owned the same way: `HarnessFile.owner` names a definition, and

@@ -32,8 +32,7 @@ and mage `.claude-plugin/plugin.json`, the plugin manifest, and `.mcp.json` wher
 under claude `hooks/hooks.json`, the guardrail registration, written only where one trial run of the
 guardrail at install time, the install-time probe, succeeds; under opencode `registry.json` (Shipped
 files). Each is rendered and neither a deployed surface nor a definition. It arrives by **install**,
-one of two distribution channels; the other, the mage release (SPEC.md, Mage Release), is unpacked
-by an operator. Install delivers one plugin, `devpro` or `kbase`, and no other. Its usage:
+the one distribution channel. Install delivers one plugin, `devpro` or `kbase`, and no other. Its usage:
 
 ```sh
 devpro install TARGET [--plugin=NAME] [--harness=NAME] [--subdir=DIR] [--family=NAME] [--model-tier-map=SPEC] [--model-pin-tier-alias-map=SPEC] [--dry-run] [--verbose]

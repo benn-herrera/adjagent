@@ -33,46 +33,62 @@ here is a constant or function in `devpro/clauses.py`, and an anchor is spelled 
   single-purpose, invoked directly rather than as part of a coding pipeline.
   applied-mathematician carries the `fam-ask-vs-stipulate` anchor; `fam-gap-aversion` renders
   nowhere.
-- **Tool-driving skills:** `install` and `docdicer`, each one `SKILL.md` with no supporting files.
-  `install` is delivered by both plugins under every harness except mage, which omits it; `docdicer`
-  and its tools package are delivered by both plugins.
+- **Tool-driving skill:** `docdicer`, one `SKILL.md` with no supporting files, delivered with its
+  tools package by both plugins.
   `docdicer.py` names its script `tools/docdicer`, relative to the skill's directory, and says its
   first run installs docdicer beside it; the script's `--help` is the command list, which the skill
   does not restate. The skill carries no runner-snippet advice and no install step; its one
   runner instruction is that where the project's runner includes the docdicer snippet, docdicer is
   run through the recipes (`docdicer`, `docdicer-check-plan`, `docdicer-kanban`, `docdicer-help`).
+  It names `check-design` and `check-roadmap` beside `check-plan`; neither has a recipe of its
+  own, and each runs through `docdicer` (`just docdicer check-design <design>`,
+  `just docdicer check-roadmap ROADMAP.md`).
   It also carries a paragraph, an optional reference to `kbase` (Rendering, Placeholders), saying
   `kb-root/` belongs to kbase and docdicer leaves it alone unless the user directs otherwise; it
-  renders only where kbase ships. `definitions/install.py` states the rule for changing the
-  installed tree — never edit it, put project behavior in CONVENTIONS.md or AGENTS.md, change the
-  definitions only through a vendored copy or a fork of the devpro project — and how to update and
-  inspect it, naming `devpro install --plugin=<plugin>` (the plugin spelled by the `@!plg-name!@`
-  placeholder), `--dry-run` and `devpro --version` and the runner's `DEVPRO_VER` (the variable a
-  consuming project's justfile or Makefile sets to pin the devpro version). It also
-  states how to run `devpro`: the project's runner recipe where there is one, else the release tag
-  of `clauses.REPOSITORY_URL` installed into a venv and that venv's `devpro`. Under claude a paragraph of its own, the
-  `reload_rule` placeholder (Rendering, Placeholders), says to run `/reload-plugins` when
-  the agents an install wrote are not offered; the paragraph drops where the harness supplies none.
-  Under opencode a further paragraph, the `side_by_side_rule` placeholder, says how to stop
-  opencode loading a claude install's skills. Mage omits the skill. The docdicer version the script
+  renders only where kbase ships. The docdicer version the script
   installs is written once, as `VERSION` in `devpro/docdicer-tools/docdicer`.
-- **Development skill** — `development` (`definitions/development.py`): one `SKILL.md` and five
+- **Guide skill** — `guide` (`definitions/guide.py`): one `SKILL.md` and two supporting files,
+  `references/installing.md` and `references/using.md`, carried as `SkillFile`s, delivered by both
+  plugins under every harness. The description names the uses SPEC.md, Guide and README lists, and
+  says it is not for a change to the consuming project's own code. `SKILL.md` is a route, as the
+  `development` skill's *Route* table is: one row per starting place SPEC.md, Guide and README
+  lists, under the never-edit rule it states. The `development` and `docdicer` rows name their skill
+  by a plain reference (`clauses.ref`), safe because both plugins ship both.
+  `references/installing.md` carries everything else about the installed set. That includes three
+  paragraphs of its own, each dropped where its value is empty:
+  - the `reload_rule` placeholder (Rendering, Placeholders), which says to run `/reload-plugins`
+    when the agents an install wrote are not offered. It is kept under claude alone;
+  - the `side_by_side_rule` placeholder, which says how to stop opencode loading a claude
+    install's skills. It is kept under opencode alone;
+  - an optional reference to `kbase` (`clauses.optional_ref`), which hands installing kbase itself
+    to that skill. It is kept in the kbase plugin alone.
+
+  The plugin is named through `clauses.PLUGIN_NAME`, and the repository through
+  `clauses.REPOSITORY_URL`.
+- **Development skill** — `development` (`definitions/development.py`): one `SKILL.md` and six
   supporting files (`references/new-project.md`, `project-documents.md`, `project-setup.md`,
-  `adopting.md`, `release.md`), carried as `SkillFile`s, delivered by both plugins under every
+  `adopting.md`, `release.md`, `design.md`), carried as `SkillFile`s, delivered by both plugins under every
   harness, mage included. Beside them in the skill's directory sits the development scripts
   package, `scripts/cold-read.sh`, owned by `development`: a shipped package, not one of the
   `SkillFile`s (Install, Renders and copies). The skill states one development process for the main
   session; the agents file's *Task management* points the session at it. `development.py` writes
-  the plan, review document, design and set-aside locations and the form stated in SPEC.md, Plan
-  Status Form, in three places: the *Terms* section's fixed table (the locations), the entry body's
-  `## Plan status` section and `references/release.md`. Each term the process names (active plan,
-  step-down model and the rest) is one module-level `*_TERM` constant that every
-  mention in the six files interpolates; a test reads `development.py` and fails where a term's
-  value is written literally in a body string, so no two mentions can name a term differently. Its
+  the roadmap's tickets, plan, review document, design and set-aside locations and the forms stated
+  in SPEC.md, Plan Status Form, at seven sites: the *Terms* section's fixed table (the locations),
+  the entry body's `## Plan status`, `## Roadmap tickets` and `## Design` sections, its `## Plans`
+  section (a diced design split at its `##` and `###` headings only), `references/design.md` (a
+  design's final form, its fixed line one constant) and `references/release.md`. The *Design*
+  section has the session run `check-design` before a design is offered for acceptance and again
+  on an entry added to an accepted design, and *Roadmap tickets* has it run `check-roadmap` after
+  each edit to `ROADMAP.md`. Each term the process names (active plan, step-down model and the
+  rest), and a design's fixed summary line, is one module-level `*_TERM` constant that every mention
+  in `SKILL.md` and its six supporting files interpolates; a test reads `development.py` and fails
+  where a term's value is written literally in a body string, so no two mentions can name a term
+  differently. Its
   `docdicer` references are optional references (Rendering, Placeholders), and `docdicer` ships
-  with both plugins, so each fills. The *Plan status* section renders whole under every plugin;
-  its `check-plan` bullet is a paragraph of its own, so an optional reference that fills to nothing
-  drops that bullet alone. The sentence naming the default step-down model is
+  with both plugins, so each fills. The *Plan status* and *Roadmap tickets* sections render whole
+  under every plugin; each one's `check-plan` or `check-roadmap` instruction is a paragraph of its
+  own, so an optional reference that fills to nothing drops that paragraph alone. The sentence
+  naming the default step-down model is
   `clauses.STEP_DOWN_MODEL`, the `tun` placeholder (Rendering, Placeholders), so that sentence alone
   renders only where the rendering assigns a model for the step-down tier. The entry body's
   `## Commits and pull requests` section gives the attribution line every commit message and

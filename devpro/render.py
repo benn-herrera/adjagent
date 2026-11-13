@@ -170,7 +170,7 @@ def filled_text(body: str, defn: Definition, ctx: Render, *, where: str) -> str:
     to a definition the render does not ship, is dropped whole, whatever else it says. A plain reference to a definition the render does not ship is refused, naming `where` and the
     definition; so is a placeholder-shaped span naming no key. Filled text is not rescanned."""
     seated = dataclasses.replace(ctx, tier=defn.tier)
-    shipped = frozenset(name for name in _referents().values() if ctx.ships(name))
+    shipped = frozenset(name for name in _referents().values() if ctx.plugin.ships(name))
     values = {hole(part): ctx.bound_harness.text(part) for part in (*HarnessText, *OptionalHarnessText)}
     values.update({hole(anchor): seated.overlay(anchor) for anchor in Anchor})
     values[hole(TuningText.STEP_DOWN_MODEL)] = ctx.step_down_model
@@ -230,9 +230,9 @@ def render_skill_file(defn: Definition, file: SkillFile, ctx: Render, *, module:
 
 
 def rendered_definitions(ctx: Render) -> tuple[tuple[str, Definition], ...]:
-    """The definitions `render_all` renders, as `definitions` gives them: those `ctx` ships — in its
-    plugin, and not omitted by its harness."""
-    return tuple(entry for entry in definitions() if ctx.ships(entry[1].name))
+    """The definitions `render_all` renders, as `definitions` gives them: those `ctx.plugin` ships: its
+    plugin's members."""
+    return tuple(entry for entry in definitions() if ctx.plugin.ships(entry[1].name))
 
 
 def shipped_definitions(ctx: Render) -> tuple[ShippedDefinition, ...]:
@@ -259,7 +259,7 @@ def harness_file_text(file: HarnessFile, ctx: Render) -> str:
 def shipped_harness_files(ctx: Render) -> tuple[HarnessFile, ...]:
     """Every file `ctx.bound_harness` renders into the output root whose owner, where it names one, this
     render ships."""
-    return tuple(file for file in ctx.bound_harness.harness_files if file.owner is None or ctx.ships(file.owner))
+    return tuple(file for file in ctx.bound_harness.harness_files if file.owner is None or ctx.plugin.ships(file.owner))
 
 
 def harness_renders(ctx: Render) -> tuple[tuple[PurePosixPath, str], ...]:

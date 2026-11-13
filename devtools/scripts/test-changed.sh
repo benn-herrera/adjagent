@@ -4,7 +4,7 @@
 # Changed paths are the uncommitted tree (`git status`: staged, unstaged and untracked, both sides
 # of a rename) plus, when <base> is given, everything committed since it (`git diff base...HEAD`).
 # Each path selects the surface its prefix names in the justfile's TEST_SURFACE_MAP; a path matching
-# no row (ROADMAP_PLANS/, scratch) selects nothing. There are no cross-surface "just in case" rows. The
+# no row (ROADMAP_DESIGNS/, scratch) selects nothing. There are no cross-surface "just in case" rows. The
 # one exception is the runner itself: `justfile`, `python.just` and the `devtools/scripts/` tree
 # select every surface, because a change to a recipe — or to the script its body became — cannot be
 # validated by skipping it. With nothing selected, it says so and exits zero without running tests.
@@ -12,7 +12,7 @@
 #
 # TEST_SURFACE_MAP is one row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
 # ending in `/` matches everything under it; one starting `*` is a glob over top-level file names
-# (`*.md` matches `README.md`, never `docs/README.md`).
+# (`*.md` matches `README.md`, never `agent-sandboxing/README.md`).
 set -euo pipefail
 : "${PROJECT_ROOT:?PROJECT_ROOT is empty or unset — run this script through its justfile recipe}"
 : "${TEST_SURFACE_MAP:?TEST_SURFACE_MAP is empty or unset — run this script through its justfile recipe}"

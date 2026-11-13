@@ -22,8 +22,8 @@ paragraphs, the `OptionalHarnessText` members, each
 a whole rule: `recipe_rule` (the rule a dispatched agent follows running recipes),
 `kbase_project_rule` (how a kbase session locates its project where the server serves many),
 `reload_rule` (what to do when an install's agents are not offered, in its own paragraph of the
-`install` skill), `side_by_side_rule` (what to do where a claude install of any plugin the devpro project
-ships also reaches an opencode session, in its own paragraph of the `install` skill) and `cold_read_rule` (how a cold
+`guide` skill's installation reference), `side_by_side_rule` (what to do where a claude install of any plugin the devpro project
+ships also reaches an opencode session, in its own paragraph of that reference) and `cold_read_rule` (how a cold
 reader is run, a whole bullet of the `development` skill's project-documents reference, naming
 the `development` skill's script), which a
 harness supplies as text or as the empty string, an empty one dropping the paragraph it stands in —
@@ -37,7 +37,7 @@ tier map and harness rather than supplied by either: `TuningText`'s one member, 
 which is `Render.step_down_model` (Harnesses and Families). A body or description may carry
 `@!ref-<name>!@`, spelled by `vocabulary.reference` and written in definitions as
 `clauses.ref(name=…)`, for a reference to another definition. Its closed set is the shipped set,
-the definitions the render's plugin carries that the harness does not omit, each filled with
+the definitions the render's plugin carries, each filled with
 `Harness.reference_prefix` followed by the name; the prefix is `{plugin}:` under claude and mage and
 `{plugin}-` under opencode, bound to the render's plugin, so a reference renders as `<plugin>:<name>` or
 `<plugin>-<name>`. The map is built once per prefix and shipped set (`render._references`), not on

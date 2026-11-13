@@ -9,9 +9,9 @@ harness's name in prose, lowercase (`claude code`, `opencode`, `mage`) and refus
 operator's own instructions file (Placeholders); the five
 harness-specific paragraphs, typed `OptionalHarnessText` — `recipe_rule`, `kbase_project_rule`
 (supplied under mage alone, whose server is started `--project-dir-required`), `reload_rule`
-(supplied under claude alone: the sentence a claude install prints and the `install` skill
-carries), `side_by_side_rule` (supplied under opencode alone, in its own paragraph of the
-`install` skill) and `cold_read_rule` (supplied under every harness: claude and opencode share
+(supplied under claude alone: the sentence a claude install prints and the `guide` skill's
+installation reference carries), `side_by_side_rule` (supplied under opencode alone, in its own
+paragraph of that reference) and `cold_read_rule` (supplied under every harness: claude and opencode share
 `harness.COLD_READ_SCRIPT_RULE`, which runs `cold-read.sh`, opencode adding that the script is not yet
 reliable there, and mage, whose copy of the script refuses to run, says to start the reader by
 hand);
@@ -46,8 +46,7 @@ directory is the harness directory); `reference_prefix`, put before a definition
 definition text names it (`{plugin}:` under claude and mage, `{plugin}-` under opencode);
 `project_harness_dir` (`{plugin}` under mage); `entry_resource`, the resource that registers the plugin
 and is copied at user level too (opencode's `index.ts`; empty elsewhere); `user_plugin_shadows`,
-whether a user-level install's plugin loads in place of a project's of its name (claude alone); `omits`, the definition names
-it renders nothing for; `default_tier_spec`, the default tier spec, used when `--model-tier-map`
+whether a user-level install's plugin loads in place of a project's of its name (claude alone); `default_tier_spec`, the default tier spec, used when `--model-tier-map`
 gives none (`None`: the family's tiers; opencode's is `default`, read by `build_render`); and
 `plugin_parent_dir`, a harness-directory plugin's trailing path of the directory its plugins sit in (`Mage/Skills`;
 empty otherwise), by which install target detection knows a target that is such a
@@ -76,7 +75,7 @@ copies it may revise independently.
 names it ships (`include`) or the ones it leaves out (`exclude`), validated at construction, with
 `ships(name)`. An instance is one module in `devpro/plugins/` defining `PLUGIN`, loaded by
 `loading.load` as harnesses and families are; `devpro.py` excludes `kbase`, `kbase.py` includes
-the names listed in SPEC.md, Deployed Surfaces, Plugins. A plugin is the same shape as a harness's `omits`, a selection of definitions, and no
+the names listed in SPEC.md, Deployed Surfaces, Plugins. A plugin is a selection of definitions and no
 profile of its own. `plugin.py` imports no harness, render or definition: the dependency direction is
 `vocabulary` ← `plugin` ← `context` → `harness`.
 
@@ -96,7 +95,7 @@ to its tuning text: a tier whose text is `inherit` or a synonym becomes `inherit
 values a render reads are always its own plugin's and no mismatch is representable. `build_render(…, plugin=)` loads
 the plugin and refuses one that names an undiscovered definition (`plugin_named`), because a misspelt
 member would otherwise drop out of the contents SPEC states for that plugin and nothing else would
-notice. `Render.ships(name)` is the one filter: in the plugin and not in the harness's `omits`.
+notice. `Plugin.ships(name)` is the one filter, called on the render's plugin.
 `Render.step_down_model` is the `medium` tier's rendered model (`context.STEP_DOWN_TIER`) where
 this render assigns one, and the empty string where that tier renders as `inherit_text`, as under
 opencode's default tier map. It is the one value behind the `tun` placeholder (Placeholders).

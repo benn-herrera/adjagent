@@ -1,6 +1,6 @@
 ### Installing this repository
 
-`just install-agents-here` installs this repository's own `.claude/` and `.opencode/` with the plain
+`just agents` installs this repository's own `.claude/` and `.opencode/` with the plain
 `install` verb, once per harness, as the devpro plugin, naming this repository as TARGET and the
 harness with `--harness`. opencode needs no tier map: its `default_tier_spec` stands in. Each
 install also keeps the agents-file block current, in the global agents file where that holds

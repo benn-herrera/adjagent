@@ -60,9 +60,9 @@ other harness reports it.
 
 A claude install that writes the plugin prints one sentence after it: "If the new agents are not
 available after using `devpro install`, `/reload-plugins` rescans the agent list." The installed
-`install` skill says the same.
+`guide` skill says the same.
 
-An install writes into its install directory: every definition its plugin and its harness carry,
+An install writes into its install directory: every definition its plugin carries,
 rendered by that same invocation, together with the shipped packages those definitions read (Shipped files),
 each at its package destination, and the harness resources, copied into that same directory as they
 stand (Shipped files). What is not part of the install product does not travel: test suites and their

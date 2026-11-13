@@ -3,7 +3,7 @@ planning, dispatch, acceptance, checkpoints and post-plan review — and the ref
 project on it, bind its terms, adopt it into a project with process of its own, keep its project
 documents and run a release.
 
-Each term is one constant here, and every mention in the skill's six files interpolates it, so no
+Each term is one constant here, and every mention in the skill's seven files interpolates it, so no
 two files can name a slot differently.
 """
 
@@ -13,7 +13,7 @@ from devpro.vocabulary import Kind
 
 ACTIVE_DESIGN_TERM = "active design"
 ACTIVE_PLAN_TERM = "active plan"
-PARKED_PLANS_TERM = "parked-plans directory"
+PARKED_DESIGNS_TERM = "parked-designs directory"
 SCRATCH_TERM = "scratch directory"
 CHECKPOINT_GATE_TERM = "checkpoint gate"
 REFERENCE_SEARCH_TERM = "reference search"
@@ -23,6 +23,16 @@ POST_PLAN_REVIEWERS_TERM = "post-plan reviewers"
 REVIEW_DOCUMENT_TERM = "review document"
 PLAN_SIZE_LIMIT_TERM = "plan size limit"
 PERIODIC_REVIEW_INTERVAL_TERM = "periodic review interval"
+SPEC_DELTA_TERM = "## SPEC delta"
+ARCHITECTURE_DELTA_TERM = "## ARCHITECTURE delta"
+CODE_DELTA_TERM = "## Code delta"
+ROADMAP_TERM = "roadmap"
+DESIGN_SUMMARY_LINE_TERM = (
+    "The preceding is a summary of the detailed design below. Summaries are unavoidably lossy. The summary "
+    "text is not to be consistency checked. The design is authoritative."
+)
+# docdicer's command name, not a mention of the roadmap term, which no body may spell literally.
+CHECK_ROADMAP_COMMAND = "check-roadmap"
 
 DEFINITIONS = (
     Definition(
@@ -44,6 +54,7 @@ rule governs.
 | a project with process already written takes up this skill | `references/adopting.md` |
 | planning or running a release | `references/release.md` |
 | writing, revising or reviewing the project documents | `references/project-documents.md` |
+| writing or applying a design's deltas | `references/design.md` |
 
 A reference is read only when its row is reached; the rest of this file applies in every case.
 
@@ -57,7 +68,8 @@ The rules use these terms.
 | --- | --- | --- |
 | {ACTIVE_DESIGN_TERM} | `ACTIVE_DESIGN.md` at the repository root | the one design under way, which feeds a plan |
 | {ACTIVE_PLAN_TERM} | `ACTIVE_PLAN.md` at the repository root | the one plan under way |
-| {PARKED_PLANS_TERM} | `ROADMAP_PLANS/` at the repository root | where partly-planned work waits |
+| {PARKED_DESIGNS_TERM} | `ROADMAP_DESIGNS/` at the repository root | where work set aside waits |
+| {ROADMAP_TERM} | `ROADMAP.md` at the repository root for its tickets, and the {PARKED_DESIGNS_TERM} for work set aside | intended work not yet taken up, at whatever stage of refinement |
 | {SCRATCH_TERM} | `{clauses.PROJECT_TEMP_DIR}/` at the repository root | untracked working files |
 | {REFERENCE_SEARCH_TERM} | `git grep -l '<name>'` | lists every file that references a name |
 | {POST_PLAN_REVIEWERS_TERM} | the agent for each domain the plan changed substantively — a change where a defect would pass unseen without that seat: the coder for each changed language, `{clauses.ref(name="architect")}` where structure, or the project documents' claims about the code, changed, `{clauses.ref(name="tech-writer")}` where READMEs or human-facing guides changed, `{clauses.ref(name="prompt-engineer")}` where model-facing text, the project documents or ROADMAP.md changed | the agents that review a finished plan |
@@ -71,8 +83,8 @@ binding replaces the default. A term marked — has no default.
 | {CHECKPOINT_GATE_TERM} | — | the runner targets run before a checkpoint commit |
 | {STEP_DOWN_MODEL_TERM} | the model the sentence after this table names; — where none follows | the model a mechanical dispatch runs on |
 | {STEP_DOWN_APPLICATION_TERM} | — | how a mechanical dispatch gets the {STEP_DOWN_MODEL_TERM} where a dispatch cannot choose its model |
-| {PLAN_SIZE_LIMIT_TERM} | 800 lines | the length past which a plan or design is diced |
-| {PERIODIC_REVIEW_INTERVAL_TERM} | 3 | the number of landed plans between periodic reviews |
+| {PLAN_SIZE_LIMIT_TERM} | {clauses.PLAN_SIZE_LIMIT_DEFAULT} | the length past which a plan or design is diced |
+| {PERIODIC_REVIEW_INTERVAL_TERM} | {clauses.PERIODIC_REVIEW_INTERVAL_DEFAULT} | the number of landed plans between periodic reviews |
 
 Where CONVENTIONS.md binds no {STEP_DOWN_MODEL_TERM}, it is `{clauses.STEP_DOWN_MODEL}`.
 
@@ -108,14 +120,42 @@ bindable term that has no default and is unbound, ask the user for it then, thro
   before a plan; going straight to the plan is a skip (*Skipping a step*). *Purpose:* requirements
   are settled and reviewed before packages are cut from them, and the step between a request and a
   plan has a known place.
-- A design holds the requirements, decisions and constraints a plan is written from, and the
-  questions still open for the user. It never holds packages, sequencing or status: those belong to
-  the plan.
-- The user accepts the design before a plan is written from it.
-- The design is deleted, with its tree if it was diced, in the commit that adds the plan written
-  from it, whether that plan is active or parked. That plan carries what it needs from the design
-  and cites none of it. *Purpose:* a design that stays in place after its plan exists reads as work
-  still in design, and a plan citing a deleted design is a citation that outlives its target.
+- After its level-1 heading, a design's final form states its intent: the outcomes and for whom, in
+  a few sentences, with no history or rationale. The rest is the change it makes to SPEC.md,
+  ARCHITECTURE.md and the code. `references/design.md` gives the opening's form and how the entries
+  are written. Its only `##` sections are `{SPEC_DELTA_TERM}`, `{ARCHITECTURE_DELTA_TERM}` and
+  `{CODE_DELTA_TERM}`, spelled exactly so, in that order; it carries each one its change has entries
+  for, and at least one. Scope, sequencing and release belong to the plan, and a decision finer than
+  SPEC.md and ARCHITECTURE.md record is the executing agent's call. *Purpose:* what the user accepts
+  is the change the work lands in the documents and the code, not a description a later step must
+  translate into it.
+- A change to process or house rules (CONVENTIONS.md) or to THESIS.md is not one of a design's
+  deltas; the plan carries it.
+- While in progress, a design holds its requirements, decisions, constraints and open questions
+  under one `## Drafts` heading, as tickets in the {ROADMAP_TERM}'s form (*Roadmap tickets*), and they
+  become entries as its questions close. *Purpose:*
+  work not yet written as entries has one place, in a form a tool reads.
+- A design is offered for acceptance only in its final form, with no open question, and the user
+  accepts it before a plan is written from it. Before offering it, run `check-design` on it (on its
+  `entry-point.md` where it is diced; the `{clauses.optional_ref(name="docdicer")}` skill) and fix
+  what it reports until it reports nothing. *Purpose:* what the user accepts is complete, so no plan
+  is written from a design still deciding.
+- The plan written from a design cites each entry by a link to it — its leaf in a diced design,
+  else its heading's `#anchor` — instead of carrying it, and the package that implements an entry
+  under `{SPEC_DELTA_TERM}` or `{ARCHITECTURE_DELTA_TERM}` applies it to its target verbatim except
+  its relative links: those are written relative to the file the entry is in, and each move rebases
+  them where the destination is in another directory. The project's link check, where it has one,
+  confirms them. *Purpose:* the text the user accepted reaches the contract documents as accepted,
+  its links still resolving.
+- The {ACTIVE_DESIGN_TERM} stays from before its plan is written until that plan is done, and is
+  deleted, with its tree if it was diced, in the commit that lands the plan. A requirement or
+  structural decision found while the plan runs is entered in the design, as an entry under its
+  delta, once the user decides it; the entry records the user's decision. An entry added to an
+  accepted design is checked again with `check-design` the same way. A package that entry adds to
+  the plan is a later change under *Plans*, reviewed in its changed text only; found in the work
+  rather than a question planning could have asked, it does not breach an approved plan's running
+  to completion. *Purpose:* the plan and its reviewers read one accepted statement of the change for
+  the plan's whole life, and the design leaves once the work it describes has landed.
 
 ## Plans
 
@@ -138,21 +178,26 @@ bindable term that has no default and is unbound, ask the user for it then, thro
   account of how it was reached.
 - On landing, the plan is replaced by the next plan, or deleted. *Purpose:* a landed plan left in
   place reads as work still under way.
-- Partly-planned work — a design set aside before its plan is written, or a plan not yet active —
-  waits, tracked, in the {PARKED_PLANS_TERM}. It leaves that directory when it becomes the
-  {ACTIVE_DESIGN_TERM} or the {ACTIVE_PLAN_TERM}, or when it is abandoned; superseded work counts as
-  abandoned. Work can only finish as the {ACTIVE_PLAN_TERM}. *Purpose:* design done ahead of its turn
-  survives without competing with the {ACTIVE_PLAN_TERM}, and one piece of work is in one place at a
-  time.
+- Setting work aside moves every `ACTIVE_*` file or diced tree at the repository root into the
+  {PARKED_DESIGNS_TERM}, its `ACTIVE_` prefix replaced by `<topic>_`, all under one topic no file
+  there already uses; the plan drops its `Release:` line. A plan cites its design by the name the
+  design has where the plan is: `ACTIVE_DESIGN.md` at the root, `<topic>_DESIGN.md` set aside; each
+  move rewrites the citation. A plan cites a diced design through its `entry-point.md`. Set-aside
+  work returns under its `ACTIVE_` names only once no `ACTIVE_*` file or diced tree is at the root.
+  It leaves the {PARKED_DESIGNS_TERM} as *Roadmap tickets* states. *Purpose:* work set aside
+  survives without competing with the work under way, one piece of work is in one place at a time,
+  and a returned plan finds its design under the name it cites.
 - A document or leaf the plan names as settling its subject outranks the plan: the work implements
   the document or leaf, the landing commit names the plan line the document or leaf overrode, and
-  the landing does not edit the document or leaf.
+  the landing does not edit the document or leaf. A leaf or section a design entry changes is that
+  entry's target, not such a document: the package that implements the entry edits it.
   *Purpose:* a disagreement between plan and requirement is resolved in the open, never by quietly
   rewriting the requirement.
 
 - A plan or design longer than the {PLAN_SIZE_LIMIT_TERM} when it is offered for approval is diced
-  (the `{clauses.optional_ref(name="docdicer")}` skill), and dispatches cite its leaves. Once approved, a plan is diced only
-  when the user asks. *Purpose:* each executor reads whole the part it acts on.
+  (the `{clauses.optional_ref(name="docdicer")}` skill), and dispatches cite its leaves. A design is
+  diced at its `##` and `###` headings only, so each entry and each ticket is one file. Once approved,
+  a plan is diced only when the user asks. *Purpose:* each executor reads whole the part it acts on.
 
 - An approved plan runs to completion: blockers that need the user surface during planning.
   *Purpose:* the user approves once and is not called back mid-run for a question planning could
@@ -162,14 +207,16 @@ bindable term that has no default and is unbound, ask the user for it then, thro
   revision; a revision applying that review's findings is not re-reviewed. A later change — a
   package added, a decision reversed, a section rewritten — gets a review of the changed text only,
   plus a check that the rest of the document cites no superseded form of it. Settled calls are not
-  reopened unless the change targets them. *Purpose:* each round reviews only text no reviewer has
-  seen, so review converges instead of re-litigating.
+  reopened unless the change targets them. A design's one review is of its final form, before the
+  user accepts it; rewriting in-progress sections into entries does not trigger a review.
+  *Purpose:* each round reviews only text no reviewer has seen, so review converges instead of
+  re-litigating.
 
 ## Plan status
 
-Where a plan, active or parked, states any of the following, it states it in this form. Nothing here
-makes a plan state anything it otherwise would not. *Purpose:* a tool reading plans reads every plan
-the same way.
+Where a plan, active or set aside, states any of the following, it states it in this form. Nothing
+here makes a plan state anything it otherwise would not. *Purpose:* a tool reading plans reads every
+plan the same way.
 
 - A package heading opens with its ID, then its title, at any heading level. The ID is unique
   within the plan and contains no spaces (`P1`, `WP2a`, `S0`).
@@ -190,6 +237,20 @@ the same way.
   work.
 
 After each edit to a plan, run `check-plan` on it (on its `entry-point.md` where it is diced; the
+`{clauses.optional_ref(name="docdicer")}` skill) and fix what it reports.
+
+## Roadmap tickets
+
+- In `ROADMAP.md`, a category is a `##` heading and its text, up to the next `#` or `##` heading. A
+  ticket is a `###` heading inside a category and its text, up to the next `#`, `##` or `###`
+  heading; a `####` heading inside a ticket is part of its text. Text in a category before its first
+  ticket is not a ticket. A ticket's heading names the ticket. A top-level list item opening with a
+  bold lead appears only inside a ticket. *Purpose:* a tool reading the {ROADMAP_TERM} reads every
+  ticket the same way.
+- Work leaves the {ROADMAP_TERM} when it becomes the active tasking, when other work accomplishes
+  it, or when it is abandoned; superseded work counts as abandoned.
+
+After each edit to `ROADMAP.md`, run `{CHECK_ROADMAP_COMMAND}` on it (the
 `{clauses.optional_ref(name="docdicer")}` skill) and fix what it reports.
 
 ## Dispatchability
@@ -298,9 +359,10 @@ approved can run as approved.
 - Every plan holding a shipped package ends with two packages: the post-plan review, then the
   post-plan burndown. *Purpose:* review and its fixes are planned work, not a step dropped when the
   plan lands.
-- The {POST_PLAN_REVIEWERS_TERM} are given the project documents and not the plan, and review the
-  changes and their tests against the project's standards and fitness for purpose. *Purpose:* they
-  judge what shipped, not how well it matches the plan's account of itself.
+- The {POST_PLAN_REVIEWERS_TERM} are given the project documents and the design, where there is
+  one, not the plan, and review the changes and their tests against the project's standards and
+  fitness for purpose. *Purpose:* they judge what shipped, not how well it matches the plan's
+  account of itself.
 - The post-plan review writes the reviewers' findings to the {REVIEW_DOCUMENT_TERM}, which is never
   diced. The review's row is `landed` in the commit that adds the {REVIEW_DOCUMENT_TERM}.
   *Purpose:* the burndown is drafted from one record of what was found.
@@ -364,8 +426,8 @@ one's answer feeds the next.
    THESIS.md by you with the user, from 3's breakdown; SPEC.md and ARCHITECTURE.md by
    `{clauses.ref(name="tech-writer")}` with the user; CONVENTIONS.md by you, from the choices made in 2. Where the
    project has code, `{clauses.ref(name="architect")}` produces its initial design, held to SPEC.md;
-   ARCHITECTURE.md is drafted from that design's invariants and skeleton. A behavioural acceptance
-   criterion in the design (an outcome, not a mechanism) that SPEC.md does not already state is a
+   ARCHITECTURE.md is drafted from that initial design's invariants and skeleton. A behavioural
+   acceptance criterion in the initial design (an outcome, not a mechanism) that SPEC.md does not already state is a
    SPEC.md gap raised with the user, not ARCHITECTURE.md content. `{clauses.ref(name="prompt-engineer")}` reviews
    each of the four drafts before the user accepts it, and authors and reviews their changes from
    then on; the user remains their owner. A project
@@ -581,8 +643,8 @@ without the user's go.
      CONVENTIONS.md as a local rule;
    - **contradiction** of a rule here, or of what a fixed term is fixed as → propose stating it in
      CONVENTIONS.md as a local rule, which overrules this skill's; where it relocates the
-     {ACTIVE_PLAN_TERM}, {ACTIVE_DESIGN_TERM} or {PARKED_PLANS_TERM}, say that a tool reading plans
-     will not find them there;
+     {ACTIVE_PLAN_TERM}, {ACTIVE_DESIGN_TERM}, {PARKED_DESIGNS_TERM} or `ROADMAP.md`, say that a
+     tool reading them will not find them there;
    - **no counterpart** → the project's own; it stays where it is.
 
    Where the project has no CONVENTIONS.md, propose creating one for the values, refinements and
@@ -603,7 +665,7 @@ Free development activates plans for the release one at a time, each an ordinary
 post-plan review and post-plan burndown; the hardening plan, whose H1 heading opens with `Release hardening`, hardens the
 release and delivers it. A plan names the release when it is activated for it: the first non-blank
 line after the plan's H1 heading is `Release: <version>`, exactly that form. Work in the
-{PARKED_PLANS_TERM}, plan or design, names no release. *Purpose:* the plan under way shows the
+{PARKED_DESIGNS_TERM}, plan or design, names no release. *Purpose:* the plan under way shows the
 release it serves, and no release is promised for work not yet taken up.
 
 ## Scope
@@ -613,7 +675,7 @@ release it serves, and no release is promised for work not yet taken up.
   keep, for example in `ROADMAP.md`. *Purpose:* the release's shape is the owner's to set, and the
   skill keeps no list of it.
 - Each feature considered and not chosen goes into `ROADMAP.md`, and design already done for it into
-  the {PARKED_PLANS_TERM} with no release named. *Purpose:* scoping a feature out loses nothing, so
+  the {PARKED_DESIGNS_TERM} with no release named. *Purpose:* scoping a feature out loses nothing, so
   nothing is kept in to save it.
 - Every package in the release's plans is shipped (SKILL.md, *Plans*): exploratory work is re-rated
   when its plan is taken into the release. *Purpose:* the process a shipped package owes is paid
@@ -644,6 +706,43 @@ release it serves, and no release is promised for work not yet taken up.
 - The release is tagged after the hardening plan's post-plan burndown lands, on a commit the
   {CHECKPOINT_GATE_TERM} passed on; any change after that run, a version bump included, runs it again.
   *Purpose:* what ships is what was reviewed and verified.""",
+            ),
+            SkillFile(
+                path="references/design.md",
+                body=f"""The opening and entries a design's final form holds (SKILL.md, *Design*), in the sections it carries.
+
+- A design opens with a level-1 heading naming the change, then its intent statement before any `##`
+  heading, then this line as its own paragraph, verbatim apart from where it wraps:
+  "{DESIGN_SUMMARY_LINE_TERM}"
+  A diced design holds all three in its `entry-point.md`. *Purpose:* a reader of the entries knows
+  what they are for, and a summary is never checked against them.
+- `{SPEC_DELTA_TERM}` and `{ARCHITECTURE_DELTA_TERM}` hold one `###` entry per leaf they change; in an
+  undiced document, one per section at the level whose `#anchor` the entry's heading links. An entry
+  runs to the next `#`, `##` or `###` heading, so a `####` heading inside it is part of its body.
+  - The heading of an entry for a diced document names the leaf: a markdown link where the leaf
+    exists, plain text where the change creates it.
+  - The heading of an entry for an undiced document names the document and section: a markdown link
+    to the section's `#anchor` where the section exists, plain text where the change creates it.
+  - The body, in that document's voice, is exactly one of: one or more pairs of a passage of the
+    target and its replacement; the whole text of a new leaf or section; a statement that the leaf
+    or section is removed. Each passage, each replacement and each whole text is a fenced block.
+
+  *Purpose:* an entry is applied to its target as written, with nothing left to interpret, and the
+  headings and tables it carries are never read as the design's or the plan's own.
+- `{CODE_DELTA_TERM}` holds one `###` entry per leaf or section the code is held to, for code changes
+  that leave SPEC.md and ARCHITECTURE.md as they stand: a fix, where the code breaks a statement the
+  leaf or section makes, or a refactor, where it reworks code the leaf or section describes without
+  changing what it says. A change to code no leaf or section describes either gets an entry under
+  `{ARCHITECTURE_DELTA_TERM}` describing that code, or is finer than the documents record and is the
+  executing agent's call.
+  - The heading names the leaf or section the entry holds the code to, as for the other deltas; it
+    is a link, since the target exists.
+  - The body states, for a fix, what the code does against what the leaf or section says; for a
+    refactor, what changes in the code and that the leaf or section stays true. Nothing is applied
+    to the leaf or section.
+
+  *Purpose:* each designed code change answers to a statement the documents make, so no design
+  lands code they do not describe.""",
             ),
         ),
     ),

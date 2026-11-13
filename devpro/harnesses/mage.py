@@ -1,5 +1,5 @@
 """The mage harness: the shared frontmatter emitter and recipe rule from `devpro.harness`, the rest of
-claude's vocabulary copied, the plugin manifest, and no `install` skill."""
+claude's vocabulary copied, and the plugin manifest."""
 
 from __future__ import annotations
 
@@ -75,5 +75,4 @@ HARNESS = Harness(
     definition_form=FrontmatterForm(agent=agent_frontmatter, document=()),
     guardrail=None,
     rendered_files=(PLUGIN_MANIFEST, mcp_json(_mcp_entry)),
-    omits=frozenset({"install"}),
 )

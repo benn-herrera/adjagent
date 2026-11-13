@@ -179,7 +179,7 @@ def test_a_mage_install_below_its_project_with_uncommitted_sources_writes_its_ag
 
 
 def test_a_mage_install_into_the_target_itself_writes_no_agents_file(tmp_path: Path, monkeypatch) -> None:
-    """The slot render and mage-dist path: ROOT is the project root, so there is no agents file to
+    """The slot render path: ROOT is the project root, so there is no agents file to
     install and the commit state is never read — an uncommitted tree would otherwise refuse."""
     monkeypatch.setattr(cli, "uncommitted_sources", _uncommitted)
     cli.main(["install", str(tmp_path), "--subdir=", "--harness=mage"])

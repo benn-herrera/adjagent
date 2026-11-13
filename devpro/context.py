@@ -101,10 +101,6 @@ class Render:
         """The harness bound to this render's plugin (`Harness.bound`)."""
         return self.harness.bound(self.plugin.name)
 
-    def ships(self, name: str) -> bool:
-        """Whether this render ships the definition `name`: in the plugin, and not one the harness omits."""
-        return self.plugin.ships(name) and name not in self.harness.omits
-
     def model(self, tier: Tier) -> str:
         """The tier's rendered model text: alias if the alias map is set, else member; "inherit" and the
         harness's inherit synonyms render harness.inherit_text."""

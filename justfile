@@ -20,15 +20,24 @@ PROJECT_ROOT := justfile_directory()
 GEN := "devpro"
 
 default:
-    @just --list | grep -v '\[dev\]'
-    @echo "===="
-    @just --list | grep '\[dev\]'
+    @just --list
 
-[doc("install a plugin, [--plugin=NAME], into an existing <target>: [--harness=NAME] [--subdir=DIR] [--dry-run] [tuning flags]; an up-to-date target is left untouched; --dry-run prints what would be created, changed and removed and writes nothing; docs/install-reference.md has the rules")]
+# Flags: [--plugin=NAME] [--harness=NAME] [--subdir=DIR] [--dry-run] [tuning flags]. An up-to-date
+# target is left untouched; --dry-run prints what would be created, changed and removed and writes
+# nothing. SPEC.md, Install destination has the rules.
+[doc("install a plugin into an existing target")]
 install target *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "$@"
 
-[doc("install a plugin's harness agents file, [--plugin=NAME], into <dir>, replacing only the devpro block and keeping everything outside it; replaces the block in a file holding one ordered marker pair, appends it to a file with no marker line, writes an absent file whole, and refuses any other file; <dir> is ~/.claude, ~/.config/opencode, or a project root; [--harness NAME] (claude, opencode — the two whose user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis; an up-to-date file is left untouched; [--dry-run] prints whether the agents file and any redirect would be created or changed and writes nothing")]
+# Takes [--plugin=NAME]. Replaces only the devpro block and keeps everything outside it: replaces
+# the block in a file holding one ordered marker pair, appends it to a file with no marker line,
+# writes an absent file whole, and refuses any other file. <dir> is ~/.claude,
+# ~/.config/opencode, or a project root. [--harness NAME] (claude, opencode — the two whose
+# user-harness-dir is absolute) is inferred when <dir> is that harness's user directory and
+# required otherwise; a relative user-harness-dir, as mage's is, is never an inference basis. An
+# up-to-date file is left untouched; [--dry-run] prints whether the agents file and any redirect
+# would be created or changed and writes nothing.
+[doc("install a plugin's agents file into <dir>")]
 install-agents-file dir *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install-agents-file "$@"
 
@@ -85,23 +94,33 @@ _venv:
 # not a privileged tree.
 RENDERED_DIR := "rendered"
 
-[doc("tag the current commit v<version>, <version> read from `python3 -m devpro --version`; refuses while devpro/ has uncommitted changes or the tag already exists, and never pushes")]
+# <version> is read from `python3 -m devpro --version`. Refuses while devpro/ has uncommitted
+# changes or the tag already exists.
+[doc("tag HEAD v<version>; never pushes")]
 tag:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/tag.sh
 
-[doc("build the mage release of each plugin from the working tree into dist/ (override with DIST_DIR) as devpro-mage-<plugin>-v<version>.tgz, each with a detached .asc signed by the release key; removes stale outputs and the stage on exit, and a failure leaves no output of the version for either plugin; uploads nothing")]
-mage-dist:
-    @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/mage-dist.sh
-
-[doc("build the wheel and sdist of the working tree into dist/ with the venv's setuptools; makes no git check and fetches nothing")]
+# Builds the working tree with the venv's setuptools; makes no git check and fetches nothing.
+[doc("build the wheel and sdist into dist/")]
 build: _venv
     @{{VENV_PYTHON}} -m build --no-isolation --outdir "{{PROJECT_ROOT}}/dist" "{{PROJECT_ROOT}}"
 
-[doc("[dev] build, then prove the wheel: its package data equals the non-.py files under devpro/ that git tracks or would track, and installed into a throwaway venv made from <python> (default /usr/bin/python3) it imports from that venv, runs as the devpro console script, installs byte-identically to the checkout, and writes the mage plugin's agents file outside a checkout")]
+# Proves the wheel's package data equals the non-.py files under devpro/ that git tracks or would
+# track, and that, installed into a throwaway venv made from <python> (default /usr/bin/python3),
+# it imports from that venv, runs as the devpro console script, installs byte-identically to the
+# checkout, and writes the mage plugin's agents file outside a checkout.
+[doc("[dev] build, then prove the wheel")]
 check-wheel python="/usr/bin/python3": build
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" PYBIN="{{PYBIN}}" EXE="{{EXE}}" ./devtools/scripts/check-wheel.sh "$@"
 
-[doc("[dev] render every plugin's install product, each at its own slot project rendered/<slug>/<plugin>/ (slug defaults to latest; the first non-flag argument, in any position, is the slug), plus its agents file for --harness=NAME (default claude) into rendered/<slug>/<plugin>/harness/<NAME>/, or at the slot project's root for a harness-directory plugin (`mage`) — refuses a slug starting with reference; every --* flag but --plugin (refused: every plugin is rendered), --harness included, forwards verbatim to `python3 -m devpro install` via install (--family, --model-tier-map, --model-pin-tier-alias-map, --harness, --verbose, ...)")]
+# Renders each plugin's install product at its own slot project rendered/<slug>/<plugin>/ (slug
+# defaults to latest; the first non-flag argument, in any position, is the slug), plus its agents
+# file for --harness=NAME (default claude) into rendered/<slug>/<plugin>/harness/<NAME>/, or at
+# the slot project's root for a harness-directory plugin (`mage`). Refuses a slug starting with
+# reference. Every --* flag but --plugin (refused: every plugin is rendered), --harness included,
+# forwards verbatim to `python3 -m devpro install` via install (--family, --model-tier-map,
+# --model-pin-tier-alias-map, --harness, --verbose, ...).
+[doc("[dev] render every plugin to rendered/<slug>/")]
 render *args:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/render.sh "$@"
 
@@ -109,7 +128,10 @@ render *args:
 _render-slot slug *args:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/_render-slot.sh "$@"
 
-[doc("[dev] re-take the four oracle slots rendered/reference-claude, reference-opencode, reference-gemma and reference-mage from the current generator with their fixed flags — the deliberate counterpart of render's refusal to touch them; run only after a content change is accepted")]
+# Re-takes rendered/reference-claude, reference-opencode, reference-gemma and reference-mage from
+# the current generator with their fixed flags — the deliberate counterpart of render's refusal to
+# touch them; run only after a content change is accepted.
+[doc("[dev] re-take the four reference slots")]
 retake-reference:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" RENDERED_DIR="{{RENDERED_DIR}}" ./devtools/scripts/retake-reference.sh
 
@@ -121,24 +143,31 @@ render-agents-file harness out plugin="":
 _harness-value plugin harness key:
     @PROJECT_ROOT="{{PROJECT_ROOT}}" GEN="{{GEN}}" ./devtools/scripts/_harness-value.sh "$@"
 
-[doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
+# Splits by heading level, with an optional link map TSV, then checks the leaves reassemble the
+# monolith and every relative link resolves.
+[doc("dice a markdown monolith into linked leaves")]
 dice-doc monolith out map="":
     @just docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
 
-[doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees")]
+# Reads the listed documents from src-dir, keeps intermediates in work-dir, then verifies all
+# trees.
+[doc("dice a manifest's documents into volumes")]
 dice-docs manifest src work:
     @just docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
 
-[doc("write a diced tree (the directory holding its entry-point.md) back out as one markdown document at monolith, which must not exist, then check it dices back to the same tree")]
+# <tree> is the directory holding its entry-point.md; <monolith> must not exist. Then checks the
+# monolith dices back to the same tree.
+[doc("write a diced tree back out as one document")]
 undice tree monolith:
     @just docdicer undice "{{tree}}" "{{monolith}}"
 
-[doc("check every relative link and #anchor in PROJECT_DOCS, docs and the top-level *.md files, then that every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exit 1 on a broken link or an orphan")]
+# Checks every relative link and #anchor in PROJECT_DOCS and the top-level *.md files, then that
+# every PROJECT_DOCS document is listed by its parent and reachable from its entry point; exits 1 on
+# a broken link or an orphan.
+[doc("check doc links and the PROJECT_DOCS tree")]
 check-links:
-  @just docdicer check-links PROJECT_DOCS docs *.md
+  @just docdicer check-links PROJECT_DOCS *.md
   @just docdicer check-tree PROJECT_DOCS
-
-import? ".claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just"
 
 # Reports and never gates: a difference between two slots is the expected
 # outcome of doing work, so differences exit zero. Only a comparison that could
@@ -154,25 +183,34 @@ import? ".claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.ju
 # (devtools/render_diff.py states the rules). A copied file's `!INSTALLED!` banner
 # is replaced the same way. Two files are the same when that text is identical. The
 # output keeps `diff -rq`'s two line forms.
-[doc("[dev] diff two rendered slots under rendered/ (a defaults to reference-claude, b defaults to latest) by text, each file's banner block replaced by one constant line — reports differences and exits zero; exits non-zero only when the comparison could not be made")]
+[doc("[dev] diff two rendered slots by text")]
 render-diff a="reference-claude" b="latest":
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
-[doc("[dev] run tooling python tests and the markdown link check: no argument runs all four (devpro + dupe_sweep pytest, then docs: just check-links with its defaults, then wheel: just check-wheel); a surface argument (devpro, dupe_sweep, docs, wheel) runs only that one; further arguments, never given to docs or wheel, forward to pytest: a flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to it, and a path outside the surface's directory is refused")]
+# No argument runs all four surfaces: devpro and dupe_sweep pytest, then docs (just check-links
+# with its defaults), then wheel (just check-wheel). A surface argument (devpro, dupe_sweep, docs,
+# wheel) runs only that one. Further arguments, never given to docs or wheel, forward to pytest: a
+# flag (-k, -x, -q, ...) keeps the surface directory, a file or file::test path narrows the run to
+# it, and a path outside the surface's directory is refused.
+[doc("[dev] run the tests, or one surface's")]
 test surface="" *pytest_args: _venv
     @PROJECT_ROOT="{{PROJECT_ROOT}}" VENV_PYTHON={{VENV_PYTHON}} JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test.sh "$@"
 
 FLAKE8_IGNORE := "E122,E201,E202,E203,E225,E226,E228,E261,E265,E302,E303,E501,E704,E731,W291,W293,W391,W503"
-[doc("[dev] black-format, isort, flake8 the generator (devpro), the tests and devtools, or the given path(s) in place of all of them")]
+# Formats the generator (devpro), the tests and devtools, or the given path(s) in place of all of
+# them.
+[doc("[dev] black, isort and flake8 the python")]
 format-python *paths: _venv
     @VENV_PYTHON={{VENV_PYTHON}} FLAKE8_IGNORE="{{FLAKE8_IGNORE}}" ./devtools/scripts/format-python.sh "$@"
 
 # Emits candidates, never verdicts, and exits zero with findings: whether two sites are one idea is
 # a judgment, and a gate here would be claiming it.
-[doc("[dev] list one-idea-two-places candidates across the owned python trees (the corpus devtools/dupe_sweep/python_corpus.py names) — structural twins, repeated constants, repeated docstring and comment rules; trailing args forward to the sweep (--rev, --min-words, --coverage)")]
+# Sweeps the owned python trees (the corpus devtools/dupe_sweep/python_corpus.py names) for
+# structural twins, repeated constants, and repeated docstring and comment rules; trailing args
+# forward to the sweep (--rev, --min-words, --coverage).
+[doc("[dev] list one-idea-two-places candidates")]
 sweep-python *args:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.dupe_sweep python "$@"
-
 
 # test-changed: run only the test surfaces a change touches.
 #
@@ -180,7 +218,7 @@ sweep-python *args:
 # untracked, both sides of a rename) plus, when <base> is given, everything
 # committed since it (`git diff base...HEAD`). Each path selects the surface
 # its prefix names in TEST_SURFACE_MAP below; a path matching no row
-# (ROADMAP_PLANS/, scratch) selects nothing. There are no cross-surface
+# (ROADMAP_DESIGNS/, scratch) selects nothing. There are no cross-surface
 # "just in case" rows. The one exception is the runner itself: `justfile`,
 # `python.just` and `devtools/scripts/` — where every recipe body lives, inline or scripted — select
 # every surface, because a change to the `test` recipe, or to the script it
@@ -190,7 +228,7 @@ sweep-python *args:
 # One row per line: "<path prefix, or exact file> <surface | ALL>". A prefix
 # ending in `/` matches everything under it; one starting `*` is a glob over
 # top-level file names. `docs` is the link check: the documents it reads
-# (PROJECT_DOCS/, docs/, top-level *.md). `wheel` is
+# (PROJECT_DOCS/, top-level *.md, and images/, which README.md shows). `wheel` is
 # check-wheel: the build configuration it builds from, and the package tree
 # whose data it checks.
 TEST_SURFACE_MAP := "
@@ -201,24 +239,58 @@ devtools/render_diff.py devpro
 devtools/ dupe_sweep
 PROJECT_DOCS/ docs
 *.md docs
-docs/ docs
+images/ docs
 pyproject.toml wheel
 justfile ALL
 python.just ALL
 devtools/scripts/ ALL
 "
 
-[doc("[dev] run only the test surfaces a change touches: uncommitted changes plus, with <base>, commits since <base>; prints each chosen surface and the paths that chose it, and runs none when nothing maps to a surface")]
+# Prints each chosen surface and the paths that chose it, and runs none when nothing maps to a
+# surface.
+[doc("[dev] run only the tests a change touches")]
 test-changed base="":
     @PROJECT_ROOT="{{PROJECT_ROOT}}" TEST_SURFACE_MAP="{{TEST_SURFACE_MAP}}" JUST="{{just_executable()}}" JUSTFILE="{{justfile()}}" ./devtools/scripts/test-changed.sh "$@"
 
-# This repository's own install: the devpro plugin, once per harness. The last
-# run writes the agents-file block, so claude runs last: it is the harness used most here.
-[private]
-install-agents-here:
-    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --plugin=devpro --harness=opencode
-    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --plugin=devpro --harness=claude
-
-[doc("[dev] list each definition-body unit that joins a clauses.* interpolation to the module's own text, one line per unit naming its first clause's line, then the count; given paths, only those definition modules")]
+# Lists each definition-body unit that joins a clauses.* interpolation to the module's own text,
+# one line per unit naming its first clause's line, then the count; given paths, only those
+# definition modules.
+[doc("[dev] list clauses.* join sites")]
 clause-join-sites *paths:
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.clause_join_sites "$@"
+
+[doc("[dev] install this checkout's devpro here")]
+agents:
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=opencode
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=claude
+
+
+# The tap clone's one source: its origin URL, which the clone and the remote
+# set-up both take, and the location its .gitignore entry names.
+HOSTED_TAP_DIR := "homebrew-tap"
+TAP_FORMULA := "devpro"
+[doc("set up the sibling Homebrew tap clone at homebrew-tap/ - can't be used directly from here (chicken and egg")]
+tap-repo:
+  @TAP_DIR="{{HOSTED_TAP_DIR}}" devtools/scripts/tap-repo.sh
+
+[doc("LIVE; NEEDS the tap clone, a pushed release: set the tap formula's v<version> tarball and sha256 and commit it there")]
+tap-update:
+  @just --justfile "{{HOSTED_TAP_DIR}}/scripts/justfile" TAP_FORMULA={{TAP_FORMULA}} tap-update
+
+[doc("LIVE; NEEDS brew and the tap clone; DESTRUCTIVE to this machine's brew install of devpro: reinstall it from a scratch formula over a tarball of the working tree's tracked files")]
+tap-local:
+  @just --justfile "{{HOSTED_TAP_DIR}}/scripts/justfile" TAP_FORMULA={{TAP_FORMULA}} tap-local
+
+[doc("clone the docdicer project as a hosted repo")]
+docdicer-repo:
+    @[[ -d docdicer ]] || git clone git@github.com:benn-herrera/docdicer
+    @cd docdicer && { [[ -d .claude ]] || ln -vs ../.claude .; }
+    @cd docdicer && { [[ -d .opencode ]] || ln -vs ../.opencode .; }
+
+dev-dd *args: docdicer-repo
+  PYTHONPATH="{{PROJECT_ROOT}}/docdicer" python3 -m docdicer {{args}}
+
+kanban: docdicer-repo
+  @just dev-dd kanban
+
+import? ".claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just"

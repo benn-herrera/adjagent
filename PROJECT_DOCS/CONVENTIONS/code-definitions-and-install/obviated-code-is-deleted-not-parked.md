@@ -6,5 +6,4 @@ second implementation nobody calls. Git holds it, and a commit message naming wh
 a better record than a dead module. The cost of keeping it is paid by everyone after: a reader
 can't tell live from vestigial, an agent reads it as current, and whoever reads the module next
 inherits the job of classifying a name nothing refers to. A plan for rebuilding it later is cheap
-and belongs in `ROADMAP_PLANS/`; the code itself is not.
-
+and belongs in `ROADMAP_DESIGNS/`; the code itself is not.

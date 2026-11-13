@@ -2,8 +2,7 @@
 
 An install renders every definition its plugin ships — for a skill, its skill entry file and then
 each supporting file it lists — and every harness-rendered file whose owner ships (the plugin
-manifest and `.mcp.json` under claude and mage, `registry.json` under opencode), bar a definition the
-harness declares it renders nothing for (`Harness.omits`), replaces
+manifest and `.mcp.json` under claude and mage, `registry.json` under opencode), replaces
 the destination of each `SHIPPED_PACKAGES` row whose owner ships whole with a copy — a `.venv` directly
 below it kept — copies each
 harness resource the installing harness ships into the install directory as it stands — bar a

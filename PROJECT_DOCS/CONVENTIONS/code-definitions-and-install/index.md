@@ -20,5 +20,6 @@ Contents:
 - [Install parameters ship with their flags](install-parameters-ship-with-their-flags.md)
 - [Agents file changes explicitly](agents-file-changes-explicitly.md)
 - [Version has one home](version-has-one-home.md)
+- [Docdicer pin is a release](docdicer-pin-is-a-release.md)
 - [Annotations on the floor](annotations-on-the-floor.md)
 - [Obviated code is deleted, not parked](obviated-code-is-deleted-not-parked.md)

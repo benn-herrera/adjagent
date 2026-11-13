@@ -16,7 +16,7 @@ Must-see:
 
 @PROJECT_DOCS/CONVENTIONS/entry-point.md
 
- <!-- vvv-devpro devpro 0.17.0 do not edit at or between marker lines. devpro-vvv -->
+ <!-- vvv-devpro devpro 0.17.1 do not edit at or between marker lines. devpro-vvv -->
  
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —
