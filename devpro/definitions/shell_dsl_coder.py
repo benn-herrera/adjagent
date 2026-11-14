@@ -40,10 +40,6 @@ unset variables are errors.
 
 {clauses.SHELL_HOUSE_STYLE}
 
-- Naked names in string expressions are footguns: brace them wherever the syntax permits, not just
-  where it currently matters.
-- `[[ ]]` gives way to `[ ]` only where the target shell genuinely cannot support it (the project
-  or the file states a need for another shell).
 - Quote every expansion unless unquoted is the point — then comment why. `"$@"` never `$*`; arrays
   for lists, never space-joined strings.
 - `printf '%s'` over `echo` for data (echo mangles flags/backslashes unportably).

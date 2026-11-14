@@ -23,8 +23,8 @@ devpro project root is the whole build configuration.
   `devpro --help` and `python3 -m devpro --help` print the same text.
 - **Offline build.** `just build` runs `python -m build --no-isolation` in `.venv` and writes the
   wheel and sdist to `dist/`, so it uses the venv's own setuptools, not a downloaded one. `.venv`'s
-  install line in `python.just` therefore pins `setuptools~=82.0.1` and `build~=1.4.4`, the last
-  releases that run on Python 3.9. The build makes no git check. A build also
+  install line in the justfile's `_venv` recipe therefore pins `setuptools~=82.0.1` and
+  `build~=1.4.4`, the last releases that run on Python 3.9. The build makes no git check. A build also
   writes `devpro.egg-info/` at the devpro project root, which `.gitignore` covers. The sdist is
   a byproduct of the build: SPEC.md, Package and Command names no sdist install source, and
   `check-wheel` checks only that the sdist exists.

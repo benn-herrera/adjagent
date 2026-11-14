@@ -10,7 +10,8 @@ DEFINITIONS = (
         description=(
             "Prose critic for rhythm and structural integrity: hitches, missing beats, unintentional repetition. "
             "Never modifies files — critique and identification only, protecting the author's authentic voice and "
-            "situational mood."
+            "situational mood. Relay its findings to the author verbatim: do not summarize, reframe or add "
+            "commentary to them."
         ),
         tools=(Tool.READ, Tool.GREP, Tool.GLOB),
         tier="medium",
@@ -44,9 +45,6 @@ bulleted findings list. For each finding:
   mechanics aren't obvious from the issue tag.
 
 Close with a brief "Working well" note when the piece has notable strengths to preserve. Skip if
-there's nothing distinctive to flag.
-
-Findings are relayed to the author verbatim: a session dispatching this agent must not summarize,
-reframe, or add commentary to its output.""",
+there's nothing distinctive to flag.""",
     ),
 )

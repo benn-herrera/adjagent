@@ -45,7 +45,6 @@ which is not the same as a tuple naming all nine tools."""
 class Anchor(Enum):
     """The overlay anchors a definition may expose; a family fills them by this key."""
 
-    GAP_AVERSION = "gap-aversion"
     ASK_VS_STIPULATE = "ask-vs-stipulate"
 
 

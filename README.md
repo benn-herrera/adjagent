@@ -38,13 +38,8 @@ in just over 16K lines of runtime code, including vision tower support and an Op
 
 ## Requirements and Supported Platforms
 
-- Harnesses: claude, opencode, or mage (so far). pi and codex are doable but aren't my daily drivers
+- Harness: claude, opencode, or mage; `--harness` takes these three names.
 - Homebrew (macOS or Linux), to install devpro.
-- `git` on `PATH`.
-- `just` 1.33.0 or later, where the project's runner is a justfile: a claude or opencode install
-  writes include lines into it.
-- `perl` on `PATH` with core `JSON::PP`, for the claude guardrail hook. Without them the claude install
-  skips the hook, says why, and installs everything else.
 
 ## Quick Start Guide
 
@@ -57,27 +52,34 @@ brew install benn-herrera/tap/devpro
 devpro install .
 ```
 
-Add the installed trees to the project's `.gitignore`:
+The install takes the harness from the `.claude/` or `.opencode/` directory inside the target.
+Where the project holds neither, or holds both, it refuses and writes nothing; `--harness=claude`
+or `--harness=opencode` on the install line settles either case.
+
+Add the installed tree, the agent scratch space and the agents file's backup to the project's
+`.gitignore`:
 
 ```text
 .claude/
 # agent scratch space
 .claude-temp/
-__pycache__/
+# the agents file's rolling backup
+backup.AGENTS.md
 ```
 
-For opencode, use `.opencode/` and `.opencode-temp/` in place of the two claude entries.
+For opencode, use `.opencode/` and `.opencode-temp/` in place of `.claude/` and `.claude-temp/`.
 
-The install detects your harness by the presence of a `.claude` or `.opencode` directory. It also
-adds include lines to the project's `justfile` or `Makefile` (a project with neither gets a new
-`Makefile`) for the runner files it installs, and writes the project's `AGENTS.md` (under claude, also
-a one-line `CLAUDE.md` redirect to it). Commit the edited `justfile` or `Makefile` and the agents
-file; the installed `.claude/` or `.opencode/` tree is not committed, which is why it is in `.gitignore`.
+The install also adds include lines to the project's `justfile` or `Makefile` (a project with
+neither gets a new `Makefile`) for the runner files it installs, and settles the project's agents
+file in one of three ways:
 
-In a project the harness has never opened, create `.claude/` (or `.opencode/`) first, or add
-`--harness=claude` (or `--harness=opencode`) to the install line.
+- `AGENTS.md`, holding the devpro block;
+- under claude, `AGENTS.md` and the one-line `CLAUDE.md` redirect to it;
+- nothing, where the global agents file already holds the block, or where a hand-written
+  `CLAUDE.md` stands where the redirect would go.
 
-To update, run `brew upgrade devpro`, then the same install line, with the same flags.
+A hand-written `CLAUDE.md` refuses the install with exit 2 and nothing written: moving its content
+into `AGENTS.md` is yours to do.
 
 ### Mage
 
@@ -90,9 +92,9 @@ devpro install ~/Mage/Skills --plugin=devpro --harness=mage
 ```
 
 This writes `~/Mage/Skills/devpro/`. `--plugin=kbase` writes `~/Mage/Skills/kbase/`, the
-knowledge-base plugin; restart Mage after installing it.
-
-To update, run `brew upgrade devpro`, then the same `devpro install` line.
+knowledge-base plugin. That plugin drives the `kbase` executable, which no devpro install provides
+or checks: on macOS and Linux, install it with `brew install benn-herrera/tap/kbase` (0.11.1 or
+later); native Windows is unsupported for the plugin. Restart Mage after installing it.
 
 ## Next: ask your agent
 
@@ -100,30 +102,22 @@ Start your coding harness, or, if a session was already open during the install,
 `/reload-plugins` or restart under Claude Code, restart under opencode, and, after installing the
 kbase plugin, restart Mage. Then ask the session agent to load the `guide` skill: `devpro:guide` under
 claude and mage, `devpro-guide` under opencode. It starts a design, explains how the development
-process runs, shows the board, and installs, updates, inspects or changes what you just installed.
+process runs, tells you where your work stands, and shows the board. It also installs, updates,
+inspects or changes what you just installed, and covers a file carrying devpro's generated banner
+that seems to need a change.
+
+## Updating
+
+To update, run `brew upgrade devpro`, then the same install line with `--dry-run` added to preview
+it, then without to apply it.
 
 ## Third Party Acknowledgements
 
-- **kanban from markdown** - idea from Jason Coleman (https://github.com/sangrail)
-- **pytest** (the pytest developers, MIT): runs the test suite; installed into this repository's
-  `.venv` by `just test`.
-- **black** (Łukasz Langa and contributors, MIT): formats the Python source; installed into `.venv`
-  by `just test` and run by `just format-python`.
-- **isort** (Timothy Crosley and contributors, MIT): sorts Python imports; installed and run the same
-  way.
-- **flake8** (Tarek Ziadé and contributors, Python Code Quality Authority, MIT): lints the Python
-  source; installed and run the same way.
-- **setuptools** (Python Packaging Authority, MIT): the build backend `pyproject.toml` names;
-  installed into `.venv`.
-- **build** (Python Packaging Authority, MIT): the frontend `just build` runs; installed into
-  `.venv`.
-- **docdicer** (Benn Herrera, MIT): the link and tree checks behind `just check-links`, installed into
-  `.venv` from its git tag. The installed `tools/docdicer` script installs it from the same tag
-  into a venv beside the script when you ask it to.
-- **@opencode/plugin** (the opencode project, MIT): the module the opencode plugin
-  entry, `index.ts`, imports `Plugin` from to register the plugin; opencode supplies it, and nothing
-  here bundles it.
-- **perl** (Larry Wall and the Perl 5 porters, Artistic License or GPL, at your choice): runs the
-  claude guardrail hook at session time, and the guardrail's tests; a host program you install.
-- **bun** (Oven, MIT): runs the opencode guardrail's and plugin entry's TypeScript cases in
-  `just test`; a host program you install.
+Credit to Jason Coleman (https://github.com/sangrail) for the kanban-from-markdown idea
+
+- **pytest** (the pytest developers, MIT): Python test runner
+- **black** (Łukasz Langa and contributors, MIT): Python formatter
+- **isort** (Timothy Crosley and contributors, MIT): Python import sorter
+- **flake8** (Tarek Ziadé and contributors, Python Code Quality Authority, MIT): Python linter
+- **docdicer** (Benn Herrera, MIT): context-saving reformatter and kanban server
+- **kbase** (Benn Herrera, MIT): the knowledge-base program and MCP server the `kbase` plugin drives

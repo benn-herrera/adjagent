@@ -1,4 +1,4 @@
-// !INSTALLED! from devpro/harnesses/resources/ — do not edit here: request changes from the devpro project
+// !INSTALLED! from devpro/harnesses/resources/opencode/guardrail.ts — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 //
 // opencode v2.2.6 plugin module
 // Prevents in-place edits using shell tools, redirects model to use EditTool and WriteTool

@@ -2,7 +2,7 @@
 
 One `kbase mcp` server per module, under a scratch `HOME`, is asked over stdio for `initialize`,
 `tools/list`, `resources/list` and a `resources/read` of every `kbase://help/<name>` text, and nothing
-else; with `--project-dir-required` it locates no project, so it reads no KB. kbase 0.11.0 offers no
+else; with `--project-dir-required` it locates no project, so it reads no KB. kbase offers no
 resource templates, so every `kbase://` resource is in `resources/list`. The installed kbase must be at
 least `KBASE_MIN_VERSION`.
 

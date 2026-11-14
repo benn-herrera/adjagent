@@ -5,13 +5,13 @@ directory and file names prose spells, the tool spellings, the model shape it
 accepts and the words that render no model at all, whether a map flag's bare
 value names the whole map, where a definition's metadata goes — the frontmatter
 lines it reads, or the registry it reads them all from — the rule a dispatched
-agent follows when running recipes in its shell, the files it
-renders beside the definitions, the resource that registers the plugin where one
-does, the definitions it renders nothing for, the prefix a definition's name
-takes where other definition text names it, the path below its harness directory the set is written into, the
-guardrail hook it registers, where it has one. It holds no tier map, no family and
-no knowledge of any one definition. Its emitter only lays out lines; the
-renderer maps tools to spellings and computes the governed keys.
+agent follows when running recipes in its shell, the files it renders beside the
+definitions, the resource that registers the plugin where one does, the prefix a
+definition's name takes where other definition text names it, the path below its
+harness directory the set is written into, the guardrail hook it registers, where
+it has one. It holds no tier map, no family and no knowledge of any one
+definition. Its emitter only lays out lines; the renderer maps tools to spellings
+and computes the governed keys.
 
 The values that vary by plugin are templates over `{plugin}`, filled once by `Harness.bound`; a harness
 takes the plugin's name as a string and knows nothing of its members. The manifest every

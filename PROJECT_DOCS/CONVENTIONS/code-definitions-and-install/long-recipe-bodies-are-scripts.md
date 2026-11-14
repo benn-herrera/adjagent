@@ -1,9 +1,10 @@
 ### Long recipe bodies are scripts
 
 A recipe body of up to three command lines stays in the justfile; moving it to a script buys only
-indirection. A recipe in a single-purpose runner file the justfile imports, such as `python.just`'s
-`_venv`, is already broken out of the justfile and stays where it is, whatever its length. A longer
-body is `devtools/scripts/<recipe-name>.sh`, and the justfile line hands it its variables as an env
+indirection. A recipe that bootstraps the venv the other recipes run from stays in the runner file,
+whatever its length, and so does a recipe in a runner file the install delivers whole. Splitting one
+contained runner file into a set of scripts is not what this rule is for. A longer body is
+`devtools/scripts/<recipe-name>.sh`, and the justfile line hands it its variables as an env
 prefix. The recipe keeps its name, parameters, `[doc]` string and dependency list; its body is one
 line running the script, with each variable the script reads passed as `NAME="{{NAME}}"` ahead of
 the command — `just` variables are not exported, so a script reads nothing it was not handed. The

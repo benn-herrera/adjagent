@@ -255,9 +255,12 @@ The terms (*Terms*): the session asks for one when a rule first needs it and the
 set it, and records the answer as a line in CONVENTIONS.md. The one every project meets is the
 checkpoint gate, the runner targets run before each commit of finished work: answer "just test",
 and CONVENTIONS.md gets `checkpoint gate: just test`. An unanswered one is written as
-`TODO: checkpoint gate:`, and the session asks again when it next needs it. The user may also set
-the step-down model (default `{clauses.STEP_DOWN_MODEL}`), the plan size limit (default {clauses.PLAN_SIZE_LIMIT_DEFAULT}) and
-the periodic review interval (default {clauses.PERIODIC_REVIEW_INTERVAL_DEFAULT}), each the same way.
+`TODO: checkpoint gate:`, and the session asks again when it next needs it.
+
+The user may also set the step-down model (default `{clauses.STEP_DOWN_MODEL}`).
+
+The plan size limit (default {clauses.PLAN_SIZE_LIMIT_DEFAULT}) and the periodic review interval
+(default {clauses.PERIODIC_REVIEW_INTERVAL_DEFAULT}) are set the same way.
 
 ## A request becomes a design
 
@@ -405,18 +408,27 @@ the periodic review interval (default {clauses.PERIODIC_REVIEW_INTERVAL_DEFAULT}
 
 ## The periodic review
 
-*Periodic review*; `references/project-documents.md`, *Full review*.
+*Periodic review*; `references/project-documents.md`, *Full review*. Where the post-plan review
+above follows one plan, this one looks at what many plans have left behind.
 
 - **Due** once the periodic review interval's count of plans (this page's *Getting started*) has
-  landed since the last periodic review, counted from the landing commits' messages.
+  landed since the last periodic review, counted from the landing commits' messages. A review the
+  user directs over accumulated work is this same review.
 - **What it holds up:** when due, the next plan made active is the periodic review, before any
   other. A request can still be designed; its plan waits.
 - **What it holds:** the full review of the project documents, skipped where none changed
-  substantively: each changed document read whole against the documents above it and the code. The
-  user accepts the term list first where the review revises the set, and decides each contradiction
-  and each piece pushed past its THESIS.md "it is not".
-- **Then** its findings go in `ACTIVE_PLAN_REVIEW.md` and are fixed in its burndown; the user
-  approves it as any plan, and its landing commit says it lands a periodic review.
+  substantively: each changed document read whole against the documents above it and the code. By
+  default eight seats staff it, two of each of four kinds: an architect, a prompt engineer, a
+  technical writer and the project's coder. Each seat judges only what changed since the review
+  last ran and reopens nothing settled; the skill's *Periodic review* gives each pair's question
+  and its two documents. The seat kinds are fixed, where the post-plan review's reviewers follow
+  the domains its plan changed. The user accepts the term list first where the review revises the
+  set, and decides each contradiction and each piece pushed past its THESIS.md "it is not".
+- **Then** its findings go in `ACTIVE_PLAN_REVIEW.md`, one ID per defect however many seats
+  reported it, and its burndown cites that ID and groups them by root cause rather than one item
+  per finding. The session brings a plan and never a design — the review produces findings, not
+  a contract change — so it goes straight to a plan (*Lighter process*), which the user approves
+  as any other; its landing commit says it lands a periodic review.
 
 ## The board
 

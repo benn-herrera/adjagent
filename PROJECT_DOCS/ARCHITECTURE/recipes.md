@@ -1,16 +1,19 @@
 ## Recipes
 
 `just install <target> [--plugin=NAME]`, `just agents`, `just render`,
-`just retake-reference`, `just install-agents-file <dir> [--plugin=NAME] [--harness NAME] [--dry-run]`,
+`just retake-reference`, `just install-agents-file <dir> [--plugin=NAME] [--harness=NAME] [--dry-run]`,
 `just tag` and `just check-wheel` reach `python3 -m devpro`: `install`,
 `agents` and `install-agents-file` each run the verb directly in
 one line; `install` takes `target *args` and `install-agents-file` takes `dir *args`,
-and each forwards all of it as `"$@"`, so `--plugin=NAME`, `--harness NAME` and `--dry-run` all
+and each forwards all of it as `"$@"`, so `--plugin=NAME`, `--harness=NAME` and `--dry-run` all
 reach the verb, which defaults the plugin to `context.DEFAULT_PLUGIN`;
-`agents` installs the devpro plugin with `--plugin=devpro`; `render` and
-`retake-reference` go through the private `_render-slot.sh`, which calls
-`python3 -m devpro install <slot>/<plugin> --plugin=<plugin>` with
-`--subdir=` once per plugin, into `<slot>/<plugin>/`, and through the private
+`agents` installs the devpro plugin into this checkout once per nested harness, taking the default
+plugin `context.DEFAULT_PLUGIN` names — never passing `--plugin` — so the two lines are
+`--harness=claude` and `--harness=opencode`;
+`render` and `retake-reference` go through the private `_render-slot.sh`, which calls
+`python3 -m devpro install <slot>/<plugin> --plugin=<plugin>` with `--subdir=` once per plugin,
+into `<slot>/<plugin>/`, where a nested plugin's install also writes the project's `AGENTS.md` and,
+under claude, the `CLAUDE.md` redirect beside it (Agents File, Placement), and through the private
 `render-agents-file HARNESS OUT [PLUGIN]` script, which may be an
 earlier revision's copy run inside that revision's worktree, where that worktree's own justfile
 supplies `GEN` and the worktree holds the package `GEN` names. Its third positional, the plugin,
@@ -35,9 +38,14 @@ CONVENTIONS.md states where the version is written down, and the order a bump ta
 checkout side of its install comparison, and runs the `devpro` console script only from its
 throwaway venv. Packaging states both.
 
-**Toolchain.** This repository's justfile needs `just` 1.27.0 or later, the first release with the
-`[doc]` recipe attribute, and runs its recipes under `bash`. That is not the floor a consuming
-project needs, which is SPEC.md, Guide and README's 1.33.0 for the `import?` include line. The private `_venv` recipe creates `.venv`
+**Toolchain.** This repository's justfile needs `just` 1.33.0 or later: its `import?` line is that
+release's, and the `[doc]` recipe attribute it also uses arrived in 1.27.0. It runs its recipes under
+`bash`. A consuming project's floor is the same 1.33.0, for the `import?` of the include line
+(SPEC.md, Guide and README). That import is the install's own snippet,
+`.claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just`, so this checkout needs
+one `just agents` run before its docdicer recipes exist: until it has run, the `docs` surface —
+`just check-links`, and so `just test` and `just test-changed` on any document — fails with
+`Does not contain recipe 'docdicer'`. The private `_venv` recipe creates `.venv`
 where its python is absent. On macOS it makes it from `/usr/bin/python3` where present, the Xcode
 command-line tools' Python 3.9.6, so the suite there runs on the Python 3.9 floor. It installs the
 pinned tools with pip, so the first run needs the network. The suite needs `bun`, `perl` and

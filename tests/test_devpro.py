@@ -94,6 +94,7 @@ from tests._structure import (
     check_source,
     check_structure,
     clause_graph,
+    kbase_skill_output_paths,
     repeated_clause_reaches,
 )
 
@@ -502,16 +503,7 @@ def test_the_opencode_registry_matches_the_render(plugin: Plugin, servers: set[s
 def test_render_all_emits_every_file_of_a_shipped_skill_and_the_plugin_drops_a_whole_definition() -> None:
     shipping = {path for path, _ in render_all(dataclasses.replace(_CLAUDE_RENDER, plugin=KBASE))}
     without = {path for path, _ in render_all(_CLAUDE_RENDER)}
-    skill = {
-        PurePosixPath("skills/kbase/SKILL.md"),
-        PurePosixPath("skills/kbase/references/reading.md"),
-        PurePosixPath("skills/kbase/references/building.md"),
-        PurePosixPath("skills/kbase/references/scoring.md"),
-        PurePosixPath("skills/kbase/references/maintaining.md"),
-        PurePosixPath("skills/kbase/references/scoring-system.md"),
-        PurePosixPath("skills/kbase/references/installing.md"),
-    }
-    assert skill <= shipping
+    assert set(kbase_skill_output_paths()) <= shipping
     assert not any(path.parts[:2] == ("skills", "kbase") for path in without)
 
 
@@ -658,7 +650,9 @@ def test_a_harness_display_name_that_is_not_lowercase_is_refused() -> None:
         dataclasses.replace(CLAUDE, display_name="Claude Code")
 
 
-@pytest.mark.parametrize("placeholder", ["@!hrn.agents-file!@", "@!hrn-nonesuch!@", "@!fam-gap!@", "@!gap-aversion!@"])
+@pytest.mark.parametrize(
+    "placeholder", ["@!hrn.agents-file!@", "@!hrn-nonesuch!@", "@!fam-gap!@", "@!ask-vs-stipulate!@"]
+)
 def test_an_unknown_placeholder_is_refused_at_render(placeholder: str) -> None:
     defn = Definition(name="probe", kind=Kind.COMMAND, body=f"before {placeholder} after")
     ctx = Render(harness=CLAUDE, plugin=DEVPRO, family=CLAUDE_FAMILY, tier_map=dict(CLAUDE_FAMILY.tiers))
@@ -843,7 +837,7 @@ def test_a_paragraph_holding_an_optional_harness_text_the_harness_supplies_nothi
 _TUNED = Family(
     "tuned",
     {"highest": "big", "high": "big", "medium": "mid", "low": "small", "lowest": "small"},
-    overlays={Anchor.GAP_AVERSION: Overlay(text="family-wide", members={"mid": "for mid"})},
+    overlays={Anchor.ASK_VS_STIPULATE: Overlay(text="family-wide", members={"mid": "for mid"})},
 )
 
 
@@ -853,21 +847,17 @@ def _with_family_text(*, family: Family, tier: str, body: str) -> str:
     return render_definition(defn, ctx, module="devpro.definitions.probe").split("---\n\n", 1)[1]
 
 
-_GAP = hole(Anchor.GAP_AVERSION)
-_ASK = hole(Anchor.ASK_VS_STIPULATE)
+_OVERLAY = hole(Anchor.ASK_VS_STIPULATE)
 
 
 @pytest.mark.parametrize(
     "family, tier, body, rendered",
     [
-        (_TUNED, "medium", f"before\n\n{_GAP}\n\nafter", "before\n\nfor mid\n\nafter\n"),
-        (_TUNED, "high", f"before\n\n{_GAP}\n\nafter", "before\n\nfamily-wide\n\nafter\n"),
-        (_TUNED, "medium", f"before\n\n{_ASK}\n\nafter", "before\n\nafter\n"),
-        (CLAUDE_FAMILY, "medium", f"before\n\n{_GAP}\n\nafter", "before\n\nafter\n"),
-        (CLAUDE_FAMILY, "medium", f"{_GAP}\n\nafter", "after\n"),
-        (CLAUDE_FAMILY, "medium", f"before\n\n{_GAP}", "before\n"),
-        (CLAUDE_FAMILY, "medium", f"before\n\n{_GAP}\n\n{_ASK}\n\nafter", "before\n\nafter\n"),
-        (_TUNED, "medium", f"before\n\n{_GAP}\n\n{_ASK}\n\nafter", "before\n\nfor mid\n\nafter\n"),
+        (_TUNED, "medium", f"before\n\n{_OVERLAY}\n\nafter", "before\n\nfor mid\n\nafter\n"),
+        (_TUNED, "high", f"before\n\n{_OVERLAY}\n\nafter", "before\n\nfamily-wide\n\nafter\n"),
+        (CLAUDE_FAMILY, "medium", f"before\n\n{_OVERLAY}\n\nafter", "before\n\nafter\n"),
+        (CLAUDE_FAMILY, "medium", f"{_OVERLAY}\n\nafter", "after\n"),
+        (CLAUDE_FAMILY, "medium", f"before\n\n{_OVERLAY}", "before\n"),
     ],
 )
 def test_family_text_renders_the_seats_overlay_or_leaves_no_empty_paragraph(
@@ -883,7 +873,7 @@ _BAIT = hole(HarnessText.AGENTS_FILE)
 _BAITED_FAMILY = Family(
     "baited",
     {"highest": "big", "high": "big", "medium": f"mid{_BAIT}", "low": "small", "lowest": "small"},
-    overlays={Anchor.GAP_AVERSION: Overlay(text=f"overlay {_BAIT}")},
+    overlays={Anchor.ASK_VS_STIPULATE: Overlay(text=f"overlay {_BAIT}")},
 )
 
 
@@ -915,7 +905,7 @@ def _baited_optional_harness_text() -> tuple[Definition, Render, str]:
 
 
 def _baited_family_overlay() -> tuple[Definition, Render, str]:
-    defn = Definition(name="probe", kind=Kind.AGENT, description="a probe", tools=ALL, tier="high", body=_GAP)
+    defn = Definition(name="probe", kind=Kind.AGENT, description="a probe", tools=ALL, tier="high", body=_OVERLAY)
     ctx = Render(harness=CLAUDE, plugin=DEVPRO, family=_BAITED_FAMILY, tier_map=dict(_BAITED_FAMILY.tiers))
     return defn, ctx, f"overlay {_BAIT}"
 

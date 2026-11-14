@@ -11,10 +11,12 @@ A definition's **base text** is its untuned text. An **anchor** is a named place
 model family may add **tuning text**. Family-wide tuning text applies at every tier. Member-scoped
 tuning text applies only where the definition's tier resolves to one named member.
 
-Every rendering of the definitions in the deployed surfaces has four observable properties:
+Every rendering of the definitions in the deployed surfaces has five observable properties:
 
 - **Single-sourcing.** Text shared across two or more definitions has exactly one source. Wherever
   a rendered definition shares text with another, that text is identical.
+- **Kind membership.** Every definition of a kind carries the clauses that kind carries. An omission
+  is admitted only where the definition is named with its reason, and a stale exemption is a defect.
 - **No shared clause twice in one prompt.** No prompt delivers one shared clause, paragraph or list
   item twice. A prompt is one rendered definition taken together with the installed agents file, and
   for a command or skill also every rendered definition reached from it through `@<path>` lines,

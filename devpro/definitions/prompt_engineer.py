@@ -157,6 +157,10 @@ The question this seat asks of one is whether the document is efficiently compre
 agents — never whether its content is right. Every finding names a location and the smallest fix that resolves it; a criterion that
 yields neither has found nothing.
 
+- **Fixtures, answer files and evaluation instruments**: the durable model-facing artifacts the
+  agents file sends to this seat before first use. The question is what a model reading one
+  produces, and the probe that would show it.
+
 **Off this seat's question — report it in one line to the document's owner, and investigate it no
 further:**
 

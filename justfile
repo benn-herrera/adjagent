@@ -185,7 +185,7 @@ check-links:
 # output keeps `diff -rq`'s two line forms.
 [doc("[dev] diff two rendered slots by text")]
 render-diff a="reference-claude" b="latest":
-    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
+    @PYTHONPATH="{{PROJECT_ROOT}}" RENDERED_DIR="{{RENDERED_DIR}}" python3 -m devtools.render_diff "{{a}}" "{{b}}"
 
 # No argument runs all four surfaces: devpro and dupe_sweep pytest, then docs (just check-links
 # with its defaults), then wheel (just check-wheel). A surface argument (devpro, dupe_sweep, docs,
@@ -219,8 +219,8 @@ sweep-python *args:
 # committed since it (`git diff base...HEAD`). Each path selects the surface
 # its prefix names in TEST_SURFACE_MAP below; a path matching no row
 # (ROADMAP_DESIGNS/, scratch) selects nothing. There are no cross-surface
-# "just in case" rows. The one exception is the runner itself: `justfile`,
-# `python.just` and `devtools/scripts/` — where every recipe body lives, inline or scripted — select
+# "just in case" rows. The one exception is the runner itself: `justfile`
+# and `devtools/scripts/` — where every recipe body lives, inline or scripted — select
 # every surface, because a change to the `test` recipe, or to the script it
 # runs, cannot be validated by skipping it. With nothing selected, it says so
 # and exits zero without running tests. Git is only read.
@@ -242,7 +242,6 @@ PROJECT_DOCS/ docs
 images/ docs
 pyproject.toml wheel
 justfile ALL
-python.just ALL
 devtools/scripts/ ALL
 "
 
@@ -261,8 +260,8 @@ clause-join-sites *paths:
 
 [doc("[dev] install this checkout's devpro here")]
 agents:
-    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=opencode
     @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=claude
+    @PYTHONPATH="{{PROJECT_ROOT}}" python3 -m "{{GEN}}" install "{{PROJECT_ROOT}}" --harness=opencode
 
 
 # The tap clone's one source: its origin URL, which the clone and the remote
@@ -287,10 +286,29 @@ docdicer-repo:
     @cd docdicer && { [[ -d .claude ]] || ln -vs ../.claude .; }
     @cd docdicer && { [[ -d .opencode ]] || ln -vs ../.opencode .; }
 
+[doc("use hosted docdicer to perform a task")]
 dev-dd *args: docdicer-repo
-  PYTHONPATH="{{PROJECT_ROOT}}/docdicer" python3 -m docdicer {{args}}
+  PYTHONPATH="{{PROJECT_ROOT}}/docdicer" python3 -m docdicer "${@}"
 
-kanban: docdicer-repo
+[doc("serve the kanban board using hosted docdicer")]
+dev-kanban:
   @just dev-dd kanban
 
-import? ".claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just"
+[doc("run ACTIVE_PLAN format compliance check using hosted docdicer")]
+dev-check-plan:
+  @just dev-dd check-plan
+
+[doc("run ACTIVE_DESIGN final-form check using hosted docdicer")]
+dev-check-design:
+  @just dev-dd check-design
+
+[doc("run ROADMAP format compliance check using hosted docdicer")]
+dev-check-roadmap:
+  @just dev-dd check-roadmap
+
+[doc("check doc links and the PROJECT_DOCS tree using hosted docdicer")]
+dev-check-links:
+  @just dev-dd check-links PROJECT_DOCS *.md
+  @just dev-dd check-tree PROJECT_DOCS
+
+import? ".opencode/plugins/devpro/skills/docdicer/tools/runner-snippets/docdicer.just"

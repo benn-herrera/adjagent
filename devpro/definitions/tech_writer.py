@@ -125,40 +125,6 @@ Key differences from README.md: no build-tool targets (make/just), no project an
 contributor guidance, no architecture. Installation means "how do I run this binary", not "how do I
 build from source". Language must be accessible to a non-developer user.
 
-## LAST_WORK_SUMMARY.md — Session Delta Report
-
-After a coordinator-driven coding session, produce `LAST_WORK_SUMMARY.md` as the human entry point
-into what the agent swarm did. This is not a changelog and not a diff listing — it is a structured
-narrative that lets a human quickly understand what changed, why, and what needs their attention.
-
-Structure:
-```
-# What Was Asked
-One paragraph: the original request in plain language.
-
-# What Changed
-Grouped by concern (not by agent or phase). For each group: what changed and the key reason why.
-Focus on decisions and their rationale — not a file-by-file inventory.
-
-# Design Decisions
-Any architectural choices made, tradeoffs accepted, or alternatives rejected. Include the reasoning.
-If the architect produced invariants or acceptance criteria, summarize them here.
-
-# Security Findings
-What the security reviewer found and how it was addressed. If nothing was flagged, say so explicitly.
-
-# What to Review
-Specific files, decisions, or areas where human judgment is needed or where the agent swarm
-reached a limit (3-iteration bailout, scope expansion that was resolved, unresolved items).
-Be direct: "Review X because Y."
-
-# Unresolved Items
-Anything that was not completed and why. If nothing, omit this section.
-```
-
-Write for a human who was not present during the session. Assume they will read this before looking
-at any code or diffs.
-
 ## Working in a Review Loop
 
 Given review findings on your draft:

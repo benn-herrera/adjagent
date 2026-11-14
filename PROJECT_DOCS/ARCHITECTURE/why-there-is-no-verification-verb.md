@@ -14,13 +14,17 @@ and refuses a slug starting with `reference`. A slot holds one slot project per 
 project root, so beside the definitions the kbase slot project holds the kb-tools package, the harness's
 MCP entry and the runner include lines (the docdicer line for either plugin, the kb line for kbase; none in the mage slot, a harness-directory plugin), and each slot project
 holds, where the harness ships them, its own harness resources — the whole install product of both
-plugins, which is what makes a `render-diff` a comparison of both. A slot holds the claude hook
-script only where `perl` passes the probe on that machine, so a `render-diff` against a reference
-slot taken elsewhere can show it. Those four reference slots (`reference-claude`,
+plugins, which is what makes a `render-diff` a comparison of both. A nested plugin's install also
+writes the project's `AGENTS.md` at its slot project's root, and the `CLAUDE.md` redirect beside it
+under claude, because the render's scratch home holds no global block (Agents File, Placement).
+A slot holds the claude hook script only where `perl` passes the probe on that machine, so a
+`render-diff` against a reference slot taken elsewhere can show it. Those four reference slots
+(`reference-claude`,
 `reference-mage`, `reference-opencode`, and `reference-gemma`, the gemma-4 family, which fills the
 anchors) are the baseline, written only by `just retake-reference`, so a `render-diff` after a
 change reports that change and nothing the baseline already held. The plugin manifest (claude and
-mage) and every slot's agents-file begin marker carry `__version__`.
+mage), every slot's agents-file begin marker and every opencode slot's `registry.json` carry
+`__version__`.
 
 `tests/test_devpro.py` holds the package's properties: each kind's frontmatter against literal
 lines, a skill's directory — its two fields and a comment-bannered supporting file — against

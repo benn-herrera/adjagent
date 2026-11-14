@@ -2,7 +2,7 @@
 # Launcher for docdicer: on first use it builds a venv beside this script and installs the pinned
 # docdicer there, sending install output to stderr.
 
-VERSION=0.11.0
+VERSION=0.11.1
 PACKAGE="git+https://github.com/benn-herrera/docdicer@v${VERSION}"
 
 case "${0}" in
@@ -11,9 +11,14 @@ case "${0}" in
 esac
 
 venv=${dir}/.venv
-venv_bin=${venv}/bin
-venv_python=${venv_bin}/python
-venv_docdicer=${venv_bin}/docdicer
+case "$(uname)" in
+Darwin|Linux)
+  venv_bin=${venv}/bin; exe="";;
+*)
+  venv_bin=${venv}/Scripts; exe=".exe";;
+esac
+venv_python=${venv_bin}/python${exe}
+venv_docdicer=${venv_bin}/docdicer${exe}
 
 function remedy() {
   {
@@ -29,8 +34,8 @@ function remedy() {
 
 { [[ -x "${venv_python}" ]]  && "${venv_python}" -c '' 2> /dev/null; } || {
   command rm -rf "${venv}" && \
-  python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null && \
-  python3 -m venv --upgrade-deps "${venv}"
+  python3${exe} -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null && \
+  python3${exe} -m venv --upgrade-deps "${venv}"
 } >&2 || { command rm -rf "${venv}"; remedy; }
 [[ -x "${venv_docdicer}" && "$("${venv_docdicer}" --version)" == "${VERSION}" ]] || \
   "${venv_python}" -m pip install "${PACKAGE}" >&2 || exit 1

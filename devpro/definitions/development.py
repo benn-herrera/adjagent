@@ -117,9 +117,9 @@ bindable term that has no default and is unbound, ask the user for it then, thro
 ## Design
 
 - The {ACTIVE_DESIGN_TERM} is where a request becomes the design a plan is written from. Design comes
-  before a plan; going straight to the plan is a skip (*Skipping a step*). *Purpose:* requirements
-  are settled and reviewed before packages are cut from them, and the step between a request and a
-  plan has a known place.
+  before a plan; going straight to the plan is a skip (*Skipping a step*), but a periodic review's
+  plan is no skip: it has no design before it. *Purpose:* requirements are settled and reviewed
+  before packages are cut from them, and the step between a request and a plan has a known place.
 - After its level-1 heading, a design's final form states its intent: the outcomes and for whom, in
   a few sentences, with no history or rationale. The rest is the change it makes to SPEC.md,
   ARCHITECTURE.md and the code. `references/design.md` gives the opening's form and how the entries
@@ -293,6 +293,9 @@ approved can run as approved.
 - Before dispatching, state the agent count and model. More than one agent at once on the most
   capable model the installed agents name waits for a go that names the count. *Purpose:* a
   fan-out's cost shows only once it is spent.
+- Before the agents go, a dispatch of a plan package names the package and sets its `State` cell; the
+  value is the state *Plan status* defines for a dispatch. *Purpose:* the board is read mid-run for
+  what is under way, and a cell set at landing answers after the fact.
 - Read an agent's definition before briefing it, if you have not read it this session. *Purpose:*
   the brief adds to what the agent carries instead of contradicting or repeating it.
 - A brief adds the task's facts to the agent's definition; it never widens or replaces the question
@@ -396,8 +399,35 @@ approved can run as approved.
   full review of the project documents (`references/project-documents.md`, *Full review*). Each
   member judges only what changed since it last ran, and reopens nothing settled. *Purpose:* the
   review converges instead of re-litigating the whole project every round.
+- A review over work accumulated across several landed plans — the periodic review, or one the user
+  directs — has no design: it delivers findings, not a contract delta, so it goes straight to a plan,
+  and the plan is what the user approves. *Purpose:* a design written before the review runs would
+  state findings it has not produced.
+- The full review is staffed by a default panel of eight, two seats for each of
+  `{clauses.ref(name="architect")}`, `{clauses.ref(name="prompt-engineer")}`,
+  `{clauses.ref(name="tech-writer")}` and the project's coder agent
+  (`{clauses.ref(name="tech-writer")}` for a project with no code): a conformance seat, which judges
+  with that agent's own review criteria and reports a departure from THESIS.md, SPEC.md,
+  ARCHITECTURE.md or CONVENTIONS.md those criteria surface; and a consistency seat, which asks
+  whether the texts assert one thing and whether the code does what ARCHITECTURE.md says, and reports
+  each inconsistency it finds. *Purpose:* one seat given both questions answers the first and skims
+  the second, so the split is what buys the second question.
+- Each consistency seat owns its pairs and reads both sides whole:
+  - `{clauses.ref(name="prompt-engineer")}`: THESIS.md against SPEC.md;
+  - `{clauses.ref(name="architect")}`: SPEC.md against ARCHITECTURE.md;
+  - `{clauses.ref(name="tech-writer")}`: SPEC.md's coverage of `README.md` and the human-facing
+    guides against those texts;
+  - the project's coder agent: ARCHITECTURE.md against the code, and each CONVENTIONS.md rule
+    against how the repository behaves.
+
+  *Purpose:* one owner per pair keeps a single defect from being reported by three seats, and a text
+  read in part hides contradictions a whole read shows.
 - Its members' findings are its post-plan review, written to the {REVIEW_DOCUMENT_TERM}, and are
   fixed in its post-plan burndown, outside any release's hardening. *Purpose:* cleanup has a home that is not a release.
+- The findings take one ID per defect as they are written to the {REVIEW_DOCUMENT_TERM}: one entry
+  per defect, naming every seat that reported it. The burndown cites that ID and groups the findings
+  by root cause, not one item per finding. *Purpose:* a defect every seat can see is still one
+  defect, and one cause is fixed once.
 
 ## Pre-release
 
@@ -474,7 +504,8 @@ requirement means one thing only when its words do.
 - **THESIS.md**: what the project is, what each piece is most like, and where each piece stops. A
   passage stays only if it changes what an agent building the project decides; motivation written
   for a person goes in the README.
-- **SPEC.md**: outcomes the project's consumer observes, which any compliant implementation meets.
+- **SPEC.md**: outcomes the project's consumer observes, which any compliant implementation, in any
+  language, meets.
   It defines every term it uses and never sends its reader to another document for a requirement.
   It presents the one way every consumer runs the system; maintainer conveniences are
   ARCHITECTURE.md's or CONVENTIONS.md's.
@@ -589,6 +620,9 @@ Its faults, in the order they are settled, each fix resting on the ones before i
 
 *Purpose:* drift no diff shows is found on a trigger the process holds, not one someone must
 remember, and each review converges because it judges only text no full review has seen.
+
+Where the periodic review staffs it with the panel, the seats report and the order above sequences
+the fixes.
 
 ## Recovering a drifted set
 

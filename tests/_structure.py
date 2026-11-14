@@ -1,6 +1,8 @@
 """The source rules a definition module and the clauses module are written to, checked over their
 syntax trees. Nothing here runs at render: the suite asserts `check_structure` empty over the
-package, and proves each rule on a fixture.
+package, and proves each rule on a fixture. `kbase_skill_output_paths` is the one reader of the
+definitions themselves: a test needing a definition's paths takes them from the definition rather than
+spelling them a second time.
 
 A definition module holds imports, string constants and `DEFINITIONS`. Its constants are string
 literals or f-strings over its own constants. Its only calls are `Definition(...)` as a
@@ -16,7 +18,11 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from devpro.definitions import discover
+from devpro.install_base import KBASE_SKILL_DIR
+from devpro.vocabulary import Kind
 
 TEXT_MODULE = "clauses.py"
 CLAUSES = "clauses"
@@ -37,6 +43,18 @@ FUNCTION_RULE = (
 DEFINITION_TOP_RULE = "a definition module's top level holds only imports, string constants and DEFINITIONS"
 TEXT_TOP_RULE = "the text module's top level holds only string constants and text functions"
 IMPORT_RULE = "the clauses module is imported only as `from devpro import clauses`"
+
+
+def kbase_skill_output_paths() -> tuple[PurePosixPath, ...]:
+    """The kbase skill's rendered paths — its router and every reference beneath it — read off its
+    definition: one definition owns the directory, so a run keeps or drops the set whole."""
+    (definition,) = (
+        defn
+        for _, entries in discover()
+        for defn in entries
+        if defn.kind is Kind.SKILL and defn.output_path.parent == PurePosixPath(KBASE_SKILL_DIR)
+    )
+    return definition.output_paths
 
 
 def carried_clauses(source: str) -> dict[str, set[str]]:

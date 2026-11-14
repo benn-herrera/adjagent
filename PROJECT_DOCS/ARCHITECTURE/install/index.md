@@ -5,7 +5,7 @@ package copies and the harness resources are written to the places and names tha
 departs from a plain copy in four places.
 
 - It removes each file under the install directory's `agents/`, `commands/` and `skills/` that
-  would ship, is ours, and was not written by this run (Renders and copies). Removing, renaming and
+  is ours and was not written by this run (Renders and copies). Removing, renaming and
   relocating installed files is standard maintenance: an install removes the files of ours it no
   longer writes, so none accumulate.
 - It first runs into a scratch copy and compares the result. The dry run is the install itself, run

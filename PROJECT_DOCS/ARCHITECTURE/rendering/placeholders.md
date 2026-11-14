@@ -27,8 +27,8 @@ ships also reaches an opencode session, in its own paragraph of that reference) 
 reader is run, a whole bullet of the `development` skill's project-documents reference, naming
 the `development` skill's script), which a
 harness supplies as text or as the empty string, an empty one dropping the paragraph it stands in —
-and `@!fam-<anchor>!@` for an anchor, an `Anchor` member (`gap-aversion`, `ask-vs-stipulate`; only
-`ask-vs-stipulate` is exposed by a definition today).
+and `@!fam-<anchor>!@` for an anchor, an `Anchor` member (`ask-vs-stipulate`, the one a definition
+exposes today).
 A body of any kind may carry `@!plg-name!@` (`PluginText.NAME`, filled from `ctx.plugin.name`) where
 the text must spell the plugin's name, such as the `devpro install --plugin=<plugin>` command.
 The agents file alone also carries `@!agf-<key>!@` for its scope name and the package version. A

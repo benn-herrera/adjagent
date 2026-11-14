@@ -35,14 +35,14 @@ its origin: `"name": "<plugin>"` in the plugin manifest, `"command": "kbase"` in
 the file is read. Every other copied file — `tools/.gitignore` among them — and every harness
 resource is installed byte-verbatim.
 
-A definition body names no installed path below the harness directory. A script inside a skill's own
-directory is named relative to that directory (`tools/docdicer`). The project's scratch directory is
-named as the harness names it. A cross-definition reference renders with the plugin's namespace —
-under claude and mage `<plugin>:<name>` for an agent, a command or a skill, and under opencode
-`<plugin>-<name>`, the id the registry registers it under; a `kbase` MCP tool is named
-`mcp__plugin_kbase_kbase__<tool>` under claude, `mcp_kbase_<tool>` under mage and `kbase_<tool>`
-under opencode. A project's agents file is named `AGENTS.md` under claude and opencode, and `CLAUDE.md` under mage
-(SPEC.md, Agents File).
+A definition body names no installed path below the harness directory for a session to run or edit. A
+script inside a skill's own directory is named relative to that directory (`tools/docdicer`). The
+project's scratch directory is named as the harness names it. A cross-definition reference renders
+with the plugin's namespace — under claude and mage `<plugin>:<name>` for an agent, a command or a
+skill, and under opencode `<plugin>-<name>`, the id the registry registers it under; a `kbase` MCP
+tool is named `mcp__plugin_kbase_kbase__<tool>` under claude, `mcp_kbase_<tool>` under mage and
+`kbase_<tool>` under opencode. A project's agents file is named `AGENTS.md` under claude and
+opencode, and `CLAUDE.md` under mage (SPEC.md, Agents File).
 
 Under claude and mage every file directly under `agents/` matching `*.md` whose definition is an
 agent is a dispatchable agent definition, without exception. Its frontmatter carries the dispatch

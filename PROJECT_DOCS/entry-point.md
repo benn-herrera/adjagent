@@ -4,18 +4,17 @@ What this project is and why
 
 This thesis does not:
 
-- Design user-facing behaviors or outcomes, that belongs to SPEC
-- Put forth project mechanisms or code structure, that belongs to ARCHITECTURE
-- Dictate project-specific process, that belongs to CONVENTIONS
+- Design user-facing behaviors or outcomes — that belongs to SPEC
+- Put forth project mechanisms, coding languages, or code structure — that belongs to ARCHITECTURE
+- Dictate project-specific process — that belongs to CONVENTIONS
 
 ## devpro in plain terms
 
 devpro generates a set of agent, command and skill definitions — the instruction files a coding
 harness such as Claude Code, opencode, or a general harness application like Mage loads — and installs
-them into a project, or into a user's own harness setup. The definitions are written in Python as string
-constants; text several definitions share is written once and filled into each; the result is
-rendered per harness and per model family (a line of models, such as Claude's), and copied into the
-harness's directory. Each agent names a tier — the capability level it needs — and a tier map names
+them into a project, or into a user's own harness setup. Text several definitions share is written
+once and filled into each; the result is rendered per harness and per model family (a line of models,
+such as Claude's). Each agent names a tier — the capability level it needs — and a tier map names
 the model for each tier: the family's own, unless the harness or the operator supplies another.
 
 Almost all of that is assembled from well-known building blocks, used at small scale. Two results
@@ -29,11 +28,11 @@ the piece resembles and is not — the direction work on it must not drift.
 
 | devpro piece | Most like | It is not |
 |---|---|---|
-| Definitions | A Python module per agent, command or skill, holding string constants | A DSL or a prompt framework |
-| Shared text | Named string constants, referenced by name from the definitions that carry them | A macro engine |
-| Rendering | String formatting with named placeholders, filled per harness and model family and written to files | A template engine or a compiler |
+| Definitions | A plain text file per agent, command or skill, holding its whole text | A DSL or a prompt framework |
+| Shared text | A named span, referenced by name from the definitions that carry it | A macro engine |
+| Rendering | Named placeholders, filled per harness and model family and written to files | A template engine or a compiler |
 | Harnesses | A profile per harness: its paths, file names, frontmatter or registry shape, the paragraphs it carries and the strings it fills in | A plugin framework |
-| Plugins | A package group: a named list of definitions, one module each, that an install delivers whole | A dependency resolver |
+| Plugins | A package group: a named list of definitions that an install delivers whole | A dependency resolver |
 | Model tuning | A table of model names per tier for each model family, and text added at anchors — named points in a definition's text | A prompt optimiser or an evaluation system |
 | Install | A deploy step: each harness has its own layout, and the rendered files are copied to the places and names that layout gives | A package manager |
 | The agents file | A marked block in the `AGENTS.md` (or `CLAUDE.md`) a harness loads into every session | A configuration layering system |

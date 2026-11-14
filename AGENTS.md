@@ -16,19 +16,19 @@ Must-see:
 
 @PROJECT_DOCS/CONVENTIONS/entry-point.md
 
- <!-- vvv-devpro devpro 0.17.1 do not edit at or between marker lines. devpro-vvv -->
+ <!-- vvv-devpro devpro 0.17.2 do not edit at or between marker lines. devpro-vvv -->
  
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —
-throwaway builds, probe harnesses, captured output — goes in `.claude-temp/` under the
-active project root, beside `.claude/` and never inside it (writes there trip
+throwaway builds, probe harnesses, captured output — goes in `.opencode-temp/` under the
+active project root, beside `.opencode/` and never inside it (writes there trip
 the permission system's own-settings protections). If it doesn't exist, stop and say so; don't
 improvise a location.
 
 ## Task management
 
 - **Before designing, planning, briefing or dispatching an agent, accepting returned work, or
-  making a checkpoint commit, load the `devpro:development` skill.**
+  making a checkpoint commit, load the `devpro-development` skill.**
 
 **PRINCIPLE**: erroneous, halting escalation of soluble problems destroys workflow.
 - Exhaust the written record before escalating: a decision "only the user can make" often dissolves
@@ -56,7 +56,7 @@ to right answers for tricky problems.
   would run, how long it takes and what it would settle, and let the user decide.
 
 ### Subagent handling
-- **Durable model-facing artifacts get `devpro:prompt-engineer` review before first use** — anything a model
+- **Durable model-facing artifacts get `devpro-prompt-engineer` review before first use** — anything a model
   reads after the task that produced it: fixtures, answer files, evaluation instruments, brief
   templates, requirements feeding an agent. A single-use dispatch brief is exempt; a durable
   artifact it drafts is not.
@@ -85,7 +85,7 @@ to invoke one piece of implementation from another is injecting complexity where
 A behavior change — yours or a dispatched agent's — is a first-class work item: surfaced, proposed
 and landed like any other change, never a private adjustment made in passing. It lands somewhere
 permanent, preferably tracked, scoped to the domain that needs it:
-`~/.claude/CLAUDE.md`, the project `AGENTS.md`, an agent/command/skill
+`~/.config/opencode/AGENTS.md`, the project `AGENTS.md`, an agent/command/skill
 definition, or a project doc.
 
 **INVARIANT**: Never create or update a cross-session memory store — a memory directory, its index,
@@ -98,7 +98,8 @@ changes cannot be seen at its source or corrected there.
 - The full project document set:
   - THESIS.md — purpose, intent, the 'north star' for decisions; explicitly not spec or
     implementation
-  - SPEC.md — consumer-facing outcomes, such that any compliant implementation would be valid
+  - SPEC.md — consumer-facing outcomes, such that any compliant implementation in any language would
+    be valid
   - ARCHITECTURE.md — how this particular implementation meets SPEC.md
   - CONVENTIONS.md — project-specific additions to house rules and practices
 - Each states what the others do not; where one needs another's content it cites rather than
@@ -137,7 +138,7 @@ changes cannot be seen at its source or corrected there.
   `sed -i`, `perl -i`, a one-off script, a heredoc, or a redirect: a scripted edit hits every match,
   not the one site meant, and shows no diff. Moving or copying a file as it stands is neither.
   Specific exemptions:
-  - Writes to scratch space `.claude-temp/`
+  - Writes to scratch space `.opencode-temp/`
   - File-writing tools — formatter, renderer, build
 - The edit and write tools write JSON escapes for U+2028/U+2029 as raw characters; spell those
   code points another way, e.g. in Python `chr(0x2028)`; elsewhere the language's own escape, built at runtime.
@@ -178,7 +179,7 @@ changes cannot be seen at its source or corrected there.
 - **ZERO SELF-BLAME LANGUAGE.** Self-blame is theater: it neither identifies the problem nor
   prevents recurrence. Never assign blame to yourself or an agent as an entity; answer a mistake
   with diagnostic attribution — identify the source of the error. If it is systemic rather than
-  categorical, name where the remediation belongs (e.g. CLAUDE.md, agent definition,
+  categorical, name where the remediation belongs (e.g. AGENTS.md, agent definition,
   project docs, next prompt) and suggest the language or rule to effect it. If categorical — the
   task asked for something models can't do or are terrible at — say so by naming the incompatible
   capability it required.

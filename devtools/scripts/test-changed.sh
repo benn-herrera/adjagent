@@ -5,7 +5,7 @@
 # of a rename) plus, when <base> is given, everything committed since it (`git diff base...HEAD`).
 # Each path selects the surface its prefix names in the justfile's TEST_SURFACE_MAP; a path matching
 # no row (ROADMAP_DESIGNS/, scratch) selects nothing. There are no cross-surface "just in case" rows. The
-# one exception is the runner itself: `justfile`, `python.just` and the `devtools/scripts/` tree
+# one exception is the runner itself: `justfile` and the `devtools/scripts/` tree
 # select every surface, because a change to a recipe — or to the script its body became — cannot be
 # validated by skipping it. With nothing selected, it says so and exits zero without running tests.
 # Git is only read.

@@ -1,11 +1,11 @@
-# CONVENTIONS – devpro
+# CONVENTIONS — devpro
 
 Project-specific process and house rules
 
 Must-see:
 
-- No user-facing behaviors or outcomes are designed here, that belongs to SPEC
-- No project mechanisms or code structure are put forth, that belongs to ARCHITECTURE
+- No user-facing behaviors or outcomes are designed here — that belongs to SPEC
+- No project mechanisms or code structure are put forth — that belongs to ARCHITECTURE
 - Edit PROJECT_DOCS/ leaves, never the root pointer files ([Project Documents](project-documents.md))
 - Process is the `development` skill; [Planning and Execution](planning-and-execution/index.md) holds its local rules
 

@@ -1,11 +1,11 @@
-# ARCHITECTURE – devpro
+# ARCHITECTURE — devpro
 
 How this project's implementation meets requirements designated by SPEC
 
 Must-see:
 
-- No user-facing behaviors or outcomes are designed here, that belongs to SPEC
-- No project-specific process is dictated, that belongs to CONVENTIONS
+- No user-facing behaviors or outcomes are designed here — that belongs to SPEC
+- No project-specific process is dictated — that belongs to CONVENTIONS
 
 Contents:
 
@@ -24,6 +24,7 @@ Contents:
   - [Harnesses and families](rendering/harnesses-and-families.md)
   - [Structural rules](rendering/structural-rules.md)
 - [Packaging](packaging.md)
+- [Homebrew Delivery](homebrew-delivery.md)
 - [Banner](banner.md)
 - [Why There Is No Verification Verb](why-there-is-no-verification-verb.md)
 - [Recipes](recipes.md)

@@ -8,7 +8,7 @@ below it kept — copies each
 harness resource the installing harness ships into the install directory as it stands — bar a
 guardrail script whose probe fails (below) — writes the rendered definitions over what is there,
 and removes each file under the install directory's `agents/`, `commands/` or `skills/` that this
-run did not write, that would ship, and that is ours by its own carrier: frontmatter holding a
+run did not write, that `_shipped` admits, and that is ours by its own carrier: frontmatter holding a
 `!GENERATED!` line, or a comment line opening with it, which is how a skill's supporting file holds
 its banner. `prune` walks the three surfaces (`_files_below`) of the install directory and nothing
 else, and the upward walk visits only a stale file's ancestors and stops at the install directory.
@@ -26,10 +26,14 @@ does not ship, is stale and goes — every one of its files, a skill's included.
 rendered before the first write. A file at a rendered-definition destination that has lost the
 generated banner, or is a directory, refuses the install.
 
-The package copy skips the copy exclusions, names matched at any depth (test directories, caches,
-`.venv` directories, `.DS_Store`, `.bak` files, the project documents), and copies each file's mode
-(`copymode`). A copied file takes the installed banner when its suffix is in `STAMPED_SUFFIXES` (`.py`,
-`.sh`, `.mk`, `.just`) or its name is in `STAMPED_NAMES` (`docdicer`, the one extensionless
+The copy exclusions are `_shipped`'s vocabulary, matched at any depth: a directory named `tests`,
+`__pycache__`, `.pytest_cache` or `.venv` in the path, a `.DS_Store`, a `.bak` suffix, or one of
+`SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `THESIS.md`, `ROADMAP.md`, `AGENTS.md` and
+`CLAUDE.md`. Every copy skips what it excludes — the package copy, which copies each file's mode
+(`copymode`), and the harness resource copy, which borrows the same vocabulary (below) — and `prune`
+removes nothing `_shipped` excludes, so a file outside it is never stale. A copied file takes the
+installed banner when its suffix is in `STAMPED_SUFFIXES` (`.py`, `.sh`, `.mk`, `.just`) or its name
+is in `STAMPED_NAMES` (`docdicer`, the one extensionless
 launcher); `stamped` places the banner below a shebang. Any other file — the package's `.gitignore`
 among them — is copied byte-verbatim.
 
@@ -53,7 +57,7 @@ directory names and the instruction names; `tests/test_cold_read_tools.py` holds
 `Harness.project_harness_dir` and every harness's `agents_file`. Mage's install of the devpro plugin ships the
 file too, since `development` ships there, and there it refuses.
 
-The harness resource copy borrows those copy exclusions and nothing else from the package path:
+The harness resource copy borrows `_shipped` and nothing else from the package path:
 `harness_resource_copies` reads `resources/<harness>/` and writes each file into the install
 directory with `copyfile` and `copymode`, so it lands as the harness ships it — no suffix is
 stamped, whatever the file's type, and an installed banner a file already holds travels with it as

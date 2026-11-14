@@ -6,7 +6,9 @@ agent-sandboxing/       setup for running a coding agent as an unprivileged loca
 images/                 the images README.md shows (`kanban.webp`, the board) — never installed and not package data; checked by `just check-links` through README's links
 pyproject.toml          the package's build configuration — setuptools, the version read from `devpro.__version__`, the package-data globs, the `devpro` console script (Packaging)
 dist/                   gitignored build product — what `just build` writes: the wheel and sdist; created on demand
-rendered/               gitignored build product — this repo's own rendered tree, one slot per rendering, each holding one slot project per plugin (`rendered/<slug>/devpro/`, `rendered/<slug>/kbase/`), and the four `reference*` slots, one per harness plus gemma, `render-diff` compares against (justfile RENDERED); created on demand
+rendered/               gitignored build product — this repo's own rendered tree, one slot per rendering, each holding one slot project per plugin (`rendered/<slug>/devpro/`, `rendered/<slug>/kbase/`), and the four `reference*` slots, one per harness plus gemma, `render-diff` compares against (justfile RENDERED_DIR); created on demand
+homebrew-tap/           gitignored hosted clone — the tap this project's formula lives in (`Formula/devpro.rb`), cloned beside this repository by `just tap-repo` and updated by `just tap-update` (Homebrew Delivery); never installed and not package data
+docdicer/               gitignored hosted clone — the docdicer project this repository's `just dev-dd`, `just dev-kanban` and `just dev-check-links` run in place, cloned by `docdicer-repo`; never installed and not package data
 devpro/                 the generator package, run as python3 -m devpro — definitions as Python values rendered into a named output root; the package docstring lists its modules
   plugin.py             the `Plugin` type: a name and either the definition names it ships or the ones it leaves out, with `ships(name)` (Rendering, Harnesses and families)
   plugins/              one module per plugin, each defining `PLUGIN` and nothing else — `devpro.py` and `kbase.py`; which definitions each ships is SPEC.md, Deployed Surfaces, Plugins (CONVENTIONS.md, Plugin membership has one home)
@@ -32,7 +34,7 @@ devtools/               repository-maintenance tooling — never installed; impo
     report.py           headers, candidate lists, the file-pair tally
     passes.py           the `python` pass and its defaults
     cli.py              argparse surface and dispatch
-  tests/                the dupe_sweep test suite, including its import-structure test (`just test dupe_sweep`)
+  tests/                the devtools test suite — dupe_sweep (`test_dupe_sweep` and its import-structure test), clause_join_sites and render_diff — run as the `dupe_sweep` test surface (`just test dupe_sweep`)
 tests/                  the root test suite, the `devpro` package's tests and the repository-wide checks, run as the `devpro` test surface (`just test devpro`) — never installed
 ```
 

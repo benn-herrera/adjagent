@@ -1,7 +1,8 @@
 ### Structural rules
 
-The substitution-depth, shared-paragraph and prompt checks fix the properties in SPEC.md, Rendering; the clause
-group check holds a group's shared clauses. Each is a test in the suite (`just test devpro`).
+The substitution-depth, shared-paragraph and prompt checks fix the properties in SPEC.md, Rendering;
+the clause group check holds its *Kind membership* — every definition of a kind carries the clauses
+that kind carries — and a group's shared clauses. Each is a test in the suite (`just test devpro`).
 `render` runs none: a syntax-tree analysis has no place on an operator's machine of unknown Python.
 The sweeps that read rendered text run per plugin (`_PLUGIN_RENDERS`), each plugin's definitions as it
 ships them, so a paragraph an optional reference drops from one plugin is judged in the other, and

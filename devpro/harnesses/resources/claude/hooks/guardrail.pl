@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# !INSTALLED! from devpro/harnesses/resources/ — do not edit here: request changes from the devpro project
+# !INSTALLED! from devpro/harnesses/resources/claude/hooks/guardrail.pl — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 #
 # Claude Code PreToolUse hook for Bash and the file tools.
 # Prevents in-place edits using shell tools, redirects model to use the Edit and Write tools.

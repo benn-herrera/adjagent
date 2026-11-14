@@ -1,4 +1,4 @@
-"""Definitions that share an anchor clause form a group, and every member carries what its group's
+"""Definitions that share a membership clause form a group, and every member carries what its group's
 table lists, unless an exemption states why not."""
 
 import re
@@ -18,7 +18,7 @@ _DEFINITIONS = Path(devpro.__file__).parent / "definitions"
 
 @dataclass(frozen=True)
 class Group:
-    anchor: str
+    membership: str
     members: tuple[str, ...]
     plain: tuple[str, ...]
     alternatives: tuple[tuple[str, str], ...] = ()
@@ -26,7 +26,7 @@ class Group:
 
 GROUPS = {
     "coders": Group(
-        anchor="CODE_PRINCIPLES_CODER",
+        membership="CODE_PRINCIPLES_CODER",
         members=(
             "c-coder",
             "cpp-coder",
@@ -78,7 +78,7 @@ GROUPS = {
         ),
     ),
     "platform-experts": Group(
-        anchor="CODE_PRINCIPLES_PLATFORM",
+        membership="CODE_PRINCIPLES_PLATFORM",
         members=(
             "android-app-expert",
             "ios-app-expert",
@@ -223,16 +223,16 @@ def check_clause_groups(
     messages = []
     member_group = {member: name for name, group in groups.items() for member in group.members}
     for name, group in groups.items():
-        table_names = {group.anchor, *group.plain, *(clause for pair in group.alternatives for clause in pair)}
+        table_names = {group.membership, *group.plain, *(clause for pair in group.alternatives for clause in pair)}
         for clause in sorted(table_names - defined):
             messages.append(f"{name}: clause {clause} is not defined in devpro/clauses.py")
-        carriers = {definition for definition, names in carried.items() if group.anchor in names}
+        carriers = {definition for definition, names in carried.items() if group.membership in names}
         for definition in sorted(carriers - set(group.members)):
-            messages.append(f"{name}: {definition} carries {group.anchor} but is not listed as a member")
+            messages.append(f"{name}: {definition} carries {group.membership} but is not listed as a member")
         for definition in group.members:
             names = carried.get(definition, set())
-            if group.anchor not in names:
-                messages.append(f"{name}: {definition} is listed as a member but does not carry {group.anchor}")
+            if group.membership not in names:
+                messages.append(f"{name}: {definition} is listed as a member but does not carry {group.membership}")
             for clause in group.plain:
                 if clause not in names and (definition, clause) not in exemptions:
                     messages.append(f"{name}: {definition} lacks {clause} and has no exemption")
@@ -289,27 +289,31 @@ def test_every_member_carries_what_its_group_carries() -> None:
     assert check_clause_groups(GROUPS, EXEMPTIONS, _real_carried(), defined, ungrouped=UNGROUPED, agents=agents) == []
 
 
-_GROUP = Group(anchor="ANCHOR", members=("one", "two"), plain=("PLAIN",), alternatives=(("LEFT", "RIGHT"),))
+_GROUP = Group(membership="MEMBERSHIP", members=("one", "two"), plain=("PLAIN",), alternatives=(("LEFT", "RIGHT"),))
 _AGENTS = {"one", "two"}
-_DEFINED = {"ANCHOR", "PLAIN", "LEFT", "RIGHT"}
-_CARRIED = {"one": {"ANCHOR", "PLAIN", "LEFT"}, "two": {"ANCHOR", "PLAIN", "RIGHT"}}
+_DEFINED = {"MEMBERSHIP", "PLAIN", "LEFT", "RIGHT"}
+_CARRIED = {"one": {"MEMBERSHIP", "PLAIN", "LEFT"}, "two": {"MEMBERSHIP", "PLAIN", "RIGHT"}}
 
 
 @pytest.mark.parametrize(
     ("carried", "exemptions", "defined", "expected"),
     [
         pytest.param(
-            {**_CARRIED, "two": {"ANCHOR", "LEFT"}}, {}, _DEFINED, "two lacks PLAIN and has no exemption", id="lacks"
+            {**_CARRIED, "two": {"MEMBERSHIP", "LEFT"}},
+            {},
+            _DEFINED,
+            "two lacks PLAIN and has no exemption",
+            id="lacks",
         ),
         pytest.param(
-            {**_CARRIED, "two": {"ANCHOR", "PLAIN", "LEFT", "RIGHT"}},
+            {**_CARRIED, "two": {"MEMBERSHIP", "PLAIN", "LEFT", "RIGHT"}},
             {},
             _DEFINED,
             "two must carry exactly one of LEFT and RIGHT",
             id="both",
         ),
         pytest.param(
-            {**_CARRIED, "two": {"ANCHOR", "PLAIN"}},
+            {**_CARRIED, "two": {"MEMBERSHIP", "PLAIN"}},
             {},
             _DEFINED,
             "two must carry exactly one of LEFT and RIGHT",
@@ -320,18 +324,22 @@ _CARRIED = {"one": {"ANCHOR", "PLAIN", "LEFT"}, "two": {"ANCHOR", "PLAIN", "RIGH
             {**_CARRIED, "two": {"PLAIN", "RIGHT"}},
             {},
             _DEFINED,
-            "two is listed as a member but does not carry ANCHOR",
-            id="no-anchor",
+            "two is listed as a member but does not carry MEMBERSHIP",
+            id="no-membership",
         ),
         pytest.param(
             {**_CARRIED, "two": {"PLAIN", "RIGHT"}},
-            {("two", "ANCHOR"): "r"},
+            {("two", "MEMBERSHIP"): "r"},
             _DEFINED,
-            "ANCHOR, which is not a plain entry",
-            id="anchor-exempt",
+            "MEMBERSHIP, which is not a plain entry",
+            id="membership-exempt",
         ),
         pytest.param(
-            {**_CARRIED, "three": {"ANCHOR"}}, {}, _DEFINED, "three carries ANCHOR but is not listed", id="unlisted"
+            {**_CARRIED, "three": {"MEMBERSHIP"}},
+            {},
+            _DEFINED,
+            "three carries MEMBERSHIP but is not listed",
+            id="unlisted",
         ),
         pytest.param(_CARRIED, {}, _DEFINED - {"PLAIN"}, "clause PLAIN is not defined", id="undefined"),
         pytest.param(_CARRIED, {("two", "LEFT"): "r"}, _DEFINED, "LEFT, which is not a plain entry", id="not-plain"),

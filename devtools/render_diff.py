@@ -1,4 +1,4 @@
-"""Compare two rendered slots under `rendered/` by text.
+"""Compare two rendered slots under the justfile's `RENDERED_DIR` by text.
 
 A file's text is its bytes after two steps. First, its body (`body`): a file whose first line is
 `---` and whose next lines match the banner shape (`BANNER`) has those lines
@@ -29,11 +29,10 @@ not exist.
 from __future__ import annotations
 
 import filecmp
+import os
 import re
 import sys
 from pathlib import Path
-
-RENDERED_DIR = Path(__file__).resolve().parent.parent / "rendered"
 
 # Line 2 onward of a bannered file: each entry is a line prefix. `COMMENT` is a skill's
 # supporting file, whose banner lines are HTML comments from its first line.
@@ -135,7 +134,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(slugs) != 2:
         print("usage: python -m devtools.render_diff <slot-a> <slot-b>", file=sys.stderr)
         return 2
-    slots = [RENDERED_DIR / slug for slug in slugs]
+    rendered = os.environ.get("RENDERED_DIR", "")
+    if not rendered:
+        print("error: RENDERED_DIR is empty or unset — run this through its justfile recipe", file=sys.stderr)
+        return 2
+    slots = [Path(rendered) / slug for slug in slugs]
     for slug, slot in zip(slugs, slots):
         if not slot.is_dir():
             print(f"error: {slot} does not exist — run 'just render {slug}' first", file=sys.stderr)

@@ -4,10 +4,12 @@ Every entry below but the last is rendered from the definition module under `dev
 named for its output path, or for its group module (Rendering). A shared-text name given
 here is a constant or function in `devpro/clauses.py`, and an anchor is spelled `fam-<key>`.
 
-- **Coder group** — generalist-coder, language coders (c, cpp, go, lua, python, rust, typescript),
-  shell-dsl-coder, platform experts (android/ios/linux/macos/web/windows-app-expert,
+- **Implementation and review seats** — generalist-coder, language coders (c, cpp, go, lua, python,
+  rust, typescript), shell-dsl-coder, platform experts (android/ios/linux/macos/web/windows-app-expert,
   linux-kernel-driver-expert), architect, and — sharing the coding-review domain — security-reviewer
   and tech-writer, which is both the authoring and the reviewing agent for READMEs and human-facing guides.
+  A *group* is narrower than this list and is the defined term: the definitions whose own
+  `Definition(...)` call names one membership clause (CONVENTIONS.md, Group membership).
 - **kbase plugin + kbase** — the `kbase` skill alone: the definition the devpro plugin excludes by name
   and the kbase plugin delivers with the others SPEC.md, Deployed Surfaces, Plugins lists
   (`devpro/plugins/kbase.py`). `kbase.py` owns a directory,
@@ -31,8 +33,7 @@ here is a constant or function in `devpro/clauses.py`, and an anchor is spelled 
 - **Specialists** — applied-mathematician, biz-dev-strategist, economic-historian, literature-scout,
   marketing-comms-expert, ml-engineer, prompt-engineer, prose-architect, theoretical-economist:
   single-purpose, invoked directly rather than as part of a coding pipeline.
-  applied-mathematician carries the `fam-ask-vs-stipulate` anchor; `fam-gap-aversion` renders
-  nowhere.
+  applied-mathematician carries the `fam-ask-vs-stipulate` anchor.
 - **Tool-driving skill:** `docdicer`, one `SKILL.md` with no supporting files, delivered with its
   tools package by both plugins.
   `docdicer.py` names its script `tools/docdicer`, relative to the skill's directory, and says its
@@ -75,7 +76,9 @@ here is a constant or function in `devpro/clauses.py`, and an anchor is spelled 
   the roadmap's tickets, plan, review document, design and set-aside locations and the forms stated
   in SPEC.md, Plan Status Form, at seven sites: the *Terms* section's fixed table (the locations),
   the entry body's `## Plan status`, `## Roadmap tickets` and `## Design` sections, its `## Plans`
-  section (a diced design split at its `##` and `###` headings only), `references/design.md` (a
+  section (the plan under way at `ACTIVE_PLAN.md`, or the tree `ACTIVE_PLAN/` where the plan was
+  diced, read through its `entry-point.md`; a design diced at its `##` and `###` headings only),
+  `references/design.md` (a
   design's final form, its fixed line one constant) and `references/release.md`. The *Design*
   section has the session run `check-design` before a design is offered for acceptance and again
   on an entry added to an accepted design, and *Roadmap tickets* has it run `check-roadmap` after
@@ -100,6 +103,7 @@ here is a constant or function in `devpro/clauses.py`, and an anchor is spelled 
   paths, the kb-tools package paths, `VENV_DIR`, the path checks, UTF-8 text reading and the report of what an
   install left alone); `runner_file.py` writes the runner include lines, one per `SnippetSet` the install passes it; `preflight.py` runs that
   install into a scratch copy and compares (Install, Renders and copies); `agents_file.py`
-  does the same for the agents file (Agents File). The imports layer: `install_base.py`, `preflight.py` and `install_target.py` import
-  no other install module; `runner_file.py` imports `install_base.py`; `agents_file.py` imports
+  does the same for the agents file (Agents File). The imports layer: `install_base.py` and
+  `install_target.py` import no other install module; `preflight.py` imports `install_base.py`;
+  `runner_file.py` imports `install_base.py`; `agents_file.py` imports
   `install_base.py`, `install_target.py` and `preflight.py`; `install.py` imports all of them.

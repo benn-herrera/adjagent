@@ -14,7 +14,7 @@ dist/
 # the setuptools build's metadata directory
 *.egg-info/
 
-# this repo's own render tree (justfile RENDERED): a build product, produced
+# this repo's own render tree (justfile RENDERED_DIR): a build product, produced
 # on demand by the same install path a consuming project gets. Never committed.
 rendered/
 

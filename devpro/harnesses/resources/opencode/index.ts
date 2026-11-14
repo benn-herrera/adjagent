@@ -1,4 +1,4 @@
-// !INSTALLED! from devpro/harnesses/resources/ — do not edit here: request changes from the devpro project
+// !INSTALLED! from devpro/harnesses/resources/opencode/index.ts — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 //
 // opencode v2.2.6 plugin module: the entry of one plugin the devpro project ships, the directory holding this file.
 // Registers the plugin's agents, commands, skills and MCP servers from registry.json and the Markdown

@@ -2,9 +2,10 @@
 
 The repository exposes exactly three deployed surfaces, `agents/`, `commands/` and `skills/`: the
 trees of rendered definitions, and one part of the install product (below). Every definition is
-produced to order into the output root an invocation names: `devpro render --out <dir> [--plugin=NAME]`
-renders the plugin's definitions (Plugins) into `<dir>`, an existing directory, and `install` renders
-into its install directory (Install destination). `agents/` holds one file per agent and per
+produced to order into the output root an invocation names: `devpro render --out <dir>
+[--plugin=NAME]` renders the plugin's definitions (Plugins) and the harness-rendered files it writes
+(Shipped files) into `<dir>`, an existing directory, and `install` renders into its install
+directory (Install destination). `agents/` holds one file per agent and per
 **document**, a definition agents read but never dispatch; `commands/` holds one file per command.
 The supported harnesses are `claude` (Claude Code), `opencode` and `mage` (Mage, an agent harness);
 `--harness` takes these names. The supported model families are `claude`, the default, `gemma-4` and

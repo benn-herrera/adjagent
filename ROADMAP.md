@@ -45,6 +45,12 @@ it, and begins repair work. The target case is projects whose debt accumulated t
 agentic development. It follows the development-process skill and should not assume that skill's
 workflow is already in place.
 
+### Documentation-only planned workflow
+
+Right now only code-facing changes are handled by the design->plan->burndown workflow.
+Doc-only changes for README or project docs are currently only handled by ad-hoc processes
+and are not well-represented in the current workflow definition.
+
 ## Maintenance
 
 ### (STICKY) Periodic load-bearing-ness pruning pass

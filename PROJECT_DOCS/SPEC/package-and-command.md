@@ -2,8 +2,8 @@
 
 The devpro package installs on Python 3.9 or later, with no third-party runtime dependency. It has
 two install sources: a release tag's git URL,
-`git+https://github.com/benn-herrera/devpro@v<version>`, or a built wheel. No package index
-publishes it.
+`git+https://github.com/benn-herrera/devpro@v<version>`, or a built wheel. No package index publishes
+it. A Homebrew tap is a distribution channel for that release archive, not a package index.
 
 The installed package provides the `devpro` command. `python3 -m devpro` is the same command:
 both print the same `--help`, and the same arguments install the same product, byte for byte.

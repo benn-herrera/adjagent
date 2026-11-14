@@ -34,6 +34,7 @@ from devpro.harnesses.claude import HARNESS as CLAUDE
 from devpro.harnesses.mage import HARNESS as MAGE
 from devpro.harnesses.opencode import HARNESS as OPENCODE
 from devpro.install import (
+    _RESOURCE_BANNER_LINES,
     HARNESS_RESOURCES_SOURCE,
     SHIPPED_PACKAGES,
     ShippedPackage,
@@ -56,6 +57,7 @@ from devpro.render import (
 )
 from devpro.runner_file import _named_harnesses, include_line, install_include_lines
 from devpro.vocabulary import Kind
+from tests._structure import kbase_skill_output_paths
 
 _SNIPPET_SETS = {
     package.source: snippets for package in SHIPPED_PACKAGES if (snippets := package.installed_snippets()) is not None
@@ -368,16 +370,6 @@ _OPENCODE_RENDER = build_render(
 _NEW_BANNER = "---\n# !GENERATED! from devpro/definitions/gone.py — x\n# !TUNING! y\n---\n\nbody\n"
 # A skill's supporting file: no frontmatter, so its banner rides on two HTML comment lines.
 _COMMENT_BANNER = "<!-- !GENERATED! from devpro/definitions/kbase.py — x -->\n<!-- !TUNING! y -->"
-# The kbase skill's files: one definition owning a directory, so a run keeps or drops all seven.
-_KB_SKILL_FILES = (
-    "skills/kbase/SKILL.md",
-    "skills/kbase/references/reading.md",
-    "skills/kbase/references/building.md",
-    "skills/kbase/references/scoring.md",
-    "skills/kbase/references/maintaining.md",
-    "skills/kbase/references/scoring-system.md",
-    "skills/kbase/references/installing.md",
-)
 
 
 def _definition_install(
@@ -584,7 +576,7 @@ def test_a_kbase_install_writes_the_kbase_skill_the_package_the_mcp_entry_and_th
     (project / "justfile").write_text("# mine\n", encoding="utf-8")
     _definition_install(root, plugin=KBASE, project_root=project)
     plugin = _claude_plugin(root, KBASE)
-    for relative in _KB_SKILL_FILES:
+    for relative in kbase_skill_output_paths():
         assert (plugin / relative).is_file()
     kb_just = (plugin / "skills/kbase/kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
     source_just = (PACKAGE_ROOT / "kb-tools/runner-snippets/kb.just").read_text(encoding="utf-8").split("\n")
@@ -703,7 +695,7 @@ def test_the_cli_plugin_argument_installs_the_kbase_skill_files_and_the_skill_kb
     root.mkdir()
     main(["install", str(root), "--plugin=kbase", "--harness=claude"])
     plugin = _claude_plugin(root, KBASE)
-    assert all((plugin / relative).is_file() for relative in _KB_SKILL_FILES)
+    assert all((plugin / relative).is_file() for relative in kbase_skill_output_paths())
     snippets = plugin / "skills/kbase/kb-tools/runner-snippets"
     assert (snippets / "kb.just").is_file() and (snippets / "kb.mk").is_file()
 
@@ -733,7 +725,7 @@ def test_a_kbase_install_prunes_a_stale_reference_and_keeps_a_user_file(tmp_path
     _definition_install(root, plugin=KBASE, project_root=tmp_path)
     assert not stale.exists()
     assert mine.read_text(encoding="utf-8") == "---\nmine\n---\n"
-    assert all((plugin / relative).is_file() for relative in _KB_SKILL_FILES)
+    assert all((plugin / relative).is_file() for relative in kbase_skill_output_paths())
     assert f"pruned {stale}" in capsys.readouterr().out
 
 
@@ -1473,11 +1465,19 @@ def test_a_prior_installs_resource_is_overwritten(tmp_path: Path) -> None:
 
 
 def test_every_shipped_resource_carries_the_header_its_reinstall_needs(tmp_path: Path) -> None:
-    """A resource without the header would refuse its own second install."""
+    """A resource without the header would refuse its own second install, and the banner a reader finds
+    in an installed tree names the file it came from and where a local need goes."""
     harnesses = load("devpro.harnesses", "HARNESS")
     sources = [source for name in harnesses for source, _ in harness_resource_copies(tmp_path, harness=name)]
     assert sources
     assert [source for source in sources if not _is_our_resource(source)] == []
+    for source in sources:
+        origin = f"{PACKAGE_ROOT.name}/{source.relative_to(PACKAGE_ROOT).as_posix()}"
+        head = source.read_text(encoding="utf-8").splitlines()[:_RESOURCE_BANNER_LINES]
+        banner = next((line for line in head if "!INSTALLED!" in line), "")
+        assert f"!INSTALLED! from {origin} — " in banner, source
+        assert "request changes from the devpro project" in banner, source
+        assert "local needs belong in your CONVENTIONS.md" in banner, source
 
 
 # The claude guardrail hook: shipped and registered in the plugin's own `hooks/hooks.json` when one run

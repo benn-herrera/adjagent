@@ -12,11 +12,11 @@ says whose it is. `install-agents-file` into a user harness directory leaves a p
 place; the next project install removes it. A
 **redirect file** is a one-line `@AGENTS.md` under another name a harness reads.
 
-`devpro install-agents-file DIR [--plugin=NAME]`, the plugin defaulted as Deployed Surfaces,
-Plugins states, installs that plugin's agents file into the directory the
-operator names — the harness's user harness directory or a project's own — and is the only way the
-agents-file block first reaches a user harness directory, or changes the plugin a global block
-belongs to. `install` also writes it, under the same rules as `install-agents-file`, in two cases:
+`devpro install-agents-file DIR [--plugin=NAME] [--harness=NAME]`, the plugin defaulted as Deployed
+Surfaces, Plugins states, installs that plugin's agents file into the directory the operator names —
+the harness's user harness directory or a project's own — and is the only way the agents-file block
+first reaches a user harness directory, or changes the plugin a global block belongs to. `install`
+also writes it, under the same rules as `install-agents-file`, in two cases:
 
 - for mage installed below its project root, whose agents file belongs in its harness directory,
   inside that plugin's own directory;

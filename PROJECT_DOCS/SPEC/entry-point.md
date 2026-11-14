@@ -1,4 +1,4 @@
-# SPEC – devpro
+# SPEC — devpro
 
 Consumer-facing behaviors and outcomes
 
@@ -7,9 +7,9 @@ harness and model family, from one source in which shared text is written once
 
 Must-see:
 
-- Any implementation that satisfies this SPEC is valid
-- No project mechanisms or code structure are put forth, that belongs to ARCHITECTURE
-- No project-specific process is dictated, that belongs to CONVENTIONS
+- Any implementation in any language that satisfies this SPEC is valid
+- No project mechanisms or code structure are put forth — that belongs to ARCHITECTURE
+- No project-specific process is dictated — that belongs to CONVENTIONS
 
 Contents:
 
