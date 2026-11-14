@@ -1,8 +1,8 @@
 # devpro
 
-Unsupervised agent-written code rots quietly then fails suddenly. devpro installs a collaborative
-AI development process into Claude Code, opencode, or mage that lets you build to last: you work with
-the agents to design, plan, build, review, and deliver.
+AI is a tremendous lever for engineering capability, but unsupervised agents write code that rots quietly
+and fails suddenly. devpro installs a collaborative AI development process into Claude Code, opencode, or
+Mage that lets you build to last: you work with the agents to design, plan, build, review, and deliver.
 
 ![kanban screenshot](images/kanban.webp)
 
@@ -17,7 +17,7 @@ like and you will need to exercise that judgment frequently.
 ## What it gets you
 
 The installed skills, agents, tools, and AGENTS.md have been coordinated and tuned
-to maximize leverage for your attention, minimize decision fatigue, and provide visibility of and
+to maximize leverage for human attention, minimize decision fatigue, and provide visibility of and
 correction steps for the stepwise drift that is unavoidable in agentic coding processes.
 
 My ballpark estimate is a 3X gain over unassisted engineering. It's not the much-hyped 10X of the
@@ -50,6 +50,12 @@ Install devpro, then run its install from the project root:
 ```sh
 brew install benn-herrera/tap/devpro
 devpro install .
+```
+
+also available via pipx:
+
+```sh
+pipx install git+https://github.com/devpro
 ```
 
 The install takes the harness from the `.claude/` or `.opencode/` directory inside the target.
@@ -103,8 +109,7 @@ Start your coding harness, or, if a session was already open during the install,
 kbase plugin, restart Mage. Then ask the session agent to load the `guide` skill: `devpro:guide` under
 claude and mage, `devpro-guide` under opencode. It starts a design, explains how the development
 process runs, tells you where your work stands, and shows the board. It also installs, updates,
-inspects or changes what you just installed, and covers a file carrying devpro's generated banner
-that seems to need a change.
+inspects or changes what you just installed.
 
 ## Updating
 

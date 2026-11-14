@@ -89,6 +89,19 @@ The Grep/Glob judgement depends on `nodes.yaml`, `edges.yaml` and `format.yaml` 
 Passing a Grep/Glob rooted in `kb-root/` only when its filter's last segment ends in `.md` drops
 both lists; it is a behaviour change to both scripts and the case table together.
 
+### A plan with a post-plan burndown can never read as done
+
+`devpro/definitions/development.py`, *Post-plan review*: "the burndown's row keeps no state word",
+against *Plan status*'s "Set a state in the same turn as the act that changes it" and
+`PROJECT_DOCS/SPEC/plan-status-form.md`, which reads a plan as done only when its post-plan review
+row and its post-plan burndown row are `landed`. One of the two has to give.
+
+### The post-plan review sentence names the reviewers as the document's writers
+
+`devpro/definitions/development.py`, *Post-plan review*: "The post-plan review writes the reviewers'
+findings to the review document". A reviewer dispatched to review reports and changes nothing
+(`prompt_engineer.py` and `tech_writer.py`, each in *Output*), and the session writes the document.
+
 ### Mage has no guardrail
 
 `devpro/harnesses/mage.py` sets `guardrail=None` and SPEC `shipped-files.md` says mage ships none,
