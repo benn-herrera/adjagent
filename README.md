@@ -104,10 +104,7 @@ process runs, shows the board, and installs, updates, inspects or changes what y
 
 ## Third Party Acknowledgements
 
-What devpro installs into a project (`agents/`, `commands/`, `skills/`) is stdlib-only Python and
-shell with no third-party dependencies. Everything below is used by this repository's development,
-build and documentation checks; none is bundled.
-
+- **kanban from markdown** - idea from Jason Coleman (https://github.com/sangrail)
 - **pytest** (the pytest developers, MIT): runs the test suite; installed into this repository's
   `.venv` by `just test`.
 - **black** (Łukasz Langa and contributors, MIT): formats the Python source; installed into `.venv`
